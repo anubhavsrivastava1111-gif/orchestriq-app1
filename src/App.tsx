@@ -7,9 +7,10 @@ const TAGLINE = "The orchestration layer of intelligent business.";
 const STAGES = [{id:"idea",l:"Idea",ic:"💡"},{id:"formation",l:"Formation",ic:"📋"},{id:"mvp",l:"MVP",ic:"🚀"},{id:"funding",l:"Funding",ic:"💰"},{id:"growth",l:"Growth",ic:"📈"},{id:"mature",l:"Mature",ic:"🏛️"}];
 const CURRENCIES = [{code:"INR",sym:"₹",name:"Indian Rupee"},{code:"USD",sym:"$",name:"US Dollar"},{code:"EUR",sym:"€",name:"Euro"},{code:"GBP",sym:"£",name:"British Pound"},{code:"AUD",sym:"A$",name:"Australian Dollar"},{code:"CAD",sym:"C$",name:"Canadian Dollar"},{code:"SGD",sym:"S$",name:"Singapore Dollar"},{code:"AED",sym:"AED",name:"UAE Dirham"},{code:"CHF",sym:"Fr",name:"Swiss Franc"}];
 const MODELS = {
-  claude:{name:"Claude",company:"Anthropic",model:"claude-sonnet-4-20250514",placeholder:"sk-ant-...",color:"#D97757",keyUrl:"https://console.anthropic.com/settings/keys"},
+  claude:{name:"Claude",company:"Anthropic",model:"claude-sonnet-4-5",placeholder:"sk-ant-...",color:"#D97757",keyUrl:"https://console.anthropic.com/settings/keys"},
   openai:{name:"ChatGPT",company:"OpenAI",model:"gpt-4o",placeholder:"sk-...",color:"#10A37F",keyUrl:"https://platform.openai.com/api-keys"},
   gemini:{name:"Gemini",company:"Google",model:"gemini-1.5-flash",placeholder:"AIza...",color:"#4285F4",keyUrl:"https://aistudio.google.com/app/apikey"},
+  groq:{name:"Groq",company:"Groq",model:"llama-3.3-70b-versatile",placeholder:"gsk_...",color:"#F97316",keyUrl:"https://console.groq.com/keys"},
 };
 // ─── DONATION QR ────────────────────────────────────────────────────────────
 // Paste your QR code as a base64 data URI between the quotes below to hard-code it,
@@ -283,7 +284,11 @@ const EP={
 
 // ─── API FUNCTIONS ──────────────────────────────────────────────────────────
 
-async function callClaude(key,sys,msgs,maxT){
+async function callGroq(key,sys,msgs,maxT){
+  const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.groq.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
+  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("Groq: Invalid API key.");if(r.status===429)throw new Error("Groq: Rate limit hit. Wait a moment.");throw new Error("Groq "+r.status+": "+(m||r.statusText));}
+  const d=await r.json();return d.choices?.[0]?.message?.content||"";
+}
   const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:MODELS.claude.model,max_tokens:maxT,system:sys,messages:msgs})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}throw new Error("Claude "+r.status+": "+(m||r.statusText));}
   const d=await r.json();return d.content?.map(b=>b.text||"").join("\n")||"";
@@ -314,7 +319,7 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500){
   const timeout=new Promise((_,rej)=>{
     timerId=setTimeout(()=>rej(new Error("Request timed out after 60s. The AI provider may be busy — try switching to Gemini (free tier).")),60000);
   });
-  const callP=provider==="claude"?callClaude(key,sys,msgs,maxT):provider==="openai"?callOpenAI(key,sys,msgs,maxT):provider==="gemini"?callGemini(key,sys,msgs,maxT):Promise.reject(new Error("Unknown provider: "+provider));
+  const callP=provider==="claude"?callClaude(key,sys,msgs,maxT):provider==="openai"?callOpenAI(key,sys,msgs,maxT):provider==="gemini"?callGemini(key,sys,msgs,maxT):provider==="groq"?callGroq(key,sys,msgs,maxT):Promise.reject(new Error("Unknown provider: "+provider));
   try{return await Promise.race([callP,timeout]);}
   finally{clearTimeout(timerId);}
 }
