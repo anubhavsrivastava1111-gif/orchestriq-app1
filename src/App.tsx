@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 const VERSION = "4.3.0";
+const SYS_GEMINI = import.meta.env.VITE_GEMINI_API_KEY || "";
+const USE_SYS_KEY = import.meta.env.VITE_USE_SYSTEM_KEY === "true";
+const EFF_GEMINI = USE_SYS_KEY && SYS_GEMINI ? SYS_GEMINI : "";
 const BRAND = "OrchestrIQ";
 const TAGLINE = "The orchestration layer of intelligent business.";
 
@@ -325,10 +328,17 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500){
 }
 
 async function callMulti(keys,defP,sys,msgs,maxT=3500){
-  const providers=Object.keys(keys).filter(p=>keys[p]?.trim());
+  // Use system Gemini key if available and no user key is set
+  const effectiveKeys={...keys};
+  if(EFF_GEMINI && !effectiveKeys.gemini?.trim()){
+    effectiveKeys.gemini=EFF_GEMINI;
+  }
+  const providers=Object.keys(effectiveKeys).filter(p=>effectiveKeys[p]?.trim());
   if(!providers.length)throw new Error("No API keys configured. Add at least one key in Settings.");
-  const active=providers.includes(defP)?defP:providers[0];
-  const text=await callAI(active,keys[active],sys,msgs,maxT);
+  // Prefer system Gemini if user has no default provider key
+  let active=providers.includes(defP)&&effectiveKeys[defP]?.trim()?defP:providers[0];
+  if(EFF_GEMINI&&!keys[defP]?.trim()&&effectiveKeys.gemini)active="gemini";
+  const text=await callAI(active,effectiveKeys[active],sys,msgs,maxT);
   return{primary:text};
 }
 
@@ -743,7 +753,8 @@ export default function App(){
   };
 
   const completeOnboard=()=>{
-    if(!Object.values(keys).some(k=>k?.trim())||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
+    const hasAnyKey=Object.values(keys).some(k=>k?.trim())||!!EFF_GEMINI;
+if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     sv("cos-keys",{keys,defaultProvider:defP,multiAI});sv("cos-co",co);
     const e={};DEPTS.forEach(d=>e[d.id]=true);setExpD(e);sv("cos-dp",e);
     setPage("app");
@@ -1196,7 +1207,7 @@ export default function App(){
             <div><label style={S.lbl}>Currency</label><select style={{...S.inp,padding:"8px"}} value={co.currency} onChange={e=>setCo({...co,currency:e.target.value})}>{CURRENCIES.map(c=><option key={c.code} value={c.code} style={{background:"#0a0e1a"}}>{c.sym} {c.code}</option>)}</select></div>
             <div><label style={S.lbl}>Stage</label><select style={{...S.inp,padding:"8px"}} value={co.stage} onChange={e=>setCo({...co,stage:e.target.value})}>{STAGES.map(st=><option key={st.id} value={st.id} style={{background:"#0a0e1a"}}>{st.ic} {st.l}</option>)}</select></div>
           </div>
-          <button onClick={completeOnboard} disabled={!hasKey||!co.name.trim()||!co.industry.trim()||!co.location.trim()} style={{...S.pBtn,opacity:hasKey&&co.name.trim()&&co.industry.trim()&&co.location.trim()?1:0.3}}>Launch {BRAND}</button>
+          <button onClick={completeOnboard} disabled={!!(Object.values(keys).some(k=>k?.trim())||!!EFF_GEMINI)||!co.name.trim()||!co.industry.trim()||!co.location.trim()} style={{...S.pBtn,opacity:hasKey&&co.name.trim()&&co.industry.trim()&&co.location.trim()?1:0.3}}>Launch {BRAND}</button>
           <button onClick={()=>setPage("landing")} style={{background:"none",border:"none",color:"#5A6480",fontSize:12,cursor:"pointer",fontFamily:"Manrope,sans-serif",marginTop:8,display:"block"}}>Back to home</button>
         </div>
         <Toaster toasts={toasts} onDismiss={id=>setToasts(prev=>prev.filter(t=>t.id!==id))}/>
