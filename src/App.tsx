@@ -2,8 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const VERSION = "4.3.0";
 const SYS_GEMINI = import.meta.env.VITE_GEMINI_API_KEY || "";
+const SYS_GROQ = import.meta.env.VITE_GROQ_API_KEY || "";
 const USE_SYS_KEY = import.meta.env.VITE_USE_SYSTEM_KEY === "true";
 const EFF_GEMINI = USE_SYS_KEY && SYS_GEMINI ? SYS_GEMINI : "";
+const EFF_GROQ = USE_SYS_KEY && SYS_GROQ ? SYS_GROQ : "";
 const BRAND = "OrchestrIQ";
 const TAGLINE = "The orchestration layer of intelligent business.";
 
@@ -332,12 +334,16 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500){
   const effectiveKeys={...keys};
   if(EFF_GEMINI && !effectiveKeys.gemini?.trim()){
     effectiveKeys.gemini=EFF_GEMINI;
-  }
+}
+if(EFF_GROQ && !effectiveKeys.groq?.trim()){
+    effectiveKeys.groq=EFF_GROQ;
+}
   const providers=Object.keys(effectiveKeys).filter(p=>effectiveKeys[p]?.trim());
   if(!providers.length)throw new Error("No API keys configured. Add at least one key in Settings.");
   // Prefer system Gemini if user has no default provider key
   let active=providers.includes(defP)&&effectiveKeys[defP]?.trim()?defP:providers[0];
-  if(EFF_GEMINI&&!keys[defP]?.trim()&&effectiveKeys.gemini)active="gemini";
+  if(EFF_GROQ&&!keys[defP]?.trim()&&effectiveKeys.groq)active="groq";
+else if(EFF_GEMINI&&!keys[defP]?.trim()&&effectiveKeys.gemini)active="gemini";
   const text=await callAI(active,effectiveKeys[active],sys,msgs,maxT);
   return{primary:text};
 }
