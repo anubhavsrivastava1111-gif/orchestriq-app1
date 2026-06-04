@@ -35,12 +35,12 @@ export default function ProfileSetup({ onComplete }: { onComplete: () => void })
     if (!user) { setError("Session expired. Please log in again."); setLoading(false); return; }
 
     const { error: dbError } = await supabase
-      .from("users")
-      .update({
-        phone: countryCode + digits,
-        phone_country_code: countryCode,
-      })
-      .eq("id", user.id);
+  .from("users")
+  .update({
+    phone: countryCode + digits,
+  })
+  .eq("id", user.id);
+
 
     if (dbError) {
       setError(dbError.message);
