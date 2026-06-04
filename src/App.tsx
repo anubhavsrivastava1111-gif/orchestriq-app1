@@ -302,7 +302,7 @@ async function callOpenAI(key,sys,msgs,maxT){
   const d=await r.json();return d.choices?.[0]?.message?.content||"";
 }
 async function callGemini(key,sys,msgs,maxT){
-  const models=["gemini-1.5-flash","gemini-1.5-pro","gemini-pro"];
+  const models=["gemini-1.5-flash","gemini-2.0-flash","gemini-1.5-pro"];
   let lastErr=null;
   for(const model of models){
     try{
