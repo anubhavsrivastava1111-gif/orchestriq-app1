@@ -1174,12 +1174,12 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   );
 
   if(page==="onboard"){
-    const hasKey=Object.values(keys).some(k=>k?.trim());
+    const hasKey=Object.values(keys).some(k=>k?.trim())||!!EFF_GEMINI;
     return(
       <div id="oiq-root" style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0a0e1a",fontFamily:"Manrope,sans-serif",padding:20}}>
         <div style={{background:"#131825",borderRadius:14,padding:"26px 24px",width:"100%",maxWidth:520,border:"1px solid #1a2030",maxHeight:"95vh",overflowY:"auto"}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}><span style={{fontSize:22,color:"#14B8A6"}}>◆</span><span style={{fontSize:18,fontWeight:800,color:"#F1F5F9"}}>Setup {BRAND}</span></div>
-          <label style={S.lbl}>Step 1: API Keys (need at least one)</label>
+          <label style={S.lbl}>Step 1: API Keys {EFF_GEMINI?"(Gemini powered — optional)":"(need at least one)"}</label>
           <div style={{background:"rgba(16,185,129,0.05)",border:"1px solid rgba(16,185,129,0.2)",borderRadius:6,padding:"8px 10px",marginBottom:10,fontSize:10,color:"#10B981"}}>Gemini is free — no credit card needed. Get key at <a href={MODELS.gemini.keyUrl} target="_blank" rel="noopener noreferrer" style={{color:"#4285F4"}}>aistudio.google.com</a>.</div>
           {Object.entries(MODELS).map(([id,m])=>(
             <div key={id} style={{marginBottom:8}}>
