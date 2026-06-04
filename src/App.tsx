@@ -1207,7 +1207,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
             <div><label style={S.lbl}>Currency</label><select style={{...S.inp,padding:"8px"}} value={co.currency} onChange={e=>setCo({...co,currency:e.target.value})}>{CURRENCIES.map(c=><option key={c.code} value={c.code} style={{background:"#0a0e1a"}}>{c.sym} {c.code}</option>)}</select></div>
             <div><label style={S.lbl}>Stage</label><select style={{...S.inp,padding:"8px"}} value={co.stage} onChange={e=>setCo({...co,stage:e.target.value})}>{STAGES.map(st=><option key={st.id} value={st.id} style={{background:"#0a0e1a"}}>{st.ic} {st.l}</option>)}</select></div>
           </div>
-          <button onClick={completeOnboard} disabled={!!(Object.values(keys).some(k=>k?.trim())||!!EFF_GEMINI)||!co.name.trim()||!co.industry.trim()||!co.location.trim()} style={{...S.pBtn,opacity:hasKey&&co.name.trim()&&co.industry.trim()&&co.location.trim()?1:0.3}}>Launch {BRAND}</button>
+          <button onClick={completeOnboard} disabled={!(Object.values(keys).some(k=>k?.trim())||!!EFF_GEMINI)||!co.name.trim()||!co.industry.trim()||!co.location.trim()} style={{...S.pBtn,opacity:hasKey&&co.name.trim()&&co.industry.trim()&&co.location.trim()?1:0.3}}>Launch {BRAND}</button>
           <button onClick={()=>setPage("landing")} style={{background:"none",border:"none",color:"#5A6480",fontSize:12,cursor:"pointer",fontFamily:"Manrope,sans-serif",marginTop:8,display:"block"}}>Back to home</button>
         </div>
         <Toaster toasts={toasts} onDismiss={id=>setToasts(prev=>prev.filter(t=>t.id!==id))}/>
