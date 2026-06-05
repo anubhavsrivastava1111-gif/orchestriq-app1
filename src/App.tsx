@@ -643,7 +643,7 @@ export default function App(){
   const [confirmReset,setConfirmReset]=useState(null);
   const [testSt,setTestSt]=useState({});
   const [vLang,setVLang]=useState("en-IN");
-  const [dnCfg,setDnCfg]=useState({ownerName:"",ownerEmail:"",upiId:"",bankName:"",accountNo:"",ifsc:"",accountType:"",paypalMe:"",stripeLink:"",note:"Scan the QR code below to support this project. Thank you!",qrImage:DEFAULT_QR,enabled:true});
+  const [dnCfg,setDnCfg]=useState({   ownerName:import.meta.env.VITE_OWNER_NAME||"",   ownerEmail:import.meta.env.VITE_OWNER_EMAIL||"",   upiId:import.meta.env.VITE_UPI_ID||"",   bankName:import.meta.env.VITE_BANK_NAME||"",   accountNo:import.meta.env.VITE_ACCOUNT_NO||"",   ifsc:import.meta.env.VITE_IFSC||"",   accountType:import.meta.env.VITE_ACCOUNT_TYPE||"",   paypalMe:"",   stripeLink:"",   note:"Scan the QR code below to support this project. Thank you!",   qrImage:DEFAULT_QR,   enabled:true });
   const [dnAmt,setDnAmt]=useState(100);
   const [dnCustom,setDnCustom]=useState("");
   const [showDonate,setShowDonate]=useState(false); 
