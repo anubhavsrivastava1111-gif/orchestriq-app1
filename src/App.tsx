@@ -646,7 +646,8 @@ export default function App(){
   const [dnCfg,setDnCfg]=useState({ownerName:"",ownerEmail:"",upiId:"",bankName:"",accountNo:"",ifsc:"",accountType:"",paypalMe:"",stripeLink:"",note:"Scan the QR code below to support this project. Thank you!",qrImage:DEFAULT_QR,enabled:true});
   const [dnAmt,setDnAmt]=useState(100);
   const [dnCustom,setDnCustom]=useState("");
-  const [showDonate,setShowDonate]=useState(false);
+  const [showDonate,setShowDonate]=useState(false); 
+  const [isAdmin,setIsAdmin]=useState(false);
   const [wfView,setWfView]=useState("new");
   const [wfTask,setWfTask]=useState("");
   const [wfCat,setWfCat]=useState("finance");
@@ -739,6 +740,17 @@ export default function App(){
       try{const last=await window.storage.get("cos-lastvisit");if(last?.value){const days=Math.floor((Date.now()-parseInt(last.value))/86400000);if(days>=1)setResumeInfo({days});}await window.storage.set("cos-lastvisit",String(Date.now()));}catch{}
     })();
   },[]);
+  // Donation popup — show after 30 minutes, then every 30 minutes
+useEffect(()=>{
+  const THIRTY_MIN = 30 * 60 * 1000;
+  const timer = setTimeout(()=>{
+    setShowDonate(true);
+  }, THIRTY_MIN);
+  const interval = setInterval(()=>{
+    setShowDonate(true);
+  }, THIRTY_MIN);
+  return ()=>{ clearTimeout(timer); clearInterval(interval); };
+},[]);
 
   const changeTheme=useCallback((id)=>{
     setTheme(id);applyTheme(id);sv("cos-theme",id);
@@ -1237,7 +1249,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
               {Object.entries(THEMES).map(([id,t])=><option key={id} value={id} style={{background:"#0a0e1a"}}>{t.ic}</option>)}
             </select>
             <button onClick={()=>setShowExport(true)} title="Export Studio — PDF & PowerPoint" style={{...S.iBtn,color:"#A855F7"}}>🎨</button>
-            <button onClick={()=>setShowDonate(true)} title="Support" style={{...S.iBtn,color:"#14B8A6"}}>💙</button>
+            
             <button onClick={()=>{setShowSettings(true);setSTab("api");}} title="Settings" style={S.iBtn}>⚙</button>
           </div>
         </div>
@@ -1903,7 +1915,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
           <div style={{...S.modal,maxWidth:520}} onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><h2 style={{fontSize:16,fontWeight:800,color:"#F1F5F9"}}>Settings</h2><button onClick={()=>setShowSettings(false)} style={S.iBtn}>×</button></div>
             <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:14,paddingBottom:12,borderBottom:"1px solid #1a2030"}}>
-              {[["api","API"],["theme","Theme"],["company","Company"],["workspace","Workspace"],["donation","Donation"],["backup","Backup"],["danger","Reset"]].map(([id,lb])=><button key={id} onClick={()=>setSTab(id)} style={{padding:"5px 10px",borderRadius:5,fontSize:10,fontWeight:600,border:"1px solid "+(sTab===id?"#14B8A6":"#1a2030"),background:sTab===id?"rgba(20,184,166,0.08)":"transparent",color:sTab===id?"#14B8A6":"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{lb}</button>)}
+              {[["api","API"],["theme","Theme"],["company","Company"],["workspace","Workspace"],["backup","Backup"],["danger","Reset"]].map(([id,lb])=><button key={id} onClick={()=>setSTab(id)} style={{padding:"5px 10px",borderRadius:5,fontSize:10,fontWeight:600,border:"1px solid "+(sTab===id?"#14B8A6":"#1a2030"),background:sTab===id?"rgba(20,184,166,0.08)":"transparent",color:sTab===id?"#14B8A6":"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{lb}</button>)}
             </div>
             {sTab==="api"&&(
               <div>
