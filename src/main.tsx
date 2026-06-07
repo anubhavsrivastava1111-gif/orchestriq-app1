@@ -1,70 +1,94 @@
-import { StrictMode, useState, useEffect } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App'
-import Auth from './Auth'
-import ProfileSetup from './ProfileSetup'
-import { supabase } from './lib/supabase'
+import { useEffect, useState } from "react";
+import ReactDOM from "react-dom/client";
+import { supabase } from "./lib/supabase";
+import Auth from "./Auth";
+import ProfileSetup from "./ProfileSetup";
+import PlanSelection from "./PlanSelection";
+import App from "./App";
+import "./index.css";
 
-type Screen = 'loading' | 'auth' | 'profile' | 'app'
+type Screen = "loading" | "auth" | "profile" | "plan" | "app";
 
 function Root() {
-  const [screen, setScreen] = useState<Screen>('loading')
-
-  const checkProfile = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setScreen('auth'); return }
-
-    const { data } = await supabase
-      .from('users')
-      .select('phone')
-      .eq('id', user.id)
-      .single()
-
-    if (data?.phone) {
-      setScreen('app')
-    } else {
-      setScreen('profile')
-    }
-  }
+  const [screen, setScreen] = useState<Screen>("loading");
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
-        setScreen('auth')
-      } else {
-        checkProfile()
+    checkUser();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") setScreen("auth");
+      if (event === "SIGNED_IN") checkUser();
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const checkUser = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        setScreen("auth");
+        return;
       }
-    })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) setScreen('auth')
-    })
+      const { data: userData } = await supabase
+        .from("users")
+        .select("full_name, company_name, trial_login_count, trial_exhausted, plan_id, plan_name")
+        .eq("id", user.id)
+        .single();
 
-    return () => subscription.unsubscribe()
-  }, [])
+      if (!userData) {
+        setScreen("auth");
+        return;
+      }
 
-  if (screen === 'loading') {
-    return (
-      <div style={{ minHeight: '100vh', background: '#0a0e1a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ color: '#14B8A6', fontSize: 14, fontFamily: 'Manrope, sans-serif' }}>Loading…</div>
+      // Profile not complete yet
+      if (!userData.full_name || !userData.company_name) {
+        setScreen("profile");
+        return;
+      }
+
+      // Trial exhausted and no paid plan — force plan selection
+      if (userData.trial_exhausted && !userData.plan_id) {
+        setScreen("plan");
+        return;
+      }
+
+      // Has paid plan — go straight to app
+      if (userData.plan_id && userData.plan_name !== "free") {
+        setScreen("app");
+        return;
+      }
+
+      // Still in free trial — show plan screen (with skip option)
+      setScreen("plan");
+
+    } catch (e) {
+      setScreen("auth");
+    }
+  };
+
+  if (screen === "loading") return (
+    <div style={{
+      minHeight: "100vh",
+      background: "#0a0e1a",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontFamily: "Manrope, sans-serif",
+    }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 24, color: "#14B8A6", fontWeight: 900, marginBottom: 8 }}>◆ OrchestrIQ</div>
+        <div style={{ fontSize: 12, color: "#3A4460" }}>Loading…</div>
       </div>
-    )
-  }
+    </div>
+  );
 
-  if (screen === 'auth') {
-    return <Auth onAuth={() => checkProfile()} />
-  }
-
-  if (screen === 'profile') {
-    return <ProfileSetup onComplete={() => setScreen('app')} />
-  }
-
-  return <App />
+  if (screen === "auth") return <Auth onAuth={checkUser} />;
+  if (screen === "profile") return <ProfileSetup onComplete={() => setScreen("plan")} />;
+  if (screen === "plan") return <PlanSelection onComplete={() => setScreen("app")} />;
+  return <App />;
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <Root />
-  </StrictMode>,
-)
+ReactDOM.createRoot(document.getElementById("root")!).render(<Root />);
