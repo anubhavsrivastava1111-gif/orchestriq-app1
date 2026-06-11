@@ -34,7 +34,7 @@ function Root() {
 
       const { data: userData } = await supabase
         .from("users")
-        .select("full_name, company_name, trial_login_count, trial_exhausted, plan_id, plan_name")
+        .select("full_name, company_name, trial_login_count, trial_exhausted, plan_id, plan_name, profile_setup_complete")
         .eq("id", user.id)
         .single();
 
@@ -43,8 +43,8 @@ function Root() {
         return;
       }
 
-      // Profile not complete yet
-      if (!userData.full_name || !userData.company_name) {
+      // Profile not complete yet — show only once
+      if (!userData.profile_setup_complete && (!userData.full_name || !userData.company_name)) {
         setScreen("profile");
         return;
       }
