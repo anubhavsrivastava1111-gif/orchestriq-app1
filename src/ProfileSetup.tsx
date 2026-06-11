@@ -85,7 +85,6 @@ export default function ProfileSetup({ onComplete }: { onComplete: () => void })
         borderRadius: 14, padding: "32px 28px", width: "100%", maxWidth: 420,
       }}>
 
-        {/* Header */}
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <div style={{ fontSize: 36, marginBottom: 8 }}>📱</div>
           <div style={{ fontSize: 20, fontWeight: 800, color: "#F1F5F9", marginBottom: 6 }}>
@@ -97,7 +96,6 @@ export default function ProfileSetup({ onComplete }: { onComplete: () => void })
           </div>
         </div>
 
-        {/* Country Code + Phone Input */}
         <div style={{ marginBottom: 8 }}>
           <label style={{
             fontSize: 9, fontWeight: 700, color: "#5A6480",
@@ -108,7 +106,6 @@ export default function ProfileSetup({ onComplete }: { onComplete: () => void })
           </label>
 
           <div style={{ display: "flex", gap: 8 }}>
-            {/* Country code dropdown */}
             <div style={{ position: "relative", flexShrink: 0 }}>
               <select
                 value={countryCode}
@@ -134,7 +131,6 @@ export default function ProfileSetup({ onComplete }: { onComplete: () => void })
               }}>▼</span>
             </div>
 
-            {/* Phone number input */}
             <input
               type="tel"
               value={phone}
@@ -145,7 +141,6 @@ export default function ProfileSetup({ onComplete }: { onComplete: () => void })
             />
           </div>
 
-          {/* Preview */}
           {phone.replace(/\D/g, "").length > 0 && (
             <div style={{ fontSize: 10, color: "#5A6480", marginTop: 6 }}>
               {selectedCountry.flag} Full number: {countryCode} {phone}
@@ -153,7 +148,6 @@ export default function ProfileSetup({ onComplete }: { onComplete: () => void })
           )}
         </div>
 
-        {/* Error */}
         {error && (
           <div style={{
             background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)",
@@ -164,7 +158,6 @@ export default function ProfileSetup({ onComplete }: { onComplete: () => void })
           </div>
         )}
 
-        {/* Save Button */}
         <button
           onClick={handleSave}
           disabled={loading}
@@ -181,7 +174,6 @@ export default function ProfileSetup({ onComplete }: { onComplete: () => void })
           {loading ? "Saving…" : "Save and Continue"}
         </button>
 
-        {/* Skip Button */}
         <button
           onClick={handleSkip}
           style={{
