@@ -907,6 +907,7 @@ export default function App(){
       try{const tq=await window.storage.get("cos-tq");if(tq?.value){const p=JSON.parse(tq.value);setTQueue(p);tQRef.current=p;}}catch{}
       // FEATURE 2: resume detection
       try{const last=await window.storage.get("cos-lastvisit");if(last?.value){const days=Math.floor((Date.now()-parseInt(last.value))/86400000);if(days>=1)setResumeInfo({days});}await window.storage.set("cos-lastvisit",String(Date.now()));}catch{}
+      enrichEPFromSupabase();
     })();
   },[]);
   // Donation popup — show after 30 minutes, then every 30 minutes
