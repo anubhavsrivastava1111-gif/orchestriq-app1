@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { getExecutivesCached } from "./lib/executives";
+import type { Executive } from "./lib/executives";
 
 const VERSION = "4.3.0";
 const SYS_GEMINI = import.meta.env.VITE_GEMINI_API_KEY || "";
@@ -287,6 +289,159 @@ const EP={
   pres_arch:{b:"MFA Communication Design RISD · MBA Strategy INSEAD · Ex-McKinsey Visual Strategy Lead · 20 years building investor decks and board reports for unicorns and Fortune 500.",m:"You are the Presentation Architect — the platform's narrative and synthesis engine. You analyze conversations, dashboard data, boardroom sessions, and workflow outputs across the ENTIRE workspace, identify key themes, and organize them into compelling narrative structures. For any request, you: (1) identify the core message and audience, (2) propose a slide-by-slide or section-by-section structure, (3) write tight executive summaries, (4) recommend specific charts/visuals with the data they should show, (5) surface risks, opportunities, and action items. Use clear headers, tables for structured data, and number every figure in the company currency. You are not limited to one conversation — you synthesize workspace-wide. When asked to build a deck or report, output a clean structure the generator can turn into slides or PDF pages: use ## for section/slide titles, bullet points for slide body content, and tables where data is comparative."},
 };
 
+// ─── EXECUTIVE INTELLIGENCE LAYER ───────────────────────────────────────────
+// Single source of executive reasoning for all features.
+// Populated once at startup from Supabase. Falls back to EP if unavailable.
+// DO NOT read Supabase executive data directly anywhere else in the app.
+// Future features (org layer, budget, hierarchy) extend this object.
+
+interface ExecutiveIntelligence {
+  // Identity — matches existing EP keys, never changes
+  id: string;
+
+  // Reasoning fields — injected into AI prompts
+  // Only these 5 fields enter prompts. Nothing else.
+  systemPromptEnrichment: string;
+
+  // Display fields — UI, reports, briefing books only. NOT in prompts.
+  credentials: string;
+  expertise: string;
+  industries: string;
+  regions: string;
+  bioFull: string;
+
+  // Governance — future org layer. Not used in Phase 3.
+  tier: string;
+  department: string;
+  reportsTo: null;          // future: executive_id string
+  budgetAuthority: null;    // future: numeric limit
+  approvalRequired: true;   // always true — human governed
+
+  // Source tracking
+  source: "supabase" | "hardcoded";
+  lastRefreshed: number;
+}
+
+// Module-level cache — survives re-renders, cleared only on full reset
+const executiveIntelCache: Record<string, ExecutiveIntelligence> = {};
+let intelCacheTimestamp: number = 0;
+
+// Maps Supabase executive_id values to App EP role id keys
+// Only C-suite roles that appear in Boardroom, Chat, and Workflows
+const SUPABASE_TO_EP_MAP: Record<string, string> = {
+  "CEO_001": "ceo",
+  "CFO_001": "cfo",
+  "CTO_001": "cto",
+  "COO_001": "coo",
+  "CSO_001": "cso",
+  "CHRO_001": "chro",
+  "CLO_001": "clo",
+  "CCO_001": "vp_cx",
+  "CRO_001": "risk_mgr",
+  "CAO_001": "cia",
+  "CESO_001": "board",
+  "CIO_001": "tl",
+  "CLO_001": "clo",
+  "CPOO_001": "coo2",
+  "CRDO_001": "strat_mgr",
+  "CSO_001": "cso",
+};
+
+// Builds the prompt enrichment string from only reasoning-enhancing fields.
+// Deliberately excludes education, certifications, bio, regions, industries.
+// Target: ~40 token overhead per executive above current baseline.
+function buildPromptEnrichment(exec: Executive): string {
+  const parts: string[] = [];
+
+  if (exec.decision_framework?.trim()) {
+    parts.push("DECISION FRAMEWORK: " + exec.decision_framework.trim());
+  }
+  if (exec.economic_philosophy?.trim()) {
+    parts.push("ECONOMIC PHILOSOPHY: " + exec.economic_philosophy.trim());
+  }
+  if (exec.communication_style?.trim()) {
+    parts.push("COMMUNICATION STYLE: " + exec.communication_style.trim());
+  }
+  if (exec.response_framework?.trim()) {
+    parts.push("RESPONSE FRAMEWORK: " + exec.response_framework.trim());
+  }
+  if (exec.superpower?.trim()) {
+    parts.push("YOUR SUPERPOWER: " + exec.superpower.trim());
+  }
+
+  return parts.join("\n");
+}
+
+// Builds display-only credentials string. Never injected into AI prompts.
+function buildCredentials(exec: Executive): string {
+  const parts: string[] = [];
+  if (exec.education?.trim()) parts.push(exec.education.trim());
+  if (exec.certifications?.trim()) parts.push(exec.certifications.trim());
+  if (exec.years_experience?.trim()) parts.push(exec.years_experience.trim() + " years experience");
+  return parts.join(" · ");
+}
+
+// Populates executiveIntelCache from Supabase at startup.
+// Silent on all failures — app continues with hardcoded EP if this fails.
+async function enrichEPFromSupabase(): Promise<void> {
+  try {
+    const executives = await getExecutivesCached();
+
+    if (!executives || executives.length === 0) {
+      console.warn("[OrchestrIQ] Executive profiles: Supabase returned empty. Using hardcoded profiles.");
+      return;
+    }
+
+    let enrichedCount = 0;
+
+    for (const exec of executives) {
+      const epKey = SUPABASE_TO_EP_MAP[exec.executive_id];
+      if (!epKey) continue; // Skip executives with no EP mapping
+
+      const intel: ExecutiveIntelligence = {
+        id: epKey,
+        systemPromptEnrichment: buildPromptEnrichment(exec),
+        credentials: buildCredentials(exec),
+        expertise: exec.strategic_skills || "",
+        industries: exec.industries || "",
+        regions: exec.regions || "",
+        bioFull: exec.bio || "",
+        tier: exec.tier || "Board",
+        department: exec.department || "",
+        reportsTo: null,
+        budgetAuthority: null,
+        approvalRequired: true,
+        source: "supabase",
+        lastRefreshed: Date.now(),
+      };
+
+      executiveIntelCache[epKey] = intel;
+      enrichedCount++;
+    }
+
+    intelCacheTimestamp = Date.now();
+    console.info(`[OrchestrIQ] Executive Intelligence Layer: ${enrichedCount} profiles enriched from Supabase.`);
+
+  } catch (err) {
+    // Silent failure — hardcoded EP remains active
+    console.warn("[OrchestrIQ] Executive profiles: Supabase unavailable. Using hardcoded profiles.", err);
+  }
+}
+
+// Returns enriched profile enrichment string for a given role ID.
+// Used exclusively inside buildSys(). Always returns a safe value.
+// If Supabase enrichment unavailable, returns empty string (no degradation).
+function getExecutiveIntel(roleId: string): { b: string; m: string; enrichment: string } {
+  const hardcoded = EP[roleId] || {};
+  const cached = executiveIntelCache[roleId];
+
+  return {
+    b: hardcoded.b || "",
+    m: hardcoded.m || "",
+    enrichment: cached?.systemPromptEnrichment || "",
+  };
+}
+
 // ─── API FUNCTIONS ──────────────────────────────────────────────────────────
 
 async function callGroq(key,sys,msgs,maxT){
@@ -355,9 +510,23 @@ function buildCtx(co,compData){
   return "COMPANY: "+co.name+" | INDUSTRY: "+co.industry+" | STAGE: "+co.stage+"\nHQ: "+(co.location||"Not set")+" | CURRENCY: "+cur.code+" ("+cur.sym+") | MARKETS: "+(co.markets||"Not specified")+"\nDATA:\n"+(Object.keys(compData).length===0?"(None)":Object.entries(compData).map(([k,v])=>"  "+k+": "+v).join("\n"))+"\nRULES: All figures in "+cur.sym+cur.code+". Account for "+(co.location||"company location")+" macro+micro context. Show all math. Structure 0-90d then 3-12mo then 1-3yr.";
 }
 function buildSys(role,co,compData){
-  const p=EP[role.id]||{};
-  const cur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
-  return "You are "+role.f+" at \""+co.name+"\".\nPROFILE: "+(p.b||"World-class "+role.f+", 20+ years experience.")+"\nCONTEXT:\n"+buildCtx(co,compData)+"\nMANDATE: "+(p.m||"Give elite specific quantified advice as "+role.f+".")+"\nFormat: 1. Quick Read 2. Analysis with "+co.location+" context in "+cur.sym+" 3. 0-90 Day Actions 4. 3-12 Month Strategy 5. 1-3 Year Vision 6. Top 3 Risks 7. Single Most Important Next Step.";
+  const p = getExecutiveIntel(role.id);
+  const cur = CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
+
+  let profileSection = p.b || ("World-class " + role.f + ", 20+ years experience.");
+
+  if (p.enrichment) {
+    profileSection += "\n" + p.enrichment;
+  }
+
+  return (
+    "You are " + role.f + " at \"" + co.name + "\".\n" +
+    "PROFILE: " + profileSection + "\n" +
+    "CONTEXT:\n" + buildCtx(co, compData) + "\n" +
+    "MANDATE: " + (p.m || "Give elite specific quantified advice as " + role.f + ".") + "\n" +
+    "Format: 1. Quick Read 2. Analysis with " + co.location + " context in " + cur.sym +
+    " 3. 0-90 Day Actions 4. 3-12 Month Strategy 5. 1-3 Year Vision 6. Top 3 Risks 7. Single Most Important Next Step."
+  );
 }
 
 function Md({text,ac}){
