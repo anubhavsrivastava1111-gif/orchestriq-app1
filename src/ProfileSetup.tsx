@@ -35,12 +35,12 @@ export default function ProfileSetup({ onComplete }: { onComplete: () => void })
     if (!user) { setError("Session expired. Please log in again."); setLoading(false); return; }
 
     const { error: dbError } = await supabase
-  .from("users")
-  .update({
-    phone: countryCode + digits,
-  })
-  .eq("id", user.id);
-
+      .from("users")
+      .update({
+        phone: countryCode + digits,
+        profile_setup_complete: true,
+      })
+      .eq("id", user.id);
 
     if (dbError) {
       setError(dbError.message);
@@ -51,7 +51,16 @@ export default function ProfileSetup({ onComplete }: { onComplete: () => void })
     onComplete();
   };
 
-  const handleSkip = () => onComplete();
+  const handleSkip = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      await supabase
+        .from("users")
+        .update({ profile_setup_complete: true })
+        .eq("id", user.id);
+    }
+    onComplete();
+  };
 
   const inputStyle = {
     background: "#0a0e1a",
