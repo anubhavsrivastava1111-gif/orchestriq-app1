@@ -923,41 +923,40 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
   useEffect(()=>setLocalDn({...dnCfg}),[dnCfg]);
 
   // Load persisted data
-  useEffect(()=>{
-    attachBenchmarkToWindow();
-    (async()=>{
-      try{const th=await window.storage.get("cos-theme");const tid=th?.value&&THEMES[th.value]?th.value:"dark";setTheme(tid);applyTheme(tid);}catch{applyTheme("dark");}
-      try{const c=await window.storage.get("cos-co");if(c?.value)setCo(p=>({...p,...JSON.parse(c.value)}));}catch{}
-      try{const k=await window.storage.get("cos-keys");if(k?.value){
-        const p=JSON.parse(k.value);
-        const loadedKeys=p.keys||{claude:"",openai:"",gemini:""};
-        setKeys(loadedKeys);setDefP(p.defaultProvider||"claude");setMultiAI(p.multiAI||false);
-        if(Object.values(loadedKeys).some(v=>v?.trim()))setPage("app");
-        // API health check on launch
-        const active=Object.keys(loadedKeys).filter(pid=>loadedKeys[pid]?.trim());
-        if(active.length){
-          const pid=(p.defaultProvider&&active.includes(p.defaultProvider))?p.defaultProvider:active[0];
-          setApiHealth("checking");
-          callAI(pid,loadedKeys[pid],"You are a test assistant.",[{role:"user",content:"Reply with one word: OK"}],5)
-            .then(()=>setApiHealth("ok"))
-            .catch(()=>setApiHealth("fail"));
-        }
-      }}catch{}
-      try{const vl=await window.storage.get("cos-vl");if(vl?.value)setVLang(vl.value);}catch{}
-      try{const h=await window.storage.get("cos-ch");if(h?.value)setChats(JSON.parse(h.value));}catch{}
-      try{const d=await window.storage.get("cos-dp");if(d?.value)setExpD(JSON.parse(d.value));}catch{}
-      try{const cd=await window.storage.get("cos-cd");if(cd?.value)setCompData(JSON.parse(cd.value));}catch{}
-      try{const br=await window.storage.get("cos-br");if(br?.value)setBrSessions(JSON.parse(br.value));}catch{}
-      try{const dn=await window.storage.get("cos-dn");if(dn?.value){const parsed=JSON.parse(dn.value);setDnCfg(parsed);setLocalDn(parsed);}}catch{}
-      try{const wf=await window.storage.get("cos-wf");if(wf?.value)setWorkflows(JSON.parse(wf.value));}catch{}
-      try{const tq=await window.storage.get("cos-tq");if(tq?.value){const p=JSON.parse(tq.value);setTQueue(p);tQRef.current=p;}}catch{}
-      // FEATURE 2: resume detection
-      try{const last=await window.storage.get("cos-lastvisit");if(last?.value){const days=Math.floor((Date.now()-parseInt(last.value))/86400000);if(days>=1)setResumeInfo({days});}await window.storage.set("cos-lastvisit",String(Date.now()));}catch{}
-      const saved=loadResumeState();
-if(saved)setWfResumeData(saved);
-      enrichEPFromSupabase();
-    })();
-  },[]);
+ useEffect(()=>{
+  attachBenchmarkToWindow();
+  (async()=>{
+    try{const th=localStorage.getItem("cos-theme");const tid=th&&THEMES[th]?th:"dark";setTheme(tid);applyTheme(tid);}catch{applyTheme("dark");}
+    try{const c=localStorage.getItem("cos-co");if(c)setCo(p=>({...p,...JSON.parse(c)}));}catch{}
+    try{const k=localStorage.getItem("cos-keys");if(k){
+      const p=JSON.parse(k);
+      const loadedKeys=p.keys||{claude:"",openai:"",gemini:""};
+      setKeys(loadedKeys);setDefP(p.defaultProvider||"claude");setMultiAI(p.multiAI||false);
+      if(Object.values(loadedKeys).some(v=>v?.trim()))setPage("app");
+      const active=Object.keys(loadedKeys).filter(pid=>loadedKeys[pid]?.trim());
+      if(active.length){
+        const pid=(p.defaultProvider&&active.includes(p.defaultProvider))?p.defaultProvider:active[0];
+        setApiHealth("checking");
+        callAI(pid,loadedKeys[pid],"You are a test assistant.",[{role:"user",content:"Reply with one word: OK"}],5)
+          .then(()=>setApiHealth("ok"))
+          .catch(()=>setApiHealth("fail"));
+      }
+    }}catch{}
+    try{const vl=localStorage.getItem("cos-vl");if(vl)setVLang(vl);}catch{}
+    try{const h=localStorage.getItem("cos-ch");if(h)setChats(JSON.parse(h));}catch{}
+    try{const d=localStorage.getItem("cos-dp");if(d)setExpD(JSON.parse(d));}catch{}
+    try{const cd=localStorage.getItem("cos-cd");if(cd)setCompData(JSON.parse(cd));}catch{}
+    try{const br=localStorage.getItem("cos-br");if(br)setBrSessions(JSON.parse(br));}catch{}
+    try{const dn=localStorage.getItem("cos-dn");if(dn){const parsed=JSON.parse(dn);setDnCfg(parsed);setLocalDn(parsed);}}catch{}
+    try{const wf=localStorage.getItem("cos-wf");if(wf)setWorkflows(JSON.parse(wf));}catch{}
+    try{const tq=localStorage.getItem("cos-tq");if(tq){const p=JSON.parse(tq);setTQueue(p);tQRef.current=p;}}catch{}
+    try{const last=localStorage.getItem("cos-lastvisit");if(last){const days=Math.floor((Date.now()-parseInt(last))/86400000);if(days>=1)setResumeInfo({days});}localStorage.setItem("cos-lastvisit",String(Date.now()));}catch{}
+    const saved=loadResumeState();
+    if(saved)setWfResumeData(saved);
+    enrichEPFromSupabase();
+  })();
+},[]);
+  
   // Donation popup — show after 30 minutes, then every 30 minutes
 useEffect(()=>{
   const THIRTY_MIN = 30 * 60 * 1000;
@@ -977,7 +976,7 @@ useEffect(()=>{
   useEffect(()=>{chatEnd.current?.scrollIntoView({behavior:"smooth"});},[chats,selRole,loading]);
   useEffect(()=>{brEnd.current?.scrollIntoView({behavior:"smooth"});},[brCur,brPh]);
 
-  const sv=async(k,v)=>{try{await window.storage.set(k,typeof v==="string"?v:JSON.stringify(v));}catch{}};
+  const sv=async(k,v)=>{try{localStorage.setItem(k,typeof v==="string"?v:JSON.stringify(v));}catch{}};
   const cp=t=>{try{navigator.clipboard.writeText(t);showToast("Copied to clipboard","success");}catch{showToast("Copy failed","error");}};
   const addN=(msg,type)=>setP3Notify(prev=>[{id:Date.now(),msg,type:type||"info",ts:new Date().toISOString()},...prev].slice(0,20));
 
@@ -1563,13 +1562,13 @@ const processTask=useCallback(async(task:any)=>{
   const saveDn=cfg=>{setDnCfg(cfg);setLocalDn(cfg);sv("cos-dn",cfg);showToast("Donation settings saved","success");};
 
   const resetData=async()=>{
-    for(const k of["cos-ch","cos-cd","cos-br","cos-wf","cos-tq"]){try{await window.storage.delete(k);}catch{}}
+    for(const k of["cos-ch","cos-cd","cos-br","cos-wf","cos-tq"]){try{localStorage.removeItem(k);}catch{}}
     setChats({});setCompData({});setBrSessions([]);setBrCur({q:"",debate:[],synthesis:"",drilldown:{}});
     setWorkflows([]);setWfActive(null);tQRef.current=[];setTQueue([]);setSelRole(null);setConfirmReset(null);
     showToast("All data reset","warning");
   };
   const fullReset=async()=>{
-    for(const k of["cos-keys","cos-co","cos-ch","cos-dp","cos-cd","cos-br","cos-dn","cos-wf","cos-tq"]){try{await window.storage.delete(k);}catch{}}
+    for(const k of["cos-keys","cos-co","cos-ch","cos-dp","cos-cd","cos-br","cos-dn","cos-wf","cos-tq"]){try{localStorage.removeItem(k);}catch{}}
     setPage("landing");setKeys({claude:"",openai:"",gemini:""});setCo({name:"",industry:"",stage:"idea",location:"",markets:"",currency:"INR"});
     setSelRole(null);setChats({});setCompData({});setBrSessions([]);setShowSettings(false);
     setWorkflows([]);tQRef.current=[];setTQueue([]);setConfirmReset(null);
