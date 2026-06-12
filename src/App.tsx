@@ -1,6 +1,24 @@
-import { useState, useEffect, useRef, useCallback } from "react";
 import { getExecutivesCached } from "./lib/executives";
 import type { Executive } from "./lib/executives";
+import {
+  COMPRESSION_ENABLED,
+  BENCHMARK_MODE,
+  compressLevelOutput,
+  formatCompressedContextForPrompt,
+  type CompressedContext,
+} from "./lib/ContextCompressor";
+
+import {
+  estimateTokens,
+  attachBenchmarkToWindow,
+  startBenchmarkSession,
+  completeBenchmarkSession,
+  logLevelBenchmark,
+  markRateLimitHit,
+  type BenchmarkSession,
+} from "./lib/TokenCounter";
+
+import { useState, useEffect, useRef, useCallback } from "react";
 
 const VERSION = "4.3.0";
 const SYS_GEMINI = import.meta.env.VITE_GEMINI_API_KEY || "";
@@ -1068,49 +1086,208 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   },[drillRole,drillQ,drillRun,brCur,co,compData,keys,defP,showToast]);
 
   // FIX BUG 4: Workflow — per-level error handling + cancel + progress
-  const runWorkflow=useCallback(async()=>{
-    if(!wfTask.trim()||wfRunning)return;
-    const ch=CHAINS[wfCat];if(!ch)return;
-    cancelRef.current.wf=false;
-    setWfRunning(true);setError(null);
-    const wfId=Date.now();
-    const newWf={id:wfId,task:wfTask,category:wfCat,chainLabel:ch.label,steps:[],status:"running",startedAt:new Date().toISOString(),finalOutput:null,approved:false};
-    setWfActive(newWf);setWfView("active");
-    const steps=[];
-    const wfCurr=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
-    try{
-      for(let i=0;i<ch.chain.length;i++){
-        if(cancelRef.current.wf){
-          showToast("Workflow cancelled at Level "+(i+1),"warning");
-          setWfActive(prev=>prev?{...prev,status:"cancelled"}:null);
-          return;
-        }
-        const roleId=ch.chain[i];const role=AR.find(r=>r.id===roleId);if(!role)continue;
-        const p=EP[roleId]||{};
-        const isFirst=i===0;const isLast=i===ch.chain.length-1;
-        setWfPhase(role.ic+" "+role.t+" — Level "+(i+1)+"/"+ch.chain.length);
-        const prevWork=steps.filter(s=>!s.failed).map((s,si)=>"Level "+(si+1)+": "+s.role.t+"\n"+s.output).join("\n\n");
-        const sys="You are "+role.f+" at \""+co.name+"\".\nPROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+"\nWORKFLOW CHAIN: \""+ch.label+"\" Level "+(i+1)+"/"+ch.chain.length+"\nTASK: \""+wfTask+"\"\n"+(isFirst?"":"PREVIOUS LEVELS:\n"+prevWork+"\n\n")+(isFirst?"INITIATING: Acknowledge task, list missing data needed, produce FIRST DRAFT.":isLast?"FINAL APPROVAL: Review all previous levels. Produce DEFINITIVE FINAL OUTPUT. Sections: Chain Review, Corrections, FINAL APPROVED OUTPUT, Strategic Commentary, Cross-functional Actions.":"MID-LEVEL: Review Level "+i+" output. Add your "+role.dl+" expertise. Produce ENHANCED version.")+"\nAll figures in "+wfCurr.sym+wfCurr.code+".";
-        // Per-level error handling (FIX BUG 4)
-        let reply;
-        try{
-          reply=await ask(sys,[{role:"user",content:"Process: \""+wfTask+"\""}],2800);
-        }catch(lvlErr){
-          const failedStep={role,output:"❌ Level "+(i+1)+" failed: "+lvlErr.message,level:i+1,failed:true,ts:new Date().toISOString()};
-          steps.push(failedStep);
-          setWfActive({...newWf,steps:[...steps],status:"error"});
-          showToast("Level "+(i+1)+" ("+role.t+") failed: "+lvlErr.message,"error");
-          setWfRunning(false);setWfPhase("");return;
-        }
-        const step={role,output:reply,level:i+1,isFirst,isLast,failed:false,ts:new Date().toISOString()};
-        steps.push(step);
-        setWfActive({...newWf,steps:[...steps],status:isLast?"awaiting_approval":"running"});
+const runWorkflow=useCallback(async()=>{
+  if(!wfTask.trim()||wfRunning)return;
+  const ch=CHAINS[wfCat];if(!ch)return;
+  cancelRef.current.wf=false;
+  setWfRunning(true);setError(null);
+  const wfId=Date.now();
+  const newWf={
+    id:wfId,task:wfTask,category:wfCat,chainLabel:ch.label,
+    steps:[],status:"running",startedAt:new Date().toISOString(),
+    finalOutput:null,approved:false
+  };
+  setWfActive(newWf);setWfView("active");
+
+  const steps:any[]=[];
+  const wfCurr=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
+
+  // Phase 1: compressed context accumulator
+  // Empty and unused when COMPRESSION_ENABLED=false — zero behavior change
+  const compressedContexts:CompressedContext[]=[];
+
+  // Phase 1: benchmark session
+  // Only created when BENCHMARK_MODE=true
+  let benchSession:BenchmarkSession|null=null;
+  if(BENCHMARK_MODE){
+    benchSession=startBenchmarkSession({
+      workflowId:String(wfId),
+      chainLabel:ch.label,
+      task:wfTask,
+      compressionEnabled:COMPRESSION_ENABLED,
+    });
+  }
+
+  try{
+    for(let i=0;i<ch.chain.length;i++){
+      if(cancelRef.current.wf){
+        showToast("Workflow cancelled at Level "+(i+1),"warning");
+        setWfActive(prev=>prev?{...prev,status:"cancelled"}:null);
+        return;
       }
-    }catch(err){
-      setError(err.message);showToast("Workflow error: "+err.message,"error");
-      setWfActive(prev=>prev?{...prev,status:"error"}:null);
-    }finally{setWfRunning(false);setWfPhase("");cancelRef.current.wf=false;}
-  },[wfTask,wfCat,wfRunning,co,compData,keys,defP,showToast]);
+
+      const roleId=ch.chain[i];
+      const role=AR.find(r=>r.id===roleId);
+      if(!role)continue;
+
+      const p=EP[roleId]||{};
+      const isFirst=i===0;
+      const isLast=i===ch.chain.length-1;
+      setWfPhase(role.ic+" "+role.t+" — Level "+(i+1)+"/"+ch.chain.length);
+
+      // MODE A (COMPRESSION_ENABLED=false): full output — existing behavior, zero change
+      // MODE B (COMPRESSION_ENABLED=true):  compressed summaries only
+      let prevWork="";
+      if(!isFirst){
+        if(COMPRESSION_ENABLED&&compressedContexts.length>0){
+          prevWork=formatCompressedContextForPrompt(compressedContexts);
+        }else{
+          prevWork=steps
+            .filter(s=>!s.failed)
+            .map((s,si)=>"Level "+(si+1)+": "+s.role.t+"\n"+s.output)
+            .join("\n\n");
+        }
+      }
+
+      // Benchmark: calculate both mode contexts for comparison logging
+      const modeAContext=isFirst?"":steps
+        .filter(s=>!s.failed)
+        .map((s,si)=>"Level "+(si+1)+": "+s.role.t+"\n"+s.output)
+        .join("\n\n");
+      const modeBContext=isFirst?"":(compressedContexts.length>0
+        ?formatCompressedContextForPrompt(compressedContexts)
+        :modeAContext);
+
+      // System prompt — identical in both modes except prevWork variable
+      const sys=
+        "You are "+role.f+" at \""+co.name+"\".\n"+
+        "PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+
+        buildCtx(co,compData)+"\n"+
+        "WORKFLOW CHAIN: \""+ch.label+"\" Level "+(i+1)+"/"+ch.chain.length+"\n"+
+        "TASK: \""+wfTask+"\"\n"+
+        (!isFirst?prevWork+"\n\n":"")+
+        (isFirst
+          ?"INITIATING: Acknowledge task, list missing data needed, produce FIRST DRAFT."
+          :isLast
+          ?"FINAL APPROVAL: Review all previous levels. Produce DEFINITIVE FINAL OUTPUT. Sections: Chain Review, Corrections, FINAL APPROVED OUTPUT, Strategic Commentary, Cross-functional Actions."
+          :"MID-LEVEL: Review Level "+i+" output. Add your "+role.dl+" expertise. Produce ENHANCED version."
+        )+"\nAll figures in "+wfCurr.sym+wfCurr.code+".";
+
+      // Execute level call
+      const levelStartTime=Date.now();
+      let reply="";
+      let providerFailures=0;
+
+      try{
+        reply=await ask(sys,[{role:"user",content:"Process: \""+wfTask+"\""}],2800);
+      }catch(lvlErr:any){
+        if(BENCHMARK_MODE&&benchSession&&
+           lvlErr.message?.toLowerCase().includes("rate limit")){
+          markRateLimitHit(benchSession);
+          providerFailures++;
+        }
+        const failedStep={
+          role,output:"❌ Level "+(i+1)+" failed: "+lvlErr.message,
+          level:i+1,failed:true,ts:new Date().toISOString()
+        };
+        steps.push(failedStep);
+        setWfActive({...newWf,steps:[...steps],status:"error"});
+        showToast("Level "+(i+1)+" ("+role.t+") failed: "+lvlErr.message,"error");
+        setWfRunning(false);setWfPhase("");
+        return;
+      }
+
+      const levelDuration=Date.now()-levelStartTime;
+
+      // Phase 1: compress this level's output for next level context
+      // Only runs when COMPRESSION_ENABLED=true and this is not the last level
+      // If compression fails for any reason, workflow continues unaffected
+      let compressed:CompressedContext|null=null;
+      if(COMPRESSION_ENABLED&&!isLast){
+        compressed=await compressLevelOutput({
+          fullOutput:reply,
+          agentRole:role.t,
+          agentFullTitle:role.f,
+          agentDepartment:role.dl||"General",
+          level:i+1,
+          currency:wfCurr.code,
+          callAI,
+          keys,
+          defaultProvider:defP,
+          effectiveGroqKey:EFF_GROQ,
+          effectiveGeminiKey:EFF_GEMINI,
+        });
+        if(compressed){
+          compressedContexts.push(compressed);
+        }else if(BENCHMARK_MODE){
+          console.warn(
+            "[BENCHMARK] Level "+(i+1)+" compression failed. "+
+            "Full output used for next level."
+          );
+        }
+      }
+
+      // Store completed step
+      const step={
+        role,output:reply,level:i+1,isFirst,isLast,
+        failed:false,ts:new Date().toISOString(),
+        compressed:compressed||null,
+      };
+      steps.push(step);
+      setWfActive({
+        ...newWf,
+        steps:[...steps],
+        status:isLast?"awaiting_approval":"running"
+      });
+
+      // Phase 1: log benchmark entry for this level
+      if(BENCHMARK_MODE&&benchSession){
+        const modeAInputTokens=estimateTokens(sys.replace(prevWork,modeAContext));
+        const modeAOutputTokens=estimateTokens(reply);
+        const modeATotal=modeAInputTokens+modeAOutputTokens;
+        const modeBInputTokens=estimateTokens(sys.replace(prevWork,modeBContext));
+        const modeBOutputTokens=modeAOutputTokens;
+        const modeBTotal=modeBInputTokens+modeBOutputTokens;
+        const compressionCost=compressed?.compression_tokens_used||0;
+        const netSaving=modeATotal-modeBTotal-compressionCost;
+
+        logLevelBenchmark(benchSession,{
+          level:i+1,
+          agent_role:role.t,
+          agent_full_title:role.f,
+          provider:defP,
+          mode_a_input_tokens:modeAInputTokens,
+          mode_a_output_tokens:modeAOutputTokens,
+          mode_a_total_tokens:modeATotal,
+          mode_a_context_chars:modeAContext.length,
+          mode_b_input_tokens:modeBInputTokens,
+          mode_b_output_tokens:modeBOutputTokens,
+          mode_b_total_tokens:modeBTotal,
+          mode_b_context_chars:modeBContext.length,
+          compression_tokens_used:compressionCost,
+          compression_ratio:compressed?.compression_ratio||1,
+          net_token_saving:netSaving,
+          execution_duration_ms:levelDuration,
+          provider_failures:providerFailures,
+          retry_count:0,
+          quality_score:null,
+          quality_notes:"",
+        });
+      }
+    }
+  }catch(err:any){
+    setError(err.message);
+    showToast("Workflow error: "+err.message,"error");
+    setWfActive(prev=>prev?{...prev,status:"error"}:null);
+  }finally{
+    if(BENCHMARK_MODE&&benchSession){
+      completeBenchmarkSession(benchSession);
+    }
+    setWfRunning(false);
+    setWfPhase("");
+    cancelRef.current.wf=false;
+  }
+},[wfTask,wfCat,wfRunning,co,compData,keys,defP,showToast]);
 
   const approveWF=useCallback(()=>{
     if(!wfActive)return;
