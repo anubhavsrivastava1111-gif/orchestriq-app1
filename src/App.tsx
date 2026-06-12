@@ -19,6 +19,17 @@ import {
 } from "./lib/TokenCounter";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  markProviderExhausted,
+  getActiveProvider,
+  isRateLimit,
+  areBothExhausted,
+  waitWithCountdown,
+  saveResumeState,
+  loadResumeState,
+  clearResumeState,
+  type ResumeState,
+} from "./lib/ProviderManager";
 
 const VERSION = "4.3.0";
 const SYS_GEMINI = import.meta.env.VITE_GEMINI_API_KEY || "";
@@ -503,22 +514,36 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500){
 }
 
 async function callMulti(keys,defP,sys,msgs,maxT=3500){
-  // Use system Gemini key if available and no user key is set
   const effectiveKeys={...keys};
-  if(EFF_GEMINI && !effectiveKeys.gemini?.trim()){
-    effectiveKeys.gemini=EFF_GEMINI;
-}
-if(EFF_GROQ && !effectiveKeys.groq?.trim()){
-    effectiveKeys.groq=EFF_GROQ;
-}
+  if(EFF_GEMINI && !effectiveKeys.gemini?.trim()) effectiveKeys.gemini=EFF_GEMINI;
+  if(EFF_GROQ && !effectiveKeys.groq?.trim()) effectiveKeys.groq=EFF_GROQ;
   const providers=Object.keys(effectiveKeys).filter(p=>effectiveKeys[p]?.trim());
-  if(!providers.length)throw new Error("No API keys configured. Add at least one key in Settings.");
-  // Prefer system Gemini if user has no default provider key
-  let active=providers.includes(defP)&&effectiveKeys[defP]?.trim()?defP:providers[0];
-  if(EFF_GROQ&&!keys[defP]?.trim()&&effectiveKeys.groq)active="groq";
-else if(EFF_GEMINI&&!keys[defP]?.trim()&&effectiveKeys.gemini)active="gemini";
-  const text=await callAI(active,effectiveKeys[active],sys,msgs,maxT);
-  return{primary:text};
+  if(!providers.length) throw new Error("No API keys configured. Add at least one key in Settings.");
+  const active=getActiveProvider(defP,effectiveKeys,EFF_GROQ,EFF_GEMINI);
+  const key=effectiveKeys[active];
+  if(!key?.trim()) throw new Error("No API key available for "+active+". Add it in Settings.");
+  try{
+    const text=await callAI(active,key,sys,msgs,maxT);
+    return{primary:text};
+  }catch(err:any){
+    if(isRateLimit(err.message)){
+      markProviderExhausted(active);
+      // Try the other provider immediately
+      const fallback=active==="groq"?"gemini":"groq";
+      const fallbackKey=effectiveKeys[fallback];
+      if(fallbackKey?.trim()){
+        console.info("[ProviderManager] Retrying with "+fallback+"...");
+        try{
+          const text=await callAI(fallback,fallbackKey,sys,msgs,maxT);
+          return{primary:text};
+        }catch(err2:any){
+          if(isRateLimit(err2.message)) markProviderExhausted(fallback);
+          throw err2;
+        }
+      }
+    }
+    throw err;
+  }
 }
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
@@ -876,7 +901,9 @@ export default function App(){
   const [expSynthesis,setExpSynthesis]=useState("");
   const [expStep,setExpStep]=useState("");
   // FEATURE 2: resume banner
-  const [resumeInfo,setResumeInfo]=useState(null);
+ const [resumeInfo,setResumeInfo]=useState(null);
+const [wfResumeData,setWfResumeData]=useState<ResumeState|null>(null);
+const [wfPauseMsg,setWfPauseMsg]=useState("");
 
   // Cancel refs for long-running operations
   const cancelRef=useRef({br:false,tm:false,ap:false,wf:false,q:false});
@@ -926,6 +953,8 @@ export default function App(){
       try{const tq=await window.storage.get("cos-tq");if(tq?.value){const p=JSON.parse(tq.value);setTQueue(p);tQRef.current=p;}}catch{}
       // FEATURE 2: resume detection
       try{const last=await window.storage.get("cos-lastvisit");if(last?.value){const days=Math.floor((Date.now()-parseInt(last.value))/86400000);if(days>=1)setResumeInfo({days});}await window.storage.set("cos-lastvisit",String(Date.now()));}catch{}
+      const saved=loadResumeState();
+if(saved)setWfResumeData(saved);
       enrichEPFromSupabase();
     })();
   },[]);
@@ -1087,86 +1116,69 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   },[drillRole,drillQ,drillRun,brCur,co,compData,keys,defP,showToast]);
 
   // FIX BUG 4: Workflow — per-level error handling + cancel + progress
-const runWorkflow=useCallback(async()=>{
-  if(!wfTask.trim()||wfRunning)return;
-  const ch=CHAINS[wfCat];if(!ch)return;
+const runWorkflow=useCallback(async(resumeFrom?:ResumeState)=>{
+  const taskText=resumeFrom?resumeFrom.task:wfTask;
+  const taskCat=resumeFrom?resumeFrom.category:wfCat;
+  if(!taskText.trim()||wfRunning)return;
+  const ch=CHAINS[taskCat];if(!ch)return;
   cancelRef.current.wf=false;
-  setWfRunning(true);setError(null);
-  const wfId=Date.now();
+  setWfRunning(true);setError(null);setWfPauseMsg("");
+  const wfId=resumeFrom?resumeFrom.workflowId:Date.now();
+  const startLevel=resumeFrom?resumeFrom.completedLevels:0;
+  const existingSteps=resumeFrom?resumeFrom.steps:[];
   const newWf={
-    id:wfId,task:wfTask,category:wfCat,chainLabel:ch.label,
-    steps:[],status:"running",startedAt:new Date().toISOString(),
+    id:wfId,task:taskText,category:taskCat,chainLabel:ch.label,
+    steps:existingSteps,status:"running",startedAt:new Date().toISOString(),
     finalOutput:null,approved:false
   };
   setWfActive(newWf);setWfView("active");
+  if(resumeFrom)clearResumeState();
 
-  const steps:any[]=[];
+  const steps:any[]=[...existingSteps];
   const wfCurr=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
-
-  // Phase 1: compressed context accumulator
-  // Empty and unused when COMPRESSION_ENABLED=false — zero behavior change
   const compressedContexts:CompressedContext[]=[];
-
-  // Phase 1: benchmark session
-  // Only created when BENCHMARK_MODE=true
   let benchSession:BenchmarkSession|null=null;
   if(BENCHMARK_MODE){
     benchSession=startBenchmarkSession({
-      workflowId:String(wfId),
-      chainLabel:ch.label,
-      task:wfTask,
-      compressionEnabled:COMPRESSION_ENABLED,
+      workflowId:String(wfId),chainLabel:ch.label,
+      task:taskText,compressionEnabled:COMPRESSION_ENABLED,
     });
   }
 
   try{
-    for(let i=0;i<ch.chain.length;i++){
+    for(let i=startLevel;i<ch.chain.length;i++){
       if(cancelRef.current.wf){
         showToast("Workflow cancelled at Level "+(i+1),"warning");
         setWfActive(prev=>prev?{...prev,status:"cancelled"}:null);
+        clearResumeState();
         return;
       }
 
       const roleId=ch.chain[i];
       const role=AR.find(r=>r.id===roleId);
       if(!role)continue;
-
       const p=EP[roleId]||{};
-      const isFirst=i===0;
+      const isFirst=i===0&&startLevel===0;
       const isLast=i===ch.chain.length-1;
       setWfPhase(role.ic+" "+role.t+" — Level "+(i+1)+"/"+ch.chain.length);
 
-      // MODE A (COMPRESSION_ENABLED=false): full output — existing behavior, zero change
-      // MODE B (COMPRESSION_ENABLED=true):  compressed summaries only
       let prevWork="";
-      if(!isFirst){
+      if(steps.length>0){
         if(COMPRESSION_ENABLED&&compressedContexts.length>0){
           prevWork=formatCompressedContextForPrompt(compressedContexts);
         }else{
-          prevWork=steps
-            .filter(s=>!s.failed)
-            .map((s,si)=>"Level "+(si+1)+": "+s.role.t+"\n"+s.output)
-            .join("\n\n");
+          prevWork=steps.filter(s=>!s.failed)
+            .map((s,si)=>"Level "+(si+1)+": "+s.role.t+"\n"+s.output).join("\n\n");
         }
       }
 
-      // Benchmark: calculate both mode contexts for comparison logging
-      const modeAContext=isFirst?"":steps
-        .filter(s=>!s.failed)
-        .map((s,si)=>"Level "+(si+1)+": "+s.role.t+"\n"+s.output)
-        .join("\n\n");
-      const modeBContext=isFirst?"":(compressedContexts.length>0
-        ?formatCompressedContextForPrompt(compressedContexts)
-        :modeAContext);
-
-      // System prompt — identical in both modes except prevWork variable
       const sys=
         "You are "+role.f+" at \""+co.name+"\".\n"+
         "PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+
         buildCtx(co,compData)+"\n"+
         "WORKFLOW CHAIN: \""+ch.label+"\" Level "+(i+1)+"/"+ch.chain.length+"\n"+
-        "TASK: \""+wfTask+"\"\n"+
-        (!isFirst?prevWork+"\n\n":"")+
+        "TASK: \""+taskText+"\"\n"+
+        (steps.length>0?prevWork+"\n\n":"")+
         (isFirst
           ?"INITIATING: Acknowledge task, list missing data needed, produce FIRST DRAFT."
           :isLast
@@ -1174,105 +1186,98 @@ const runWorkflow=useCallback(async()=>{
           :"MID-LEVEL: Review Level "+i+" output. Add your "+role.dl+" expertise. Produce ENHANCED version."
         )+"\nAll figures in "+wfCurr.sym+wfCurr.code+".";
 
-      // Execute level call
       const levelStartTime=Date.now();
       let reply="";
-      let providerFailures=0;
+      let levelSuccess=false;
+      let lastLevelErr:any=null;
 
-      try{
-        reply=await ask(sys,[{role:"user",content:"Process: \""+wfTask+"\""}],2800);
-      }catch(lvlErr:any){
-        if(BENCHMARK_MODE&&benchSession&&
-           lvlErr.message?.toLowerCase().includes("rate limit")){
-          markRateLimitHit(benchSession);
-          providerFailures++;
+      for(let attempt=0;attempt<4;attempt++){
+        if(cancelRef.current.wf)break;
+        try{
+          reply=await ask(sys,[{role:"user",content:"Process: \""+taskText+"\""}],2800);
+          levelSuccess=true;
+          break;
+        }catch(lvlErr:any){
+          lastLevelErr=lvlErr;
+          if(isRateLimit(lvlErr.message)){
+            if(areBothExhausted()){
+              await waitWithCountdown(60,(remaining)=>{
+                setWfPauseMsg("⏸ Both providers rate-limited. Resuming in "+remaining+"s… Your progress is saved.");
+                setWfPhase("⏸ Paused — auto-resuming in "+remaining+"s");
+              });
+              setWfPauseMsg("");
+              continue;
+            }
+            continue;
+          }else{
+            break;
+          }
         }
-        const failedStep={
-          role,output:"❌ Level "+(i+1)+" failed: "+lvlErr.message,
-          level:i+1,failed:true,ts:new Date().toISOString()
-        };
-        steps.push(failedStep);
-        setWfActive({...newWf,steps:[...steps],status:"error"});
-        showToast("Level "+(i+1)+" ("+role.t+") failed: "+lvlErr.message,"error");
+      }
+
+      if(!levelSuccess){
+        saveResumeState({
+          workflowId:wfId,
+          task:taskText,
+          category:taskCat,
+          chainLabel:ch.label,
+          completedLevels:i,
+          steps:[...steps],
+          savedAt:new Date().toISOString(),
+        });
+        setWfActive(prev=>prev?{...prev,status:"paused"}:null);
+        setWfPauseMsg("⏸ Workflow paused at Level "+(i+1)+". Progress saved. Click Resume to continue.");
+        setWfResumeData({
+          workflowId:wfId,task:taskText,category:taskCat,
+          chainLabel:ch.label,completedLevels:i,
+          steps:[...steps],savedAt:new Date().toISOString(),
+        });
+        showToast("Workflow paused — click Resume to continue from Level "+(i+1),"warning");
         setWfRunning(false);setWfPhase("");
         return;
       }
 
       const levelDuration=Date.now()-levelStartTime;
-
-      // Phase 1: compress this level's output for next level context
-      // Only runs when COMPRESSION_ENABLED=true and this is not the last level
-      // If compression fails for any reason, workflow continues unaffected
       let compressed:CompressedContext|null=null;
       if(COMPRESSION_ENABLED&&!isLast){
         compressed=await compressLevelOutput({
-          fullOutput:reply,
-          agentRole:role.t,
-          agentFullTitle:role.f,
-          agentDepartment:role.dl||"General",
-          level:i+1,
-          currency:wfCurr.code,
-          callAI,
-          keys,
-          defaultProvider:defP,
-          effectiveGroqKey:EFF_GROQ,
-          effectiveGeminiKey:EFF_GEMINI,
+          fullOutput:reply,agentRole:role.t,agentFullTitle:role.f,
+          agentDepartment:role.dl||"General",level:i+1,currency:wfCurr.code,
+          callAI,keys,defaultProvider:defP,
+          effectiveGroqKey:EFF_GROQ,effectiveGeminiKey:EFF_GEMINI,
         });
-        if(compressed){
-          compressedContexts.push(compressed);
-        }else if(BENCHMARK_MODE){
-          console.warn(
-            "[BENCHMARK] Level "+(i+1)+" compression failed. "+
-            "Full output used for next level."
-          );
-        }
+        if(compressed)compressedContexts.push(compressed);
       }
 
-      // Store completed step
       const step={
         role,output:reply,level:i+1,isFirst,isLast,
         failed:false,ts:new Date().toISOString(),
         compressed:compressed||null,
       };
       steps.push(step);
-      setWfActive({
-        ...newWf,
-        steps:[...steps],
-        status:isLast?"awaiting_approval":"running"
+
+      saveResumeState({
+        workflowId:wfId,task:taskText,category:taskCat,
+        chainLabel:ch.label,completedLevels:i+1,
+        steps:[...steps],savedAt:new Date().toISOString(),
       });
 
-      // Phase 1: log benchmark entry for this level
+      setWfActive({...newWf,steps:[...steps],status:isLast?"awaiting_approval":"running"});
+
       if(BENCHMARK_MODE&&benchSession){
-        const modeAInputTokens=estimateTokens(sys.replace(prevWork,modeAContext));
+        const modeAInputTokens=estimateTokens(sys);
         const modeAOutputTokens=estimateTokens(reply);
         const modeATotal=modeAInputTokens+modeAOutputTokens;
-        const modeBInputTokens=estimateTokens(sys.replace(prevWork,modeBContext));
-        const modeBOutputTokens=modeAOutputTokens;
-        const modeBTotal=modeBInputTokens+modeBOutputTokens;
-        const compressionCost=compressed?.compression_tokens_used||0;
-        const netSaving=modeATotal-modeBTotal-compressionCost;
-
         logLevelBenchmark(benchSession,{
-          level:i+1,
-          agent_role:role.t,
-          agent_full_title:role.f,
-          provider:defP,
-          mode_a_input_tokens:modeAInputTokens,
-          mode_a_output_tokens:modeAOutputTokens,
-          mode_a_total_tokens:modeATotal,
-          mode_a_context_chars:modeAContext.length,
-          mode_b_input_tokens:modeBInputTokens,
-          mode_b_output_tokens:modeBOutputTokens,
-          mode_b_total_tokens:modeBTotal,
-          mode_b_context_chars:modeBContext.length,
-          compression_tokens_used:compressionCost,
+          level:i+1,agent_role:role.t,agent_full_title:role.f,provider:defP,
+          mode_a_input_tokens:modeAInputTokens,mode_a_output_tokens:modeAOutputTokens,
+          mode_a_total_tokens:modeATotal,mode_a_context_chars:prevWork.length,
+          mode_b_input_tokens:modeAInputTokens,mode_b_output_tokens:modeAOutputTokens,
+          mode_b_total_tokens:modeATotal,mode_b_context_chars:prevWork.length,
+          compression_tokens_used:compressed?.compression_tokens_used||0,
           compression_ratio:compressed?.compression_ratio||1,
-          net_token_saving:netSaving,
-          execution_duration_ms:levelDuration,
-          provider_failures:providerFailures,
-          retry_count:0,
-          quality_score:null,
-          quality_notes:"",
+          net_token_saving:0,execution_duration_ms:levelDuration,
+          provider_failures:0,retry_count:0,quality_score:null,quality_notes:"",
         });
       }
     }
@@ -1281,11 +1286,8 @@ const runWorkflow=useCallback(async()=>{
     showToast("Workflow error: "+err.message,"error");
     setWfActive(prev=>prev?{...prev,status:"error"}:null);
   }finally{
-    if(BENCHMARK_MODE&&benchSession){
-      completeBenchmarkSession(benchSession);
-    }
-    setWfRunning(false);
-    setWfPhase("");
+    if(BENCHMARK_MODE&&benchSession)completeBenchmarkSession(benchSession);
+    setWfRunning(false);setWfPhase("");
     cancelRef.current.wf=false;
   }
 },[wfTask,wfCat,wfRunning,co,compData,keys,defP,showToast]);
@@ -1954,6 +1956,23 @@ const processTask=useCallback(async(task:any)=>{
                     {wfRunning&&<button onClick={()=>cancelRef.current.wf=true} style={{...S.cancelBtn,alignSelf:"flex-end",marginBottom:0}}>Cancel</button>}
                   </div>
                   {wfRunning&&wfPhase&&<div style={{fontSize:10,color:"#14B8A6",marginTop:8,display:"flex",alignItems:"center",gap:5}}><span style={{width:5,height:5,borderRadius:"50%",background:"#14B8A6",display:"inline-block",animation:"pulse 1s infinite"}}/>{wfPhase}</div>}
+                  {wfPauseMsg&&(
+  <div style={{background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:8,padding:"10px 14px",marginBottom:10,fontSize:11,color:"#F59E0B",display:"flex",alignItems:"center",gap:8}}>
+    <span style={{fontSize:14,flexShrink:0}}>⏸</span>
+    <span style={{flex:1,lineHeight:1.6}}>{wfPauseMsg}</span>
+  </div>
+)}
+{wfResumeData&&!wfRunning&&(
+  <div style={{background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.25)",borderRadius:8,padding:"12px 14px",marginBottom:12}}>
+    <div style={{fontSize:12,fontWeight:700,color:"#F59E0B",marginBottom:3}}>⏸ Paused Workflow Found</div>
+    <div style={{fontSize:11,color:"#A0AAC0",marginBottom:2}}>"{wfResumeData.task.slice(0,60)}{wfResumeData.task.length>60?"…":""}"</div>
+    <div style={{fontSize:9,color:"#5A6480",marginBottom:10}}>{wfResumeData.chainLabel} · Completed {wfResumeData.completedLevels} of {CHAINS[wfResumeData.category]?.chain.length||0} levels · Saved {new Date(wfResumeData.savedAt).toLocaleTimeString()}</div>
+    <div style={{display:"flex",gap:6}}>
+      <button onClick={()=>runWorkflow(wfResumeData)} style={{...S.pBtn,marginTop:0,flex:1,background:"#F59E0B",color:"#0a0e1a",fontSize:11}}>▶ Resume from Level {wfResumeData.completedLevels+1}</button>
+      <button onClick={()=>{clearResumeState();setWfResumeData(null);}} style={{...S.hBtn,padding:"8px 12px",fontSize:10}}>Discard</button>
+    </div>
+  </div>
+)}
                   {error&&<div style={{...S.errB,marginTop:8}}>⚠️ {error}<button onClick={()=>setError(null)} style={{...S.retBtn,background:"#3A4060"}}>Dismiss</button></div>}
                 </div>
               )}
