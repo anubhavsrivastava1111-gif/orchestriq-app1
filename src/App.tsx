@@ -515,29 +515,32 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500){
 
 async function callMulti(keys,defP,sys,msgs,maxT=3500){
   const effectiveKeys={...keys};
-  if(EFF_GEMINI && !effectiveKeys.gemini?.trim()) effectiveKeys.gemini=EFF_GEMINI;
-  if(EFF_GROQ && !effectiveKeys.groq?.trim()) effectiveKeys.groq=EFF_GROQ;
-  const providers=Object.keys(effectiveKeys).filter(p=>effectiveKeys[p]?.trim());
-  if(!providers.length) throw new Error("No API keys configured. Add at least one key in Settings.");
-  const active=getActiveProvider(defP,effectiveKeys,EFF_GROQ,EFF_GEMINI);
-  const key=effectiveKeys[active];
-  if(!key?.trim()) throw new Error("No API key available for "+active+". Add it in Settings.");
+  if(EFF_GEMINI&&!effectiveKeys.gemini?.trim())effectiveKeys.gemini=EFF_GEMINI;
+  if(EFF_GROQ&&!effectiveKeys.groq?.trim())effectiveKeys.groq=EFF_GROQ;
+
+  // Build list of providers that actually have keys
+  const available=Object.keys(effectiveKeys).filter(p=>effectiveKeys[p]?.trim());
+  if(!available.length)throw new Error("No API keys configured. Add at least one key in Settings.");
+
+  // Pick best available provider — prefer defP if available, else first available
+  const primary=available.includes(defP)?defP:available[0];
+  const primaryKey=effectiveKeys[primary];
+
   try{
-    const text=await callAI(active,key,sys,msgs,maxT);
+    const text=await callAI(primary,primaryKey,sys,msgs,maxT);
     return{primary:text};
   }catch(err:any){
     if(isRateLimit(err.message)){
-      markProviderExhausted(active);
-      // Try the other provider immediately
-      const fallback=active==="groq"?"gemini":"groq";
-      const fallbackKey=effectiveKeys[fallback];
-      if(fallbackKey?.trim()){
-        console.info("[ProviderManager] Retrying with "+fallback+"...");
+      markProviderExhausted(primary);
+      // Try any other available provider
+      const fallback=available.find(p=>p!==primary);
+      if(fallback){
+        const fallbackKey=effectiveKeys[fallback];
         try{
           const text=await callAI(fallback,fallbackKey,sys,msgs,maxT);
           return{primary:text};
         }catch(err2:any){
-          if(isRateLimit(err2.message)) markProviderExhausted(fallback);
+          if(isRateLimit(err2.message))markProviderExhausted(fallback);
           throw err2;
         }
       }
