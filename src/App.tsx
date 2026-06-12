@@ -897,6 +897,7 @@ export default function App(){
 
   // Load persisted data
   useEffect(()=>{
+    attachBenchmarkToWindow();
     (async()=>{
       try{const th=await window.storage.get("cos-theme");const tid=th?.value&&THEMES[th.value]?th.value:"dark";setTheme(tid);applyTheme(tid);}catch{applyTheme("dark");}
       try{const c=await window.storage.get("cos-co");if(c?.value)setCo(p=>({...p,...JSON.parse(c.value)}));}catch{}
@@ -1319,44 +1320,203 @@ const runWorkflow=useCallback(async()=>{
     return task.id;
   },[showToast]);
 
-  const processTask=useCallback(async(task)=>{
-    const ch=CHAINS[task.category];if(!ch)return;
-    const p3Curr=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
-    const steps=[...task.steps];
-    const upd=(updates)=>{
-      tQRef.current=tQRef.current.map(t=>t.id===task.id?{...t,...updates}:t);
-      setTQueue([...tQRef.current]);
-      setP3Running(prev=>prev?.id===task.id?{...prev,...updates}:prev);
-      sv("cos-tq",tQRef.current);
-    };
-    upd({status:TS.RUNNING,startedAt:new Date().toISOString()});
-    addN("Chain started: "+ch.label,"running");
-    for(let i=0;i<ch.chain.length;i++){
-      if(cancelRef.current.q){upd({status:TS.FAILED,error:"Cancelled by user"});addN("Queue cancelled","warning");return;}
-      const roleId=ch.chain[i];const role=AR.find(r=>r.id===roleId);if(!role)continue;
-      const p=EP[roleId]||{};
-      const isFirst=i===0;const isLast=i===ch.chain.length-1;
-      setP3Phase(role.ic+" "+role.t+" — Level "+(i+1)+"/"+ch.chain.length);
-      upd({currentLevel:i+1,status:TS.RUNNING});
-      const prevWork=steps.filter(s=>!s.failed).map((s,si)=>"Level "+(si+1)+": "+s.role.t+"\n"+s.output).join("\n\n");
-      const sys="You are "+role.f+" at \""+co.name+"\".\nPROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+"\nAUTONOMOUS CHAIN Level "+(i+1)+"/"+ch.chain.length+" - "+ch.label+"\nPriority: "+task.priority.toUpperCase()+"\nTask: \""+task.task+"\"\n"+(isFirst?"":"PREVIOUS LEVELS:\n"+prevWork+"\n")+(isFirst?"INITIATING: Acknowledge task, produce FIRST DRAFT. Use "+p3Curr.sym+p3Curr.code+".":isLast?"FINAL APPROVAL: Review all levels. Produce DEFINITIVE FINAL OUTPUT.":"MID-LEVEL: Review previous level, add "+role.dl+" expertise. Enhanced output in "+p3Curr.sym+p3Curr.code+".");
-      try{
-        const reply=await ask(sys,[{role:"user",content:"Process: \""+task.task+"\""}],2800);
-        const step={role,output:reply,level:i+1,isFirst,isLast,ts:new Date().toISOString()};
-        steps.push(step);upd({steps:[...steps],currentLevel:i+1});
-        addN("Level "+(i+1)+" ("+role.t+") complete","success");
-      }catch(err){
-        upd({status:TS.FAILED,error:err.message});
-        addN("Failed at Level "+(i+1)+" ("+role.t+"): "+err.message,"error");
-        showToast("Queue task failed at Level "+(i+1)+": "+err.message,"error");
-        return;
+const processTask=useCallback(async(task:any)=>{
+  const ch=CHAINS[task.category];if(!ch)return;
+  const p3Curr=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
+  const steps=[...task.steps];
+
+  // Phase 1: compressed context accumulator for autonomous queue
+  const compressedContexts:CompressedContext[]=[];
+
+  // Phase 1: benchmark session for queue tasks
+  let benchSession:BenchmarkSession|null=null;
+  if(BENCHMARK_MODE){
+    benchSession=startBenchmarkSession({
+      workflowId:String(task.id),
+      chainLabel:ch.label,
+      task:task.task,
+      compressionEnabled:COMPRESSION_ENABLED,
+    });
+  }
+
+  const upd=(updates:any)=>{
+    tQRef.current=tQRef.current.map(t=>t.id===task.id?{...t,...updates}:t);
+    setTQueue([...tQRef.current]);
+    setP3Running((prev:any)=>prev?.id===task.id?{...prev,...updates}:prev);
+    sv("cos-tq",tQRef.current);
+  };
+
+  upd({status:TS.RUNNING,startedAt:new Date().toISOString()});
+  addN("Chain started: "+ch.label,"running");
+
+  for(let i=0;i<ch.chain.length;i++){
+    if(cancelRef.current.q){
+      upd({status:TS.FAILED,error:"Cancelled by user"});
+      addN("Queue cancelled","warning");
+      if(BENCHMARK_MODE&&benchSession)completeBenchmarkSession(benchSession);
+      return;
+    }
+
+    const roleId=ch.chain[i];
+    const role=AR.find(r=>r.id===roleId);
+    if(!role)continue;
+
+    const p=EP[roleId]||{};
+    const isFirst=i===0;
+    const isLast=i===ch.chain.length-1;
+    setP3Phase(role.ic+" "+role.t+" — Level "+(i+1)+"/"+ch.chain.length);
+    upd({currentLevel:i+1,status:TS.RUNNING});
+
+    // MODE A (COMPRESSION_ENABLED=false): full output — existing behavior, zero change
+    // MODE B (COMPRESSION_ENABLED=true):  compressed summaries only
+    let prevWork="";
+    if(!isFirst){
+      if(COMPRESSION_ENABLED&&compressedContexts.length>0){
+        prevWork=formatCompressedContextForPrompt(compressedContexts);
+      }else{
+        prevWork=steps
+          .filter(s=>!s.failed)
+          .map((s:any,si:number)=>"Level "+(si+1)+": "+s.role.t+"\n"+s.output)
+          .join("\n\n");
       }
     }
-    upd({steps:[...steps],status:TS.REVIEWING,finalOutput:steps[steps.length-1]?.output||"",completedAt:new Date().toISOString(),currentLevel:ch.chain.length});
-    addN("Chain complete — awaiting your approval","complete");
-    showToast("Task chain complete — review and approve","success");
-    setP3View("completed");
-  },[co,compData,keys,defP,showToast]);
+
+    // Benchmark: calculate both mode contexts for comparison
+    const modeAContext=isFirst?"":steps
+      .filter(s=>!s.failed)
+      .map((s:any,si:number)=>"Level "+(si+1)+": "+s.role.t+"\n"+s.output)
+      .join("\n\n");
+    const modeBContext=isFirst?"":(compressedContexts.length>0
+      ?formatCompressedContextForPrompt(compressedContexts)
+      :modeAContext);
+
+    // System prompt — identical in both modes except prevWork variable
+    const sys=
+      "You are "+role.f+" at \""+co.name+"\".\n"+
+      "PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+
+      buildCtx(co,compData)+"\n"+
+      "AUTONOMOUS CHAIN Level "+(i+1)+"/"+ch.chain.length+" - "+ch.label+"\n"+
+      "Priority: "+task.priority.toUpperCase()+"\n"+
+      "Task: \""+task.task+"\"\n"+
+      (!isFirst?prevWork+"\n":"")+
+      (isFirst
+        ?"INITIATING: Acknowledge task, produce FIRST DRAFT. Use "+p3Curr.sym+p3Curr.code+"."
+        :isLast
+        ?"FINAL APPROVAL: Review all levels. Produce DEFINITIVE FINAL OUTPUT."
+        :"MID-LEVEL: Review previous level, add "+role.dl+" expertise. Enhanced output in "+p3Curr.sym+p3Curr.code+"."
+      );
+
+    // Execute level call
+    const levelStartTime=Date.now();
+    let providerFailures=0;
+
+    try{
+      const reply=await ask(sys,[{role:"user",content:"Process: \""+task.task+"\""}],2800);
+      const levelDuration=Date.now()-levelStartTime;
+
+      // Phase 1: compress this level's output for next level context
+      // Only runs when COMPRESSION_ENABLED=true and not the last level
+      // If compression fails workflow continues unaffected
+      let compressed:CompressedContext|null=null;
+      if(COMPRESSION_ENABLED&&!isLast){
+        compressed=await compressLevelOutput({
+          fullOutput:reply,
+          agentRole:role.t,
+          agentFullTitle:role.f,
+          agentDepartment:role.dl||"General",
+          level:i+1,
+          currency:p3Curr.code,
+          callAI,
+          keys,
+          defaultProvider:defP,
+          effectiveGroqKey:EFF_GROQ,
+          effectiveGeminiKey:EFF_GEMINI,
+        });
+        if(compressed){
+          compressedContexts.push(compressed);
+        }else if(BENCHMARK_MODE){
+          console.warn(
+            "[BENCHMARK] Queue Level "+(i+1)+" compression failed. "+
+            "Full output used for next level."
+          );
+        }
+      }
+
+      // Store completed step
+      const step={
+        role,output:reply,level:i+1,isFirst,isLast,
+        ts:new Date().toISOString(),
+        compressed:compressed||null,
+      };
+      steps.push(step);
+      upd({steps:[...steps],currentLevel:i+1});
+      addN("Level "+(i+1)+" ("+role.t+") complete","success");
+
+      // Phase 1: log benchmark entry
+      if(BENCHMARK_MODE&&benchSession){
+        const modeAInputTokens=estimateTokens(sys.replace(prevWork,modeAContext));
+        const modeAOutputTokens=estimateTokens(reply);
+        const modeATotal=modeAInputTokens+modeAOutputTokens;
+        const modeBInputTokens=estimateTokens(sys.replace(prevWork,modeBContext));
+        const modeBOutputTokens=modeAOutputTokens;
+        const modeBTotal=modeBInputTokens+modeBOutputTokens;
+        const compressionCost=compressed?.compression_tokens_used||0;
+        const netSaving=modeATotal-modeBTotal-compressionCost;
+
+        logLevelBenchmark(benchSession,{
+          level:i+1,
+          agent_role:role.t,
+          agent_full_title:role.f,
+          provider:defP,
+          mode_a_input_tokens:modeAInputTokens,
+          mode_a_output_tokens:modeAOutputTokens,
+          mode_a_total_tokens:modeATotal,
+          mode_a_context_chars:modeAContext.length,
+          mode_b_input_tokens:modeBInputTokens,
+          mode_b_output_tokens:modeBOutputTokens,
+          mode_b_total_tokens:modeBTotal,
+          mode_b_context_chars:modeBContext.length,
+          compression_tokens_used:compressionCost,
+          compression_ratio:compressed?.compression_ratio||1,
+          net_token_saving:netSaving,
+          execution_duration_ms:levelDuration,
+          provider_failures:providerFailures,
+          retry_count:0,
+          quality_score:null,
+          quality_notes:"",
+        });
+      }
+
+    }catch(err:any){
+      if(BENCHMARK_MODE&&benchSession&&
+         err.message?.toLowerCase().includes("rate limit")){
+        markRateLimitHit(benchSession);
+        providerFailures++;
+      }
+      upd({status:TS.FAILED,error:err.message});
+      addN("Failed at Level "+(i+1)+" ("+role.t+"): "+err.message,"error");
+      showToast("Queue task failed at Level "+(i+1)+": "+err.message,"error");
+      if(BENCHMARK_MODE&&benchSession)completeBenchmarkSession(benchSession);
+      return;
+    }
+  }
+
+  upd({
+    steps:[...steps],
+    status:TS.REVIEWING,
+    finalOutput:steps[steps.length-1]?.output||"",
+    completedAt:new Date().toISOString(),
+    currentLevel:ch.chain.length
+  });
+  addN("Chain complete — awaiting your approval","complete");
+  showToast("Task chain complete — review and approve","success");
+  setP3View("completed");
+
+  if(BENCHMARK_MODE&&benchSession){
+    completeBenchmarkSession(benchSession);
+  }
+
+},[co,compData,keys,defP,showToast]);
 
   const runQueue=useCallback(async()=>{
     if(qRunning)return;
