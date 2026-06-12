@@ -1290,7 +1290,7 @@ const runWorkflow=useCallback(async(resumeFrom?:ResumeState)=>{
     setWfRunning(false);setWfPhase("");
     cancelRef.current.wf=false;
   }
-},[wfTask,wfCat,wfRunning,co,compData,keys,defP,showToast]);
+},[wfTask,wfCat,wfRunning,co,compData,keys,defP,showToast,clearResumeState,saveResumeState]);
 
   const approveWF=useCallback(()=>{
     if(!wfActive)return;
