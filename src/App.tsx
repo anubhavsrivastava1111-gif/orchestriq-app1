@@ -1202,7 +1202,7 @@ if(!role){
     const p=EP[roleId]||{};
     const isFirst=i===0;
     const isLast=i===ch.chain.length-1;
-    setWfPhase(role.ic+" "+role.t+" — Level "+(i+1)+"/"+ch.chain.length);
+    setWfPhase(role.ic+" "+role.t+" - Level "+(i+1)+"/"+ch.chain.length);
 
     const prevWork=steps.length>0
   ?"PREVIOUS LEVEL (build on this, do not repeat it):\nCompleted by "+steps[steps.length-1].role.t+":\n"+steps[steps.length-1].output+
