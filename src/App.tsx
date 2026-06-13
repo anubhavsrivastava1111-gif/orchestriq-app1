@@ -515,27 +515,29 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500){
 
 async function callMulti(keys,defP,sys,msgs,maxT=3500){
   const effectiveKeys={...keys};
-  if(EFF_GEMINI&&!effectiveKeys.gemini?.trim())effectiveKeys.gemini=EFF_GEMINI;
-  if(EFF_GROQ&&!effectiveKeys.groq?.trim())effectiveKeys.groq=EFF_GROQ;
+  if(EFF_GEMINI?.trim())effectiveKeys.gemini=EFF_GEMINI;
+  if(EFF_GROQ?.trim())effectiveKeys.groq=EFF_GROQ;
 
-  // Build list of providers that actually have keys
-  const available=Object.keys(effectiveKeys).filter(p=>effectiveKeys[p]?.trim());
-  if(!available.length)throw new Error("No API keys configured. Add at least one key in Settings.");
+  const active=getActiveProvider(defP,effectiveKeys,EFF_GROQ,EFF_GEMINI);
+  const key=effectiveKeys[active]?.trim();
 
-  // Pick best available provider — prefer defP if available, else first available
-  const primary=available.includes(defP)?defP:available[0];
-  const primaryKey=effectiveKeys[primary];
+  if(!key){
+    const fallback=active==="groq"?"gemini":"groq";
+    const fallbackKey=effectiveKeys[fallback]?.trim();
+    if(!fallbackKey)throw new Error("No API keys available. Check Cloudflare environment variables.");
+    const text=await callAI(fallback,fallbackKey,sys,msgs,maxT);
+    return{primary:text};
+  }
 
   try{
-    const text=await callAI(primary,primaryKey,sys,msgs,maxT);
+    const text=await callAI(active,key,sys,msgs,maxT);
     return{primary:text};
   }catch(err:any){
     if(isRateLimit(err.message)){
-      markProviderExhausted(primary);
-      // Try any other available provider
-      const fallback=available.find(p=>p!==primary);
-      if(fallback){
-        const fallbackKey=effectiveKeys[fallback];
+      markProviderExhausted(active);
+      const fallback=active==="groq"?"gemini":"groq";
+      const fallbackKey=effectiveKeys[fallback]?.trim();
+      if(fallbackKey){
         try{
           const text=await callAI(fallback,fallbackKey,sys,msgs,maxT);
           return{primary:text};
