@@ -715,9 +715,9 @@ function parseSections(text){
 async function fetchExchangeRate(toCode){
   if(toCode==="USD")return 1;
   try{
-    const r=await fetch("https://api.frankfurter.app/latest?from=USD&to="+toCode);
-    const d=await r.json();
-    return d.rates?.[toCode]||null;
+    const r=await fetch("https://open.er-api.com/v6/latest/USD");
+const d=await r.json();
+return d.rates?.[toCode]||null;
   }catch{return null;}
 }
 function computeServiceFee(costUsd){
