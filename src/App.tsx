@@ -825,8 +825,8 @@ async function generatePPTX(type,title,bodyText,co,cur){
 
 export default function App(){
   const [page,setPage]=useState("landing");
-  const [keys,setKeys]=useState({claude:"",openai:"",gemini:""});
-  const [defP,setDefP]=useState("claude");
+  const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:""});
+  const [defP,setDefP]=useState("groq");
   const [multiAI,setMultiAI]=useState(false);
   const [co,setCo]=useState({name:"",industry:"",stage:"idea",location:"",markets:"",currency:"INR"});
   const [selRole,setSelRole]=useState(null);
@@ -933,7 +933,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{const c=localStorage.getItem("cos-co");if(c)setCo(p=>({...p,...JSON.parse(c)}));}catch{}
     try{const k=localStorage.getItem("cos-keys");if(k){
       const p=JSON.parse(k);
-      const loadedKeys=p.keys||{claude:"",openai:"",gemini:""};
+      const loadedKeys=p.keys||{claude:"",openai:"",gemini:"",groq:""};
       setKeys(loadedKeys);setDefP(p.defaultProvider||"claude");setMultiAI(p.multiAI||false);
       if(Object.values(loadedKeys).some(v=>v?.trim()))setPage("app");
       const active=Object.keys(loadedKeys).filter(pid=>loadedKeys[pid]?.trim());
