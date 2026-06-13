@@ -8,7 +8,7 @@ export interface ProviderState {
   exhaustedAt: number | null;
 }
 
-const RETRY_AFTER_MS = 60000; // 1 minute cooldown before retrying exhausted provider
+const RETRY_AFTER_MS = 60000;
 const RESUME_KEY = "oiq-wf-resume";
 
 const state: ProviderState = {
@@ -49,25 +49,15 @@ export function getActiveProvider(
 ): string {
   resetProviderIfCooled();
 
-  const hasGroq = !!(keys.groq?.trim() || effGroq);
-  const hasGemini = !!(keys.gemini?.trim() || effGemini);
+  const hasGroq = !!(keys?.groq?.trim() || effGroq?.trim());
+  const hasGemini = !!(keys?.gemini?.trim() || effGemini?.trim());
 
-  // If preferred is not exhausted and available, use it
-  if (preferredProvider === "groq" && hasGroq && !state.groqExhausted) return "groq";
-  if (preferredProvider === "gemini" && hasGemini && !state.geminiExhausted) return "gemini";
+  if (hasGroq && !state.groqExhausted) return "groq";
+  if (hasGemini && !state.geminiExhausted) return "gemini";
+  if (hasGroq) return "groq";
+  if (hasGemini) return "gemini";
 
-  // Failover logic
-  if (preferredProvider === "groq" && state.groqExhausted && hasGemini && !state.geminiExhausted) {
-    console.info("[ProviderManager] Groq exhausted → switching to Gemini silently.");
-    return "gemini";
-  }
-  if (preferredProvider === "gemini" && state.geminiExhausted && hasGroq && !state.groqExhausted) {
-    console.info("[ProviderManager] Gemini exhausted → switching to Groq silently.");
-    return "groq";
-  }
-
-  // Non-groq/gemini providers — return as-is
-  return preferredProvider;
+  return preferredProvider || "groq";
 }
 
 export function isRateLimit(errorMessage: string): boolean {
