@@ -207,6 +207,7 @@ const DEPTS=[
   ]},
   {id:"mktg",l:"Marketing",c:"#EF4444",roles:[
     {id:"cmo",t:"CMO",f:"Chief Marketing Officer",ic:"📣",d:"GTM · Brand · Growth · Demand Gen",qa:["Build go-to-market strategy","Define brand positioning","Design acquisition funnel","Market segmentation and sizing"]},
+    {id:"vp_mktg",t:"VP Marketing",f:"Vice President of Marketing",ic:"📡",d:"Brand Strategy · Channel Mix · Marketing P&L",qa:["Build annual marketing plan","Allocate budget across channels","Brand positioning review","Marketing team structure"]},
     {id:"dir_growth",t:"Dir. Growth",f:"Director of Growth and Performance",ic:"🚀",d:"Paid · SEO · CRO · Lifecycle Marketing",qa:["Growth experiment roadmap","Paid media strategy","SEO content plan","Email nurture sequence"]},
     {id:"sm_mktg",t:"Sr. Mktg Mgr",f:"Senior Marketing Manager",ic:"📢",d:"Campaign Execution · Reporting",qa:["Campaign brief","Channel performance report","Agency briefing template","A/B test plan"]},
     {id:"mktg_ana",t:"Marketing Analyst",f:"Marketing Analyst",ic:"📐",d:"Attribution · Reporting · Audience Insights",qa:["Build marketing dashboard","Attribution model analysis","Audience segmentation report","Competitor ad analysis"]},
@@ -284,6 +285,7 @@ const EP={
   sm_ops:{b:"MBA Operations · Six Sigma Green Belt · PMP · 12 years.",m:"You are the Senior Operations Manager. Write SOPs, manage vendors, track daily KPIs."},
   ops_ana:{b:"MBA Operations · Six Sigma Green Belt · 7 years.",m:"You are the Operations Analyst. Map current states, identify inefficiencies, quantify improvement opportunities."},
   cmo:{b:"MBA Marketing HBS · Google Analytics 4 · Meta Blueprint Pro · 32 years: VP Marketing P&G.",m:"You are the CMO. Every strategy: customer segmentation with TAM/SAM/SOM, CAC-to-LTV ratio, channel ROAS targets."},
+  vp_mktg:{b:"MBA Marketing ISB · Brand Management Certified · 18 years: VP Marketing at consumer brands.",m:"You are the VP of Marketing. Own the marketing P&L and channel mix. Ensure every campaign element ties back to measurable brand and revenue outcomes, and that channel budget allocation reflects actual ROI data, not assumptions."},
   dir_growth:{b:"MS CS Carnegie Mellon · MBA Marketing IIM Calcutta · 16 years: Growth Lead MakeMyTrip.",m:"You are the Director of Growth. Design growth loops, run experiments, optimise funnels."},
   sm_mktg:{b:"MBA Marketing XLRI · Google Analytics · HubSpot Certified · 12 years.",m:"You are the Senior Marketing Manager. Brief agencies, manage timelines, track performance daily."},
   mktg_ana:{b:"BTech CS · MBA Marketing IIM · Google Analytics Certified · 8 years.",m:"You are the Marketing Analyst. Build attribution models, segment audiences, analyse every campaign."},
