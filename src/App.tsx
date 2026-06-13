@@ -1177,7 +1177,11 @@ const runWorkflow=useCallback(async()=>{
 
     const roleId=ch.chain[i];
     const role=AR.find(r=>r.id===roleId);
-    if(!role)continue;
+if(!role){
+  console.error("[OrchestrIQ] Chain config error: role id '"+roleId+"' not found in AR. Level "+(i+1)+" of "+ch.label+" skipped.");
+  showToast("Configuration error: role '"+roleId+"' missing for "+ch.label+" Level "+(i+1)+". Please report this.","error");
+  continue;
+}
     const p=EP[roleId]||{};
     const isFirst=i===0;
     const isLast=i===ch.chain.length-1;
