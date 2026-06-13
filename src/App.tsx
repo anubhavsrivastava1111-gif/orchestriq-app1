@@ -1213,7 +1213,7 @@ const runWorkflow=useCallback(async(resumeFrom?:ResumeState)=>{
         (isFirst
           ?"INITIATING: Acknowledge task, list missing data needed, produce FIRST DRAFT."
           :isLast
-          ?"FINAL APPROVAL: Review all previous levels. Produce DEFINITIVE FINAL OUTPUT. Sections: Chain Review, Corrections, FINAL APPROVED OUTPUT, Strategic Commentary, Cross-functional Actions."
+         ?"FINAL APPROVAL: Review all previous levels. Produce DEFINITIVE FINAL OUTPUT. Sections: Chain Review, Corrections, FINAL APPROVED OUTPUT, Strategic Commentary, Cross-functional Actions.\n\nAFTER finishing the above, on its own new line write exactly: ===CAPABILITY_BRIEF===\nThen, with NOTHING else (no markdown, no commentary), output ONLY a single valid JSON object with this exact shape:\n{\"info_needed\":[\"...\"],\"tools_required\":[{\"name\":\"...\",\"available\":true,\"why\":\"...\"}],\"manual_steps\":[\"...\"],\"automated_steps\":[\"...\"],\"est_cost_usd\":0,\"notes\":\"...\"}\nRules: info_needed = any data still missing from the user. tools_required = external tools/APIs/subscriptions needed, with 'available' set to false if it requires an integration we don't have yet. manual_steps = numbered actions the USER must do themselves. automated_steps = what this chain already completed. est_cost_usd = your best-effort estimate in US dollars of any external API/subscription/service cost to fully execute this (0 if none). If genuinely nothing is needed, return empty arrays and est_cost_usd:0."
           :"MID-LEVEL: Review Level "+i+" output. Add your "+role.dl+" expertise. Produce ENHANCED version."
         )+"\nAll figures in "+wfCurr.sym+wfCurr.code+".";
 
