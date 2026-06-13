@@ -1122,8 +1122,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   // FIX BUG 4: Workflow — per-level error handling + cancel + progress
 const runWorkflow=useCallback(async(resumeFrom?:ResumeState)=>{
   const taskText=(resumeFrom?resumeFrom.task:wfTask)||"";
-   const taskCat=(resumeFrom?resumeFrom.category:wfCat)||"finance";
-  const taskCat=resumeFrom?resumeFrom.category:wfCat;
+  const taskCat=(resumeFrom?resumeFrom.category:wfCat)||"finance";
   if(!taskText.trim()||wfRunning)return;
   const ch=CHAINS[taskCat];if(!ch)return;
   cancelRef.current.wf=false;
