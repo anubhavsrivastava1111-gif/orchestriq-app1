@@ -153,6 +153,21 @@ const CHAINS = {
   executive_task:{label:"Executive Decision",ic:"👔",color:"#14B8A6",chain:["coo","cfo","cto","cmo","chro","clo","ceo","chairman"],desc:"Cross-functional C-suite decisions"},
 };
 
+const DELIVERABLE_SPECS = {
+  finance:"a Variance Analysis Table (Budget vs Actual vs Variance % for each line item) and a Cash Flow Action List (specific actions with rupee impact and deadline)",
+  tax:"a Filing Calendar (Form | Due Date | Penalty if Late | Status) and a Computation Worksheet showing exact tax calculation with current rates",
+  audit:"a Risk Register (Risk | Likelihood | Impact | Owner | Mitigation | Deadline) and a Control Testing Checklist with pass/fail criteria",
+  hr_task:"a Job Description ready to post, an Interview Scorecard with weighted criteria, and a 30-60-90 Day Onboarding Plan",
+  legal_task:"a Compliance Checklist (Requirement | Deadline | Status | Owner) and key Contract Clauses written in full, ready to insert",
+  marketing_task:"a 30-DAY CONTENT CALENDAR (Day | Platform | Content Type | Caption | Hashtags | CTA, minimum 12 rows, full ready-to-post captions following platform-specific rules: Instagram hook in first 125 chars with line breaks, LinkedIn bold opening line 150-300 words, Twitter/X max 280 chars single thought), THREE READY-TO-POST CAPTIONS in full, and a CREATIVE BRIEF",
+  sales_task:"a Pipeline Tracker template (Stage | Deal | Value | Probability | Next Action | Owner) and a ready-to-send Proposal Email",
+  tech_task:"a Sprint Backlog (Story | Priority | Effort | Owner) and an API Contract or technical spec section ready for engineering handoff",
+  ops_task:"a Standard Operating Procedure document (numbered steps, ready to follow) and a Vendor Scorecard template",
+  strategy_task:"a Market Sizing Table (TAM/SAM/SOM with calculation shown) and a Strategic Options Matrix (Option | Pros | Cons | Investment | Timeline | Recommendation)",
+  cx_task:"a Customer Health Score model (Metric | Weight | Threshold) and a 30-60-90 Day Success Plan template",
+  executive_task:"a Decision Matrix (Option | Cost | Risk | Impact | Recommendation) and a Board-Ready Summary in bullet form",
+};
+
 function autoRoute(text){
   const t=text.toLowerCase();
   const kw={
