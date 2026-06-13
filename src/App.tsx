@@ -1280,10 +1280,28 @@ const runWorkflow=useCallback(async(resumeFrom?:ResumeState)=>{
         if(compressed)compressedContexts.push(compressed);
       }
 
+      let stepOutput=reply;
+      let stepCapability=null;
+      if(isLast){
+        const parsed=parseCapabilityBrief(reply);
+        stepOutput=parsed.output;
+        if(parsed.capability){
+          const fee=computeServiceFee(parsed.capability.est_cost_usd||0);
+          const rate=await fetchExchangeRate(wfCurr.code);
+          stepCapability={
+            ...parsed.capability,
+            fee_usd:fee.fee,total_usd:fee.total,
+            converted_total: rate?Math.ceil(fee.total*rate):null,
+            converted_currency: wfCurr.code, converted_symbol: wfCurr.sym,
+          };
+        }
+      }
+
       const step={
-        role,output:reply,level:i+1,isFirst,isLast,
+        role,output:stepOutput,level:i+1,isFirst,isLast,
         failed:false,ts:new Date().toISOString(),
         compressed:compressed||null,
+        capability:stepCapability,
       };
       steps.push(step);
 
