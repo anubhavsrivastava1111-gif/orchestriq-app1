@@ -1148,199 +1148,105 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   },[drillRole,drillQ,drillRun,brCur,co,compData,keys,defP,showToast]);
 
   // FIX BUG 4: Workflow — per-level error handling + cancel + progress
-const runWorkflow=useCallback(async(resumeFrom?:ResumeState)=>{
-  const taskText=(resumeFrom?resumeFrom.task:wfTask)||"";
-  const taskCat=(resumeFrom?resumeFrom.category:wfCat)||"finance";
-  if(!taskText.trim()||wfRunning)return;
+const runWorkflow=useCallback(async()=>{
+  const taskText=wfTask.trim();
+  const taskCat=wfCat;
+  if(!taskText||wfRunning)return;
   const ch=CHAINS[taskCat];if(!ch)return;
   cancelRef.current.wf=false;
   setWfRunning(true);setError(null);setWfPauseMsg("");
-  const wfId=resumeFrom?resumeFrom.workflowId:Date.now();
-  const startLevel=resumeFrom?resumeFrom.completedLevels:0;
-  const existingSteps=resumeFrom?resumeFrom.steps:[];
+
+  const wfId=Date.now();
   const newWf={
     id:wfId,task:taskText,category:taskCat,chainLabel:ch.label,
-    steps:existingSteps,status:"running",startedAt:new Date().toISOString(),
+    steps:[],status:"running",startedAt:new Date().toISOString(),
     finalOutput:null,approved:false
   };
   setWfActive(newWf);setWfView("active");
-  if(resumeFrom)clearResumeState();
 
-  const steps:any[]=[...existingSteps];
+  const steps:any[]=[];
   const wfCurr=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
-  const compressedContexts:CompressedContext[]=[];
-  let benchSession:BenchmarkSession|null=null;
-  if(BENCHMARK_MODE){
-    benchSession=startBenchmarkSession({
-      workflowId:String(wfId),chainLabel:ch.label,
-      task:taskText,compressionEnabled:COMPRESSION_ENABLED,
-    });
-  }
 
-  try{
-    for(let i=startLevel;i<ch.chain.length;i++){
-      if(cancelRef.current.wf){
-        showToast("Workflow cancelled at Level "+(i+1),"warning");
-        setWfActive(prev=>prev?{...prev,status:"cancelled"}:null);
-        clearResumeState();
-        return;
-      }
+  for(let i=0;i<ch.chain.length;i++){
+    if(cancelRef.current.wf){
+      showToast("Workflow cancelled at Level "+(i+1),"warning");
+      setWfActive(prev=>prev?{...prev,status:"cancelled"}:null);
+      setWfRunning(false);setWfPhase("");
+      return;
+    }
 
-      const roleId=ch.chain[i];
-      const role=AR.find(r=>r.id===roleId);
-      if(!role)continue;
-      const p=EP[roleId]||{};
-      const isFirst=i===0&&startLevel===0;
-      const isLast=i===ch.chain.length-1;
-      setWfPhase(role.ic+" "+role.t+" — Level "+(i+1)+"/"+ch.chain.length);
+    const roleId=ch.chain[i];
+    const role=AR.find(r=>r.id===roleId);
+    if(!role)continue;
+    const p=EP[roleId]||{};
+    const isFirst=i===0;
+    const isLast=i===ch.chain.length-1;
+    setWfPhase(role.ic+" "+role.t+" — Level "+(i+1)+"/"+ch.chain.length);
 
-      let prevWork="";
-      if(steps.length>0){
-        if(COMPRESSION_ENABLED&&compressedContexts.length>0){
-          prevWork=formatCompressedContextForPrompt(compressedContexts);
-        }else{
-          prevWork=steps.filter(s=>!s.failed)
-            .map((s,si)=>"Level "+(si+1)+": "+s.role.t+"\n"+s.output).join("\n\n");
-        }
-      }
+    const prevWork=steps.length>0
+      ?steps.map((s,si)=>"Level "+(si+1)+": "+s.role.t+"\n"+s.output).join("\n\n")
+      :"";
 
-      const sys=
-        "You are "+role.f+" at \""+co.name+"\".\n"+
-        "PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+
-        buildCtx(co,compData)+"\n"+
-        "WORKFLOW CHAIN: \""+ch.label+"\" Level "+(i+1)+"/"+ch.chain.length+"\n"+
-        "TASK: \""+taskText+"\"\n"+
-        (steps.length>0?prevWork+"\n\n":"")+
-        (isFirst
-          ?"INITIATING: Acknowledge task, list missing data needed, produce FIRST DRAFT."
-          :isLast
-         ?"FINAL APPROVAL: Review all previous levels. Produce DEFINITIVE FINAL OUTPUT. Sections: Chain Review, Corrections, FINAL APPROVED OUTPUT, Strategic Commentary, Cross-functional Actions.\n\nAFTER finishing the above, on its own new line write exactly: ===CAPABILITY_BRIEF===\nThen, with NOTHING else (no markdown, no commentary), output ONLY a single valid JSON object with this exact shape:\n{\"info_needed\":[\"...\"],\"tools_required\":[{\"name\":\"...\",\"available\":true,\"why\":\"...\"}],\"manual_steps\":[\"...\"],\"automated_steps\":[\"...\"],\"est_cost_usd\":0,\"notes\":\"...\"}\nRules: info_needed = any data still missing from the user. tools_required = external tools/APIs/subscriptions needed, with 'available' set to false if it requires an integration we don't have yet. manual_steps = numbered actions the USER must do themselves. automated_steps = what this chain already completed. est_cost_usd = your best-effort estimate in US dollars of any external API/subscription/service cost to fully execute this (0 if none). If genuinely nothing is needed, return empty arrays and est_cost_usd:0."
-          :"MID-LEVEL: Review Level "+i+" output. Add your "+role.dl+" expertise. Produce ENHANCED version."
-        )+"\nAll figures in "+wfCurr.sym+wfCurr.code+".";
+    const sys=
+      "You are "+role.f+" at \""+co.name+"\".\n"+
+      "PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+
+      buildCtx(co,compData)+"\n"+
+      "WORKFLOW CHAIN: \""+ch.label+"\" Level "+(i+1)+"/"+ch.chain.length+"\n"+
+      "TASK: \""+taskText+"\"\n"+
+      (steps.length>0?prevWork+"\n\n":"")+
+      (isFirst
+        ?"INITIATING: Acknowledge task, list missing data needed, produce FIRST DRAFT."
+        :isLast
+        ?"FINAL APPROVAL: Review all previous levels. Produce DEFINITIVE FINAL OUTPUT. Sections: Chain Review, Corrections, FINAL APPROVED OUTPUT, Strategic Commentary, Cross-functional Actions.\n\nAFTER finishing the above, on its own new line write exactly: ===CAPABILITY_BRIEF===\nThen, with NOTHING else (no markdown, no commentary), output ONLY a single valid JSON object with this exact shape:\n{\"info_needed\":[\"...\"],\"tools_required\":[{\"name\":\"...\",\"available\":true,\"why\":\"...\"}],\"manual_steps\":[\"...\"],\"automated_steps\":[\"...\"],\"est_cost_usd\":0,\"notes\":\"...\"}\nRules: info_needed = any data still missing from the user. tools_required = external tools/APIs/subscriptions needed, with 'available' set to false if it requires an integration we don't have yet. manual_steps = numbered actions the USER must do themselves. automated_steps = what this chain already completed. est_cost_usd = your best-effort estimate in US dollars of any external API/subscription/service cost to fully execute this (0 if none). If genuinely nothing is needed, return empty arrays and est_cost_usd:0."
+        :"MID-LEVEL: Review Level "+i+" output. Add your "+role.dl+" expertise. Produce ENHANCED version."
+      )+"\nAll figures in "+wfCurr.sym+wfCurr.code+".";
 
-      const levelStartTime=Date.now();
-      let reply="";
-      let levelSuccess=false;
-      let lastLevelErr:any=null;
+    let reply="";
+    let stepFailed=false;
+    let failMsg="";
 
-      for(let attempt=0;attempt<4;attempt++){
-        if(cancelRef.current.wf)break;
-        try{
-          reply=await ask(sys,[{role:"user",content:"Process: \""+taskText+"\""}],2800);
-          levelSuccess=true;
-          break;
-        }catch(lvlErr:any){
-          lastLevelErr=lvlErr;
-          if(isRateLimit(lvlErr.message)){
-            if(areBothExhausted()){
-              await waitWithCountdown(60,(remaining)=>{
-                setWfPauseMsg("⏸ Both providers rate-limited. Resuming in "+remaining+"s… Your progress is saved.");
-                setWfPhase("⏸ Paused — auto-resuming in "+remaining+"s");
-              });
-              setWfPauseMsg("");
-              continue;
-            }
-            continue;
-          }else{
-            break;
-          }
-        }
-      }
+    try{
+      reply=await ask(sys,[{role:"user",content:"Process: \""+taskText+"\""}],2800);
+    }catch(err:any){
+      stepFailed=true;
+      failMsg=err.message||"Unknown error";
+    }
 
-      if(!levelSuccess){
-        saveResumeState({
-          workflowId:wfId,
-          task:taskText,
-          category:taskCat,
-          chainLabel:ch.label,
-          completedLevels:i,
-          steps:[...steps],
-          savedAt:new Date().toISOString(),
-        });
-        setWfActive(prev=>prev?{...prev,status:"paused"}:null);
-        setWfPauseMsg("⏸ Workflow paused at Level "+(i+1)+". Progress saved. Click Resume to continue.");
-        setWfResumeData({
-          workflowId:wfId,task:taskText,category:taskCat,
-          chainLabel:ch.label,completedLevels:i,
-          steps:[...steps],savedAt:new Date().toISOString(),
-        });
-        showToast("Workflow paused — click Resume to continue from Level "+(i+1),"warning");
-        setWfRunning(false);setWfPhase("");
-        return;
-      }
-
-      const levelDuration=Date.now()-levelStartTime;
-      let compressed:CompressedContext|null=null;
-      if(COMPRESSION_ENABLED&&!isLast){
-        compressed=await compressLevelOutput({
-          fullOutput:reply,agentRole:role.t,agentFullTitle:role.f,
-          agentDepartment:role.dl||"General",level:i+1,currency:wfCurr.code,
-          callAI,keys,defaultProvider:defP,
-          effectiveGroqKey:EFF_GROQ,effectiveGeminiKey:EFF_GEMINI,
-        });
-        if(compressed)compressedContexts.push(compressed);
-      }
-
-      let stepOutput=reply;
-      let stepCapability=null;
-      if(isLast){
-        const parsed=parseCapabilityBrief(reply);
-        stepOutput=parsed.output;
-        if(parsed.capability){
-          const fee=computeServiceFee(parsed.capability.est_cost_usd||0);
-          const rate=await fetchExchangeRate(wfCurr.code);
-          stepCapability={
-            ...parsed.capability,
-            fee_usd:fee.fee,total_usd:fee.total,
-            converted_total: rate?Math.ceil(fee.total*rate):null,
-            converted_currency: wfCurr.code, converted_symbol: wfCurr.sym,
-          };
-        }
-      }
-
-      const step={
-        role,output:stepOutput,level:i+1,isFirst,isLast,
-        failed:false,ts:new Date().toISOString(),
-        compressed:compressed||null,
-        capability:stepCapability,
-      };
+    if(stepFailed){
+      const step={role,output:"⚠ This level failed: "+failMsg,level:i+1,isFirst,isLast,failed:true,ts:new Date().toISOString(),capability:null};
       steps.push(step);
+      setWfActive({...newWf,steps:[...steps],status:"error"});
+      setError(failMsg);
+      showToast("Level "+(i+1)+" ("+role.t+") failed: "+failMsg,"error");
+      setWfRunning(false);setWfPhase("");
+      return;
+    }
 
-      saveResumeState({
-        workflowId:wfId,task:taskText,category:taskCat,
-        chainLabel:ch.label,completedLevels:i+1,
-        steps:[...steps],savedAt:new Date().toISOString(),
-      });
-
-      setWfActive({...newWf,steps:[...steps],status:isLast?"awaiting_approval":"running"});
-
-      if(BENCHMARK_MODE&&benchSession){
-        const modeAInputTokens=estimateTokens(sys);
-        const modeAOutputTokens=estimateTokens(reply);
-        const modeATotal=modeAInputTokens+modeAOutputTokens;
-        logLevelBenchmark(benchSession,{
-          level:i+1,agent_role:role.t,agent_full_title:role.f,provider:defP,
-          mode_a_input_tokens:modeAInputTokens,mode_a_output_tokens:modeAOutputTokens,
-          mode_a_total_tokens:modeATotal,mode_a_context_chars:prevWork.length,
-          mode_b_input_tokens:modeAInputTokens,mode_b_output_tokens:modeAOutputTokens,
-          mode_b_total_tokens:modeATotal,mode_b_context_chars:prevWork.length,
-          compression_tokens_used:compressed?.compression_tokens_used||0,
-          compression_ratio:compressed?.compression_ratio||1,
-          net_token_saving:0,execution_duration_ms:levelDuration,
-          provider_failures:0,retry_count:0,quality_score:null,quality_notes:"",
-        });
+    let stepOutput=reply;
+    let stepCapability=null;
+    if(isLast){
+      const parsed=parseCapabilityBrief(reply);
+      stepOutput=parsed.output;
+      if(parsed.capability){
+        const fee=computeServiceFee(parsed.capability.est_cost_usd||0);
+        const rate=await fetchExchangeRate(wfCurr.code);
+        stepCapability={
+          ...parsed.capability,
+          fee_usd:fee.fee,total_usd:fee.total,
+          converted_total: rate?Math.ceil(fee.total*rate):null,
+          converted_currency: wfCurr.code, converted_symbol: wfCurr.sym,
+        };
       }
     }
-  }catch(err:any){
-    setError(err.message);
-    showToast("Workflow error: "+err.message,"error");
-    setWfActive(prev=>prev?{...prev,status:"error"}:null);
-  }finally{
-    if(BENCHMARK_MODE&&benchSession)completeBenchmarkSession(benchSession);
-    setWfRunning(false);setWfPhase("");
-    cancelRef.current.wf=false;
+
+    const step={role,output:stepOutput,level:i+1,isFirst,isLast,failed:false,ts:new Date().toISOString(),capability:stepCapability};
+    steps.push(step);
+    setWfActive({...newWf,steps:[...steps],status:isLast?"awaiting_approval":"running"});
   }
-},[wfTask,wfCat,wfRunning,co,compData,keys,defP,showToast,clearResumeState,saveResumeState]);
+
+  setWfRunning(false);setWfPhase("");
+  cancelRef.current.wf=false;
+},[wfTask,wfCat,wfRunning,co,compData,keys,defP,showToast]);
 
   const approveWF=useCallback(()=>{
     if(!wfActive)return;
