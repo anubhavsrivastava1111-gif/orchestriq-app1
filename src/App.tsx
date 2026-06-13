@@ -1184,8 +1184,9 @@ const runWorkflow=useCallback(async()=>{
     setWfPhase(role.ic+" "+role.t+" — Level "+(i+1)+"/"+ch.chain.length);
 
     const prevWork=steps.length>0
-      ?steps.map((s,si)=>"Level "+(si+1)+": "+s.role.t+"\n"+s.output).join("\n\n")
-      :"";
+  ?"PREVIOUS LEVEL (build on this, do not repeat it):\nCompleted by "+steps[steps.length-1].role.t+":\n"+steps[steps.length-1].output+
+    "\n\nCHAIN PROGRESSION SO FAR: "+steps.map(s=>s.role.t).join(" -> ")
+  :"";
 
     const sys=
   "You are "+role.f+" at \""+co.name+"\".\n"+
