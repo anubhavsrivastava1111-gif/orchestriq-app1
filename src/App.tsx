@@ -688,8 +688,8 @@ async function ensureJsPDF(){
 }
 async function ensurePptx(){
   if(window.PptxGenJS)return window.PptxGenJS;
-  await loadScript("https://cdnjs.cloudflare.com/ajax/libs/pptxgenjs/3.12.0/pptxgen.bundle.js");
-  if(!window.PptxGenJS)throw new Error("PptxGenJS unavailable");
+  await loadScript("https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js");
+if(!window.PptxGenJS)throw new Error("PptxGenJS unavailable");
   return window.PptxGenJS;
 }
 
