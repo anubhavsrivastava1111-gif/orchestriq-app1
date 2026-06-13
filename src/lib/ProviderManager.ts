@@ -49,11 +49,26 @@ export function getActiveProvider(
 ): string {
   resetProviderIfCooled();
 
+  // 1. User's own configured key for their chosen provider — highest priority
+  const userHasPreferred = !!keys?.[preferredProvider]?.trim();
+  const preferredExhausted = preferredProvider === "groq" ? state.groqExhausted
+    : preferredProvider === "gemini" ? state.geminiExhausted : false;
+  if (userHasPreferred && !preferredExhausted) return preferredProvider;
+
+  // 2. Platform-managed Groq/Gemini as universal fallback
   const hasGroq = !!(keys?.groq?.trim() || effGroq?.trim());
   const hasGemini = !!(keys?.gemini?.trim() || effGemini?.trim());
 
   if (hasGroq && !state.groqExhausted) return "groq";
   if (hasGemini && !state.geminiExhausted) return "gemini";
+
+  // 3. Any other user key (claude/openai) not yet tried
+  const otherKeys = Object.keys(keys || {}).filter(
+    p => p !== "groq" && p !== "gemini" && keys[p]?.trim()
+  );
+  if (otherKeys.length) return otherKeys[0];
+
+  // 4. Exhausted platform keys as last resort
   if (hasGroq) return "groq";
   if (hasGemini) return "gemini";
 
