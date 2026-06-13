@@ -493,7 +493,7 @@ async function callGemini(key,sys,msgs,maxT){
   let lastErr=null;
   for(const model of models){
     try{
-      const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent?key="+key.trim(),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:msgs.map(m=>({role:m.role==="user"?"user":"model",parts:[{text:m.content}]})),generationConfig:{maxOutputTokens:maxT,temperature:0.7}})});
+      const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent?key="+key.trim(),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:msgs.map(m=>({role:m.role==="user"?"user":"model",parts:[{text:m.content}]})),tools:[{google_search:{}}],generationConfig:{maxOutputTokens:maxT,temperature:0.7}})});
       if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===403)throw new Error("Gemini: API key invalid.");if(r.status===429){lastErr=new Error("Gemini: Free quota exceeded.");continue;}if(r.status===400&&(m.includes("not found")||m.includes("deprecated"))){lastErr=new Error("Gemini model "+model+" unavailable");continue;}lastErr=new Error("Gemini/"+model+" "+r.status+": "+(m||r.statusText));continue;}
       const d=await r.json();const text=d.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("\n")||"";if(!text){lastErr=new Error("Gemini/"+model+": empty response");continue;}return text;
     }catch(e){if(e.message.includes("Failed to fetch")||e.message.includes("NetworkError"))throw new Error("Gemini: Network error.");if(e.message.includes("Invalid")||e.message.includes("quota"))throw e;lastErr=e;}
@@ -1190,6 +1190,7 @@ const runWorkflow=useCallback(async()=>{
     const sys=
       "You are "+role.f+" at \""+co.name+"\".\n"+
       "PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+
+      "OPERATING STYLE: Think critically, not agreeably — challenge weak assumptions including your own from prior drafts. When current real-world data would strengthen your answer (rates, regulations, market data, competitor moves, benchmarks), search for it and use it — don't rely on memory for anything time-sensitive. Be decisive and specific; avoid generic frameworks restated without numbers.\n"+
       buildCtx(co,compData)+"\n"+
       "WORKFLOW CHAIN: \""+ch.label+"\" Level "+(i+1)+"/"+ch.chain.length+"\n"+
       "TASK: \""+taskText+"\"\n"+
@@ -1198,7 +1199,7 @@ const runWorkflow=useCallback(async()=>{
         ?"INITIATING: Acknowledge task, list missing data needed, produce FIRST DRAFT."
         :isLast
         ?"FINAL APPROVAL: Review all previous levels. Produce DEFINITIVE FINAL OUTPUT. Sections: Chain Review, Corrections, FINAL APPROVED OUTPUT, Strategic Commentary, Cross-functional Actions.\n\nAFTER finishing the above, on its own new line write exactly: ===CAPABILITY_BRIEF===\nThen, with NOTHING else (no markdown, no commentary), output ONLY a single valid JSON object with this exact shape:\n{\"info_needed\":[\"...\"],\"tools_required\":[{\"name\":\"...\",\"available\":true,\"why\":\"...\"}],\"manual_steps\":[\"...\"],\"automated_steps\":[\"...\"],\"est_cost_usd\":0,\"notes\":\"...\"}\nRules: info_needed = any data still missing from the user. tools_required = external tools/APIs/subscriptions needed, with 'available' set to false if it requires an integration we don't have yet. manual_steps = numbered actions the USER must do themselves. automated_steps = what this chain already completed. est_cost_usd = your best-effort estimate in US dollars of any external API/subscription/service cost to fully execute this (0 if none). If genuinely nothing is needed, return empty arrays and est_cost_usd:0."
-        :"MID-LEVEL: Review Level "+i+" output. Add your "+role.dl+" expertise. Produce ENHANCED version."
+        :"MID-LEVEL: You are reviewing the previous level's output as a critical, senior "+role.dl+" expert. DO NOT restate or repeat what was already said. Instead: (1) Identify 2-3 specific gaps, errors, or unrealistic assumptions in the previous output — be direct and critical. (2) If current real-world data (rates, regulations, benchmarks, competitor info, market figures) would materially improve this, search for it and cite what you found. (3) Add ONE substantive new dimension that only someone at your level would contribute — do not just add more of the same. (4) Output ONLY: a short 'Critical Review' section (your gaps/corrections), then 'New Contribution' (your unique addition), then an updated consolidated summary/table. Be concise — quality over length."
       )+"\nAll figures in "+wfCurr.sym+wfCurr.code+".";
 
     let reply="";
@@ -1352,6 +1353,7 @@ const processTask=useCallback(async(task:any)=>{
     const sys=
       "You are "+role.f+" at \""+co.name+"\".\n"+
       "PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+
+      "OPERATING STYLE: Think critically, not agreeably — challenge weak assumptions including your own from prior drafts. When current real-world data would strengthen your answer (rates, regulations, market data, competitor moves, benchmarks), search for it and use it — don't rely on memory for anything time-sensitive. Be decisive and specific; avoid generic frameworks restated without numbers.\n"+
       buildCtx(co,compData)+"\n"+
       "AUTONOMOUS CHAIN Level "+(i+1)+"/"+ch.chain.length+" - "+ch.label+"\n"+
       "Priority: "+task.priority.toUpperCase()+"\n"+
