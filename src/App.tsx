@@ -2220,21 +2220,38 @@ const processTask=useCallback(async(task:any)=>{
               <MicButton lang={vLang} onResult={t=>setDataF(p=>({...p,v:(p.v?p.v+" ":"")+t}))}/>
               <button onClick={addD} style={{...S.pBtn,padding:"6px 14px",marginTop:0,fontSize:11,width:"auto"}}>+ Add</button>
             </div>
-            {!Object.keys(compData).length&&(
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,marginBottom:12}}>
-                {[["Monthly Revenue"],["Monthly Expenses"],["Cash in Bank"],["Team Size"],["Total Customers"],["MoM Growth Rate"],["Product Price"],["TAM"],["Funding Raised"],["CAC"],["LTV"],["Burn Rate"]].map(([k])=>(
+           {!Object.keys(compData).length&&(
+  <div style={{marginBottom:14}}>
+    {[
+      {cat:"Financial",items:["Monthly Revenue","Monthly Operating Costs","Cash in Bank","Marketing Budget (Quarterly)","Gross Margin %"]},
+      {cat:"Operations",items:["Team Size (Total)","Key Vendors/Suppliers","Monthly Burn Rate"]},
+      {cat:"Market",items:["Target Markets/Cities","Primary Customer Segment","Top 3 Competitors"]},
+      {cat:"Product",items:["Core Product/Service","Pricing (per unit/service)","Unique Selling Proposition"]},
+    ].map(grp=>(
+      <div key={grp.cat} style={{marginBottom:10}}>
+        <div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:0.8,marginBottom:4}}>{grp.cat}</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+          {grp.items.map(k=>(
+            <button key={k} onClick={()=>setDataF({k,v:""})} style={{background:"#131825",border:"1px solid #1a2030",borderRadius:5,padding:"8px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Manrope,sans-serif"}}><div style={{fontSize:10,fontWeight:600,color:"#14B8A6"}}>+ {k}</div></button>
+          ))}
+        </div>
+      </div>
+    ))}
+  </div>
+)}
                   <button key={k} onClick={()=>setDataF({k,v:""})} style={{background:"#131825",border:"1px solid #1a2030",borderRadius:5,padding:"8px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Manrope,sans-serif"}}><div style={{fontSize:10,fontWeight:600,color:"#14B8A6"}}>+ {k}</div></button>
                 ))}
               </div>
             )}
             {Object.entries(compData).map(([k,v])=>(
-              <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"#131825",border:"1px solid #1a2030",borderRadius:5,marginBottom:3}}>
-                <div><span style={{fontSize:11,fontWeight:600,color:"#A0AAC0"}}>{k}:</span> <span style={{fontSize:11,color:"#F1F5F9"}}>{v}</span></div>
-                <button onClick={()=>delD(k)} style={{background:"none",border:"none",color:"#3A4060",fontSize:10,cursor:"pointer"}}>×</button>
-              </div>
-            ))}
-          </div>
-        )}
+  <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"#131825",border:"1px solid #1a2030",borderRadius:5,marginBottom:3}}>
+    <div style={{flex:1,cursor:"pointer"}} onClick={()=>setDataF({k,v})}><span style={{fontSize:11,fontWeight:600,color:"#A0AAC0"}}>{k}:</span> <span style={{fontSize:11,color:"#F1F5F9"}}>{v}</span></div>
+    <div style={{display:"flex",gap:4}}>
+      <button onClick={()=>setDataF({k,v})} style={{background:"none",border:"none",color:"#5A6480",fontSize:10,cursor:"pointer"}}>Edit</button>
+      <button onClick={()=>delD(k)} style={{background:"none",border:"none",color:"#3A4060",fontSize:10,cursor:"pointer"}}>×</button>
+    </div>
+  </div>
+))}
 
         {/* PRESENTATION STUDIO — FEATURE 4/5/6 */}
         {view==="studio"&&(
