@@ -2235,14 +2235,11 @@ const processTask=useCallback(async(task:any)=>{
             <button key={k} onClick={()=>setDataF({k,v:""})} style={{background:"#131825",border:"1px solid #1a2030",borderRadius:5,padding:"8px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Manrope,sans-serif"}}><div style={{fontSize:10,fontWeight:600,color:"#14B8A6"}}>+ {k}</div></button>
           ))}
         </div>
-      </div>
-    ))}
-  </div>
-)}
-                  <button key={k} onClick={()=>setDataF({k,v:""})} style={{background:"#131825",border:"1px solid #1a2030",borderRadius:5,padding:"8px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Manrope,sans-serif"}}><div style={{fontSize:10,fontWeight:600,color:"#14B8A6"}}>+ {k}</div></button>
-                ))}
-              </div>
-            )}
+        </div>
+      ))}
+    </div>
+      )}
+
             {Object.entries(compData).map(([k,v])=>(
   <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"#131825",border:"1px solid #1a2030",borderRadius:5,marginBottom:3}}>
     <div style={{flex:1,cursor:"pointer"}} onClick={()=>setDataF({k,v})}><span style={{fontSize:11,fontWeight:600,color:"#A0AAC0"}}>{k}:</span> <span style={{fontSize:11,color:"#F1F5F9"}}>{v}</span></div>
