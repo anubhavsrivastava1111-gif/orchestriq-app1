@@ -37,6 +37,7 @@ const SYS_GROQ = import.meta.env.VITE_GROQ_API_KEY || "";
 const USE_SYS_KEY = import.meta.env.VITE_USE_SYSTEM_KEY === "true";
 const EFF_GEMINI = USE_SYS_KEY && SYS_GEMINI ? SYS_GEMINI : "";
 const EFF_GROQ = USE_SYS_KEY && SYS_GROQ ? SYS_GROQ : "";
+console.log("[OIQ-DIAG] USE_SYS_KEY:",USE_SYS_KEY,"| SYS_GEMINI present:",!!SYS_GEMINI,"| SYS_GROQ present:",!!SYS_GROQ,"| EFF_GEMINI:",!!EFF_GEMINI,"| EFF_GROQ:",!!EFF_GROQ);
 const BRAND = "OrchestrIQ";
 const TAGLINE = "The orchestration layer of intelligent business.";
 
