@@ -2055,6 +2055,17 @@ const processTask=useCallback(async(task:any)=>{
                             </div>
                             <div style={{fontSize:11,lineHeight:1.7,color:step.failed?"#EF9999":"#A0AAC0"}}><Md text={step.output} ac={step.failed?"#EF4444":step.role.dc}/></div>
                           </div>
+                          {step.capability&&(
+                            <div style={{marginTop:8,background:"linear-gradient(135deg,rgba(168,85,247,0.06),rgba(20,184,166,0.04))",border:"1px solid rgba(168,85,247,0.2)",borderRadius:8,padding:"12px 14px"}}>
+                              <div style={{fontSize:12,fontWeight:800,color:"#A855F7",marginBottom:8}}>📋 Capability & Cost Brief</div>
+                              {step.capability.info_needed?.length>0&&<div style={{marginBottom:8}}><div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginBottom:3}}>Information Still Needed</div>{step.capability.info_needed.map((x,k)=><div key={k} style={{fontSize:10,color:"#A0AAC0",padding:"2px 0"}}>• {x}</div>)}</div>}
+                              {step.capability.tools_required?.length>0&&<div style={{marginBottom:8}}><div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginBottom:3}}>Tools / Integrations Required</div>{step.capability.tools_required.map((t,k)=><div key={k} style={{fontSize:10,padding:"2px 0",color:t.available?"#10B981":"#F59E0B"}}>{t.available?"✓":"⚠"} {t.name} — {t.why}{!t.available&&" (not yet integrated — contact admin)"}</div>)}</div>}
+                              {step.capability.automated_steps?.length>0&&<div style={{marginBottom:8}}><div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginBottom:3}}>✅ Completed By This Chain</div>{step.capability.automated_steps.map((x,k)=><div key={k} style={{fontSize:10,color:"#10B981",padding:"2px 0"}}>• {x}</div>)}</div>}
+                              {step.capability.manual_steps?.length>0&&<div style={{marginBottom:8}}><div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginBottom:3}}>👤 Your Next Steps</div>{step.capability.manual_steps.map((x,k)=><div key={k} style={{fontSize:10,color:"#A0AAC0",padding:"2px 0"}}>{k+1}. {x}</div>)}</div>}
+                              {step.capability.est_cost_usd>0&&<div style={{marginTop:8,paddingTop:8,borderTop:"1px dashed #1a2030"}}><div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginBottom:3}}>Estimated Cost</div><div style={{fontSize:11,color:"#A0AAC0"}}>External services: ~${step.capability.est_cost_usd.toFixed(2)} · Service fee: ~${step.capability.fee_usd.toFixed(2)}</div><div style={{fontSize:14,fontWeight:800,color:"#14B8A6",marginTop:4}}>{step.capability.converted_total?cur.sym+step.capability.converted_total:"$"+step.capability.total_usd.toFixed(2)+" total"}</div></div>}
+                              {step.capability.notes&&<div style={{marginTop:8,fontSize:10,color:"#8892B0",fontStyle:"italic"}}>{step.capability.notes}</div>}
+                            </div>
+                          )}
                           {i<wfActive.steps.length-1&&<div style={{display:"flex",justifyContent:"center",margin:"3px 0"}}><span style={{fontSize:9,color:"#3A4060"}}>↓ escalated</span></div>}
                         </div>
                       ))}
