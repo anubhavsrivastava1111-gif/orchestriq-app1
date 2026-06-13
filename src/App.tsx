@@ -710,6 +710,33 @@ function parseSections(text){
 }
 
 // Gather all workspace knowledge into a single corpus
+// ─── PHASE 2: CAPABILITY & COST BRIEF ───────────────────────────────────────
+async function fetchExchangeRate(toCode){
+  if(toCode==="USD")return 1;
+  try{
+    const r=await fetch("https://api.frankfurter.app/latest?from=USD&to="+toCode);
+    const d=await r.json();
+    return d.rates?.[toCode]||null;
+  }catch{return null;}
+}
+function computeServiceFee(costUsd){
+  if(!costUsd||costUsd<=0)return{cost:0,fee:0,total:0};
+  const pct=costUsd<100?0.2:0.1;
+  const fee=Math.max(costUsd*pct,0.5);
+  return{cost:costUsd,fee,total:costUsd+fee};
+}
+function parseCapabilityBrief(raw){
+  const marker="===CAPABILITY_BRIEF===";
+  const idx=raw.indexOf(marker);
+  if(idx===-1)return{output:raw,capability:null};
+  const output=raw.slice(0,idx).trim();
+  let capability=null;
+  try{
+    const jsonStr=raw.slice(idx+marker.length).trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/```\s*$/,"");
+    capability=JSON.parse(jsonStr);
+  }catch{}
+  return{output,capability};
+}
 function gatherWorkspace(co,compData,chats,brSessions,workflows,tQueue,extras){
   const parts=[];
   parts.push("COMPANY: "+co.name+" | "+co.industry+" | "+co.stage+" | "+co.location+" | "+co.currency);
