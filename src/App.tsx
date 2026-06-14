@@ -1,4 +1,5 @@
 import { getExecutivesCached } from "./lib/executives";
+import Ledger, { type JournalEntry } from "./Ledger";
 import type { Executive } from "./lib/executives";
 import {
   COMPRESSION_ENABLED,
@@ -883,6 +884,7 @@ export default function App(){
   const [error,setError]=useState(null);
   const [expD,setExpD]=useState({});
   const [compData,setCompData]=useState({});
+  const [ledgerEntries,setLedgerEntries]=useState<JournalEntry[]>([]);
   const [dataF,setDataF]=useState({k:"",v:""});
   const [view,setView]=useState("nerve");
   const [nTab,setNTab]=useState("boardroom");
@@ -996,6 +998,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{const h=localStorage.getItem("cos-ch");if(h)setChats(JSON.parse(h));}catch{}
     try{const d=localStorage.getItem("cos-dp");if(d)setExpD(JSON.parse(d));}catch{}
     try{const cd=localStorage.getItem("cos-cd");if(cd)setCompData(JSON.parse(cd));}catch{}
+    try{const le=localStorage.getItem("cos-ledger");if(le)setLedgerEntries(JSON.parse(le));}catch{}
     try{const br=localStorage.getItem("cos-br");if(br)setBrSessions(JSON.parse(br));}catch{}
     try{const dn=localStorage.getItem("cos-dn");if(dn){const parsed=JSON.parse(dn);setDnCfg(parsed);setLocalDn(parsed);}}catch{}
     try{const wf=localStorage.getItem("cos-wf");if(wf)setWorkflows(JSON.parse(wf));}catch{}
@@ -1753,8 +1756,8 @@ const processTask=useCallback(async(task:any)=>{
               style={{...S.pill,...(co.stage===st.id?{borderColor:"#14B8A6",color:"#14B8A6",background:"rgba(20,184,166,0.08)"}:{})}}>{st.ic}</button>
           ))}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:1,padding:"2px 6px 4px"}}>
-          {[["nerve","🧠","Nerve"],["workflow","⚡","Flow"],["p3","🤖","Auto"],["chat","💬","Chat"],["data","🗄️","Data"],["studio","🎨","Studio"]].map(([v,ic,lb])=>(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,padding:"2px 6px 4px"}}>
+          {[["nerve","🧠","Nerve"],["workflow","⚡","Flow"],["p3","🤖","Auto"],["chat","💬","Chat"],["data","🗄️","Data"],["ledger","📒","Ledger"],["studio","🎨","Studio"]].map(([v,ic,lb])=>(
             <button key={v} onClick={()=>setView(v)} style={{...S.nTab,...(view===v?{background:"rgba(20,184,166,0.08)",color:"#14B8A6",borderColor:"rgba(20,184,166,0.18)"}:{})}}>
               <span style={{fontSize:10}}>{ic}</span><span style={{fontSize:6,fontWeight:600}}>{lb}</span>
             </button>
@@ -2207,6 +2210,11 @@ const processTask=useCallback(async(task:any)=>{
             </div>
           </div>
         )}
+
+        {/* GENERAL LEDGER */}
+{view==="ledger"&&(
+  <Ledger cur={cur} entries={ledgerEntries} setEntries={setLedgerEntries} sv={sv} S={S} showToast={showToast}/>
+)}
 
         {/* DATA HUB */}
         {view==="data"&&(
