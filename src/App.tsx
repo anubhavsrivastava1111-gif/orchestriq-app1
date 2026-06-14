@@ -1183,7 +1183,6 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     setExtractModal(null);
     showToast(items.length+" action item(s) added to tracker","success");
   };
-</parameter>
 
   // Vision-capable call for Pulse Agentic (Dispatch). Uses Claude directly since it
   // supports image content blocks; falls back with a clear error if no Claude key.
