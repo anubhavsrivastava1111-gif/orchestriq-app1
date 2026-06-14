@@ -885,7 +885,7 @@ async function generatePPTX(type,title,bodyText,co,cur){
   s0.addText(typeLabel+"   ·   "+(co.industry||"")+"   ·   "+(co.location||"")+"   ·   "+cur.code,{x:0.7,y:4.7,w:12,h:0.5,fontSize:13,color:MUT,fontFace:"Arial"});
   s0.addText("Generated "+new Date().toLocaleDateString()+"  ·  Confidential",{x:0.7,y:6.7,w:12,h:0.4,fontSize:10,color:"5A6480",fontFace:"Arial"});
   // Content slides from sections
-  const secs=parseSections(bodyText);
+const secs=parseSections(bodyText);
   secs.forEach((sec,idx)=>{
     const s=pptx.addSlide();s.background={color:DARK};
     s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:13.333,h:0.95,fill:{color:"131825"}});
@@ -894,7 +894,18 @@ async function generatePPTX(type,title,bodyText,co,cur){
     s.addText(String(idx+1).padStart(2,"0"),{x:12.3,y:0.12,w:0.9,h:0.7,fontSize:18,color:A,align:"right",valign:"middle"});
     // Detect table rows
     const tableRows=sec.lines.filter(l=>l.includes("|")&&l.trim().startsWith("|")&&!l.trim().match(/^\|[\s|:-]+\|$/));
-    if(tableRows.length>=2){
+    const chartData=tableRows.length>=2?tableToChartData(tableRows):null;
+    if(chartData){
+      const chartType=chartData.series.length===1?"pie":"bar";
+      const palette=["14B8A6","3B82F6","A855F7","F97316","EF4444","10B981"];
+      if(chartType==="pie"){
+        const chartRows=[{name:chartData.series[0].name,labels:chartData.labels,values:chartData.series[0].values}];
+        s.addChart(pptx.ChartType.pie,chartRows,{x:1.5,y:1.3,w:7,h:5.2,showLegend:true,legendPos:"r",legendColor:MUT,dataLabelColor:DARK,dataLabelFontSize:11,chartColors:palette});
+      }else{
+        const chartRows=chartData.series.map((sr,i)=>({name:sr.name,labels:chartData.labels,values:sr.values}));
+        s.addChart(pptx.ChartType.bar,chartRows,{x:0.55,y:1.3,w:12.2,h:5.2,barDir:"col",showLegend:chartData.series.length>1,legendPos:"b",legendColor:MUT,catAxisLabelColor:MUT,valAxisLabelColor:MUT,chartColors:palette});
+      }
+    }else if(tableRows.length>=2){
       const rows=tableRows.map(r=>r.split("|").filter((c,i,a)=>i>0&&i<a.length-1).map(c=>c.trim()));
       const tblData=rows.map((r,ri)=>r.map(c=>({text:c,options:{fill:{color:ri===0?A:"131825"},color:ri===0?DARK:MUT,bold:ri===0,fontSize:11,fontFace:"Arial"}})));
       s.addTable(tblData,{x:0.55,y:1.3,w:12.2,border:{type:"solid",color:"1a2030",pt:1},autoPage:false});
