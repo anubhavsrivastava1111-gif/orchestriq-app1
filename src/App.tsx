@@ -2337,7 +2337,7 @@ if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admi
 
         {/* PULSE AGENTIC */}
 {view==="dispatch"&&(
-  <Dispatch templates={dispatchTemplates} setTemplates={setDispatchTemplates} sv={sv} S={S} showToast={showToast} askVision={askVision} MicButton={MicButton} vLang={vLang}/>
+  <Dispatch templates={dispatchTemplates} setTemplates={setDispatchTemplates} sv={sv} S={S} showToast={showToast} ask={ask} askVision={askVision} MicButton={MicButton} vLang={vLang}/>
 )}
 
         {/* DATA HUB */}
