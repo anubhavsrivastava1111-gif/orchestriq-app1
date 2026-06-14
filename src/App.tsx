@@ -839,32 +839,52 @@ async function generatePDF(type,title,bodyText,co,cur){
   doc.text(title,M,y,{maxWidth:W-2*M});y+=10;
   const titleLines=doc.splitTextToSize(title,W-2*M);y+=titleLines.length*8;
   doc.setFontSize(8);doc.setTextColor(120,120,120);doc.setFont("helvetica","normal");
-  doc.text("Generated "+new Date().toLocaleString()+"  ·  Currency: "+cur.code,M,y);y+=20;
+  doc.text("Generated "+new Date().toLocaleString()+" - Currency: "+cur.code,M,y);y+=20;
   doc.setDrawColor(...A);doc.setLineWidth(1.5);doc.line(M,y,W-M,y);y+=20;
   // Body
+// Body
   const secs=parseSections(bodyText);
-  secs.forEach(sec=>{
+  for(const sec of secs){
     addPageIfNeeded(40);
     doc.setFont("helvetica","bold");doc.setFontSize(13);doc.setTextColor(...A);
-    const st=doc.splitTextToSize(sec.title,W-2*M);
+    const st=doc.splitTextToSize(sec.title.replace(/₹/g,"Rs."),W-2*M);
     st.forEach(line=>{addPageIfNeeded(18);doc.text(line,M,y);y+=18;});
     y+=2;
+
+    const tableLines=sec.lines.filter(l=>l.includes("|")&&l.trim().startsWith("|")&&!l.trim().match(/^\|[\s|:-]+\|$/));
+    const chartData=tableLines.length>=2?tableToChartData(tableLines):null;
+
+    if(chartData){
+      try{
+        const chartType=chartData.series.length===1?"bar":"bar";
+        const imgData=await renderChartToImage(chartData,chartType,800,450);
+        const imgW=W-2*M;const imgH=imgW*(450/800);
+        addPageIfNeeded(imgH+10);
+        doc.addImage(imgData,"PNG",M,y,imgW,imgH);
+        y+=imgH+12;
+      }catch{
+        // fallback to text table if chart rendering fails
+      }
+    }
+
     doc.setFont("helvetica","normal");doc.setFontSize(10);doc.setTextColor(45,45,45);
-    sec.lines.forEach(raw=>{
+    const nonChartLines=chartData?sec.lines.filter(l=>!tableLines.includes(l)):sec.lines;
+    nonChartLines.forEach(raw=>{
       const isBullet=/^[-*]\s/.test(raw)||/^•/.test(raw);
       const isTable=raw.includes("|")&&raw.trim().startsWith("|");
       let text=stripMd(raw);
       if(isTable){text=raw.split("|").filter(c=>c.trim()&&!c.trim().match(/^[-:]+$/)).map(c=>c.trim()).join("   |   ");if(!text)return;}
+      text=text.replace(/₹/g,"Rs.").replace(/·/g,"-");
       const indent=isBullet?M+14:M;
       const lines=doc.splitTextToSize(text,W-indent-M);
       lines.forEach(line=>{addPageIfNeeded(14);doc.text(line,indent,y);y+=13;});
       y+=2;
     });
     y+=8;
-  });
+  }
   // Footer page numbers
   const pages=doc.internal.getNumberOfPages();
-  for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(7);doc.setTextColor(150,150,150);doc.text((co.name||"")+"  ·  Confidential  ·  Page "+i+" of "+pages,M,H-20);}
+  for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(7);doc.setTextColor(150,150,150);doc.text((co.name||"")+" - Confidential - Page "+i+" of "+pages,M,H-20);}
   doc.save((co.name||"Report").replace(/\s+/g,"-")+"-"+typeLabel.replace(/\s+/g,"-")+"-"+Date.now()+".pdf");
 }
 
@@ -1637,9 +1657,9 @@ const processTask=useCallback(async(task:any)=>{
       setExpStep("🎨 Presentation Architect is synthesizing your workspace…");
       const pa=AR.find(r=>r.id==="pres_arch");
       const structureHint=isPdf
-        ?"Produce a "+tLabel+". Use ## for each major section heading. Under each, use concise bullet points and markdown tables where data is comparative. Sections must suit a "+tLabel+": "+(dtype==="summary"?"single tight executive summary with key metrics and the one recommendation.":dtype==="investor"?"Problem, Market & TAM, Solution, Traction/Metrics, Business Model, Financials, Risks, The Ask.":dtype==="executive"?"Executive Summary, Key Findings, Strategic Recommendations, Financials, Risk Register, 90-Day Action Plan.":"full detailed report covering every theme found in the workspace.")
+        ?"Produce a "+tLabel+". Use ## for each major section heading. Under each, use concise bullet points and markdown tables where data is comparative. Sections must suit a "+tLabel+": "+(dtype==="summary"?"single tight executive summary with key metrics and the one recommendation.":dtype==="investor"?"Executive Summary (3-4 sentence overview of the opportunity and ask - never leave empty or use placeholder dashes), Problem, Market & TAM, Solution, Traction/Metrics, Business Model, Financials, Risks, The Ask.":dtype==="executive"?"Executive Summary (3-4 sentence overview - never leave empty or use placeholder dashes), Key Findings, Strategic Recommendations, Financials, Risk Register, 90-Day Action Plan.":"full detailed report covering every theme found in the workspace.")
         :"Produce a "+tLabel+" as a slide deck. Each ## heading = one slide title. Under each, 3-6 short punchy bullet points (slide-ready, not paragraphs) OR a markdown table. Aim for 8-12 slides. Structure for a "+tLabel+": "+(dtype==="investor"?"Title, Problem, Solution, Market, Traction, Business Model, Competition, Financials, Team, The Ask.":dtype==="pitch"?"Hook, Problem, Solution, Why Now, Market, Product, Traction, Ask.":dtype==="roadmap"?"Vision, Now, Next, Later, Milestones, Metrics.":dtype==="research"?"Objective, Method, Findings, Analysis, Implications, Next Steps.":dtype==="operational"?"Overview, KPIs, Wins, Issues, Actions, Outlook.":dtype==="strategy"?"Context, Strategic Goals, Initiatives, Roadmap, Risks, Metrics.":"Agenda, Key Themes, Insights, Recommendations, Risks, Next Steps.");
-      const sys=buildSys(pa,co,compData)+"\n\nWORKSPACE CORPUS TO SYNTHESIZE:\n"+corpus+"\n\nOUTPUT INSTRUCTIONS: "+structureHint+" Be specific and use real numbers from the corpus in "+cur.sym+cur.code+". Do not include any preamble — start directly with the first ## section.";
+      const sys=buildSys(pa,co,compData)+"\n\nWORKSPACE CORPUS TO SYNTHESIZE:\n"+corpus+"\n\nOUTPUT INSTRUCTIONS: "+structureHint+" Be specific and use real numbers from the corpus in "+cur.sym+cur.code+". Do not include any preamble - start directly with the first ## section. EVERY section must contain real content - never output a section with only a horizontal rule, dash, or placeholder. If data for a section is genuinely unavailable, write 1-2 sentences explaining what is needed instead of leaving it blank.";
       const userTitle=expTitle.trim()||(tLabel+" — "+co.name);
       const synth=await ask(sys,[{role:"user",content:"Build: \""+userTitle+"\". Synthesize across the entire workspace corpus above."}],4000);
       setExpSynthesis(synth);
