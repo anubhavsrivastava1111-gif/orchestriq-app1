@@ -2379,7 +2379,7 @@ const processTask=useCallback(async(task:any)=>{
         )}
       </div>
 
-      )}
+
       {/* FEATURE 4 & 5: EXPORT STUDIO MODAL */}
       {showExport&&(
         <div style={S.modalBg} onClick={()=>!expGenerating&&setShowExport(false)}>
