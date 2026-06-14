@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import type { RefObject } from "react";
 
 export interface DispatchTemplate{
   id:number;
@@ -79,6 +80,40 @@ const cpHelper=(t:string,showToast:(m:string,ty?:string)=>void)=>{try{navigator.
 
 function AIDisclaimer(){
   return <div style={{fontSize:9,color:"#5A6480",marginTop:6,lineHeight:1.5,fontStyle:"italic"}}>⚠ AI-generated — please review and verify before sending or posting.</div>;
+}
+
+// Multi-image upload gallery: shows thumbnails with remove buttons + an "add more" tile
+function ImageGallery({images,onRemove,onAddClick,inputRef,onFiles,label,emptyLabel,S}:{
+  images:{data:string;mediaType:string;preview:string}[],
+  onRemove:(i:number)=>void,
+  onAddClick:()=>void,
+  inputRef:RefObject<HTMLInputElement|null>,
+  onFiles:(files:FileList)=>void,
+  label:string,
+  emptyLabel:string,
+  S:any,
+}){
+  return(
+    <div>
+      <input ref={inputRef} type="file" accept="image/*" multiple onChange={e=>e.target.files&&onFiles(e.target.files)} style={{display:"none"}}/>
+      {!images.length?(
+        <button onClick={onAddClick} style={{...S.inp,cursor:"pointer",textAlign:"center",color:"#5A6480",padding:"24px 10px"}}>{emptyLabel}</button>
+      ):(
+        <div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:6,marginBottom:6}}>
+            {images.map((img,i)=>(
+              <div key={i} style={{position:"relative"}}>
+                <img src={img.preview} alt={label+" "+(i+1)} style={{width:"100%",height:80,objectFit:"cover",borderRadius:5,border:"1px solid #1a2030"}}/>
+                <button onClick={()=>onRemove(i)} style={{position:"absolute",top:2,right:2,background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:4,color:"#EF4444",fontSize:9,cursor:"pointer",padding:"1px 4px",lineHeight:1.4}}>×</button>
+                <span style={{position:"absolute",bottom:2,left:2,background:"rgba(10,14,26,0.8)",borderRadius:3,color:"#A0AAC0",fontSize:8,padding:"1px 4px"}}>{i+1}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={onAddClick} style={{...S.hBtn,width:"100%",textAlign:"center",padding:"6px"}}>+ Add another screenshot</button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -276,15 +311,15 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
   const [tab,setTab]=useState<"templates"|"new"|"run">("templates");
 
   const [newName,setNewName]=useState("");
-  const [trackerImg,setTrackerImg]=useState<{data:string;mediaType:string;preview:string}|null>(null);
-  const [outputImg,setOutputImg]=useState<{data:string;mediaType:string;preview:string}|null>(null);
+  const [trackerImgs,setTrackerImgs]=useState<{data:string;mediaType:string;preview:string}[]>([]);
+  const [outputImgs,setOutputImgs]=useState<{data:string;mediaType:string;preview:string}[]>([]);
   const [outputText,setOutputText]=useState("");
   const [inferring,setInferring]=useState(false);
   const [inferredDesc,setInferredDesc]=useState("");
 
   const [runTemplateId,setRunTemplateId]=useState<number|null>(null);
   const [runUpdateText,setRunUpdateText]=useState("");
-  const [runTrackerImg,setRunTrackerImg]=useState<{data:string;mediaType:string;preview:string}|null>(null);
+  const [runTrackerImgs,setRunTrackerImgs]=useState<{data:string;mediaType:string;preview:string}[]>([]);
   const [running,setRunning]=useState(false);
   const [runOutput,setRunOutput]=useState("");
 
@@ -292,40 +327,42 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
   const outputInputRef=useRef<HTMLInputElement>(null);
   const runTrackerInputRef=useRef<HTMLInputElement>(null);
 
-  const handleImageUpload=async(file:File,setter:(v:{data:string;mediaType:string;preview:string}|null)=>void)=>{
-    try{
-      const {data,mediaType}=await fileToBase64(file);
-      const preview=URL.createObjectURL(file);
-      setter({data,mediaType,preview});
-    }catch(e:any){
-      showToast("Could not read image: "+e.message,"error");
+  const handleMultiImageUpload=async(files:FileList,adder:(v:{data:string;mediaType:string;preview:string})=>void)=>{
+    for(const file of Array.from(files)){
+      try{
+        const {data,mediaType}=await fileToBase64(file);
+        const preview=URL.createObjectURL(file);
+        adder({data,mediaType,preview});
+      }catch(e:any){
+        showToast("Could not read image: "+e.message,"error");
+      }
     }
   };
 
   const inferTemplate=async()=>{
-    if(!trackerImg&&!outputText.trim()&&!outputImg){
+    if(!trackerImgs.length&&!outputText.trim()&&!outputImgs.length){
       showToast("Upload a tracker screenshot and/or describe the output format","error");
       return;
     }
     setInferring(true);setInferredDesc("");
     try{
       const sys=
-        "You are a report-template analyst. The user will show you (a) a screenshot of their data tracker (spreadsheet, ticket queue, mailbox, etc) and/or (b) a sample of the report/email output they currently produce manually.\n"+
+        "You are a report-template analyst. The user will show you (a) one or more screenshots of their data tracker (spreadsheet, ticket queue, mailbox, etc - the tracker may span multiple screenshots since it doesn't fit in one image) and/or (b) one or more screenshots or text samples of the report/email output they currently produce manually.\n"+
         "Your job: infer and describe, in clear plain text, a reusable TEMPLATE that captures:\n"+
-        "1. The structure/columns of the tracker (what data fields exist, what each means)\n"+
+        "1. The structure/columns of the tracker (what data fields exist, what each means) - combine information across all tracker images into one unified structure\n"+
         "2. The structure of the desired OUTPUT (sections, tables, tone, what calculations are derived - e.g. aging buckets, totals, categorization)\n"+
         "3. Any business rules visible (e.g. SLA = first action within 3 days, aging buckets 0-3/4-5/5+ days, pending reasons categorized as Employee/Client/Dependency)\n\n"+
         "Write this as a clear, numbered specification that another AI can follow later, given only a fresh raw update, to regenerate the same kind of output. Be specific about column names and output formatting. Do NOT include any actual data values from the samples - only the STRUCTURE and RULES. Output plain text only, no markdown headers.";
 
       const images:{data:string;mediaType:string}[]=[];
-      if(trackerImg)images.push({data:trackerImg.data,mediaType:trackerImg.mediaType});
-      if(outputImg)images.push({data:outputImg.data,mediaType:outputImg.mediaType});
+      trackerImgs.forEach(img=>images.push({data:img.data,mediaType:img.mediaType}));
+      outputImgs.forEach(img=>images.push({data:img.data,mediaType:img.mediaType}));
 
       let userText="Analyze these samples and produce the template specification.";
       if(outputText.trim())userText+="\n\nSAMPLE OUTPUT TEXT:\n"+outputText.trim();
-      if(trackerImg&&outputImg)userText+="\n\n(First image = tracker sample, second image = output sample)";
-      else if(trackerImg)userText+="\n\n(Image = tracker sample)";
-      else if(outputImg)userText+="\n\n(Image = output sample)";
+      if(trackerImgs.length&&outputImgs.length)userText+="\n\n(First "+trackerImgs.length+" image(s) = tracker sample across multiple screenshots, remaining "+outputImgs.length+" image(s) = output sample)";
+      else if(trackerImgs.length)userText+="\n\n("+trackerImgs.length+" image(s) = tracker sample, possibly split across multiple screenshots - combine them into one unified structure)";
+      else if(outputImgs.length)userText+="\n\n("+outputImgs.length+" image(s) = output sample)";
 
       const result=await askVision(sys,userText,images);
       setInferredDesc(result.trim());
@@ -350,7 +387,7 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
     const updated=[...templates,tpl];
     setTemplates(updated);sv("cos-dispatch-templates",updated);
     showToast("Template \""+tpl.name+"\" saved","success");
-    setNewName("");setTrackerImg(null);setOutputImg(null);setOutputText("");setInferredDesc("");
+    setNewName("");setTrackerImgs([]);setOutputImgs([]);setOutputText("");setInferredDesc("");
     setTab("templates");
   };
 
@@ -363,20 +400,20 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
   const runReport=async()=>{
     const tpl=templates.find(t=>t.id===runTemplateId);
     if(!tpl){showToast("Select a template first","error");return;}
-    if(!runUpdateText.trim()&&!runTrackerImg){showToast("Paste today's update or upload a tracker screenshot","error");return;}
+    if(!runUpdateText.trim()&&!runTrackerImgs.length){showToast("Paste today's update or upload a tracker screenshot","error");return;}
     setRunning(true);setRunOutput("");
     try{
       const sys=
         "You generate a formatted status report from a raw update, following this template specification exactly:\n\n"+
         "=== TEMPLATE SPECIFICATION ===\n"+tpl.description+"\n=== END SPECIFICATION ===\n\n"+
         "Apply the template's structure, calculations (aging buckets, totals, categorization) and tone to the raw input below. "+
-        "If a tracker screenshot is provided, read the actual data from it. Output ONLY the final formatted report, ready to copy-paste - no preamble, no explanation, no markdown code fences.";
+        "If tracker screenshots are provided (possibly multiple, covering the full tracker), read the actual data from all of them combined. Output ONLY the final formatted report, ready to copy-paste - no preamble, no explanation, no markdown code fences.";
 
       const images:{data:string;mediaType:string}[]=[];
-      if(runTrackerImg)images.push({data:runTrackerImg.data,mediaType:runTrackerImg.mediaType});
+      runTrackerImgs.forEach(img=>images.push({data:img.data,mediaType:img.mediaType}));
 
-      let userText="RAW UPDATE FROM TEAM:\n"+(runUpdateText.trim()||"(see attached tracker screenshot)");
-      if(runTrackerImg)userText+="\n\n(A current tracker screenshot is attached - use it as the data source.)";
+      let userText="RAW UPDATE FROM TEAM:\n"+(runUpdateText.trim()||"(see attached tracker screenshot(s))");
+      if(runTrackerImgs.length)userText+="\n\n("+runTrackerImgs.length+" current tracker screenshot(s) attached - use them together as the data source.)";
 
       const result=await askVision(sys,userText,images);
       setRunOutput(result.trim());
@@ -436,28 +473,12 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
 
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
             <div>
-              <label style={S.lbl}>Tracker Screenshot (optional)</label>
-              <input ref={trackerInputRef} type="file" accept="image/*" onChange={e=>e.target.files?.[0]&&handleImageUpload(e.target.files[0],setTrackerImg)} style={{display:"none"}}/>
-              {trackerImg?(
-                <div style={{position:"relative"}}>
-                  <img src={trackerImg.preview} alt="Tracker sample" style={{width:"100%",borderRadius:6,border:"1px solid #1a2030",maxHeight:140,objectFit:"cover"}}/>
-                  <button onClick={()=>setTrackerImg(null)} style={{position:"absolute",top:4,right:4,background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:4,color:"#EF4444",fontSize:10,cursor:"pointer",padding:"2px 6px"}}>Remove</button>
-                </div>
-              ):(
-                <button onClick={()=>trackerInputRef.current?.click()} style={{...S.inp,cursor:"pointer",textAlign:"center",color:"#5A6480",padding:"24px 10px"}}>📊 Upload tracker screenshot</button>
-              )}
+              <label style={S.lbl}>Tracker Screenshot(s) (optional - upload multiple if your tracker doesn't fit one screen)</label>
+              <ImageGallery images={trackerImgs} onRemove={i=>setTrackerImgs(prev=>prev.filter((_,idx)=>idx!==i))} onAddClick={()=>trackerInputRef.current?.click()} inputRef={trackerInputRef} onFiles={files=>handleMultiImageUpload(files,img=>setTrackerImgs(prev=>[...prev,img]))} label="Tracker" emptyLabel="📊 Upload tracker screenshot(s)" S={S}/>
             </div>
             <div>
-              <label style={S.lbl}>Sample Output Screenshot (optional)</label>
-              <input ref={outputInputRef} type="file" accept="image/*" onChange={e=>e.target.files?.[0]&&handleImageUpload(e.target.files[0],setOutputImg)} style={{display:"none"}}/>
-              {outputImg?(
-                <div style={{position:"relative"}}>
-                  <img src={outputImg.preview} alt="Output sample" style={{width:"100%",borderRadius:6,border:"1px solid #1a2030",maxHeight:140,objectFit:"cover"}}/>
-                  <button onClick={()=>setOutputImg(null)} style={{position:"absolute",top:4,right:4,background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:4,color:"#EF4444",fontSize:10,cursor:"pointer",padding:"2px 6px"}}>Remove</button>
-                </div>
-              ):(
-                <button onClick={()=>outputInputRef.current?.click()} style={{...S.inp,cursor:"pointer",textAlign:"center",color:"#5A6480",padding:"24px 10px"}}>📧 Upload output sample</button>
-              )}
+              <label style={S.lbl}>Sample Output Screenshot(s) (optional)</label>
+              <ImageGallery images={outputImgs} onRemove={i=>setOutputImgs(prev=>prev.filter((_,idx)=>idx!==i))} onAddClick={()=>outputInputRef.current?.click()} inputRef={outputInputRef} onFiles={files=>handleMultiImageUpload(files,img=>setOutputImgs(prev=>[...prev,img]))} label="Output" emptyLabel="📧 Upload output sample(s)" S={S}/>
             </div>
           </div>
 
@@ -467,7 +488,7 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
             <MicButton lang={vLang} onResult={(t:string)=>setOutputText(prev=>(prev?prev+" ":"")+t)} disabled={inferring}/>
           </div>
 
-          <button onClick={inferTemplate} disabled={inferring||(!trackerImg&&!outputText.trim()&&!outputImg)} style={{...S.pBtn,marginTop:0,opacity:inferring||(!trackerImg&&!outputText.trim()&&!outputImg)?0.4:1}}>{inferring?"Analyzing samples...":"Analyze and Generate Template"}</button>
+          <button onClick={inferTemplate} disabled={inferring||(!trackerImgs.length&&!outputText.trim()&&!outputImgs.length)} style={{...S.pBtn,marginTop:0,opacity:inferring||(!trackerImgs.length&&!outputText.trim()&&!outputImgs.length)?0.4:1}}>{inferring?"Analyzing samples...":"Analyze and Generate Template"}</button>
 
           {inferredDesc&&(
             <div style={{marginTop:12}}>
@@ -500,18 +521,12 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
                 <MicButton lang={vLang} onResult={(t:string)=>setRunUpdateText(prev=>(prev?prev+" ":"")+t)} disabled={running}/>
               </div>
 
-              <label style={S.lbl}>Fresh Tracker Screenshot (optional, if tracker changed today)</label>
-              <input ref={runTrackerInputRef} type="file" accept="image/*" onChange={e=>e.target.files?.[0]&&handleImageUpload(e.target.files[0],setRunTrackerImg)} style={{display:"none"}}/>
-              {runTrackerImg?(
-                <div style={{position:"relative",marginBottom:10}}>
-                  <img src={runTrackerImg.preview} alt="Tracker" style={{width:"100%",borderRadius:6,border:"1px solid #1a2030",maxHeight:160,objectFit:"cover"}}/>
-                  <button onClick={()=>setRunTrackerImg(null)} style={{position:"absolute",top:4,right:4,background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:4,color:"#EF4444",fontSize:10,cursor:"pointer",padding:"2px 6px"}}>Remove</button>
-                </div>
-              ):(
-                <button onClick={()=>runTrackerInputRef.current?.click()} style={{...S.inp,cursor:"pointer",textAlign:"center",color:"#5A6480",padding:"16px 10px",marginBottom:10}}>📊 Upload current tracker screenshot</button>
-              )}
+              <label style={S.lbl}>Fresh Tracker Screenshot(s) (optional, if tracker changed today - upload multiple if it spans more than one screen)</label>
+              <div style={{marginBottom:10}}>
+                <ImageGallery images={runTrackerImgs} onRemove={i=>setRunTrackerImgs(prev=>prev.filter((_,idx)=>idx!==i))} onAddClick={()=>runTrackerInputRef.current?.click()} inputRef={runTrackerInputRef} onFiles={files=>handleMultiImageUpload(files,img=>setRunTrackerImgs(prev=>[...prev,img]))} label="Tracker" emptyLabel="📊 Upload current tracker screenshot(s)" S={S}/>
+              </div>
 
-              <button onClick={runReport} disabled={running||!runTemplateId||(!runUpdateText.trim()&&!runTrackerImg)} style={{...S.pBtn,marginTop:0,opacity:running||!runTemplateId||(!runUpdateText.trim()&&!runTrackerImg)?0.4:1}}>{running?"Generating report...":"Generate Report"}</button>
+              <button onClick={runReport} disabled={running||!runTemplateId||(!runUpdateText.trim()&&!runTrackerImgs.length)} style={{...S.pBtn,marginTop:0,opacity:running||!runTemplateId||(!runUpdateText.trim()&&!runTrackerImgs.length)?0.4:1}}>{running?"Generating report...":"Generate Report"}</button>
 
               {runOutput&&(
                 <div style={{marginTop:12}}>
