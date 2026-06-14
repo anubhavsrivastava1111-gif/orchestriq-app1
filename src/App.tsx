@@ -780,7 +780,45 @@ function gatherWorkspace(co,compData,chats,brSessions,workflows,tQueue,extras){
   if(extras?.autopilot)parts.push("\n=== DECISION AUTOPILOT ===\n"+stripMd(extras.autopilot).slice(0,1500));
   return parts.join("\n");
 }
+// ─── CHART DETECTION ────────────────────────────────────────────────────────
+// Detects if a markdown table is chartable: first column = labels, remaining columns = numbers
+function tableToChartData(rows){
+  if(rows.length<2)return null;
+  const header=rows[0].split("|").filter((c,i,a)=>i>0&&i<a.length-1).map(c=>c.trim());
+  const dataRows=rows.slice(1).filter(r=>!r.trim().match(/^\|[\s|:-]+\|$/));
+  if(dataRows.length<2||header.length<2)return null;
+  const labels=[];const series=header.slice(1).map(()=>[]);
+  let numericCount=0;
+  for(const r of dataRows){
+    const cells=r.split("|").filter((c,i,a)=>i>0&&i<a.length-1).map(c=>c.trim());
+    if(cells.length<2)continue;
+    labels.push(cells[0]);
+    for(let c=1;c<header.length;c++){
+      const raw=(cells[c]||"").replace(/[^\d.\-]/g,"");
+      const n=parseFloat(raw);
+      series[c-1].push(isNaN(n)?0:n);
+      if(!isNaN(n)&&raw!=="")numericCount++;
+    }
+  }
+  if(numericCount<2)return null; // not enough numeric data to chart
+  return{labels,series:header.slice(1).map((name,i)=>({name,values:series[i]}))};
+}
 
+// ─── CHART RENDER (canvas, for PDF) ─────────────────────────────────────────
+async function renderChartToImage(chartData,type,width,height){
+  await loadScript("https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js");
+  const canvas=document.createElement("canvas");
+  canvas.width=width;canvas.height=height;
+  const ctx=canvas.getContext("2d");
+  const palette=["#14B8A6","#3B82F6","#A855F7","#F97316","#EF4444","#10B981"];
+  const datasets=chartData.series.map((s,i)=>({label:s.name,data:s.values,backgroundColor:type==="line"?"transparent":palette[i%palette.length],borderColor:palette[i%palette.length],borderWidth:2,fill:false}));
+  // @ts-ignore
+  const chart=new window.Chart(ctx,{type:type==="pie"?"pie":type,data:{labels:chartData.labels,datasets},options:{responsive:false,animation:false,plugins:{legend:{labels:{color:"#333",font:{size:14}}}},scales:type==="pie"?{}:{x:{ticks:{color:"#333"}},y:{ticks:{color:"#333"}}}}});
+  await new Promise(r=>setTimeout(r,200));
+  const dataUrl=canvas.toDataURL("image/png");
+  chart.destroy();
+  return dataUrl;
+}
 // ─── PDF GENERATOR ──────────────────────────────────────────────────────────
 async function generatePDF(type,title,bodyText,co,cur){
   const jsPDF=await ensureJsPDF();
