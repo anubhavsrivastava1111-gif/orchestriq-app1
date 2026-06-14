@@ -116,9 +116,11 @@ interface LedgerProps{
   S:any;
   showToast:(m:string,t?:string)=>void;
   ask:(sys:string,msgs:any[],maxT?:number)=>Promise<string>;
+  MicButton:any;
+  vLang:string;
 }
 
-export default function Ledger({cur,entries,setEntries,customAccounts,setCustomAccounts,sv,S,showToast,ask}:LedgerProps){
+export default function Ledger({cur,entries,setEntries,customAccounts,setCustomAccounts,sv,S,showToast,ask,MicButton,vLang}:LedgerProps){
   const [tab,setTab]=useState("ai");
   const accounts=getAllAccounts(customAccounts);
 
