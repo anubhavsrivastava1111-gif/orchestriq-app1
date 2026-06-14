@@ -974,6 +974,8 @@ export default function App(){
   const [compData,setCompData]=useState({});
   const [ledgerEntries,setLedgerEntries]=useState<JournalEntry[]>([]);
   const [customAccounts,setCustomAccounts]=useState<any[]>([]);
+  const [dispatchTemplates,setDispatchTemplates]=useState<any[]>([]);
+  const [adminConfig,setAdminConfig]=useState<{[k:string]:boolean}>({ledgerEnabled:true,dispatchEnabled:true});
   const [dataF,setDataF]=useState({k:"",v:""});
   const [view,setView]=useState("nerve");
   const [nTab,setNTab]=useState("boardroom");
@@ -1089,6 +1091,8 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{const cd=localStorage.getItem("cos-cd");if(cd)setCompData(JSON.parse(cd));}catch{}
     try{const le=localStorage.getItem("cos-ledger");if(le)setLedgerEntries(JSON.parse(le));}catch{}
     try{const ca=localStorage.getItem("cos-accounts");if(ca)setCustomAccounts(JSON.parse(ca));}catch{}
+    try{const dt=localStorage.getItem("cos-dispatch-templates");if(dt)setDispatchTemplates(JSON.parse(dt));}catch{}
+    try{const ac=localStorage.getItem("cos-admin-config");if(ac)setAdminConfig({...adminConfig,...JSON.parse(ac)});}catch{}
     try{const br=localStorage.getItem("cos-br");if(br)setBrSessions(JSON.parse(br));}catch{}
     try{const dn=localStorage.getItem("cos-dn");if(dn){const parsed=JSON.parse(dn);setDnCfg(parsed);setLocalDn(parsed);}}catch{}
     try{const wf=localStorage.getItem("cos-wf");if(wf)setWorkflows(JSON.parse(wf));}catch{}
@@ -1657,8 +1661,10 @@ const processTask=useCallback(async(task:any)=>{
     setSelRole(null);setChats({});setCompData({});setBrSessions([]);setShowSettings(false);
     setWorkflows([]);tQRef.current=[];setTQueue([]);setConfirmReset(null);
   };
-  const exportAll=()=>dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",{version:VERSION,exported:new Date().toISOString(),company:co,companyData:compData,ledgerEntries,customAccounts,chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue});
-  const importData=file=>{const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.company){setCo(d.company);sv("cos-co",d.company);}if(d.companyData){setCompData(d.companyData);sv("cos-cd",d.companyData);}if(d.ledgerEntries){setLedgerEntries(d.ledgerEntries);sv("cos-ledger",d.ledgerEntries);}if(d.customAccounts){setCustomAccounts(d.customAccounts);sv("cos-accounts",d.customAccounts);}if(d.chats){setChats(d.chats);sv("cos-ch",d.chats);}if(d.boardroomSessions){setBrSessions(d.boardroomSessions);sv("cos-br",d.boardroomSessions);}if(d.workflows){setWorkflows(d.workflows);sv("cos-wf",d.workflows);}if(d.taskQueue){tQRef.current=d.taskQueue;setTQueue(d.taskQueue);sv("cos-tq",d.taskQueue);}setResumeInfo(null);showToast("Workspace loaded — continue where you left off","success");}catch{showToast("Invalid workspace file","error");}};r.readAsText(file);};
+  const exportAll=()=>dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",{version:VERSION,exported:new Date().toISOString(),company:co,companyData:compData,ledgerEntries,customAccounts,dispatchTemplates,adminConfig,chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue});
+  const importData=file=>{const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.company){setCo(d.company);sv("cos-co",d.company);}if(d.companyData){setCompData(d.companyData);sv("cos-cd",d.companyData);}if(d.ledgerEntries){setLedgerEntries(d.ledgerEntries);sv("cos-ledger",d.ledgerEntries);}if(d.customAccounts){setCustomAccounts(d.customAccounts);sv("cos-accounts",d.customAccounts);}
+if(d.dispatchTemplates){setDispatchTemplates(d.dispatchTemplates);sv("cos-dispatch-templates",d.dispatchTemplates);}
+if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admin-config",d.adminConfig);}if(d.chats){setChats(d.chats);sv("cos-ch",d.chats);}if(d.boardroomSessions){setBrSessions(d.boardroomSessions);sv("cos-br",d.boardroomSessions);}if(d.workflows){setWorkflows(d.workflows);sv("cos-wf",d.workflows);}if(d.taskQueue){tQRef.current=d.taskQueue;setTQueue(d.taskQueue);sv("cos-tq",d.taskQueue);}setResumeInfo(null);showToast("Workspace loaded — continue where you left off","success");}catch{showToast("Invalid workspace file","error");}};r.readAsText(file);};
 
   // FEATURE 4 & 5: Export Studio generation
   const runExport=useCallback(async()=>{
@@ -1856,8 +1862,8 @@ const processTask=useCallback(async(task:any)=>{
               style={{...S.pill,...(co.stage===st.id?{borderColor:"#14B8A6",color:"#14B8A6",background:"rgba(20,184,166,0.08)"}:{})}}>{st.ic}</button>
           ))}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,padding:"2px 6px 4px"}}>
-          {[["nerve","🧠","Nerve"],["workflow","⚡","Flow"],["p3","🤖","Auto"],["chat","💬","Chat"],["data","🗄️","Data"],["ledger","📒","Ledger"],["studio","🎨","Studio"]].map(([v,ic,lb])=>(
+        <div style={{display:"grid",gridTemplateColumns:"repeat("+([true,true,true,true,true,adminConfig.ledgerEnabled,adminConfig.dispatchEnabled,true].filter(Boolean).length)+",1fr)",gap:1,padding:"2px 6px 4px"}}>
+          {[["nerve","🧠","Nerve"],["workflow","⚡","Flow"],["p3","🤖","Auto"],["chat","💬","Chat"],["data","🗄️","Data"],["ledger","📒","Ledger"],["dispatch","📡","Pulse"],["studio","🎨","Studio"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).map(([v,ic,lb])=>(
             <button key={v} onClick={()=>setView(v)} style={{...S.nTab,...(view===v?{background:"rgba(20,184,166,0.08)",color:"#14B8A6",borderColor:"rgba(20,184,166,0.18)"}:{})}}>
               <span style={{fontSize:10}}>{ic}</span><span style={{fontSize:6,fontWeight:600}}>{lb}</span>
             </button>
@@ -2635,6 +2641,17 @@ const processTask=useCallback(async(task:any)=>{
                 <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
                   {[["Conversations",Object.values(chats).filter(c=>c?.length).length],["Data points",Object.keys(compData).length],["Ledger entries",ledgerEntries.length],["Custom accounts",customAccounts.length],["Boardroom sessions",brSessions.length],["Workflows",workflows.length],["Queue tasks",tQueue.length]].map(([lb,n])=>(
                     <div key={lb} style={{background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:5,padding:"8px 10px",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:10,color:"#8892B0"}}>{lb}</span><span style={{fontSize:10,fontWeight:700,color:"#14B8A6"}}>{n}</span></div>
+                  ))}
+                </div>
+                <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid #1a2030"}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginBottom:8}}>Admin - Section Visibility</div>
+                  {[["ledgerEnabled","General Ledger"],["dispatchEnabled","Pulse Agentic"]].map(([key,lb])=>(
+                    <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0"}}>
+                      <span style={{fontSize:11,color:"#A0AAC0"}}>{lb}</span>
+                      <button onClick={()=>{const nc={...adminConfig,[key]:!adminConfig[key]};setAdminConfig(nc);sv("cos-admin-config",nc);showToast(lb+(nc[key]?" enabled":" disabled"),"info");}} style={{width:38,height:20,borderRadius:10,border:"none",background:adminConfig[key]?"#14B8A6":"#1a2030",cursor:"pointer",position:"relative",transition:"background 0.2s"}}>
+                        <span style={{position:"absolute",top:2,left:adminConfig[key]?20:2,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left 0.2s"}}/>
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
