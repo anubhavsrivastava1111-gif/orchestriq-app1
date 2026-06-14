@@ -116,9 +116,11 @@ interface LedgerProps{
   S:any;
   showToast:(m:string,t?:string)=>void;
   ask:(sys:string,msgs:any[],maxT?:number)=>Promise<string>;
+  MicButton:any;
+  vLang:string;
 }
 
-export default function Ledger({cur,entries,setEntries,customAccounts,setCustomAccounts,sv,S,showToast,ask}:LedgerProps){
+export default function Ledger({cur,entries,setEntries,customAccounts,setCustomAccounts,sv,S,showToast,ask,MicButton,vLang}:LedgerProps){
   const [tab,setTab]=useState("ai");
   const accounts=getAllAccounts(customAccounts);
 
@@ -354,9 +356,10 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
           </div>
 
           {!aiProposal&&!aiQuestion&&(
-            <div style={{display:"flex",gap:6,marginBottom:10}}>
+            <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"flex-end"}}>
               <textarea style={{...S.inp,flex:1,minHeight:60,resize:"vertical"}} value={aiInput} onChange={e=>setAiInput(e.target.value)} placeholder="Describe the transaction..." disabled={aiThinking}/>
-              <button onClick={startAI} disabled={aiThinking||!aiInput.trim()} style={{...S.pBtn,width:"auto",padding:"10px 18px",marginTop:0,alignSelf:"flex-end",opacity:aiThinking||!aiInput.trim()?0.4:1}}>{aiThinking?"Thinking...":"Submit"}</button>
+              <MicButton lang={vLang} onResult={(t:string)=>setAiInput(prev=>(prev?prev+" ":"")+t)} disabled={aiThinking}/>
+              <button onClick={startAI} disabled={aiThinking||!aiInput.trim()} style={{...S.pBtn,width:"auto",padding:"10px 18px",marginTop:0,opacity:aiThinking||!aiInput.trim()?0.4:1}}>{aiThinking?"Thinking...":"Submit"}</button>
             </div>
           )}
 
