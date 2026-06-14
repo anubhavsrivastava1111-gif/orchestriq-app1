@@ -124,6 +124,10 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
   const [tab,setTab]=useState("ai");
   const accounts=getAllAccounts(customAccounts);
 
+  const [obDate,setObDate]=useState(new Date().toISOString().slice(0,10));
+  const [ob,setOb]=useState({cash:"",bank:"",receivable:"",inventory:"",equipment:"",building:"",vehicles:"",payable:"",shortLoan:"",longLoan:"",capital:""});
+  const [obDone,setObDone]=useState(()=>entries.some(e=>e.narration==="Opening Balance"));
+
   const [date,setDate]=useState(new Date().toISOString().slice(0,10));
   const [narration,setNarration]=useState("");
   const [lines,setLines]=useState<JournalLine[]>([{accountCode:"",debit:0,credit:0},{accountCode:"",debit:0,credit:0}]);
@@ -162,6 +166,32 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
     return true;
   };
 
+  const postOpeningBalance=()=>{
+    const n=(v:string)=>parseFloat(v.replace(/,/g,""))||0;
+    const obLines:JournalLine[]=[];
+    const assetMap:[string,string][]=[["cash","1000"],["bank","1010"],["receivable","1100"],["inventory","1200"],["equipment","1500"],["building","1510"],["vehicles","1520"]];
+    const liabMap:[string,string][]=[["payable","2000"],["shortLoan","2100"],["longLoan","2500"]];
+    let totalAssets=0,totalLiab=0;
+    assetMap.forEach(([k,code])=>{const v=n((ob as any)[k]);if(v>0){obLines.push({accountCode:code,debit:v,credit:0});totalAssets+=v;}});
+    liabMap.forEach(([k,code])=>{const v=n((ob as any)[k]);if(v>0){obLines.push({accountCode:code,debit:0,credit:v});totalLiab+=v;}});
+    const capitalEntered=n(ob.capital);
+    if(capitalEntered>0){obLines.push({accountCode:"3000",debit:0,credit:capitalEntered});}
+    const residual=totalAssets-totalLiab-capitalEntered;
+    if(Math.abs(residual)>0.01){
+      if(residual>0)obLines.push({accountCode:"3000",debit:0,credit:residual});
+      else obLines.push({accountCode:"3000",debit:-residual,credit:0});
+    }
+    if(obLines.length<2){showToast("Enter at least two values to record opening balances","error");return;}
+    const entry:JournalEntry={id:Date.now(),date:obDate,narration:"Opening Balance",lines:obLines};
+    const updated=[...entries,entry];
+    setEntries(updated);sv("cos-ledger",updated);
+    setObDone(true);
+    showToast("Opening balances recorded","success");
+  };
+
+  const skipOpeningBalance=()=>{
+    setObDone(true);
+  };
   const postManual=()=>{
     if(postEntry()){
       setNarration("");setLines([{accountCode:"",debit:0,credit:0},{accountCode:"",debit:0,credit:0}]);
@@ -291,6 +321,35 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
         ))}
       </div>
 
+      {!obDone&&!entries.length&&(
+        <div style={{background:"linear-gradient(135deg,rgba(20,184,166,0.06),rgba(59,130,246,0.04))",border:"1px solid rgba(20,184,166,0.25)",borderRadius:9,padding:"14px 16px",marginBottom:14}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#14B8A6",marginBottom:4}}>Set Up Opening Balances</div>
+          <div style={{fontSize:11,color:"#A0AAC0",marginBottom:12,lineHeight:1.6}}>If your business already has cash, a bank balance, loans, or assets, enter them here so your Ledger starts accurate. You can skip this and add entries later.</div>
+          <div style={{marginBottom:8}}><label style={S.lbl}>As of Date</label><input type="date" style={{...S.inp,maxWidth:200}} value={obDate} onChange={e=>setObDate(e.target.value)}/></div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginBottom:8}}>
+            <div><label style={S.lbl}>Cash on Hand</label><input style={S.inp} type="number" value={ob.cash} onChange={e=>setOb({...ob,cash:e.target.value})} placeholder="0"/></div>
+            <div><label style={S.lbl}>Bank Balance</label><input style={S.inp} type="number" value={ob.bank} onChange={e=>setOb({...ob,bank:e.target.value})} placeholder="0"/></div>
+            <div><label style={S.lbl}>Accounts Receivable</label><input style={S.inp} type="number" value={ob.receivable} onChange={e=>setOb({...ob,receivable:e.target.value})} placeholder="0"/></div>
+            <div><label style={S.lbl}>Inventory</label><input style={S.inp} type="number" value={ob.inventory} onChange={e=>setOb({...ob,inventory:e.target.value})} placeholder="0"/></div>
+            <div><label style={S.lbl}>Equipment</label><input style={S.inp} type="number" value={ob.equipment} onChange={e=>setOb({...ob,equipment:e.target.value})} placeholder="0"/></div>
+            <div><label style={S.lbl}>Building</label><input style={S.inp} type="number" value={ob.building} onChange={e=>setOb({...ob,building:e.target.value})} placeholder="0"/></div>
+            <div><label style={S.lbl}>Vehicles</label><input style={S.inp} type="number" value={ob.vehicles} onChange={e=>setOb({...ob,vehicles:e.target.value})} placeholder="0"/></div>
+            <div><label style={S.lbl}>Accounts Payable</label><input style={S.inp} type="number" value={ob.payable} onChange={e=>setOb({...ob,payable:e.target.value})} placeholder="0"/></div>
+            <div><label style={S.lbl}>Short-term Loan</label><input style={S.inp} type="number" value={ob.shortLoan} onChange={e=>setOb({...ob,shortLoan:e.target.value})} placeholder="0"/></div>
+            <div><label style={S.lbl}>Long-term Bank Loan</label><input style={S.inp} type="number" value={ob.longLoan} onChange={e=>setOb({...ob,longLoan:e.target.value})} placeholder="0"/></div>
+            <div><label style={S.lbl}>Owner's Capital (if known)</label><input style={S.inp} type="number" value={ob.capital} onChange={e=>setOb({...ob,capital:e.target.value})} placeholder="0"/></div>
+          </div>
+          <div style={{fontSize:9,color:"#5A6480",marginBottom:10,lineHeight:1.5}}>Any difference between assets and (liabilities + capital) will be automatically recorded as Owner's Equity.</div>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={postOpeningBalance} style={{...S.pBtn,marginTop:0,flex:1}}>Save Opening Balances</button>
+            <button onClick={skipOpeningBalance} style={{...S.hBtn,padding:"10px 16px"}}>Skip for now</button>
+          </div>
+        </div>
+      )}
+
+      {tab==="ai"&&(
+        <div>
+          <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"10px 12px",marginBottom:10,fontSize:11,color:"#A0AAC0",lineHeight:1.7}}>
       {tab==="ai"&&(
         <div>
           <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"10px 12px",marginBottom:10,fontSize:11,color:"#A0AAC0",lineHeight:1.7}}>
