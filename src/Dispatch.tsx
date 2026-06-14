@@ -80,9 +80,6 @@ const cpHelper=(t:string,showToast:(m:string,ty?:string)=>void)=>{try{navigator.
 function AIDisclaimer(){
   return <div style={{fontSize:9,color:"#5A6480",marginTop:6,lineHeight:1.5,fontStyle:"italic"}}>⚠ AI-generated — please review and verify before sending or posting.</div>;
 }
-function AIDisclaimer(){
-  return <div style={{fontSize:9,color:"#5A6480",marginTop:6,lineHeight:1.5,fontStyle:"italic"}}>⚠ AI-generated — please review and verify before sending or posting.</div>;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AGENT 2: Meeting Notes to Action Items
@@ -255,7 +252,7 @@ function VarianceAgent({S,showToast,ask,MicButton,vLang}:{S:any,showToast:(m:str
         <MicButton lang={vLang} onResult={(t:string)=>setContext(prev=>(prev?prev+" ":"")+t)} disabled={running}/>
       </div>
       <button onClick={run} disabled={running||!current.trim()||!previous.trim()} style={{...S.pBtn,marginTop:0,opacity:running||!current.trim()||!previous.trim()?0.4:1}}>{running?"Analyzing...":"Explain Variance"}</button>
-{output&&(
+      {output&&(
         <div style={{marginTop:12}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
             <label style={{...S.lbl,marginBottom:0}}>Explanation (editable)</label>
