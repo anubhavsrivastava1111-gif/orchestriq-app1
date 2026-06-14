@@ -1,6 +1,7 @@
 import { getExecutivesCached } from "./lib/executives";
 import Ledger, { type JournalEntry } from "./Ledger";
 import Dispatch, { type DispatchTemplate } from "./Dispatch";
+import ActionTracker, { ExtractReviewModal, extractItemsFromJSON, EXTRACTION_PROMPT, type ActionItem, type ExtractedItem } from "./ActionTracker";
 import type { Executive } from "./lib/executives";
 import {
   COMPRESSION_ENABLED,
@@ -976,7 +977,10 @@ export default function App(){
   const [ledgerEntries,setLedgerEntries]=useState<JournalEntry[]>([]);
   const [customAccounts,setCustomAccounts]=useState<any[]>([]);
   const [dispatchTemplates,setDispatchTemplates]=useState<DispatchTemplate[]>([]);
-  const [adminConfig,setAdminConfig]=useState<{[k:string]:boolean}>({ledgerEnabled:true,dispatchEnabled:true});
+  const [actionItems,setActionItems]=useState<ActionItem[]>([]);
+  const [extractModal,setExtractModal]=useState<{items:ExtractedItem[];sourceType:ActionItem["source"];sourceLabel:string}|null>(null);
+  const [extracting,setExtracting]=useState<string|null>(null); // which source is currently extracting
+  const [adminConfig,setAdminConfig]=useState<{[k:string]:boolean}>({ledgerEnabled:true,dispatchEnabled:true,actionsEnabled:true});
   const [dataF,setDataF]=useState({k:"",v:""});
   const [view,setView]=useState("nerve");
   const [nTab,setNTab]=useState("boardroom");
@@ -1093,6 +1097,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{const le=localStorage.getItem("cos-ledger");if(le)setLedgerEntries(JSON.parse(le));}catch{}
     try{const ca=localStorage.getItem("cos-accounts");if(ca)setCustomAccounts(JSON.parse(ca));}catch{}
     try{const dt=localStorage.getItem("cos-dispatch-templates");if(dt)setDispatchTemplates(JSON.parse(dt));}catch{}
+    try{const acts=localStorage.getItem("cos-actions");if(acts)setActionItems(JSON.parse(acts));}catch{}
     try{const ac=localStorage.getItem("cos-admin-config");if(ac)setAdminConfig({...adminConfig,...JSON.parse(ac)});}catch{}
     try{const br=localStorage.getItem("cos-br");if(br)setBrSessions(JSON.parse(br));}catch{}
     try{const dn=localStorage.getItem("cos-dn");if(dn){const parsed=JSON.parse(dn);setDnCfg(parsed);setLocalDn(parsed);}}catch{}
@@ -1154,6 +1159,31 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   };
 
   const ask=async(sys,msgs,maxT)=>(await callMulti(keys,defP,sys,msgs,maxT)).primary;
+
+  // Extracts candidate action items from a Boardroom/Autopilot/TimeMachine output and opens the review modal
+  const extractActionItems=async(sourceType:ActionItem["source"],sourceLabel:string,content:string)=>{
+    if(!content?.trim())return;
+    setExtracting(sourceType);
+    try{
+      const sys="You are an execution analyst. "+EXTRACTION_PROMPT;
+      const result=await ask(sys,[{role:"user",content:"STRATEGIC OUTPUT:\n\n"+content}],800);
+      const items=extractItemsFromJSON(result);
+      if(!items||!items.length){showToast("Could not extract action items from this output","error");return;}
+      setExtractModal({items,sourceType,sourceLabel});
+    }catch(e:any){
+      showToast("Extraction failed: "+e.message,"error");
+    }finally{
+      setExtracting(null);
+    }
+  };
+
+  const confirmExtractedItems=(items:ActionItem[])=>{
+    const updated=[...items,...actionItems];
+    setActionItems(updated);sv("cos-actions",updated);
+    setExtractModal(null);
+    showToast(items.length+" action item(s) added to tracker","success");
+  };
+</parameter>
 
   // Vision-capable call for Pulse Agentic (Dispatch). Uses Claude directly since it
   // supports image content blocks; falls back with a clear error if no Claude key.
@@ -1674,10 +1704,11 @@ const processTask=useCallback(async(task:any)=>{
     setSelRole(null);setChats({});setCompData({});setBrSessions([]);setShowSettings(false);
     setWorkflows([]);tQRef.current=[];setTQueue([]);setConfirmReset(null);
   };
-  const exportAll=()=>dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",{version:VERSION,exported:new Date().toISOString(),company:co,companyData:compData,ledgerEntries,customAccounts,dispatchTemplates,adminConfig,chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue});
+  const exportAll=()=>dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",{version:VERSION,exported:new Date().toISOString(),company:co,companyData:compData,ledgerEntries,customAccounts,dispatchTemplates,adminConfig,actionItems,chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue});
   const importData=file=>{const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.company){setCo(d.company);sv("cos-co",d.company);}if(d.companyData){setCompData(d.companyData);sv("cos-cd",d.companyData);}if(d.ledgerEntries){setLedgerEntries(d.ledgerEntries);sv("cos-ledger",d.ledgerEntries);}if(d.customAccounts){setCustomAccounts(d.customAccounts);sv("cos-accounts",d.customAccounts);}
 if(d.dispatchTemplates){setDispatchTemplates(d.dispatchTemplates);sv("cos-dispatch-templates",d.dispatchTemplates);}
-if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admin-config",d.adminConfig);}if(d.chats){setChats(d.chats);sv("cos-ch",d.chats);}if(d.boardroomSessions){setBrSessions(d.boardroomSessions);sv("cos-br",d.boardroomSessions);}if(d.workflows){setWorkflows(d.workflows);sv("cos-wf",d.workflows);}if(d.taskQueue){tQRef.current=d.taskQueue;setTQueue(d.taskQueue);sv("cos-tq",d.taskQueue);}setResumeInfo(null);showToast("Workspace loaded — continue where you left off","success");}catch{showToast("Invalid workspace file","error");}};r.readAsText(file);};
+if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admin-config",d.adminConfig);}
+if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);}if(d.chats){setChats(d.chats);sv("cos-ch",d.chats);}if(d.boardroomSessions){setBrSessions(d.boardroomSessions);sv("cos-br",d.boardroomSessions);}if(d.workflows){setWorkflows(d.workflows);sv("cos-wf",d.workflows);}if(d.taskQueue){tQRef.current=d.taskQueue;setTQueue(d.taskQueue);sv("cos-tq",d.taskQueue);}setResumeInfo(null);showToast("Workspace loaded — continue where you left off","success");}catch{showToast("Invalid workspace file","error");}};r.readAsText(file);};
 
   // FEATURE 4 & 5: Export Studio generation
   const runExport=useCallback(async()=>{
@@ -1875,8 +1906,8 @@ if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admi
               style={{...S.pill,...(co.stage===st.id?{borderColor:"#14B8A6",color:"#14B8A6",background:"rgba(20,184,166,0.08)"}:{})}}>{st.ic}</button>
           ))}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat("+([true,true,true,true,true,adminConfig.ledgerEnabled,adminConfig.dispatchEnabled,true].filter(Boolean).length)+",1fr)",gap:1,padding:"2px 6px 4px"}}>
-          {[["nerve","🧠","Nerve"],["workflow","⚡","Flow"],["p3","🤖","Auto"],["chat","💬","Chat"],["data","🗄️","Data"],["ledger","📒","Ledger"],["dispatch","📡","Pulse"],["studio","🎨","Studio"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).map(([v,ic,lb])=>(
+        <div style={{display:"grid",gridTemplateColumns:"repeat("+([true,true,true,true,true,adminConfig.ledgerEnabled,adminConfig.dispatchEnabled,adminConfig.actionsEnabled,true].filter(Boolean).length)+",1fr)",gap:1,padding:"2px 6px 4px"}}>
+          {[["nerve","🧠","Nerve"],["workflow","⚡","Flow"],["p3","🤖","Auto"],["chat","💬","Chat"],["data","🗄️","Data"],["ledger","📒","Ledger"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
             <button key={v} onClick={()=>setView(v)} style={{...S.nTab,...(view===v?{background:"rgba(20,184,166,0.08)",color:"#14B8A6",borderColor:"rgba(20,184,166,0.18)"}:{})}}>
               <span style={{fontSize:10}}>{ic}</span><span style={{fontSize:6,fontWeight:600}}>{lb}</span>
             </button>
@@ -1967,11 +1998,12 @@ if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admi
                       <div style={{background:"linear-gradient(135deg,rgba(20,184,166,0.06),rgba(59,130,246,0.04))",borderRadius:8,padding:"14px 16px",border:"1px solid rgba(20,184,166,0.18)"}}>
                         <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
                           <div style={{fontSize:12,fontWeight:800,color:"#14B8A6"}}>BOARDROOM SYNTHESIS</div>
-                          <div style={{display:"flex",gap:4}}>
+                          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                             <button onClick={()=>cp(brCur.synthesis)} style={S.hBtn}>Copy</button>
                             <button onClick={()=>quickExport("pdf","executive","Boardroom — "+brCur.q,brCur.synthesis)} style={S.hBtn}>📄 PDF</button>
                             <button onClick={()=>quickExport("pptx","strategy","Boardroom — "+brCur.q,brCur.synthesis)} style={S.hBtn}>📊 PPT</button>
                             <button onClick={()=>dlFile("Synthesis-"+Date.now()+".md","# "+brCur.q+"\n\n"+brCur.synthesis,"text/markdown")} style={S.hBtn}>MD</button>
+                            <button onClick={()=>extractActionItems("boardroom","Boardroom — \""+brCur.q+"\"",brCur.synthesis)} disabled={extracting==="boardroom"} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>{extracting==="boardroom"?"Extracting...":"✅ Extract Action Items"}</button>
                           </div>
                         </div>
                         <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={brCur.synthesis}/></div>
@@ -1998,7 +2030,7 @@ if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admi
                     </div>
                   </div>
                   {tmRun&&<div style={{fontSize:10,color:"#8B5CF6",marginBottom:8,display:"flex",alignItems:"center",gap:5}}><span style={{width:5,height:5,borderRadius:"50%",background:"#8B5CF6",display:"inline-block",animation:"pulse 1s infinite"}}/> Running simulation… (up to 60s)</div>}
-                  {tmRes&&<div style={{animation:"fadeIn 0.3s"}}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4,gap:4}}><button onClick={()=>cp(tmRes)} style={S.hBtn}>Copy</button><button onClick={()=>quickExport("pdf","detailed","Time Machine — "+tmDec.slice(0,40),tmRes)} style={S.hBtn}>📄 PDF</button><button onClick={()=>quickExport("pptx","strategy","Time Machine Simulation",tmRes)} style={S.hBtn}>📊 PPT</button><button onClick={()=>dlFile("TimeMachine-"+Date.now()+".md",tmDec+"\n\n"+tmRes,"text/markdown")} style={S.hBtn}>MD</button></div><div style={{background:"#131825",borderRadius:8,padding:"14px 16px",border:"1px solid rgba(139,92,246,0.18)"}}><div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={tmRes} ac="#8B5CF6"/></div></div></div>}
+                  {tmRes&&<div style={{animation:"fadeIn 0.3s"}}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4,gap:4,flexWrap:"wrap"}}><button onClick={()=>cp(tmRes)} style={S.hBtn}>Copy</button><button onClick={()=>quickExport("pdf","detailed","Time Machine — "+tmDec.slice(0,40),tmRes)} style={S.hBtn}>📄 PDF</button><button onClick={()=>quickExport("pptx","strategy","Time Machine Simulation",tmRes)} style={S.hBtn}>📊 PPT</button><button onClick={()=>dlFile("TimeMachine-"+Date.now()+".md",tmDec+"\n\n"+tmRes,"text/markdown")} style={S.hBtn}>MD</button><button onClick={()=>extractActionItems("timemachine","Time Machine — \""+tmDec.slice(0,40)+"\"",tmRes)} disabled={extracting==="timemachine"} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>{extracting==="timemachine"?"Extracting...":"✅ Extract Action Items"}</button></div><div style={{background:"#131825",borderRadius:8,padding:"14px 16px",border:"1px solid rgba(139,92,246,0.18)"}}><div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={tmRes} ac="#8B5CF6"/></div></div></div>}
                   {error&&nTab==="timemachine"&&<div style={S.errB}>⚠️ {error}<div style={{display:"flex",gap:4}}><button onClick={runTM} style={S.retBtn}>Retry</button><button onClick={()=>setError(null)} style={{...S.retBtn,background:"#3A4060"}}>Dismiss</button></div></div>}
                 </div>
               )}
@@ -2013,7 +2045,7 @@ if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admi
                     {apRun&&<button onClick={()=>{cancelRef.current.ap=true;}} style={{...S.cancelBtn,alignSelf:"flex-end",marginBottom:6}}>Cancel</button>}
                   </div>
                   {apRun&&<div style={{fontSize:10,color:"#F59E0B",marginBottom:8,display:"flex",alignItems:"center",gap:5}}><span style={{width:5,height:5,borderRadius:"50%",background:"#F59E0B",display:"inline-block",animation:"pulse 1s infinite"}}/> Scanning all decision vectors… (up to 60s)</div>}
-                  {apRes&&<div style={{animation:"fadeIn 0.3s"}}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4,gap:4}}><button onClick={()=>cp(apRes)} style={S.hBtn}>Copy</button><button onClick={()=>quickExport("pdf","executive","Decision Autopilot Scan",apRes)} style={S.hBtn}>📄 PDF</button><button onClick={()=>quickExport("pptx","briefing","Decision Autopilot",apRes)} style={S.hBtn}>📊 PPT</button><button onClick={()=>dlFile("Autopilot-"+Date.now()+".md",apRes,"text/markdown")} style={S.hBtn}>MD</button></div><div style={{background:"#131825",borderRadius:8,padding:"14px 16px",border:"1px solid rgba(245,158,11,0.18)"}}><div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={apRes} ac="#F59E0B"/></div></div></div>}
+                  {apRes&&<div style={{animation:"fadeIn 0.3s"}}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4,gap:4,flexWrap:"wrap"}}><button onClick={()=>cp(apRes)} style={S.hBtn}>Copy</button><button onClick={()=>quickExport("pdf","executive","Decision Autopilot Scan",apRes)} style={S.hBtn}>📄 PDF</button><button onClick={()=>quickExport("pptx","briefing","Decision Autopilot",apRes)} style={S.hBtn}>📊 PPT</button><button onClick={()=>dlFile("Autopilot-"+Date.now()+".md",apRes,"text/markdown")} style={S.hBtn}>MD</button><button onClick={()=>extractActionItems("autopilot","Decision Autopilot Scan",apRes)} disabled={extracting==="autopilot"} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>{extracting==="autopilot"?"Extracting...":"✅ Extract Action Items"}</button></div><div style={{background:"#131825",borderRadius:8,padding:"14px 16px",border:"1px solid rgba(245,158,11,0.18)"}}><div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={apRes} ac="#F59E0B"/></div></div></div>}
                   {error&&nTab==="autopilot"&&<div style={S.errB}>⚠️ {error}<div style={{display:"flex",gap:4}}><button onClick={runAP} style={S.retBtn}>Retry</button><button onClick={()=>setError(null)} style={{...S.retBtn,background:"#3A4060"}}>Dismiss</button></div></div>}
                 </div>
               )}
@@ -2340,6 +2372,11 @@ if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admi
   <Dispatch templates={dispatchTemplates} setTemplates={setDispatchTemplates} sv={sv} S={S} showToast={showToast} ask={ask} askVision={askVision} MicButton={MicButton} vLang={vLang}/>
 )}
 
+        {/* ACTION TRACKER */}
+{view==="actions"&&(
+  <ActionTracker items={actionItems} setItems={setActionItems} sv={sv} S={S} showToast={showToast} AR={AR}/>
+)}
+
         {/* DATA HUB */}
         {view==="data"&&(
           <div style={{flex:1,padding:"14px 18px",overflowY:"auto"}}>
@@ -2663,7 +2700,7 @@ if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admi
                 </div>
                 <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid #1a2030"}}>
                   <div style={{fontSize:10,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginBottom:8}}>Admin - Section Visibility</div>
-                  {[["ledgerEnabled","General Ledger"],["dispatchEnabled","Pulse Agentic"]].map(([key,lb])=>(
+                  {[["ledgerEnabled","General Ledger"],["dispatchEnabled","Pulse Agentic"],["actionsEnabled","Action Tracker"]].map(([key,lb])=>(
                     <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0"}}>
                       <span style={{fontSize:11,color:"#A0AAC0"}}>{lb}</span>
                       <button onClick={()=>{const nc={...adminConfig,[key]:!adminConfig[key]};setAdminConfig(nc);sv("cos-admin-config",nc);showToast(lb+(nc[key]?" enabled":" disabled"),"info");}} style={{width:38,height:20,borderRadius:10,border:"none",background:adminConfig[key]?"#14B8A6":"#1a2030",cursor:"pointer",position:"relative",transition:"background 0.2s"}}>
@@ -2763,6 +2800,7 @@ if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admi
         </div>
       )}
 
+      {extractModal&&<ExtractReviewModal extracted={extractModal.items} sourceType={extractModal.sourceType} sourceLabel={extractModal.sourceLabel} onConfirm={confirmExtractedItems} onCancel={()=>setExtractModal(null)} AR={AR} S={S}/>}
       {showDonate&&<DonateModal cfg={dnCfg} presets={DONATION_PRESETS} onClose={()=>setShowDonate(false)} cur={cur} amt={dnAmt} setAmt={setDnAmt} custom={dnCustom} setCustom={setDnCustom} S={S}/>}
       <Toaster toasts={toasts} onDismiss={id=>setToasts(prev=>prev.filter(t=>t.id!==id))}/>
       <style>{CSS}</style>
