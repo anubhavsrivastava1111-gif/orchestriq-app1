@@ -2249,6 +2249,8 @@ const processTask=useCallback(async(task:any)=>{
     </div>
   </div>
 ))}
+          </div>
+        )}
 
         {/* PRESENTATION STUDIO — FEATURE 4/5/6 */}
         {view==="studio"&&(
