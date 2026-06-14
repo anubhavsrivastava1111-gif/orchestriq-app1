@@ -537,7 +537,15 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500){
   if(EFF_GEMINI?.trim())effectiveKeys.gemini=EFF_GEMINI;
   if(EFF_GROQ?.trim())effectiveKeys.groq=EFF_GROQ;
 
-  const active=getActiveProvider(defP,effectiveKeys,EFF_GROQ,EFF_GEMINI);
+  // If a paid provider (Claude or OpenAI) is configured, prefer it over free-tier providers
+  // unless the user explicitly chose a different default.
+  const paidConfigured=["claude","openai"].filter(p=>effectiveKeys[p]?.trim());
+  let active=getActiveProvider(defP,effectiveKeys,EFF_GROQ,EFF_GEMINI);
+  if(paidConfigured.length&&!paidConfigured.includes(defP)&&!effectiveKeys[active]?.trim()){
+    active=paidConfigured[0];
+  }else if(paidConfigured.includes(defP)&&effectiveKeys[defP]?.trim()){
+    active=defP;
+  }
   const key=effectiveKeys[active]?.trim();
 
   if(!key){
@@ -554,14 +562,19 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500){
   }catch(err:any){
     if(isRateLimit(err.message)){
       markProviderExhausted(active);
-      const fallback=active==="groq"?"gemini":"groq";
-      const fallbackKey=effectiveKeys[fallback]?.trim();
-      if(fallbackKey){
+      // Build fallback order: try other free provider first, then any configured paid provider
+      const fallbackOrder=[];
+      if(active==="groq")fallbackOrder.push("gemini");
+      if(active==="gemini")fallbackOrder.push("groq");
+      ["claude","openai"].forEach(p=>{if(p!==active&&effectiveKeys[p]?.trim())fallbackOrder.push(p);});
+      for(const fallback of fallbackOrder){
+        const fallbackKey=effectiveKeys[fallback]?.trim();
+        if(!fallbackKey)continue;
         try{
           const text=await callAI(fallback,fallbackKey,sys,msgs,maxT);
           return{primary:text};
         }catch(err2:any){
-          if(isRateLimit(err2.message))markProviderExhausted(fallback);
+          if(isRateLimit(err2.message)){markProviderExhausted(fallback);continue;}
           throw err2;
         }
       }
