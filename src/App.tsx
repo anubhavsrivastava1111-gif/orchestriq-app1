@@ -47,7 +47,7 @@ const TAGLINE = "The orchestration layer of intelligent business.";
 const STAGES = [{id:"idea",l:"Idea",ic:"💡"},{id:"formation",l:"Formation",ic:"📋"},{id:"mvp",l:"MVP",ic:"🚀"},{id:"funding",l:"Funding",ic:"💰"},{id:"growth",l:"Growth",ic:"📈"},{id:"mature",l:"Mature",ic:"🏛️"}];
 const CURRENCIES = [{code:"INR",sym:"₹",name:"Indian Rupee"},{code:"USD",sym:"$",name:"US Dollar"},{code:"EUR",sym:"€",name:"Euro"},{code:"GBP",sym:"£",name:"British Pound"},{code:"AUD",sym:"A$",name:"Australian Dollar"},{code:"CAD",sym:"C$",name:"Canadian Dollar"},{code:"SGD",sym:"S$",name:"Singapore Dollar"},{code:"AED",sym:"AED",name:"UAE Dirham"},{code:"CHF",sym:"Fr",name:"Swiss Franc"}];
 const MODELS = {
-  claude:{name:"Claude",company:"Anthropic",model:"claude-sonnet-4-5",placeholder:"sk-ant-...",color:"#D97757",keyUrl:"https://console.anthropic.com/settings/keys"},
+  claude:{name:"Claude",company:"Anthropic",model:"claude-haiku-4-5-20251001",placeholder:"sk-ant-...",color:"#D97757",keyUrl:"https://console.anthropic.com/settings/keys"},
   openai:{name:"ChatGPT",company:"OpenAI",model:"gpt-4o",placeholder:"sk-...",color:"#10A37F",keyUrl:"https://platform.openai.com/api-keys"},
   gemini:{name:"Gemini",company:"Google",model:"gemini-1.5-flash",placeholder:"AIza...",color:"#4285F4",keyUrl:"https://aistudio.google.com/app/apikey"},
   groq:{name:"Groq",company:"Groq",model:"llama-3.3-70b-versatile",placeholder:"gsk_...",color:"#F97316",keyUrl:"https://console.groq.com/keys"},
