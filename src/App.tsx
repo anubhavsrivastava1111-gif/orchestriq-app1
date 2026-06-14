@@ -35,10 +35,12 @@ import {
 const VERSION = "4.3.0";
 const SYS_GEMINI = import.meta.env.VITE_GEMINI_API_KEY || "";
 const SYS_GROQ = import.meta.env.VITE_GROQ_API_KEY || "";
+const SYS_CLAUDE = import.meta.env.VITE_CLAUDE_API_KEY || "";
 const USE_SYS_KEY = import.meta.env.VITE_USE_SYSTEM_KEY === "true";
 const EFF_GEMINI = USE_SYS_KEY && SYS_GEMINI ? SYS_GEMINI : "";
 const EFF_GROQ = USE_SYS_KEY && SYS_GROQ ? SYS_GROQ : "";
-console.log("[OIQ-DIAG] USE_SYS_KEY:",USE_SYS_KEY,"| SYS_GEMINI present:",!!SYS_GEMINI,"| SYS_GROQ present:",!!SYS_GROQ,"| EFF_GEMINI:",!!EFF_GEMINI,"| EFF_GROQ:",!!EFF_GROQ);
+const EFF_CLAUDE = USE_SYS_KEY && SYS_CLAUDE ? SYS_CLAUDE : "";
+console.log("[OIQ-DIAG] USE_SYS_KEY:",USE_SYS_KEY,"| SYS_GEMINI present:",!!SYS_GEMINI,"| SYS_GROQ present:",!!SYS_GROQ,"| SYS_CLAUDE present:",!!SYS_CLAUDE,"| EFF_GEMINI:",!!EFF_GEMINI,"| EFF_GROQ:",!!EFF_GROQ,"| EFF_CLAUDE:",!!EFF_CLAUDE);
 const BRAND = "OrchestrIQ";
 const TAGLINE = "The orchestration layer of intelligent business.";
 
@@ -536,12 +538,16 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500){
   const effectiveKeys={...keys};
   if(EFF_GEMINI?.trim())effectiveKeys.gemini=EFF_GEMINI;
   if(EFF_GROQ?.trim())effectiveKeys.groq=EFF_GROQ;
+  if(EFF_CLAUDE?.trim())effectiveKeys.claude=EFF_CLAUDE;
 
-  // If a paid provider (Claude or OpenAI) is configured, prefer it over free-tier providers
-  // unless the user explicitly chose a different default.
+  // Prefer a paid system-level provider (Claude) over free-tier providers for reliability,
+  // unless the user explicitly configured and selected a different default with their own key.
   const paidConfigured=["claude","openai"].filter(p=>effectiveKeys[p]?.trim());
   let active=getActiveProvider(defP,effectiveKeys,EFF_GROQ,EFF_GEMINI);
-  if(paidConfigured.length&&!paidConfigured.includes(defP)&&!effectiveKeys[active]?.trim()){
+  if(EFF_CLAUDE?.trim()&&!keys.claude?.trim()&&!keys.openai?.trim()){
+    // System Claude key present and user hasn't set their own paid key - use system Claude as primary
+    active="claude";
+  }else if(paidConfigured.length&&!paidConfigured.includes(defP)&&!effectiveKeys[active]?.trim()){
     active=paidConfigured[0];
   }else if(paidConfigured.includes(defP)&&effectiveKeys[defP]?.trim()){
     active=defP;
