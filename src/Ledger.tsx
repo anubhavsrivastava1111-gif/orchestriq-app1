@@ -116,11 +116,9 @@ interface LedgerProps{
   S:any;
   showToast:(m:string,t?:string)=>void;
   ask:(sys:string,msgs:any[],maxT?:number)=>Promise<string>;
-  MicButton:any;
-  vLang:string;
 }
 
-export default function Ledger({cur,entries,setEntries,customAccounts,setCustomAccounts,sv,S,showToast,ask,MicButton,vLang}:LedgerProps){
+export default function Ledger({cur,entries,setEntries,customAccounts,setCustomAccounts,sv,S,showToast,ask}:LedgerProps){
   const [tab,setTab]=useState("ai");
   const accounts=getAllAccounts(customAccounts);
 
@@ -192,6 +190,7 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
   const skipOpeningBalance=()=>{
     setObDone(true);
   };
+
   const postManual=()=>{
     if(postEntry()){
       setNarration("");setLines([{accountCode:"",debit:0,credit:0},{accountCode:"",debit:0,credit:0}]);
@@ -350,18 +349,14 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
       {tab==="ai"&&(
         <div>
           <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"10px 12px",marginBottom:10,fontSize:11,color:"#A0AAC0",lineHeight:1.7}}>
-      {tab==="ai"&&(
-        <div>
-          <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"10px 12px",marginBottom:10,fontSize:11,color:"#A0AAC0",lineHeight:1.7}}>
             Describe a transaction in plain language - for example: "I purchased a tractor for the business today, I paid by cash."
             The assistant will work out the correct double-entry treatment, ask follow-up questions if needed, and propose a journal entry for your review before posting.
           </div>
 
           {!aiProposal&&!aiQuestion&&(
-            <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"flex-end"}}>
+            <div style={{display:"flex",gap:6,marginBottom:10}}>
               <textarea style={{...S.inp,flex:1,minHeight:60,resize:"vertical"}} value={aiInput} onChange={e=>setAiInput(e.target.value)} placeholder="Describe the transaction..." disabled={aiThinking}/>
-              <MicButton lang={vLang} onResult={t=>setAiInput(prev=>(prev?prev+" ":"")+t)} disabled={aiThinking}/>
-              <button onClick={startAI} disabled={aiThinking||!aiInput.trim()} style={{...S.pBtn,width:"auto",padding:"10px 18px",marginTop:0,opacity:aiThinking||!aiInput.trim()?0.4:1}}>{aiThinking?"Thinking...":"Submit"}</button>
+              <button onClick={startAI} disabled={aiThinking||!aiInput.trim()} style={{...S.pBtn,width:"auto",padding:"10px 18px",marginTop:0,alignSelf:"flex-end",opacity:aiThinking||!aiInput.trim()?0.4:1}}>{aiThinking?"Thinking...":"Submit"}</button>
             </div>
           )}
 
