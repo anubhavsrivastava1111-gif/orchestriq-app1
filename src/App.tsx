@@ -2220,7 +2220,7 @@ const processTask=useCallback(async(task:any)=>{
               <MicButton lang={vLang} onResult={t=>setDataF(p=>({...p,v:(p.v?p.v+" ":"")+t}))}/>
               <button onClick={addD} style={{...S.pBtn,padding:"6px 14px",marginTop:0,fontSize:11,width:"auto"}}>+ Add</button>
             </div>
-           {!Object.keys(compData).length&&(
+{(
   <div style={{marginBottom:14}}>
     {[
       {cat:"Financial - Income",items:["Monthly Revenue","Monthly Operating Costs","COGS (Cost of Goods Sold)","Marketing Budget (Quarterly)"]},
