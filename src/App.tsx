@@ -2223,7 +2223,10 @@ const processTask=useCallback(async(task:any)=>{
            {!Object.keys(compData).length&&(
   <div style={{marginBottom:14}}>
     {[
-      {cat:"Financial",items:["Monthly Revenue","Monthly Operating Costs","Cash in Bank","Marketing Budget (Quarterly)","Gross Margin %"]},
+      {cat:"Financial - Income",items:["Monthly Revenue","Monthly Operating Costs","COGS (Cost of Goods Sold)","Marketing Budget (Quarterly)"]},
+      {cat:"Financial - Balance Sheet",items:["Current Assets","Current Liabilities","Total Debt","Total Equity","Total Assets","Inventory","Accounts Receivable","Accounts Payable","Cash in Bank"]},
+      {cat:"Equity & Cap Table",items:["Total Shares Outstanding","Founder Shareholding %","ESOP Pool %","Current Valuation"]},
+      {cat:"Customer Metrics",items:["Total Customers (Current)","Total Customers (Previous Period)","New Customers This Period","Churned Customers This Period","Customer Acquisition Cost (CAC)","Average Revenue Per User (ARPU)"]},
       {cat:"Operations",items:["Team Size (Total)","Key Vendors/Suppliers","Monthly Burn Rate"]},
       {cat:"Market",items:["Target Markets/Cities","Primary Customer Segment","Top 3 Competitors"]},
       {cat:"Product",items:["Core Product/Service","Pricing (per unit/service)","Unique Selling Proposition"]},
