@@ -29,15 +29,252 @@ interface DispatchProps{
   sv:(k:string,v:any)=>void;
   S:any;
   showToast:(m:string,t?:string)=>void;
+  ask:(sys:string,msgs:any[],maxT?:number)=>Promise<string>;
   askVision:(sys:string,userText:string,images:{data:string;mediaType:string}[])=>Promise<string>;
   MicButton:any;
   vLang:string;
 }
 
-export default function Dispatch({templates,setTemplates,sv,S,showToast,askVision,MicButton,vLang}:DispatchProps){
+const AGENTS=[
+  {id:"status_report",ic:"📡",name:"Status Report Generator",desc:"Turn a raw team update into your daily SLA/status report - using a template learned from your own samples.",setup:"One-time template setup required"},
+  {id:"meeting_notes",ic:"📝",name:"Meeting Notes to Action Items",desc:"Paste rough meeting notes or a transcript - get a clean table of Action | Owner | Deadline | Priority.",setup:"Ready to use"},
+  {id:"email_drafter",ic:"✉️",name:"Email Drafter",desc:"Turn bullet points into a polished, professionally-toned email or message.",setup:"Ready to use"},
+  {id:"variance",ic:"📊",name:"Variance Explainer",desc:"Paste today's numbers and yesterday's (or last period's) - get a written explanation of what changed and why it likely happened.",setup:"Ready to use"},
+];
+
+export default function Dispatch({templates,setTemplates,sv,S,showToast,ask,askVision,MicButton,vLang}:DispatchProps){
+  const [activeAgent,setActiveAgent]=useState<string|null>(null);
+
+  if(!activeAgent){
+    return(
+      <div style={{flex:1,padding:"14px 18px",overflowY:"auto"}}>
+        <h2 style={{fontSize:15,fontWeight:800,color:"#F1F5F9",marginBottom:2}}>Pulse Agentic</h2>
+        <p style={{fontSize:10,color:"#5A6480",marginBottom:14}}>A toolkit of small agents that turn your messy daily inputs into polished, ready-to-use output. Pick a tool to get started.</p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
+          {AGENTS.map(a=>(
+            <button key={a.id} onClick={()=>setActiveAgent(a.id)} style={{display:"flex",flexDirection:"column",alignItems:"flex-start",gap:6,padding:"14px",borderRadius:9,border:"1px solid #1a2030",background:"#131825",cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"left"}}>
+              <span style={{fontSize:22}}>{a.ic}</span>
+              <div style={{fontSize:12,fontWeight:700,color:"#F1F5F9"}}>{a.name}</div>
+              <div style={{fontSize:10,color:"#8892B0",lineHeight:1.6}}>{a.desc}</div>
+              <div style={{fontSize:9,color:a.setup==="Ready to use"?"#10B981":"#F59E0B",fontWeight:700,marginTop:2}}>{a.setup==="Ready to use"?"● Ready to use":"○ "+a.setup}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return(
+    <div style={{flex:1,padding:"14px 18px",overflowY:"auto"}}>
+      <button onClick={()=>setActiveAgent(null)} style={{...S.hBtn,marginBottom:10}}>← All Agents</button>
+      {activeAgent==="status_report"&&<StatusReportAgent templates={templates} setTemplates={setTemplates} sv={sv} S={S} showToast={showToast} askVision={askVision} MicButton={MicButton} vLang={vLang}/>}
+      {activeAgent==="meeting_notes"&&<MeetingNotesAgent S={S} showToast={showToast} ask={ask} MicButton={MicButton} vLang={vLang}/>}
+      {activeAgent==="email_drafter"&&<EmailDrafterAgent S={S} showToast={showToast} ask={ask} MicButton={MicButton} vLang={vLang}/>}
+      {activeAgent==="variance"&&<VarianceAgent S={S} showToast={showToast} ask={ask} MicButton={MicButton} vLang={vLang}/>}
+    </div>
+  );
+}
+
+const cpHelper=(t:string,showToast:(m:string,ty?:string)=>void)=>{try{navigator.clipboard.writeText(t);showToast("Copied to clipboard","success");}catch{showToast("Copy failed","error");}};
+
+function AIDisclaimer(){
+  return <div style={{fontSize:9,color:"#5A6480",marginTop:6,lineHeight:1.5,fontStyle:"italic"}}>⚠ AI-generated — please review and verify before sending or posting.</div>;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AGENT 2: Meeting Notes to Action Items
+// ═══════════════════════════════════════════════════════════════════════════
+function MeetingNotesAgent({S,showToast,ask,MicButton,vLang}:{S:any,showToast:(m:string,t?:string)=>void,ask:(sys:string,msgs:any[],maxT?:number)=>Promise<string>,MicButton:any,vLang:string}){
+  const [input,setInput]=useState("");
+  const [running,setRunning]=useState(false);
+  const [output,setOutput]=useState("");
+
+  const run=async()=>{
+    if(!input.trim())return;
+    setRunning(true);setOutput("");
+    try{
+      const sys=
+        "You extract action items from meeting notes or transcripts. Output a markdown table with columns: Action Item | Owner | Deadline | Priority (High/Medium/Low). "+
+        "If an owner or deadline isn't stated, write 'Not specified'. After the table, add a short 'Key Decisions' section (bullet list) if any decisions were made, and a 'Open Questions' section (bullet list) if anything was left unresolved. "+
+        "Output ONLY the formatted result, no preamble.";
+      const result=await ask(sys,[{role:"user",content:input.trim()}],1500);
+      setOutput(result.trim());
+    }catch(e:any){
+      showToast("Failed: "+e.message,"error");
+    }finally{
+      setRunning(false);
+    }
+  };
+
+  return(
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+        <span style={{fontSize:22}}>📝</span>
+        <div><h3 style={{fontSize:14,fontWeight:800,color:"#F1F5F9"}}>Meeting Notes to Action Items</h3><p style={{fontSize:10,color:"#5A6480"}}>Paste rough notes or a transcript - get a clean action items table.</p></div>
+      </div>
+      <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"10px 12px",margin:"10px 0",fontSize:11,color:"#A0AAC0",lineHeight:1.7}}>
+        Paste your raw meeting notes below - bullet points, a transcript, even messy typed notes work fine.
+      </div>
+      <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"flex-end"}}>
+        <textarea style={{...S.inp,flex:1,minHeight:140,resize:"vertical"}} value={input} onChange={e=>setInput(e.target.value)} placeholder="Paste meeting notes here..." disabled={running}/>
+        <MicButton lang={vLang} onResult={(t:string)=>setInput(prev=>(prev?prev+" ":"")+t)} disabled={running}/>
+      </div>
+      <button onClick={run} disabled={running||!input.trim()} style={{...S.pBtn,marginTop:0,opacity:running||!input.trim()?0.4:1}}>{running?"Extracting...":"Extract Action Items"}</button>
+      {output&&(
+        <div style={{marginTop:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <label style={{...S.lbl,marginBottom:0}}>Result (editable)</label>
+            <button onClick={()=>cpHelper(output,showToast)} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>Copy</button>
+          </div>
+          <textarea style={{...S.inp,minHeight:180,resize:"vertical",fontSize:11,lineHeight:1.7,fontFamily:"monospace"}} value={output} onChange={e=>setOutput(e.target.value)}/>
+          <AIDisclaimer/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AGENT 3: Email Drafter
+// ═══════════════════════════════════════════════════════════════════════════
+const TONES=["Professional","Friendly","Formal/Escalation","Apologetic","Assertive/Firm"];
+
+function EmailDrafterAgent({S,showToast,ask,MicButton,vLang}:{S:any,showToast:(m:string,t?:string)=>void,ask:(sys:string,msgs:any[],maxT?:number)=>Promise<string>,MicButton:any,vLang:string}){
+  const [input,setInput]=useState("");
+  const [tone,setTone]=useState("Professional");
+  const [recipient,setRecipient]=useState("");
+  const [running,setRunning]=useState(false);
+  const [output,setOutput]=useState("");
+
+  const run=async()=>{
+    if(!input.trim())return;
+    setRunning(true);setOutput("");
+    try{
+      const sys=
+        "You draft professional emails or chat messages from bullet points or rough notes. "+
+        "Tone requested: "+tone+". "+(recipient.trim()?"Recipient context: "+recipient.trim()+". ":"")+
+        "Write a complete, ready-to-send email with a subject line and body. Keep it concise - do not pad with unnecessary filler. "+
+        "Output ONLY the email (Subject: ... then body), no preamble or explanation.";
+      const result=await ask(sys,[{role:"user",content:input.trim()}],1200);
+      setOutput(result.trim());
+    }catch(e:any){
+      showToast("Failed: "+e.message,"error");
+    }finally{
+      setRunning(false);
+    }
+  };
+
+  return(
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+        <span style={{fontSize:22}}>✉️</span>
+        <div><h3 style={{fontSize:14,fontWeight:800,color:"#F1F5F9"}}>Email Drafter</h3><p style={{fontSize:10,color:"#5A6480"}}>Turn bullet points into a polished, ready-to-send email.</p></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,margin:"10px 0"}}>
+        <div>
+          <label style={S.lbl}>Tone</label>
+          <select style={{...S.inp,padding:"8px"}} value={tone} onChange={e=>setTone(e.target.value)}>
+            {TONES.map(t=><option key={t} value={t} style={{background:"#0a0e1a"}}>{t}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={S.lbl}>Recipient / Context (optional)</label>
+          <input style={S.inp} value={recipient} onChange={e=>setRecipient(e.target.value)} placeholder="e.g. Client leadership, my manager"/>
+        </div>
+      </div>
+      <label style={S.lbl}>Your Bullet Points / Rough Notes</label>
+      <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"flex-end"}}>
+        <textarea style={{...S.inp,flex:1,minHeight:120,resize:"vertical"}} value={input} onChange={e=>setInput(e.target.value)} placeholder="e.g. - need extension on Q2 report, 2 more days&#10;- waiting on data from finance team&#10;- want to keep tone polite but firm" disabled={running}/>
+        <MicButton lang={vLang} onResult={(t:string)=>setInput(prev=>(prev?prev+" ":"")+t)} disabled={running}/>
+      </div>
+      <button onClick={run} disabled={running||!input.trim()} style={{...S.pBtn,marginTop:0,opacity:running||!input.trim()?0.4:1}}>{running?"Drafting...":"Draft Email"}</button>
+      {output&&(
+        <div style={{marginTop:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <label style={{...S.lbl,marginBottom:0}}>Draft</label>
+            <button onClick={()=>cpHelper(output,showToast)} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>Copy</button>
+          </div>
+          <textarea style={{...S.inp,minHeight:180,resize:"vertical",fontSize:11,lineHeight:1.7}} value={output} onChange={e=>setOutput(e.target.value)}/>
+          <AIDisclaimer/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AGENT 4: Variance Explainer
+// ═══════════════════════════════════════════════════════════════════════════
+function VarianceAgent({S,showToast,ask,MicButton,vLang}:{S:any,showToast:(m:string,t?:string)=>void,ask:(sys:string,msgs:any[],maxT?:number)=>Promise<string>,MicButton:any,vLang:string}){
+  const [current,setCurrent]=useState("");
+  const [previous,setPrevious]=useState("");
+  const [context,setContext]=useState("");
+  const [running,setRunning]=useState(false);
+  const [output,setOutput]=useState("");
+
+  const run=async()=>{
+    if(!current.trim()||!previous.trim())return;
+    setRunning(true);setOutput("");
+    try{
+      const sys=
+        "You compare two sets of numbers/metrics (current period vs previous period) and write a clear, concise narrative explaining what changed and the likely reasons why, based on the context given. "+
+        "Structure: a short summary line, then for each metric that changed meaningfully, one or two sentences on the change (amount and %) and a plausible reason. End with a 'Worth Flagging' line if anything looks like it needs attention. "+
+        "Be specific with numbers. Output ONLY the narrative, no preamble.";
+      const userMsg="PREVIOUS PERIOD:\n"+previous.trim()+"\n\nCURRENT PERIOD:\n"+current.trim()+(context.trim()?"\n\nADDITIONAL CONTEXT:\n"+context.trim():"");
+      const result=await ask(sys,[{role:"user",content:userMsg}],1200);
+      setOutput(result.trim());
+    }catch(e:any){
+      showToast("Failed: "+e.message,"error");
+    }finally{
+      setRunning(false);
+    }
+  };
+
+  return(
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+        <span style={{fontSize:22}}>📊</span>
+        <div><h3 style={{fontSize:14,fontWeight:800,color:"#F1F5F9"}}>Variance Explainer</h3><p style={{fontSize:10,color:"#5A6480"}}>Paste two periods of numbers - get a written explanation of what changed.</p></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,margin:"10px 0"}}>
+        <div>
+          <label style={S.lbl}>Previous Period</label>
+          <textarea style={{...S.inp,minHeight:100,resize:"vertical"}} value={previous} onChange={e=>setPrevious(e.target.value)} placeholder="e.g. Pending tickets: 8&#10;Closed: 5&#10;New: 3" disabled={running}/>
+        </div>
+        <div>
+          <label style={S.lbl}>Current Period</label>
+          <textarea style={{...S.inp,minHeight:100,resize:"vertical"}} value={current} onChange={e=>setCurrent(e.target.value)} placeholder="e.g. Pending tickets: 12&#10;Closed: 2&#10;New: 6" disabled={running}/>
+        </div>
+      </div>
+      <label style={S.lbl}>Additional Context (optional - e.g. holidays, known issues)</label>
+      <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"flex-end"}}>
+        <textarea style={{...S.inp,flex:1,minHeight:60,resize:"vertical"}} value={context} onChange={e=>setContext(e.target.value)} placeholder="e.g. one team member was on leave, client delayed responses on 3 tickets" disabled={running}/>
+        <MicButton lang={vLang} onResult={(t:string)=>setContext(prev=>(prev?prev+" ":"")+t)} disabled={running}/>
+      </div>
+      <button onClick={run} disabled={running||!current.trim()||!previous.trim()} style={{...S.pBtn,marginTop:0,opacity:running||!current.trim()||!previous.trim()?0.4:1}}>{running?"Analyzing...":"Explain Variance"}</button>
+      {output&&(
+        <div style={{marginTop:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <label style={{...S.lbl,marginBottom:0}}>Explanation (editable)</label>
+            <button onClick={()=>cpHelper(output,showToast)} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>Copy</button>
+          </div>
+          <textarea style={{...S.inp,minHeight:160,resize:"vertical",fontSize:11,lineHeight:1.7}} value={output} onChange={e=>setOutput(e.target.value)}/>
+          <AIDisclaimer/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AGENT 1: Status Report Generator (template-based, original implementation)
+// ═══════════════════════════════════════════════════════════════════════════
+function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicButton,vLang}:{
+  templates:DispatchTemplate[],setTemplates:(t:DispatchTemplate[])=>void,sv:(k:string,v:any)=>void,S:any,showToast:(m:string,t?:string)=>void,
+  askVision:(sys:string,userText:string,images:{data:string;mediaType:string}[])=>Promise<string>,MicButton:any,vLang:string
+}){
   const [tab,setTab]=useState<"templates"|"new"|"run">("templates");
 
-  // ── New Template wizard state ──
   const [newName,setNewName]=useState("");
   const [trackerImg,setTrackerImg]=useState<{data:string;mediaType:string;preview:string}|null>(null);
   const [outputImg,setOutputImg]=useState<{data:string;mediaType:string;preview:string}|null>(null);
@@ -45,7 +282,6 @@ export default function Dispatch({templates,setTemplates,sv,S,showToast,askVisio
   const [inferring,setInferring]=useState(false);
   const [inferredDesc,setInferredDesc]=useState("");
 
-  // ── Run Report state ──
   const [runTemplateId,setRunTemplateId]=useState<number|null>(null);
   const [runUpdateText,setRunUpdateText]=useState("");
   const [runTrackerImg,setRunTrackerImg]=useState<{data:string;mediaType:string;preview:string}|null>(null);
@@ -66,7 +302,6 @@ export default function Dispatch({templates,setTemplates,sv,S,showToast,askVisio
     }
   };
 
-  // ── Step 1: AI infers template structure from samples ──
   const inferTemplate=async()=>{
     if(!trackerImg&&!outputText.trim()&&!outputImg){
       showToast("Upload a tracker screenshot and/or describe the output format","error");
@@ -125,7 +360,6 @@ export default function Dispatch({templates,setTemplates,sv,S,showToast,askVisio
     showToast("Template deleted","info");
   };
 
-  // ── Step 2: Run report using a saved template ──
   const runReport=async()=>{
     const tpl=templates.find(t=>t.id===runTemplateId);
     if(!tpl){showToast("Select a template first","error");return;}
@@ -156,20 +390,18 @@ export default function Dispatch({templates,setTemplates,sv,S,showToast,askVisio
     }
   };
 
-  const cp=(t:string)=>{try{navigator.clipboard.writeText(t);showToast("Copied to clipboard","success");}catch{showToast("Copy failed","error");}};
-
   return(
-    <div style={{flex:1,padding:"14px 18px",overflowY:"auto"}}>
-      <h2 style={{fontSize:15,fontWeight:800,color:"#F1F5F9",marginBottom:2}}>Pulse Agentic</h2>
-      <p style={{fontSize:10,color:"#5A6480",marginBottom:10}}>Turn raw daily updates into formatted reports - using templates learned from your own samples.</p>
-
-      <div style={{display:"flex",gap:3,marginBottom:14,flexWrap:"wrap"}}>
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+        <span style={{fontSize:22}}>📡</span>
+        <div><h3 style={{fontSize:14,fontWeight:800,color:"#F1F5F9"}}>Status Report Generator</h3><p style={{fontSize:10,color:"#5A6480"}}>Learn your report format once, then generate it daily from a quick update.</p></div>
+      </div>
+      <div style={{display:"flex",gap:3,margin:"10px 0",flexWrap:"wrap"}}>
         {[["templates","My Templates ("+templates.length+")"],["new","+ New Template"],["run","Run Report"]].map(([id,lb])=>(
           <button key={id} onClick={()=>setTab(id as any)} style={{padding:"5px 12px",borderRadius:5,fontSize:10,fontWeight:600,border:"1px solid "+(tab===id?"#14B8A6":"#1a2030"),background:tab===id?"rgba(20,184,166,0.08)":"transparent",color:tab===id?"#14B8A6":"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{lb}</button>
         ))}
       </div>
 
-      {/* MY TEMPLATES */}
       {tab==="templates"&&(
         <div>
           {!templates.length?(
@@ -193,7 +425,6 @@ export default function Dispatch({templates,setTemplates,sv,S,showToast,askVisio
         </div>
       )}
 
-      {/* NEW TEMPLATE */}
       {tab==="new"&&(
         <div>
           <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"10px 12px",marginBottom:12,fontSize:11,color:"#A0AAC0",lineHeight:1.7}}>
@@ -248,7 +479,6 @@ export default function Dispatch({templates,setTemplates,sv,S,showToast,askVisio
         </div>
       )}
 
-      {/* RUN REPORT */}
       {tab==="run"&&(
         <div>
           {!templates.length?(
@@ -287,9 +517,10 @@ export default function Dispatch({templates,setTemplates,sv,S,showToast,askVisio
                 <div style={{marginTop:12}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                     <label style={{...S.lbl,marginBottom:0}}>Generated Report</label>
-                    <button onClick={()=>cp(runOutput)} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>Copy</button>
+                    <button onClick={()=>cpHelper(runOutput,showToast)} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>Copy</button>
                   </div>
                   <textarea style={{...S.inp,minHeight:240,resize:"vertical",fontSize:11,lineHeight:1.7,fontFamily:"monospace"}} value={runOutput} onChange={e=>setRunOutput(e.target.value)}/>
+                  <AIDisclaimer/>
                 </div>
               )}
             </div>
@@ -299,4 +530,3 @@ export default function Dispatch({templates,setTemplates,sv,S,showToast,askVisio
     </div>
   );
 }
-
