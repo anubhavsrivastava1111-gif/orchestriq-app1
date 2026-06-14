@@ -1024,6 +1024,16 @@ useEffect(()=>{
   return ()=>{ clearTimeout(timer); clearInterval(interval); };
 },[]);
 
+  useEffect(()=>{
+  const TWENTY_MIN = 20 * 60 * 1000;
+  const interval = setInterval(()=>{
+    if(Object.keys(compData).length>0||ledgerEntries.length>0||Object.values(chats).some(c=>c?.length>0)){
+      showToast("Reminder: save your workspace (Settings > Workspace) so you don't lose your data","info");
+    }
+  }, TWENTY_MIN);
+  return ()=>clearInterval(interval);
+},[compData,ledgerEntries,chats,showToast]);
+
   const changeTheme=useCallback((id)=>{
     setTheme(id);applyTheme(id);sv("cos-theme",id);
   },[]);
@@ -1559,8 +1569,8 @@ const processTask=useCallback(async(task:any)=>{
     setSelRole(null);setChats({});setCompData({});setBrSessions([]);setShowSettings(false);
     setWorkflows([]);tQRef.current=[];setTQueue([]);setConfirmReset(null);
   };
-  const exportAll=()=>dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",{version:VERSION,exported:new Date().toISOString(),company:co,companyData:compData,chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue});
-  const importData=file=>{const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.company){setCo(d.company);sv("cos-co",d.company);}if(d.companyData){setCompData(d.companyData);sv("cos-cd",d.companyData);}if(d.chats){setChats(d.chats);sv("cos-ch",d.chats);}if(d.boardroomSessions){setBrSessions(d.boardroomSessions);sv("cos-br",d.boardroomSessions);}if(d.workflows){setWorkflows(d.workflows);sv("cos-wf",d.workflows);}if(d.taskQueue){tQRef.current=d.taskQueue;setTQueue(d.taskQueue);sv("cos-tq",d.taskQueue);}setResumeInfo(null);showToast("Workspace loaded — continue where you left off","success");}catch{showToast("Invalid workspace file","error");}};r.readAsText(file);};
+  const exportAll=()=>dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",{version:VERSION,exported:new Date().toISOString(),company:co,companyData:compData,ledgerEntries,customAccounts,chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue});
+  const importData=file=>{const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.company){setCo(d.company);sv("cos-co",d.company);}if(d.companyData){setCompData(d.companyData);sv("cos-cd",d.companyData);}if(d.ledgerEntries){setLedgerEntries(d.ledgerEntries);sv("cos-ledger",d.ledgerEntries);}if(d.customAccounts){setCustomAccounts(d.customAccounts);sv("cos-accounts",d.customAccounts);}if(d.chats){setChats(d.chats);sv("cos-ch",d.chats);}if(d.boardroomSessions){setBrSessions(d.boardroomSessions);sv("cos-br",d.boardroomSessions);}if(d.workflows){setWorkflows(d.workflows);sv("cos-wf",d.workflows);}if(d.taskQueue){tQRef.current=d.taskQueue;setTQueue(d.taskQueue);sv("cos-tq",d.taskQueue);}setResumeInfo(null);showToast("Workspace loaded — continue where you left off","success");}catch{showToast("Invalid workspace file","error");}};r.readAsText(file);};
 
   // FEATURE 4 & 5: Export Studio generation
   const runExport=useCallback(async()=>{
@@ -2535,7 +2545,7 @@ const processTask=useCallback(async(task:any)=>{
                 </div>
                 <div style={{marginTop:14,fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:0.8,marginBottom:6}}>Currently Stored</div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
-                  {[["Conversations",Object.values(chats).filter(c=>c?.length).length],["Data points",Object.keys(compData).length],["Boardroom sessions",brSessions.length],["Workflows",workflows.length],["Queue tasks",tQueue.length]].map(([lb,n])=>(
+                  {[["Conversations",Object.values(chats).filter(c=>c?.length).length],["Data points",Object.keys(compData).length],["Ledger entries",ledgerEntries.length],["Custom accounts",customAccounts.length],["Boardroom sessions",brSessions.length],["Workflows",workflows.length],["Queue tasks",tQueue.length]].map(([lb,n])=>(
                     <div key={lb} style={{background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:5,padding:"8px 10px",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:10,color:"#8892B0"}}>{lb}</span><span style={{fontSize:10,fontWeight:700,color:"#14B8A6"}}>{n}</span></div>
                   ))}
                 </div>
