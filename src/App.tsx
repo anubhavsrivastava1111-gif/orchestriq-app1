@@ -885,6 +885,7 @@ export default function App(){
   const [expD,setExpD]=useState({});
   const [compData,setCompData]=useState({});
   const [ledgerEntries,setLedgerEntries]=useState<JournalEntry[]>([]);
+  const [customAccounts,setCustomAccounts]=useState<any[]>([]);
   const [dataF,setDataF]=useState({k:"",v:""});
   const [view,setView]=useState("nerve");
   const [nTab,setNTab]=useState("boardroom");
@@ -999,6 +1000,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{const d=localStorage.getItem("cos-dp");if(d)setExpD(JSON.parse(d));}catch{}
     try{const cd=localStorage.getItem("cos-cd");if(cd)setCompData(JSON.parse(cd));}catch{}
     try{const le=localStorage.getItem("cos-ledger");if(le)setLedgerEntries(JSON.parse(le));}catch{}
+    try{const ca=localStorage.getItem("cos-accounts");if(ca)setCustomAccounts(JSON.parse(ca));}catch{}
     try{const br=localStorage.getItem("cos-br");if(br)setBrSessions(JSON.parse(br));}catch{}
     try{const dn=localStorage.getItem("cos-dn");if(dn){const parsed=JSON.parse(dn);setDnCfg(parsed);setLocalDn(parsed);}}catch{}
     try{const wf=localStorage.getItem("cos-wf");if(wf)setWorkflows(JSON.parse(wf));}catch{}
@@ -2213,7 +2215,7 @@ const processTask=useCallback(async(task:any)=>{
 
         {/* GENERAL LEDGER */}
 {view==="ledger"&&(
-  <Ledger cur={cur} entries={ledgerEntries} setEntries={setLedgerEntries} sv={sv} S={S} showToast={showToast}/>
+  <Ledger cur={cur} entries={ledgerEntries} setEntries={setLedgerEntries} customAccounts={customAccounts} setCustomAccounts={setCustomAccounts} sv={sv} S={S} showToast={showToast} ask={ask}/>
 )}
 
         {/* DATA HUB */}
