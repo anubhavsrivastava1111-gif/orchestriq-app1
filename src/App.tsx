@@ -2294,7 +2294,7 @@ const processTask=useCallback(async(task:any)=>{
 
         {/* GENERAL LEDGER */}
 {view==="ledger"&&(
-  <Ledger cur={cur} entries={ledgerEntries} setEntries={setLedgerEntries} customAccounts={customAccounts} setCustomAccounts={setCustomAccounts} sv={sv} S={S} showToast={showToast} ask={ask}/>
+  <Ledger cur={cur} entries={ledgerEntries} setEntries={setLedgerEntries} customAccounts={customAccounts} setCustomAccounts={setCustomAccounts} sv={sv} S={S} showToast={showToast} ask={ask} MicButton={MicButton} vLang={vLang}/>
 )}
 
         {/* DATA HUB */}
