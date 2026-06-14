@@ -1,5 +1,6 @@
 import { getExecutivesCached } from "./lib/executives";
 import Ledger, { type JournalEntry } from "./Ledger";
+import Dispatch, { type DispatchTemplate } from "./Dispatch";
 import type { Executive } from "./lib/executives";
 import {
   COMPRESSION_ENABLED,
@@ -974,7 +975,7 @@ export default function App(){
   const [compData,setCompData]=useState({});
   const [ledgerEntries,setLedgerEntries]=useState<JournalEntry[]>([]);
   const [customAccounts,setCustomAccounts]=useState<any[]>([]);
-  const [dispatchTemplates,setDispatchTemplates]=useState<any[]>([]);
+  const [dispatchTemplates,setDispatchTemplates]=useState<DispatchTemplate[]>([]);
   const [adminConfig,setAdminConfig]=useState<{[k:string]:boolean}>({ledgerEnabled:true,dispatchEnabled:true});
   const [dataF,setDataF]=useState({k:"",v:""});
   const [view,setView]=useState("nerve");
@@ -1153,6 +1154,18 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   };
 
   const ask=async(sys,msgs,maxT)=>(await callMulti(keys,defP,sys,msgs,maxT)).primary;
+
+  // Vision-capable call for Pulse Agentic (Dispatch). Uses Claude directly since it
+  // supports image content blocks; falls back with a clear error if no Claude key.
+  const askVision=async(sys:string,userText:string,images:{data:string;mediaType:string}[])=>{
+    const claudeKey=(keys.claude?.trim())||EFF_CLAUDE;
+    if(!claudeKey)throw new Error("Pulse Agentic requires a Claude API key (for image reading). Add one in Settings.");
+    const content:any[]=images.map(img=>({type:"image",source:{type:"base64",media_type:img.mediaType,data:img.data}}));
+    content.push({type:"text",text:userText});
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":claudeKey.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:MODELS.claude.model,max_tokens:2000,system:sys,messages:[{role:"user",content}]})});
+    if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}throw new Error("Claude "+r.status+": "+(m||r.statusText));}
+    const d=await r.json();return d.content?.map((b:any)=>b.text||"").join("\n")||"";
+  };
 
   const send=useCallback(async(text)=>{
     if(!text.trim()||loading||!selRole)return;
@@ -2320,6 +2333,11 @@ if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admi
         {/* GENERAL LEDGER */}
 {view==="ledger"&&(
   <Ledger cur={cur} entries={ledgerEntries} setEntries={setLedgerEntries} customAccounts={customAccounts} setCustomAccounts={setCustomAccounts} sv={sv} S={S} showToast={showToast} ask={ask} MicButton={MicButton} vLang={vLang}/>
+)}
+
+        {/* PULSE AGENTIC */}
+{view==="dispatch"&&(
+  <Dispatch templates={dispatchTemplates} setTemplates={setDispatchTemplates} sv={sv} S={S} showToast={showToast} askVision={askVision} MicButton={MicButton} vLang={vLang}/>
 )}
 
         {/* DATA HUB */}
