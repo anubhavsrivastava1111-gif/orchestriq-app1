@@ -78,6 +78,23 @@ export default function Dispatch({templates,setTemplates,sv,S,showToast,ask,askV
 
 const cpHelper=(t:string,showToast:(m:string,ty?:string)=>void)=>{try{navigator.clipboard.writeText(t);showToast("Copied to clipboard","success");}catch{showToast("Copy failed","error");}};
 
+// Copy as rich HTML so pasting into Outlook/Gmail preserves formatting (colors, tables, borders)
+const cpHtmlRich=async(html:string,showToast:(m:string,ty?:string)=>void)=>{
+  try{
+    if(navigator.clipboard&&"write" in navigator.clipboard&&typeof ClipboardItem!=="undefined"){
+      const blobHtml=new Blob([html],{type:"text/html"});
+      const blobText=new Blob([html],{type:"text/plain"});
+      await navigator.clipboard.write([new ClipboardItem({"text/html":blobHtml,"text/plain":blobText})]);
+      showToast("Copied with formatting - paste directly into your email","success");
+    }else{
+      navigator.clipboard.writeText(html);
+      showToast("Copied (your browser may not preserve formatting on paste)","info");
+    }
+  }catch{
+    try{navigator.clipboard.writeText(html);showToast("Copied as text","info");}catch{showToast("Copy failed","error");}
+  }
+};
+
 function AIDisclaimer(){
   return <div style={{fontSize:9,color:"#5A6480",marginTop:6,lineHeight:1.5,fontStyle:"italic"}}>⚠ AI-generated — please review and verify before sending or posting.</div>;
 }
@@ -322,6 +339,7 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
   const [runTrackerImgs,setRunTrackerImgs]=useState<{data:string;mediaType:string;preview:string}[]>([]);
   const [running,setRunning]=useState(false);
   const [runOutput,setRunOutput]=useState("");
+  const [outputView,setOutputView]=useState<"preview"|"source">("preview");
 
   const trackerInputRef=useRef<HTMLInputElement>(null);
   const outputInputRef=useRef<HTMLInputElement>(null);
@@ -350,9 +368,10 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
         "You are a report-template analyst. The user will show you (a) one or more screenshots of their data tracker (spreadsheet, ticket queue, mailbox, etc - the tracker may span multiple screenshots since it doesn't fit in one image) and/or (b) one or more screenshots or text samples of the report/email output they currently produce manually.\n"+
         "Your job: infer and describe, in clear plain text, a reusable TEMPLATE that captures:\n"+
         "1. The structure/columns of the tracker (what data fields exist, what each means) - combine information across all tracker images into one unified structure\n"+
-        "2. The structure of the desired OUTPUT (sections, tables, tone, what calculations are derived - e.g. aging buckets, totals, categorization)\n"+
-        "3. Any business rules visible (e.g. SLA = first action within 3 days, aging buckets 0-3/4-5/5+ days, pending reasons categorized as Employee/Client/Dependency)\n\n"+
-        "Write this as a clear, numbered specification that another AI can follow later, given only a fresh raw update, to regenerate the same kind of output. Be specific about column names and output formatting. Do NOT include any actual data values from the samples - only the STRUCTURE and RULES. Output plain text only, no markdown headers.";
+        "2. The structure of the desired OUTPUT: sections, tables (exact column names and order), tone, and what calculations are derived (e.g. aging buckets, totals, categorization)\n"+
+        "3. Any business rules visible (e.g. SLA = first action within 3 days, aging buckets 0-3/4-5/5+ days, pending reasons categorized as Employee/Client/Dependency)\n"+
+        "4. The VISUAL STYLE of any tables shown in the output sample - note header bar color, any shaded/highlighted cells (e.g. totals rows, specific aging buckets), and general layout, so the final report can be reproduced as a styled HTML email with similar professional appearance (navy/blue header bars, light shading for totals, clean borders).\n\n"+
+        "Write this as a clear, numbered specification that another AI can follow later, given only a fresh raw update, to regenerate the same kind of output AS A STYLED HTML EMAIL. Be specific about column names, table order, calculations, and visual styling. Do NOT include any actual data values from the samples - only the STRUCTURE, RULES, and STYLE. Output plain text only, no markdown headers.";
 
       const images:{data:string;mediaType:string}[]=[];
       trackerImgs.forEach(img=>images.push({data:img.data,mediaType:img.mediaType}));
@@ -404,10 +423,21 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
     setRunning(true);setRunOutput("");
     try{
       const sys=
-        "You generate a formatted status report from a raw update, following this template specification exactly:\n\n"+
+        "You generate a formatted status report EMAIL from a raw update, following this template specification:\n\n"+
         "=== TEMPLATE SPECIFICATION ===\n"+tpl.description+"\n=== END SPECIFICATION ===\n\n"+
         "Apply the template's structure, calculations (aging buckets, totals, categorization) and tone to the raw input below. "+
-        "If tracker screenshots are provided (possibly multiple, covering the full tracker), read the actual data from all of them combined. Output ONLY the final formatted report, ready to copy-paste - no preamble, no explanation, no markdown code fences.";
+        "If tracker screenshots are provided (possibly multiple, covering the full tracker), read the actual data from all of them combined.\n\n"+
+        "OUTPUT FORMAT - THIS IS MANDATORY:\n"+
+        "Output a single self-contained HTML fragment (no <html>/<head>/<body> tags - just the content, ready to paste into an email body). Use ONLY inline CSS styles (style=\"...\" attributes), since email clients strip <style> blocks. Follow these exact visual rules:\n"+
+        "- Every table: <table style=\"border-collapse:collapse;width:100%;font-family:Calibri,Arial,sans-serif;font-size:13px;margin-bottom:14px\">\n"+
+        "- Header row cells: <th style=\"background:#1F3864;color:#FFFFFF;padding:6px 10px;border:1px solid #999;text-align:left;font-weight:bold\">\n"+
+        "- Normal data cells: <td style=\"padding:6px 10px;border:1px solid #ccc\">\n"+
+        "- Totals / Grand Total rows or cells: <td style=\"padding:6px 10px;border:1px solid #ccc;background:#D9E2F3;font-weight:bold\">\n"+
+        "- Cells flagged as a concern (e.g. SLA breach, 5+ days aging, high pending count): <td style=\"padding:6px 10px;border:1px solid #ccc;background:#F8CBAD;font-weight:bold\">\n"+
+        "- Section titles (e.g. 'T&E ACTIVITIES OVERVIEW', 'AGEING SUMMARY'): <p style=\"font-weight:bold;font-size:14px;margin:14px 0 6px;color:#1F3864\">\n"+
+        "- Body text/paragraphs: <p style=\"font-family:Calibri,Arial,sans-serif;font-size:13px;margin:4px 0\">\n"+
+        "- Greeting, intro line, closing ('Let me know if you have any questions.', sign-off) all as styled <p> tags matching the tone in the specification.\n\n"+
+        "Output ONLY this HTML fragment - no markdown, no code fences, no preamble or explanation, no asterisks for bold (use <strong> or the styles above instead).";
 
       const images:{data:string;mediaType:string}[]=[];
       runTrackerImgs.forEach(img=>images.push({data:img.data,mediaType:img.mediaType}));
@@ -416,7 +446,11 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
       if(runTrackerImgs.length)userText+="\n\n("+runTrackerImgs.length+" current tracker screenshot(s) attached - use them together as the data source.)";
 
       const result=await askVision(sys,userText,images);
-      setRunOutput(result.trim());
+      let cleaned=result.trim();
+      // Strip accidental markdown code fences if the model adds them despite instructions
+      cleaned=cleaned.replace(/^```(?:html)?\s*/i,"").replace(/```\s*$/,"").trim();
+      setRunOutput(cleaned);
+      setOutputView("preview");
 
       const updated=templates.map(t=>t.id===tpl.id?{...t,lastUsed:new Date().toISOString()}:t);
       setTemplates(updated);sv("cos-dispatch-templates",updated);
@@ -530,11 +564,23 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
 
               {runOutput&&(
                 <div style={{marginTop:12}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:6}}>
                     <label style={{...S.lbl,marginBottom:0}}>Generated Report</label>
-                    <button onClick={()=>cpHelper(runOutput,showToast)} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>Copy</button>
+                    <div style={{display:"flex",gap:4}}>
+                      <button onClick={()=>setOutputView("preview")} style={{...S.hBtn,color:outputView==="preview"?"#14B8A6":"#5A6480",borderColor:outputView==="preview"?"#14B8A633":"#1a2030"}}>Preview</button>
+                      <button onClick={()=>setOutputView("source")} style={{...S.hBtn,color:outputView==="source"?"#14B8A6":"#5A6480",borderColor:outputView==="source"?"#14B8A633":"#1a2030"}}>HTML Source (edit)</button>
+                      <button onClick={()=>cpHtmlRich(runOutput,showToast)} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>Copy Formatted</button>
+                      <button onClick={()=>cpHelper(runOutput,showToast)} style={S.hBtn}>Copy HTML</button>
+                    </div>
                   </div>
-                  <textarea style={{...S.inp,minHeight:240,resize:"vertical",fontSize:11,lineHeight:1.7,fontFamily:"monospace"}} value={runOutput} onChange={e=>setRunOutput(e.target.value)}/>
+                  {outputView==="preview"?(
+                    <div style={{background:"#FFFFFF",border:"1px solid #1a2030",borderRadius:6,padding:"14px",maxHeight:480,overflowY:"auto"}}>
+                      <div dangerouslySetInnerHTML={{__html:runOutput}}/>
+                    </div>
+                  ):(
+                    <textarea style={{...S.inp,minHeight:240,resize:"vertical",fontSize:11,lineHeight:1.7,fontFamily:"monospace"}} value={runOutput} onChange={e=>setRunOutput(e.target.value)}/>
+                  )}
+                  <div style={{fontSize:9,color:"#5A6480",marginTop:6,lineHeight:1.5}}>Click <strong>Copy Formatted</strong> then paste directly into Outlook/Gmail to keep the colors and table layout. Use <strong>HTML Source</strong> to fine-tune the underlying code if needed.</div>
                   <AIDisclaimer/>
                 </div>
               )}
