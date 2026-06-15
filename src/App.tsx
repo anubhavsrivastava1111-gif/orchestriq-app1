@@ -173,6 +173,27 @@ const DELIVERABLE_SPECS = {
   executive_task:"a Decision Matrix (Option | Cost | Risk | Impact | Recommendation) and a Board-Ready Summary in bullet form",
 };
 
+// ─── SHARED RESEARCH DESK PROMPT ────────────────────────────────────────────
+// Used by Boardroom, Time Machine, and Autopilot as a pre-step: one search-enabled
+// call gathers current, source-cited figures that all downstream analysis references.
+// Centralized here so all three features use an identical, battle-tested prompt.
+function researchDeskPrompt(co,compData,question){
+  return "You are the Research Desk for \""+co.name+"\"'s strategic analysis. "+buildCtx(co,compData)+"\nGiven the question below, identify 3-6 SPECIFIC, CURRENT, VERIFIABLE figures that would materially inform this analysis - e.g. costs, pricing benchmarks, market sizes, rates, fees, salary benchmarks, or industry statistics relevant to "+co.industry+" in "+co.location+". Search for each.\n\nSOURCE HIERARCHY (critical): For each figure, prefer PRIMARY/OFFICIAL sources in this order:\n1. The vendor's or provider's own official site (e.g. anthropic.com, aws.amazon.com, razorpay.com, openai.com) for pricing/product specs.\n2. Government, regulatory, or industry-body sources (e.g. RBI, MSME ministry, NASSCOM) for market sizing, regulations, or benchmarks.\n3. Recognized research firms (Gartner, Bain, McKinsey, NASSCOM reports) for market/industry statistics.\n4. Only as a last resort, reputable secondary sources (industry blogs, comparison sites) - and if you use one, note in the bullet that an official source was not found.\nIf your first search result is a third-party blog or aggregator for a pricing/product figure, search again specifically for the official source (e.g. 'site:anthropic.com pricing') before finalizing.\n\nFor each figure, output: the figure itself, the source name, AND the source URL so the user can click through and verify. If a relevant figure cannot be verified via search with a real URL, omit it rather than guessing.\n\nOUTPUT FORMAT (strict): Output ONLY a bulleted list, 3-6 bullets. Each bullet format: '[Figure] — [Source name] ([URL]), accessed "+new Date().toISOString().slice(0,10)+"'. Do NOT include any preamble, commentary, search narration, or text like 'Now I need to search...' or 'Let me compile...' - output starts directly with the first bullet.\n\nQUESTION: \""+question+"\"";
+}
+
+// Strips any preamble/narration before the first bullet point, and provides a
+// fallback message if the research call fails entirely.
+async function runResearchDesk(ask,co,compData,question,showToast){
+  try{
+    let brief=await ask(researchDeskPrompt(co,compData,question),[{role:"user",content:"Generate the research brief."}],1200,true);
+    const bulletStart=brief.search(/^[•\-\*]/m);
+    if(bulletStart>0)brief=brief.slice(bulletStart);
+    return brief;
+  }catch(err:any){
+    return "(Research Desk unavailable this session: "+err.message+". Treat any figures below as ESTIMATE (unverified).)";
+  }
+}
+
 function autoRoute(text){
   const t=text.toLowerCase();
   const kw={
@@ -1004,8 +1025,12 @@ export default function App(){
   const [tmDec,setTmDec]=useState("");
   const [tmRes,setTmRes]=useState("");
   const [tmRun,setTmRun]=useState(false);
+  const [tmResearchBrief,setTmResearchBrief]=useState("");
+  const [tmPh,setTmPh]=useState("");
   const [apRes,setApRes]=useState("");
   const [apRun,setApRun]=useState(false);
+  const [apResearchBrief,setApResearchBrief]=useState("");
+  const [apPh,setApPh]=useState("");
   const [showSettings,setShowSettings]=useState(false);
   const [sTab,setSTab]=useState("api");
   const [confirmReset,setConfirmReset]=useState(null);
@@ -1241,17 +1266,23 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   const runTM=useCallback(async()=>{
     if(!tmDec.trim()||tmRun)return;
     cancelRef.current.tm=false;
-    setTmRun(true);setTmRes("");setError(null);
+    setTmRun(true);setTmRes("");setError(null);setTmResearchBrief("");
     const tmCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
     try{
       if(cancelRef.current.tm)return;
-      const sys="You are a Business Simulation Engine for \""+co.name+"\". "+buildCtx(co,compData)+"\nSimulate TWO parallel 12-month timelines. ALL figures in "+tmCur.sym+tmCur.code+".\nSections: Decision, Baseline Assumptions, TIMELINE A PROCEED (table: Month/Revenue/OpEx/Cash/Key Event), TIMELINE B DO NOT PROCEED (same table), Divergence Summary, Best/Worst/Black Swan scenarios, Verdict table (Expected Value A&B, Cost of Waiting per week, Reversibility, Recommendation with confidence %), First 30 Days Action Plan.";
-      const res=await ask(sys,[{role:"user",content:"Simulate: \""+tmDec+"\""}],4000);
+      setTmPh("📡 Research Desk is gathering current data…");
+      const researchBrief=await runResearchDesk(ask,co,compData,tmDec,showToast);
+      if(cancelRef.current.tm)return;
+      setTmResearchBrief(researchBrief);
+      setTmPh("Running simulation…");
+      const researchContext="\nVERIFIED RESEARCH BRIEF (current data for this simulation - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n";
+      const sys="You are a Business Simulation Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nSimulate TWO parallel 12-month timelines. ALL figures in "+tmCur.sym+tmCur.code+".\nSections: Decision, Baseline Assumptions, TIMELINE A PROCEED (table: Month/Revenue/OpEx/Cash/Key Event), TIMELINE B DO NOT PROCEED (same table), Divergence Summary, Best/Worst/Black Swan scenarios, Verdict table (Expected Value A&B, Cost of Waiting per week, Reversibility, Recommendation with confidence %), First 30 Days Action Plan, Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled 'ESTIMATE (unverified)'. Do not present invented numbers as fact.";
+      const res=await ask(sys,[{role:"user",content:"Simulate: \""+tmDec+"\""}],4500);
       if(!cancelRef.current.tm)setTmRes(res);
     }catch(err){
       if(!cancelRef.current.tm){setError(err.message);showToast("Time Machine: "+err.message,"error");}
     }finally{
-      setTmRun(false);cancelRef.current.tm=false;
+      setTmRun(false);setTmPh("");cancelRef.current.tm=false;
     }
   },[tmDec,tmRun,co,compData,keys,defP,showToast]);
 
@@ -1259,17 +1290,26 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   const runAP=useCallback(async()=>{
     if(apRun)return;
     cancelRef.current.ap=false;
-    setApRun(true);setApRes("");setError(null);
+    setApRun(true);setApRes("");setError(null);setApResearchBrief("");
     const apCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
     try{
       if(cancelRef.current.ap)return;
-      const sys="You are the Decision Intelligence Engine for \""+co.name+"\". "+buildCtx(co,compData)+"\nIdentify 6 CRITICAL decisions the founder should make RIGHT NOW. ALL figures in "+apCur.sym+apCur.code+".\nFor each: Title, Urgency, Owner, Decide By, Cost of delay/week (with calculation), Options 1/2/3 with outcomes, Recommendation, "+co.location+" Context, Data Needed. End with: THE ONE DECISION THAT MATTERS MOST THIS WEEK.";
-      const res=await ask(sys,[{role:"user",content:"Run complete decision scan."}],4000);
+      setApPh("📡 Research Desk is gathering current data…");
+      const researchQuestion="What decisions should "+co.name+" ("+co.industry+", "+co.location+", stage: "+co.stage+") be making right now to grow and protect the business?";
+      const researchBrief=await runResearchDesk(ask,co,compData,researchQuestion,showToast);
+      if(cancelRef.current.ap)return;
+      setApResearchBrief(researchBrief);
+      setApPh("Scanning all decision vectors…");
+      const researchContext="\nVERIFIED RESEARCH BRIEF (current data for this scan - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n";
+      const sys="You are the Decision Intelligence Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nIdentify 6 CRITICAL decisions the founder should make RIGHT NOW. ALL figures in "+apCur.sym+apCur.code+".\nFor each: Title, Urgency, Owner, Decide By, Cost of delay/week (with calculation), Options 1/2/3 with outcomes, Recommendation, "+co.location+" Context, Data Needed. End with: THE ONE DECISION THAT MATTERS MOST THIS WEEK. Then a final section: Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled 'ESTIMATE (unverified)'. Do not present invented numbers as fact.";
+      const res=await ask(sys,[{role:"user",content:"Run complete decision scan."}],4500);
       if(!cancelRef.current.ap)setApRes(res);
     }catch(err){
       if(!cancelRef.current.ap){setError(err.message);showToast("Autopilot: "+err.message,"error");}
     }finally{
-      setApRun(false);cancelRef.current.ap=false;
+      setApRun(false);setApPh("");cancelRef.current.ap=false;
+    }
+  },[apRun,co,compData,keys,defP,showToast]);
     }
   },[apRun,co,compData,keys,defP,showToast]);
 
@@ -1290,16 +1330,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       if(!cancelRef.current.br){
         setBrResearching(true);
         setBrPh("📡 Research Desk is gathering current data…");
-        const researchSys="You are the Research Desk for \""+co.name+"\"'s boardroom. "+buildCtx(co,compData)+"\nGiven the board's question below, identify 3-6 SPECIFIC, CURRENT, VERIFIABLE figures that would materially inform this debate - e.g. costs, pricing benchmarks, market sizes, rates, fees, salary benchmarks, or industry statistics relevant to "+co.industry+" in "+co.location+". Search for each. For each figure, output: the figure itself, the source name, AND the source URL so the user can click through and verify. If a relevant figure cannot be verified via search with a real URL, omit it rather than guessing.\n\nOUTPUT FORMAT (strict): Output ONLY a bulleted list, 3-6 bullets. Each bullet format: '[Figure] — [Source name] ([URL]), accessed "+new Date().toISOString().slice(0,10)+"'. Do NOT include any preamble, commentary, search narration, or text like 'Now I need to search...' or 'Let me compile...' - output starts directly with the first bullet.";
-          try{
-          researchBrief=await ask(researchSys,[{role:"user",content:"Board question: \""+brQ+"\""}],1200,true);
-          // Safety: strip any preamble before the first bullet point, in case the model
-          // includes search-narration text despite instructions.
-          const bulletStart=researchBrief.search(/^[•\-\*]/m);
-          if(bulletStart>0)researchBrief=researchBrief.slice(bulletStart);
-        }catch(researchErr:any){
-          researchBrief="(Research Desk unavailable this session: "+researchErr.message+". Agents should label any figures as ESTIMATE (unverified).)";
-        }
+        researchBrief=await runResearchDesk(ask,co,compData,brQ,showToast);
         setBrCur(prev=>({...prev,researchBrief}));
         setBrResearching(false);
       }
@@ -2066,7 +2097,14 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                       </div>
                     </div>
                   </div>
-                  {tmRun&&<div style={{fontSize:10,color:"#8B5CF6",marginBottom:8,display:"flex",alignItems:"center",gap:5}}><span style={{width:5,height:5,borderRadius:"50%",background:"#8B5CF6",display:"inline-block",animation:"pulse 1s infinite"}}/> Running simulation… (up to 60s)</div>}
+                  {tmRun&&tmPh&&<div style={{fontSize:10,color:"#8B5CF6",marginBottom:8,display:"flex",alignItems:"center",gap:5}}><span style={{width:5,height:5,borderRadius:"50%",background:"#8B5CF6",display:"inline-block",animation:"pulse 1s infinite"}}/> {tmPh} (up to 100s)</div>}
+                  {tmResearchBrief&&(
+                    <div style={{marginBottom:10,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:7,padding:"10px 12px"}}>
+                      <div style={{fontSize:10,fontWeight:800,color:"#3B82F6",marginBottom:5,textTransform:"uppercase",letterSpacing:0.8}}>📡 Research Brief — Current Data, Generated {new Date().toLocaleString()}</div>
+                      <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={tmResearchBrief} ac="#3B82F6"/></div>
+                      <div style={{fontSize:9,color:"#5A6480",marginTop:6,fontStyle:"italic"}}>Click source links to verify independently. AI-generated — please confirm critical figures before external use.</div>
+                    </div>
+                  )}
                   {tmRes&&<div style={{animation:"fadeIn 0.3s"}}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4,gap:4,flexWrap:"wrap"}}><button onClick={()=>cp(tmRes)} style={S.hBtn}>Copy</button><button onClick={()=>quickExport("pdf","detailed","Time Machine — "+tmDec.slice(0,40),tmRes)} style={S.hBtn}>📄 PDF</button><button onClick={()=>quickExport("pptx","strategy","Time Machine Simulation",tmRes)} style={S.hBtn}>📊 PPT</button><button onClick={()=>dlFile("TimeMachine-"+Date.now()+".md",tmDec+"\n\n"+tmRes,"text/markdown")} style={S.hBtn}>MD</button><button onClick={()=>extractActionItems("timemachine","Time Machine — \""+tmDec.slice(0,40)+"\"",tmRes)} disabled={extracting==="timemachine"} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>{extracting==="timemachine"?"Extracting...":"✅ Extract Action Items"}</button></div><div style={{background:"#131825",borderRadius:8,padding:"14px 16px",border:"1px solid rgba(139,92,246,0.18)"}}><div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={tmRes} ac="#8B5CF6"/></div></div></div>}
                   {error&&nTab==="timemachine"&&<div style={S.errB}>⚠️ {error}<div style={{display:"flex",gap:4}}><button onClick={runTM} style={S.retBtn}>Retry</button><button onClick={()=>setError(null)} style={{...S.retBtn,background:"#3A4060"}}>Dismiss</button></div></div>}
                 </div>
@@ -2081,7 +2119,14 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                     <button onClick={runAP} disabled={apRun} style={{...S.pBtn,width:"auto",padding:"10px 24px",marginTop:0,fontSize:13,background:"#F59E0B",opacity:apRun?0.4:1}}>{apRun?"Scanning…":"Run Decision Scan"}</button>
                     {apRun&&<button onClick={()=>{cancelRef.current.ap=true;}} style={{...S.cancelBtn,alignSelf:"flex-end",marginBottom:6}}>Cancel</button>}
                   </div>
-                  {apRun&&<div style={{fontSize:10,color:"#F59E0B",marginBottom:8,display:"flex",alignItems:"center",gap:5}}><span style={{width:5,height:5,borderRadius:"50%",background:"#F59E0B",display:"inline-block",animation:"pulse 1s infinite"}}/> Scanning all decision vectors… (up to 60s)</div>}
+                  {apRun&&apPh&&<div style={{fontSize:10,color:"#F59E0B",marginBottom:8,display:"flex",alignItems:"center",gap:5}}><span style={{width:5,height:5,borderRadius:"50%",background:"#F59E0B",display:"inline-block",animation:"pulse 1s infinite"}}/> {apPh} (up to 100s)</div>}
+                  {apResearchBrief&&(
+                    <div style={{marginBottom:10,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:7,padding:"10px 12px"}}>
+                      <div style={{fontSize:10,fontWeight:800,color:"#3B82F6",marginBottom:5,textTransform:"uppercase",letterSpacing:0.8}}>📡 Research Brief — Current Data, Generated {new Date().toLocaleString()}</div>
+                      <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={apResearchBrief} ac="#3B82F6"/></div>
+                      <div style={{fontSize:9,color:"#5A6480",marginTop:6,fontStyle:"italic"}}>Click source links to verify independently. AI-generated — please confirm critical figures before external use.</div>
+                    </div>
+                  )}
                   {apRes&&<div style={{animation:"fadeIn 0.3s"}}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4,gap:4,flexWrap:"wrap"}}><button onClick={()=>cp(apRes)} style={S.hBtn}>Copy</button><button onClick={()=>quickExport("pdf","executive","Decision Autopilot Scan",apRes)} style={S.hBtn}>📄 PDF</button><button onClick={()=>quickExport("pptx","briefing","Decision Autopilot",apRes)} style={S.hBtn}>📊 PPT</button><button onClick={()=>dlFile("Autopilot-"+Date.now()+".md",apRes,"text/markdown")} style={S.hBtn}>MD</button><button onClick={()=>extractActionItems("autopilot","Decision Autopilot Scan",apRes)} disabled={extracting==="autopilot"} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>{extracting==="autopilot"?"Extracting...":"✅ Extract Action Items"}</button></div><div style={{background:"#131825",borderRadius:8,padding:"14px 16px",border:"1px solid rgba(245,158,11,0.18)"}}><div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={apRes} ac="#F59E0B"/></div></div></div>}
                   {error&&nTab==="autopilot"&&<div style={S.errB}>⚠️ {error}<div style={{display:"flex",gap:4}}><button onClick={runAP} style={S.retBtn}>Retry</button><button onClick={()=>setError(null)} style={{...S.retBtn,background:"#3A4060"}}>Dismiss</button></div></div>}
                 </div>
