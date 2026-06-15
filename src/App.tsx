@@ -1288,7 +1288,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         const prev=res.map(r=>"\n--- "+r.ag.t+" ---\n"+r.text).join("\n");
         setBrPh(ag.ic+" "+ag.t+" is analyzing…");
         const sys="You are "+ag.f+" at \""+co.name+"\".\nPROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+"\nLIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State position with calculations in "+synCur.sym+".":"Previous:\n"+prev+"\n\nChallenge one point, build on one, add unique "+ag.dl+" insight in "+synCur.sym+".")+"\n250-400 words.\n\nVERIFICATION RULE (critical): If you cite any price, cost, rate, fee, salary benchmark, or market figure (e.g. cloud hosting costs, API pricing, compliance fees, payment gateway charges), you MUST search for current real data first and cite the source inline in parentheses, e.g. '(per AWS RDS India pricing, accessed "+new Date().toISOString().slice(0,10)+")'. If you cannot verify a figure via search, label it explicitly as 'ESTIMATE (unverified)' - never present an invented number as fact. Figures without verification or an ESTIMATE label are a serious error.";
-        const reply=await ask(sys,[{role:"user",content:brQ}]);
+        const reply=await ask(sys,[{role:"user",content:brQ}],undefined,i===0);
         if(cancelRef.current.br)break;
         res.push({ag,text:reply});
         setBrCur(prev=>({...prev,debate:[...res]}));
