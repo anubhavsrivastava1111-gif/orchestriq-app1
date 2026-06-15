@@ -501,9 +501,15 @@ async function callGroq(key,sys,msgs,maxT){
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("Groq: Invalid API key.");if(r.status===429)throw new Error("Groq: Rate limit hit. Wait a moment.");throw new Error("Groq "+r.status+": "+(m||r.statusText));}
   const d=await r.json();return d.choices?.[0]?.message?.content||"";
 }
-  async function callClaude(key,sys,msgs,maxT){   const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:MODELS.claude.model,max_tokens:maxT,system:sys,messages:msgs})});
+  async function callClaude(key,sys,msgs,maxT,enableSearch){
+  const body:any={model:MODELS.claude.model,max_tokens:maxT,system:sys,messages:msgs};
+  if(enableSearch)body.tools=[{type:"web_search_20250305",name:"web_search",max_uses:5}];
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body)});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}throw new Error("Claude "+r.status+": "+(m||r.statusText));}
-  const d=await r.json();return d.content?.map(b=>b.text||"").join("\n")||"";
+  const d=await r.json();
+  // Response content blocks can include: text, server_tool_use (search query), web_search_tool_result (search results).
+  // Only "text" blocks contain the model's actual answer - filter to those, in order, and join.
+  return d.content?.filter((b:any)=>b.type==="text").map((b:any)=>b.text||"").join("\n")||"";
 }
 async function callOpenAI(key,sys,msgs,maxT){
   const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.openai.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
@@ -524,19 +530,21 @@ async function callGemini(key,sys,msgs,maxT){
 }
 
 // FIX BUG 2,3,5: universal 60s timeout on every AI call
-async function callAI(provider,key,sys,rawMsgs,maxT=3500){
+async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false){
   if(!key?.trim())throw new Error("No API key for "+(MODELS[provider]?.name||provider)+". Add it in Settings.");
   const msgs=rawMsgs.map(m=>({role:m.role==="user"?"user":"assistant",content:m.content}));
   let timerId;
+  // Search-enabled calls take longer (multiple search round-trips inside one request) - extend timeout
+  const timeoutMs=enableSearch?100000:60000;
   const timeout=new Promise((_,rej)=>{
-    timerId=setTimeout(()=>rej(new Error("Request timed out after 60s. The AI provider may be busy — try switching to Gemini (free tier).")),60000);
+    timerId=setTimeout(()=>rej(new Error("Request timed out after "+(timeoutMs/1000)+"s. The AI provider may be busy — try switching to Gemini (free tier).")),timeoutMs);
   });
-  const callP=provider==="claude"?callClaude(key,sys,msgs,maxT):provider==="openai"?callOpenAI(key,sys,msgs,maxT):provider==="gemini"?callGemini(key,sys,msgs,maxT):provider==="groq"?callGroq(key,sys,msgs,maxT):Promise.reject(new Error("Unknown provider: "+provider));
+  const callP=provider==="claude"?callClaude(key,sys,msgs,maxT,enableSearch):provider==="openai"?callOpenAI(key,sys,msgs,maxT):provider==="gemini"?callGemini(key,sys,msgs,maxT):provider==="groq"?callGroq(key,sys,msgs,maxT):Promise.reject(new Error("Unknown provider: "+provider));
   try{return await Promise.race([callP,timeout]);}
   finally{clearTimeout(timerId);}
 }
 
-async function callMulti(keys,defP,sys,msgs,maxT=3500){
+async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false){
   const effectiveKeys={...keys};
   if(EFF_GEMINI?.trim())effectiveKeys.gemini=EFF_GEMINI;
   if(EFF_GROQ?.trim())effectiveKeys.groq=EFF_GROQ;
@@ -560,17 +568,16 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500){
     const fallback=active==="groq"?"gemini":"groq";
     const fallbackKey=effectiveKeys[fallback]?.trim();
     if(!fallbackKey)throw new Error("No API keys available. Check Cloudflare environment variables.");
-    const text=await callAI(fallback,fallbackKey,sys,msgs,maxT);
+    const text=await callAI(fallback,fallbackKey,sys,msgs,maxT,false);
     return{primary:text};
   }
 
   try{
-    const text=await callAI(active,key,sys,msgs,maxT);
+    const text=await callAI(active,key,sys,msgs,maxT,enableSearch);
     return{primary:text};
   }catch(err:any){
     if(isRateLimit(err.message)){
       markProviderExhausted(active);
-      // Build fallback order: try other free provider first, then any configured paid provider
       const fallbackOrder=[];
       if(active==="groq")fallbackOrder.push("gemini");
       if(active==="gemini")fallbackOrder.push("groq");
@@ -579,7 +586,7 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500){
         const fallbackKey=effectiveKeys[fallback]?.trim();
         if(!fallbackKey)continue;
         try{
-          const text=await callAI(fallback,fallbackKey,sys,msgs,maxT);
+          const text=await callAI(fallback,fallbackKey,sys,msgs,maxT,enableSearch&&fallback==="claude");
           return{primary:text};
         }catch(err2:any){
           if(isRateLimit(err2.message)){markProviderExhausted(fallback);continue;}
@@ -1158,7 +1165,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     setPage("app");
   };
 
-  const ask=async(sys,msgs,maxT)=>(await callMulti(keys,defP,sys,msgs,maxT)).primary;
+  const ask=async(sys,msgs,maxT,enableSearch)=>(await callMulti(keys,defP,sys,msgs,maxT,enableSearch)).primary;
 
   // Extracts candidate action items from a Boardroom/Autopilot/TimeMachine output and opens the review modal
   const extractActionItems=async(sourceType:ActionItem["source"],sourceLabel:string,content:string)=>{
