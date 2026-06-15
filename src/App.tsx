@@ -1310,8 +1310,6 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       setApRun(false);setApPh("");cancelRef.current.ap=false;
     }
   },[apRun,co,compData,keys,defP,showToast]);
-    }
-  },[apRun,co,compData,keys,defP,showToast]);
 
   // Boardroom with cancel support
   const runBR=useCallback(async()=>{
