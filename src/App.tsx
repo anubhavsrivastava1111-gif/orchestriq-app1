@@ -1290,9 +1290,13 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       if(!cancelRef.current.br){
         setBrResearching(true);
         setBrPh("📡 Research Desk is gathering current data…");
-        const researchSys="You are the Research Desk for \""+co.name+"\"'s boardroom. "+buildCtx(co,compData)+"\nGiven the board's question below, identify 3-6 SPECIFIC, CURRENT, VERIFIABLE figures that would materially inform this debate - e.g. costs, pricing benchmarks, market sizes, rates, fees, salary benchmarks, or industry statistics relevant to "+co.industry+" in "+co.location+". Search for each and cite the source inline (e.g. 'per Anthropic's published API pricing, accessed "+new Date().toISOString().slice(0,10)+"'). If a relevant figure cannot be verified via search, omit it rather than guessing. Output ONLY a compact bulleted list (3-6 bullets), each bullet one figure with its source - no preamble, no commentary, no headers.";
-        try{
+        const researchSys="You are the Research Desk for \""+co.name+"\"'s boardroom. "+buildCtx(co,compData)+"\nGiven the board's question below, identify 3-6 SPECIFIC, CURRENT, VERIFIABLE figures that would materially inform this debate - e.g. costs, pricing benchmarks, market sizes, rates, fees, salary benchmarks, or industry statistics relevant to "+co.industry+" in "+co.location+". Search for each. For each figure, output: the figure itself, the source name, AND the source URL so the user can click through and verify. If a relevant figure cannot be verified via search with a real URL, omit it rather than guessing.\n\nOUTPUT FORMAT (strict): Output ONLY a bulleted list, 3-6 bullets. Each bullet format: '[Figure] — [Source name] ([URL]), accessed "+new Date().toISOString().slice(0,10)+"'. Do NOT include any preamble, commentary, search narration, or text like 'Now I need to search...' or 'Let me compile...' - output starts directly with the first bullet.";
+          try{
           researchBrief=await ask(researchSys,[{role:"user",content:"Board question: \""+brQ+"\""}],1200,true);
+          // Safety: strip any preamble before the first bullet point, in case the model
+          // includes search-narration text despite instructions.
+          const bulletStart=researchBrief.search(/^[•\-\*]/m);
+          if(bulletStart>0)researchBrief=researchBrief.slice(bulletStart);
         }catch(researchErr:any){
           researchBrief="(Research Desk unavailable this session: "+researchErr.message+". Agents should label any figures as ESTIMATE (unverified).)";
         }
@@ -1317,7 +1321,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         setBrPh("Synthesizing consensus…");
         const allPos=res.map(r=>r.ag.t+":\n"+r.text).join("\n\n---\n\n");
         const synSys="You are Chief of Staff at \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nSynthesize the boardroom debate below into a CEO-ready briefing. Sections, in this order: (1) Executive Summary - 3-4 sentences max, the single decision and headline number. (2) Consensus Points - only NEW synthesis-level insight, do not restate what each exec already said. (3) Points of Conflict - one compact table: Leader | Position | Why it matters. (4) Quantified Recommendation in "+synCur.sym+" - the single recommended path with budget and timeline. (5) 30-60-90 Day Plan (table, one row per phase, not per task). (6) Risk Register (table, max 5 rows). (7) This Week's Decision, with cost of delay/week. (8) Confidence & Verification - state which figures came from the VERIFIED RESEARCH BRIEF (cite it) versus which are ESTIMATE (unverified) - be honest, this builds trust.\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled 'ESTIMATE (unverified)'. Do not present invented numbers as fact. Keep the ENTIRE output under 1800 words - be dense, not exhaustive. Prioritize completing all 8 sections over depth in any one section.";
-        const syn=await ask(synSys,[{role:"user",content:"Question: \""+brQ+"\"\nDebate:\n"+allPos}],4000);
+        const syn=await ask(synSys,[{role:"user",content:"Question: \""+brQ+"\"\nDebate:\n"+allPos}],4500);
         const finalSession={id:Date.now(),q:brQ,agents:brAg,debate:res,synthesis:syn,researchBrief,ts:new Date().toISOString()};
         setBrCur({q:brQ,debate:res,synthesis:syn,drilldown:{},researchBrief});
         const ns=[finalSession,...brSessions].slice(0,20);setBrSessions(ns);sv("cos-br",ns);
@@ -1993,8 +1997,9 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                   {brPh&&<div style={{fontSize:10,color:"#14B8A6",marginBottom:8}}><span style={{width:5,height:5,borderRadius:"50%",background:"#EF4444",display:"inline-block",marginRight:5,animation:"pulse 1s infinite"}}/>{brPh}</div>}
                   {brCur.researchBrief&&(
                     <div style={{marginBottom:10,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:7,padding:"10px 12px"}}>
-                      <div style={{fontSize:10,fontWeight:800,color:"#3B82F6",marginBottom:5,textTransform:"uppercase",letterSpacing:0.8}}>📡 Research Brief — Current Data for This Debate</div>
+                      <div style={{fontSize:10,fontWeight:800,color:"#3B82F6",marginBottom:5,textTransform:"uppercase",letterSpacing:0.8}}>📡 Research Brief — Current Data, Generated {new Date().toLocaleString()}</div>
                       <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={brCur.researchBrief} ac="#3B82F6"/></div>
+                      <div style={{fontSize:9,color:"#5A6480",marginTop:6,fontStyle:"italic"}}>Click source links to verify independently. AI-generated — please confirm critical figures before external use.</div>
                     </div>
                   )}
                   {brCur.debate.map((e,i)=>(
