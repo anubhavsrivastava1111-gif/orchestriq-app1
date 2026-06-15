@@ -994,7 +994,8 @@ export default function App(){
   const [brQ,setBrQ]=useState("");
   const [brAg,setBrAg]=useState(["ceo","cfo","cto","cmo"]);
   const [brSessions,setBrSessions]=useState([]);
-  const [brCur,setBrCur]=useState({q:"",debate:[],synthesis:"",drilldown:{}});
+  const [brCur,setBrCur]=useState({q:"",debate:[],synthesis:"",drilldown:{},researchBrief:""}); 
+  const [brResearching,setBrResearching]=useState(false);
   const [brRun,setBrRun]=useState(false);
   const [brPh,setBrPh]=useState("");
   const [drillRole,setDrillRole]=useState(null);
@@ -1277,18 +1278,37 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     if(!brQ.trim()||brRun)return;
     cancelRef.current.br=false;
     setBrRun(true);setError(null);
-    setBrCur({q:brQ,debate:[],synthesis:"",drilldown:{}});
+    setBrCur({q:brQ,debate:[],synthesis:"",drilldown:{},researchBrief:""});
     const agents=brAg.map(id=>AR.find(r=>r.id===id)).filter(Boolean);
     const res=[];
     const synCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
+    let researchBrief="";
     try{
+      // RESEARCH STEP: one search-enabled call gathers current verifiable figures
+      // relevant to the question. All agents then reference this shared brief
+      // instead of each searching independently (cost + consistency).
+      if(!cancelRef.current.br){
+        setBrResearching(true);
+        setBrPh("📡 Research Desk is gathering current data…");
+        const researchSys="You are the Research Desk for \""+co.name+"\"'s boardroom. "+buildCtx(co,compData)+"\nGiven the board's question below, identify 3-6 SPECIFIC, CURRENT, VERIFIABLE figures that would materially inform this debate - e.g. costs, pricing benchmarks, market sizes, rates, fees, salary benchmarks, or industry statistics relevant to "+co.industry+" in "+co.location+". Search for each and cite the source inline (e.g. 'per Anthropic's published API pricing, accessed "+new Date().toISOString().slice(0,10)+"'). If a relevant figure cannot be verified via search, omit it rather than guessing. Output ONLY a compact bulleted list (3-6 bullets), each bullet one figure with its source - no preamble, no commentary, no headers.";
+        try{
+          researchBrief=await ask(researchSys,[{role:"user",content:"Board question: \""+brQ+"\""}],1200,true);
+        }catch(researchErr:any){
+          researchBrief="(Research Desk unavailable this session: "+researchErr.message+". Agents should label any figures as ESTIMATE (unverified).)";
+        }
+        setBrCur(prev=>({...prev,researchBrief}));
+        setBrResearching(false);
+      }
+      const researchContext=researchBrief
+        ?"\nVERIFIED RESEARCH BRIEF (current data gathered for this debate - use these figures and cite this brief as your source; do not re-search):\n"+researchBrief+"\n"
+        :"";
       for(let i=0;i<agents.length;i++){
         if(cancelRef.current.br){showToast("Boardroom cancelled","warning");break;}
         const ag=agents[i];const p=EP[ag.id]||{};
         const prev=res.map(r=>"\n--- "+r.ag.t+" ---\n"+r.text).join("\n");
         setBrPh(ag.ic+" "+ag.t+" is analyzing…");
-        const sys="You are "+ag.f+" at \""+co.name+"\".\nPROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+"\nLIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State position with calculations in "+synCur.sym+".":"Previous:\n"+prev+"\n\nChallenge one point, build on one, add unique "+ag.dl+" insight in "+synCur.sym+".")+"\n250-400 words.\n\nVERIFICATION RULE (critical): If you cite any price, cost, rate, fee, salary benchmark, or market figure (e.g. cloud hosting costs, API pricing, compliance fees, payment gateway charges), you MUST search for current real data first and cite the source inline in parentheses, e.g. '(per AWS RDS India pricing, accessed "+new Date().toISOString().slice(0,10)+")'. If you cannot verify a figure via search, label it explicitly as 'ESTIMATE (unverified)' - never present an invented number as fact. Figures without verification or an ESTIMATE label are a serious error.";
-        const reply=await ask(sys,[{role:"user",content:brQ}],undefined,i===0);
+        const sys="You are "+ag.f+" at \""+co.name+"\".\nPROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+researchContext+"\nLIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State position with calculations in "+synCur.sym+".":"Previous:\n"+prev+"\n\nChallenge one point, build on one, add unique "+ag.dl+" insight in "+synCur.sym+".")+"\n250-400 words.\n\nVERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it explicitly as 'ESTIMATE (unverified)'. Never present an invented number as fact.";
+        const reply=await ask(sys,[{role:"user",content:brQ}]);
         if(cancelRef.current.br)break;
         res.push({ag,text:reply});
         setBrCur(prev=>({...prev,debate:[...res]}));
@@ -1296,17 +1316,17 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       if(!cancelRef.current.br&&res.length>0){
         setBrPh("Synthesizing consensus…");
         const allPos=res.map(r=>r.ag.t+":\n"+r.text).join("\n\n---\n\n");
-        const synSys="You are Chief of Staff at \""+co.name+"\". "+buildCtx(co,compData)+"\nSynthesize the boardroom debate below into a CEO-ready briefing. Sections, in this order: (1) Executive Summary - 3-4 sentences max, the single decision and headline number. (2) Consensus Points - only NEW synthesis-level insight, do not restate what each exec already said. (3) Points of Conflict - one compact table: Leader | Position | Why it matters. (4) Quantified Recommendation in "+synCur.sym+" - the single recommended path with budget and timeline. (5) 30-60-90 Day Plan (table, one row per phase, not per task). (6) Risk Register (table, max 5 rows). (7) This Week's Decision, with cost of delay/week. (8) Confidence & Verification - a short section listing which specific figures above were search-verified (with source) versus which are estimates (unverified) - be honest, this builds trust.\n\nVERIFICATION RULE (critical): Any price, cost, rate, or market figure you state or carry forward from the debate must either (a) be search-verified with an inline source citation, or (b) be explicitly labeled 'ESTIMATE (unverified)'. Do not present invented numbers as fact. Keep the ENTIRE output under 1800 words - be dense, not exhaustive. Prioritize completing all 8 sections over depth in any one section.";
+        const synSys="You are Chief of Staff at \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nSynthesize the boardroom debate below into a CEO-ready briefing. Sections, in this order: (1) Executive Summary - 3-4 sentences max, the single decision and headline number. (2) Consensus Points - only NEW synthesis-level insight, do not restate what each exec already said. (3) Points of Conflict - one compact table: Leader | Position | Why it matters. (4) Quantified Recommendation in "+synCur.sym+" - the single recommended path with budget and timeline. (5) 30-60-90 Day Plan (table, one row per phase, not per task). (6) Risk Register (table, max 5 rows). (7) This Week's Decision, with cost of delay/week. (8) Confidence & Verification - state which figures came from the VERIFIED RESEARCH BRIEF (cite it) versus which are ESTIMATE (unverified) - be honest, this builds trust.\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled 'ESTIMATE (unverified)'. Do not present invented numbers as fact. Keep the ENTIRE output under 1800 words - be dense, not exhaustive. Prioritize completing all 8 sections over depth in any one section.";
         const syn=await ask(synSys,[{role:"user",content:"Question: \""+brQ+"\"\nDebate:\n"+allPos}],4000);
-        const finalSession={id:Date.now(),q:brQ,agents:brAg,debate:res,synthesis:syn,ts:new Date().toISOString()};
-        setBrCur({q:brQ,debate:res,synthesis:syn,drilldown:{}});
+        const finalSession={id:Date.now(),q:brQ,agents:brAg,debate:res,synthesis:syn,researchBrief,ts:new Date().toISOString()};
+        setBrCur({q:brQ,debate:res,synthesis:syn,drilldown:{},researchBrief});
         const ns=[finalSession,...brSessions].slice(0,20);setBrSessions(ns);sv("cos-br",ns);
       }
     }catch(err){
       if(!cancelRef.current.br){setError(err.message);showToast("Boardroom error: "+err.message,"error");}
-    }finally{setBrRun(false);setBrPh("");cancelRef.current.br=false;}
+    }finally{setBrRun(false);setBrPh("");setBrResearching(false);cancelRef.current.br=false;}
   },[brQ,brAg,brRun,co,compData,brSessions,keys,defP,showToast]);
-
+  
   const runDrill=useCallback(async()=>{
     if(!drillRole||!drillQ.trim()||drillRun)return;
     setDrillRun(true);setError(null);
@@ -1971,6 +1991,12 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                     </div>
                   </div>
                   {brPh&&<div style={{fontSize:10,color:"#14B8A6",marginBottom:8}}><span style={{width:5,height:5,borderRadius:"50%",background:"#EF4444",display:"inline-block",marginRight:5,animation:"pulse 1s infinite"}}/>{brPh}</div>}
+                  {brCur.researchBrief&&(
+                    <div style={{marginBottom:10,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:7,padding:"10px 12px"}}>
+                      <div style={{fontSize:10,fontWeight:800,color:"#3B82F6",marginBottom:5,textTransform:"uppercase",letterSpacing:0.8}}>📡 Research Brief — Current Data for This Debate</div>
+                      <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={brCur.researchBrief} ac="#3B82F6"/></div>
+                    </div>
+                  )}
                   {brCur.debate.map((e,i)=>(
                     <div key={i} style={{marginBottom:8,animation:"fadeIn 0.3s ease"}}>
                       <div style={{background:"#131825",borderRadius:7,padding:"10px 12px",borderLeft:"3px solid "+e.ag.dc}}>
