@@ -629,13 +629,19 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false){
   try{
     let r=await callAI(active,key,sys,msgs,maxT,enableSearch);
     let text=r.text;
-    if(r.truncated && active==="claude"){
+    let stillTruncated=r.truncated;
+    let continueAttempts=0;
+    while(stillTruncated && active==="claude" && continueAttempts<2){
+      continueAttempts++;
       try{
         const cont=await callAI(active,key,sys,[...msgs,{role:"assistant",content:text},{role:"user",content:"Continue exactly where you left off. Do not repeat any content already written. Pick up mid-sentence if needed."}],Math.min(maxT,4000),false);
         text=text+cont.text;
-      }catch{ /* if continuation fails, return what we have rather than losing it */ }
+        stillTruncated=cont.truncated;
+      }catch{
+        break; // if continuation fails, return what we have rather than losing it
+      }
     }
-    return{primary:text};
+    return{primary:text,truncated:stillTruncated};
   }catch(err:any){
     if(isRateLimit(err.message)){
       markProviderExhausted(active);
@@ -1302,6 +1308,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{const acts=localStorage.getItem("cos-actions");if(acts)setActionItems(JSON.parse(acts));}catch{}
     try{const ac=localStorage.getItem("cos-admin-config");if(ac)setAdminConfig({...adminConfig,...JSON.parse(ac)});}catch{}
     try{const br=localStorage.getItem("cos-br");if(br)setBrSessions(JSON.parse(br));}catch{}
+    try{const brLive=localStorage.getItem("cos-br-live");if(brLive){const parsed=JSON.parse(brLive);if(parsed?.q)setBrCur(parsed);}}catch{}
     try{const dn=localStorage.getItem("cos-dn");if(dn){const parsed=JSON.parse(dn);setDnCfg(parsed);setLocalDn(parsed);}}catch{}
     try{const wf=localStorage.getItem("cos-wf");if(wf)setWorkflows(JSON.parse(wf));}catch{}
     try{const tq=localStorage.getItem("cos-tq");if(tq){const p=JSON.parse(tq);setTQueue(p);tQRef.current=p;}}catch{}
@@ -1361,6 +1368,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   };
 
   const ask=async(sys,msgs,maxT,enableSearch)=>(await callMulti(keys,defP,sys,msgs,maxT,enableSearch)).primary;
+  const askFull=async(sys,msgs,maxT,enableSearch)=>await callMulti(keys,defP,sys,msgs,maxT,enableSearch);
 
   // Extracts candidate action items from a Boardroom/Autopilot/TimeMachine output and opens the review modal
   const extractActionItems=async(sourceType:ActionItem["source"],sourceLabel:string,content:string)=>{
@@ -1525,10 +1533,12 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         const prev=res.map(r=>"\n--- "+r.ag.t+" ---\n"+r.text).join("\n");
         setBrPh(ag.ic+" "+ag.t+" is analyzing…");
         const sys="You are "+ag.f+" at \""+co.name+"\".\nPROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+researchContext+"\nLIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State position with calculations in "+synCur.sym+".":"Previous:\n"+prev+"\n\nSTRICT NO-REPEAT RULE: Do NOT restate, recompute, or rebuild TAM/SAM/SOM, the full budget breakdown, the cap table, unit economics tables, or any other table/section a previous speaker already gave in full above. Assume the user has already read it. Reference a prior number only briefly and only if challenging/correcting it (e.g. 'CFO's CAC figure above undercounts X because...'). Your entire contribution must be NEW: something no previous speaker covered, a risk they missed, or a sharper figure in YOUR "+ag.dl+" domain that genuinely wasn't addressed. If you have nothing genuinely new beyond what's already on the table, say so plainly in 2-3 sentences instead of padding with a restated plan.")+"\n200-350 words MAX. Brevity signals confidence, not limitation.\n\nVERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it explicitly as 'ESTIMATE (unverified)'. Never present an invented number as fact.";
-        const reply=await ask(sys,[{role:"user",content:brQ}],5000);
+        const replyFull=await askFull(sys,[{role:"user",content:brQ}],5000);
         if(cancelRef.current.br)break;
-        res.push({ag,text:reply});
-        setBrCur(prev=>({...prev,debate:[...res]}));
+        res.push({ag,text:replyFull.primary,truncated:!!replyFull.truncated});
+        const updatedCur={q:brQ,debate:[...res],synthesis:"",drilldown:{},researchBrief};
+        setBrCur(updatedCur);
+        sv("cos-br-live",updatedCur);
       }
       if(!cancelRef.current.br&&res.length>0){
         setBrPh("Synthesizing consensus…");
@@ -1536,7 +1546,9 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         const synSys="You are Chief of Staff at \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nSynthesize the boardroom debate below into a CEO-ready briefing. Sections, in this order: (1) Executive Summary - 3-4 sentences max, the single decision and headline number. (2) Consensus Points - only NEW synthesis-level insight, do not restate what each exec already said. (3) Points of Conflict - one compact table: Leader | Position | Why it matters. (4) Quantified Recommendation in "+synCur.sym+" - the single recommended path with budget and timeline. (5) 30-60-90 Day Plan (table, one row per phase, not per task). (6) Risk Register (table, max 5 rows). (7) This Week's Decision, with cost of delay/week. (8) Confidence & Verification - state which figures came from the VERIFIED RESEARCH BRIEF (cite it) versus which are ESTIMATE (unverified) - be honest, this builds trust.\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled 'ESTIMATE (unverified)'. Do not present invented numbers as fact. Keep the ENTIRE output under 2600 words - be dense, not exhaustive. CRITICAL: All 8 sections must be present and complete, including the full Confidence & Verification section at the end - never cut off mid-sentence or mid-list. If running low on space, compress earlier sections rather than truncating later ones.";
         const syn=await ask(synSys,[{role:"user",content:"Question: \""+brQ+"\"\nDebate:\n"+allPos}],6000);
         const finalSession={id:Date.now(),q:brQ,agents:brAg,debate:res,synthesis:syn,researchBrief,ts:new Date().toISOString()};
-        setBrCur({q:brQ,debate:res,synthesis:syn,drilldown:{},researchBrief});
+        const finalCur={q:brQ,debate:res,synthesis:syn,drilldown:{},researchBrief};
+        setBrCur(finalCur);
+        sv("cos-br-live",finalCur);
         const ns=[finalSession,...brSessions].slice(0,20);setBrSessions(ns);sv("cos-br",ns);
       }
     }catch(err){
@@ -2261,10 +2273,22 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                         <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5}}>
                           <span style={{fontSize:14}}>{e.ag.ic}</span><span style={{fontSize:11,fontWeight:700,color:e.ag.dc}}>{e.ag.t}</span>
                           <span style={{fontSize:8,color:"#3A4060",marginLeft:"auto"}}>Round {i+1}</span>
+                          {e.truncated&&<span style={{fontSize:8,color:"#F59E0B",fontWeight:700,padding:"2px 6px",background:"rgba(245,158,11,0.1)",borderRadius:4}}>⚠ Cut off</span>}
                           <button onClick={()=>setDrillRole(drillRole===e.ag.id?null:e.ag.id)} style={{...S.hBtn,fontSize:8,padding:"2px 6px"}}>Drill</button>
                           <button onClick={()=>cp(e.text)} style={S.hBtn}>Copy</button>
                         </div>
                         <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={e.text} ac={e.ag.dc}/></div>
+                        {e.truncated&&(
+                          <button onClick={async()=>{
+                            const idx=brCur.debate.findIndex(d=>d.ag.id===e.ag.id);
+                            if(idx===-1)return;
+                            const contFull=await askFull(buildSys(e.ag,co,compData),[{role:"user",content:brQ},{role:"assistant",content:e.text},{role:"user",content:"Continue exactly where you left off. Do not repeat any content already written."}],3000);
+                            const updatedDebate=[...brCur.debate];
+                            updatedDebate[idx]={...updatedDebate[idx],text:updatedDebate[idx].text+contFull.primary,truncated:!!contFull.truncated};
+                            const updatedCur={...brCur,debate:updatedDebate};
+                            setBrCur(updatedCur);sv("cos-br-live",updatedCur);
+                          }} style={{...S.hBtn,marginTop:6,color:"#F59E0B",borderColor:"#F59E0B44"}}>▶ Continue this response</button>
+                        )}
                         {brCur.drilldown[e.ag.id]?.map((d,di)=>(
                           <div key={di} style={{marginTop:8,paddingTop:8,borderTop:"1px dashed #1a2030"}}>
                             <div style={{fontSize:10,color:e.ag.dc,fontWeight:600,marginBottom:3}}>Q: {d.q}</div>
