@@ -1078,16 +1078,6 @@ export default function App(){
   const [showDonate,setShowDonate]=useState(false); 
   const [isAdmin,setIsAdmin]=useState(false);
   const [showSignOutConfirm,setShowSignOutConfirm]=useState(false);
-
-  const handleSignOut=useCallback(async(saveFirst:boolean)=>{
-    if(saveFirst){
-      try{exportAll();}catch(e){showToast("Save failed: "+(e as Error).message+" — signing out anyway","warning");}
-      await new Promise(r=>setTimeout(r,600));
-    }
-    try{await supabase.auth.signOut();}catch(e){console.warn("[OIQ] Sign out error:",e);}
-    setShowSignOutConfirm(false);
-    window.location.reload();
-  },[showToast]);
   const [wfView,setWfView]=useState("new");
   const [wfTask,setWfTask]=useState("");
   const [wfCat,setWfCat]=useState("finance");
@@ -1826,8 +1816,17 @@ const processTask=useCallback(async(task:any)=>{
     setWorkflows([]);tQRef.current=[];setTQueue([]);setConfirmReset(null);
   };
   const exportAll=()=>dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",{version:VERSION,exported:new Date().toISOString(),company:co,companyData:compData,ledgerEntries,customAccounts,dispatchTemplates,adminConfig,actionItems,chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue});
-  const importData=file=>{const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.company){setCo(d.company);sv("cos-co",d.company);}if(d.companyData){setCompData(d.companyData);sv("cos-cd",d.companyData);}if(d.ledgerEntries){setLedgerEntries(d.ledgerEntries);sv("cos-ledger",d.ledgerEntries);}if(d.customAccounts){setCustomAccounts(d.customAccounts);sv("cos-accounts",d.customAccounts);}
-if(d.dispatchTemplates){setDispatchTemplates(d.dispatchTemplates);sv("cos-dispatch-templates",d.dispatchTemplates);}
+  const handleSignOut=useCallback(async(saveFirst:boolean)=>{
+    if(saveFirst){
+      try{exportAll();}catch(e){showToast("Save failed: "+(e as Error).message+" — signing out anyway","warning");}
+      await new Promise(r=>setTimeout(r,600));
+    }
+    try{await supabase.auth.signOut();}catch(e){console.warn("[OIQ] Sign out error:",e);}
+    setShowSignOutConfirm(false);
+    window.location.reload();
+  },[showToast]);
+
+  const importData=file=>{const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.company)setCo(d.company);sv("cos-co",d.company);
 if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admin-config",d.adminConfig);}
 if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);}if(d.chats){setChats(d.chats);sv("cos-ch",d.chats);}if(d.boardroomSessions){setBrSessions(d.boardroomSessions);sv("cos-br",d.boardroomSessions);}if(d.workflows){setWorkflows(d.workflows);sv("cos-wf",d.workflows);}if(d.taskQueue){tQRef.current=d.taskQueue;setTQueue(d.taskQueue);sv("cos-tq",d.taskQueue);}setResumeInfo(null);showToast("Workspace loaded — continue where you left off","success");}catch{showToast("Invalid workspace file","error");}};r.readAsText(file);};
 
