@@ -619,7 +619,6 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false){
   const key=effectiveKeys[active]?.trim();
 
   if(!key){
-    if(!key){
     const fallback=active==="groq"?"gemini":"groq";
     const fallbackKey=effectiveKeys[fallback]?.trim();
     if(!fallbackKey)throw new Error("No API keys available. Check Cloudflare environment variables.");
