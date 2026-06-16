@@ -558,7 +558,9 @@ async function callGroq(key,sys,msgs,maxT){
   const d=await r.json();
   // Response content blocks can include: text, server_tool_use (search query), web_search_tool_result (search results).
   // Only "text" blocks contain the model's actual answer - filter to those, in order, and join.
-  return d.content?.filter((b:any)=>b.type==="text").map((b:any)=>b.text||"").join("\n")||"";
+  const text=d.content?.filter((b:any)=>b.type==="text").map((b:any)=>b.text||"").join("\n")||"";
+  (text as any).__truncated=d.stop_reason==="max_tokens";
+  return text;
 }
 async function callOpenAI(key,sys,msgs,maxT){
   const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.openai.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
@@ -622,7 +624,13 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false){
   }
 
   try{
-    const text=await callAI(active,key,sys,msgs,maxT,enableSearch);
+    let text=await callAI(active,key,sys,msgs,maxT,enableSearch);
+    if((text as any).__truncated && active==="claude"){
+      try{
+        const continuation=await callAI(active,key,sys,[...msgs,{role:"assistant",content:text},{role:"user",content:"Continue exactly where you left off. Do not repeat any content already written. Pick up mid-sentence if needed."}],Math.min(maxT,4000),false);
+        text=text+continuation;
+      }catch{ /* if continuation fails, return what we have rather than losing it */ }
+    }
     return{primary:text};
   }catch(err:any){
     if(isRateLimit(err.message)){
