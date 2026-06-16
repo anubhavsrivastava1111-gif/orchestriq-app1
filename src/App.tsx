@@ -1,4 +1,32 @@
 import { getExecutivesCached } from "./lib/executives";
+import { supabase } from "./lib/supabase";
+
+// ─── SESSION GATE ────────────────────────────────────────────────────────────
+async function checkSessionGate(): Promise<{allowed:boolean;reason?:string;plan?:string;used?:number;limit?:number}> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { allowed: true };
+    const { data, error } = await supabase.rpc('check_and_increment_session', { p_user_id: user.id });
+    if (error) {
+      console.warn('[OIQ] Session gate error:', error.message);
+      return { allowed: true };
+    }
+    return data as {allowed:boolean;reason?:string;plan?:string;used?:number;limit?:number};
+  } catch(e) {
+    console.warn('[OIQ] Session gate exception:', e);
+    return { allowed: true };
+  }
+}
+
+async function saveBYOKeyToSupabase(apiKey: string): Promise<void> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('profiles').update({ byo_api_key: apiKey || null }).eq('id', user.id);
+  } catch(e) {
+    console.warn('[OIQ] Failed to save BYO key:', e);
+  }
+}
 import Ledger, { type JournalEntry } from "./Ledger";
 import Dispatch, { type DispatchTemplate } from "./Dispatch";
 import ActionTracker, { ExtractReviewModal, extractItemsFromJSON, EXTRACTION_PROMPT, type ActionItem, type ExtractedItem } from "./ActionTracker";
@@ -1266,6 +1294,11 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   const runTM=useCallback(async()=>{
     if(!tmDec.trim()||tmRun)return;
     cancelRef.current.tm=false;
+    const gate=await checkSessionGate();
+    if(!gate.allowed){
+      showToast(`Free trial limit reached (${gate.used}/${gate.limit} sessions used). Upgrade your plan or add your own API key in Settings.`,"warning");
+      return;
+    }
     setTmRun(true);setTmRes("");setError(null);setTmResearchBrief("");
     const tmCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
     try{
@@ -1290,6 +1323,11 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   const runAP=useCallback(async()=>{
     if(apRun)return;
     cancelRef.current.ap=false;
+    const gate=await checkSessionGate();
+    if(!gate.allowed){
+      showToast(`Free trial limit reached (${gate.used}/${gate.limit} sessions used). Upgrade your plan or add your own API key in Settings.`,"warning");
+      return;
+    }
     setApRun(true);setApRes("");setError(null);setApResearchBrief("");
     const apCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
     try{
@@ -1315,6 +1353,11 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   const runBR=useCallback(async()=>{
     if(!brQ.trim()||brRun)return;
     cancelRef.current.br=false;
+    const gate=await checkSessionGate();
+    if(!gate.allowed){
+      showToast(`Free trial limit reached (${gate.used}/${gate.limit} sessions used). Upgrade your plan at orchestriq.gorakhai.com or add your own API key in Settings to continue.`,"warning");
+      return;
+    }
     setBrRun(true);setError(null);
     setBrCur({q:brQ,debate:[],synthesis:"",drilldown:{},researchBrief:""});
     const agents=brAg.map(id=>AR.find(r=>r.id===id)).filter(Boolean);
@@ -2717,7 +2760,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                       <a href={m.keyUrl} target="_blank" rel="noopener noreferrer" style={{marginLeft:"auto",fontSize:9,color:m.color,textDecoration:"none"}}>Get key ↗</a>
                       {keys[id]?.trim()&&<button onClick={()=>testKey(id)} style={{...S.iBtn,fontSize:9,padding:"1px 6px"}}>{testSt[id]==="testing"?"…":testSt[id]==="ok"?"✓ OK":testSt[id]?.startsWith("fail:")?"✗ Fail":"Test"}</button>}
                     </div>
-                    <input style={{...S.inp,fontSize:11}} type="password" value={keys[id]} onChange={e=>{const nk={...keys,[id]:e.target.value};setKeys(nk);sv("cos-keys",{keys:nk,defaultProvider:defP,multiAI});setTestSt(p=>({...p,[id]:undefined}));}} placeholder={m.placeholder}/>
+                    <input style={{...S.inp,fontSize:11}} type="password" value={keys[id]} onChange={e=>{const nk={...keys,[id]:e.target.value};setKeys(nk);sv("cos-keys",{keys:nk,defaultProvider:defP,multiAI});setTestSt(p=>({...p,[id]:undefined}));if(id==="claude"||id==="openai")saveBYOKeyToSupabase(e.target.value);}} placeholder={m.placeholder}/>
                     {testSt[id]?.startsWith("fail:")&&<div style={{fontSize:9,color:"#EF4444",marginTop:2,lineHeight:1.4}}>{testSt[id].slice(5)}</div>}
                   </div>
                 ))}
