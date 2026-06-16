@@ -559,8 +559,7 @@ async function callGroq(key,sys,msgs,maxT){
   // Response content blocks can include: text, server_tool_use (search query), web_search_tool_result (search results).
   // Only "text" blocks contain the model's actual answer - filter to those, in order, and join.
   const text=d.content?.filter((b:any)=>b.type==="text").map((b:any)=>b.text||"").join("\n")||"";
-  (text as any).__truncated=d.stop_reason==="max_tokens";
-  return text;
+  return {text,truncated:d.stop_reason==="max_tokens"};
 }
 async function callOpenAI(key,sys,msgs,maxT){
   const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.openai.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
@@ -590,7 +589,11 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false){
   const timeout=new Promise((_,rej)=>{
     timerId=setTimeout(()=>rej(new Error("Request timed out after "+(timeoutMs/1000)+"s. The AI provider may be busy — try switching to Gemini (free tier).")),timeoutMs);
   });
-  const callP=provider==="claude"?callClaude(key,sys,msgs,maxT,enableSearch):provider==="openai"?callOpenAI(key,sys,msgs,maxT):provider==="gemini"?callGemini(key,sys,msgs,maxT):provider==="groq"?callGroq(key,sys,msgs,maxT):Promise.reject(new Error("Unknown provider: "+provider));
+  const callP=(async()=>{
+    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT):provider==="groq"?await callGroq(key,sys,msgs,maxT):Promise.reject(new Error("Unknown provider: "+provider));
+    if(raw&&typeof raw==="object"&&"text" in raw)return raw as {text:string;truncated:boolean};
+    return {text:raw as string,truncated:false};
+  })();
   try{return await Promise.race([callP,timeout]);}
   finally{clearTimeout(timerId);}
 }
@@ -616,19 +619,21 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false){
   const key=effectiveKeys[active]?.trim();
 
   if(!key){
+    if(!key){
     const fallback=active==="groq"?"gemini":"groq";
     const fallbackKey=effectiveKeys[fallback]?.trim();
     if(!fallbackKey)throw new Error("No API keys available. Check Cloudflare environment variables.");
-    const text=await callAI(fallback,fallbackKey,sys,msgs,maxT,false);
-    return{primary:text};
+    const r=await callAI(fallback,fallbackKey,sys,msgs,maxT,false);
+    return{primary:r.text};
   }
 
   try{
-    let text=await callAI(active,key,sys,msgs,maxT,enableSearch);
-    if((text as any).__truncated && active==="claude"){
+    let r=await callAI(active,key,sys,msgs,maxT,enableSearch);
+    let text=r.text;
+    if(r.truncated && active==="claude"){
       try{
-        const continuation=await callAI(active,key,sys,[...msgs,{role:"assistant",content:text},{role:"user",content:"Continue exactly where you left off. Do not repeat any content already written. Pick up mid-sentence if needed."}],Math.min(maxT,4000),false);
-        text=text+continuation;
+        const cont=await callAI(active,key,sys,[...msgs,{role:"assistant",content:text},{role:"user",content:"Continue exactly where you left off. Do not repeat any content already written. Pick up mid-sentence if needed."}],Math.min(maxT,4000),false);
+        text=text+cont.text;
       }catch{ /* if continuation fails, return what we have rather than losing it */ }
     }
     return{primary:text};
@@ -643,8 +648,8 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false){
         const fallbackKey=effectiveKeys[fallback]?.trim();
         if(!fallbackKey)continue;
         try{
-          const text=await callAI(fallback,fallbackKey,sys,msgs,maxT,enableSearch&&fallback==="claude");
-          return{primary:text};
+          const r=await callAI(fallback,fallbackKey,sys,msgs,maxT,enableSearch&&fallback==="claude");
+          return{primary:r.text};
         }catch(err2:any){
           if(isRateLimit(err2.message)){markProviderExhausted(fallback);continue;}
           throw err2;
@@ -653,7 +658,6 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false){
     }
     throw err;
   }
-}
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 
