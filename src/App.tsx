@@ -1077,6 +1077,17 @@ export default function App(){
   const [dnCustom,setDnCustom]=useState("");
   const [showDonate,setShowDonate]=useState(false); 
   const [isAdmin,setIsAdmin]=useState(false);
+  const [showSignOutConfirm,setShowSignOutConfirm]=useState(false);
+
+  const handleSignOut=useCallback(async(saveFirst:boolean)=>{
+    if(saveFirst){
+      try{exportAll();}catch(e){showToast("Save failed: "+(e as Error).message+" — signing out anyway","warning");}
+      await new Promise(r=>setTimeout(r,600));
+    }
+    try{await supabase.auth.signOut();}catch(e){console.warn("[OIQ] Sign out error:",e);}
+    setShowSignOutConfirm(false);
+    window.location.reload();
+  },[showToast]);
   const [wfView,setWfView]=useState("new");
   const [wfTask,setWfTask]=useState("");
   const [wfCat,setWfCat]=useState("finance");
@@ -2001,7 +2012,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
               {Object.entries(THEMES).map(([id,t])=><option key={id} value={id} style={{background:"#0a0e1a"}}>{t.ic}</option>)}
             </select>
             <button onClick={()=>setShowExport(true)} title="Export Studio — PDF & PowerPoint" style={{...S.iBtn,color:"#A855F7"}}>🎨</button>
-            
+            <button onClick={()=>setShowSignOutConfirm(true)} title="Sign Out" style={{...S.iBtn,color:"#EF4444"}}>⎋</button>
             <button onClick={()=>{setShowSettings(true);setSTab("api");}} title="Settings" style={S.iBtn}>⚙</button>
           </div>
         </div>
@@ -2931,6 +2942,22 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
         </div>
       )}
 
+      {showSignOutConfirm&&(
+        <div style={S.modalBg} onClick={()=>setShowSignOutConfirm(false)}>
+          <div style={{...S.modal,maxWidth:420,textAlign:"center"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:32,marginBottom:8}}>⎋</div>
+            <h2 style={{fontSize:16,fontWeight:800,color:"#F1F5F9",marginBottom:8}}>Sign Out</h2>
+            <p style={{fontSize:12,color:"#8892B0",marginBottom:18,lineHeight:1.6}}>
+              Your conversations, boardroom sessions, and company data live in this browser only. Signing out without saving means this data will not follow you to your next login on this or any device.
+            </p>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              <button onClick={()=>handleSignOut(true)} style={{...S.pBtn,marginTop:0,background:"#14B8A6"}}>Save Workspace, Then Sign Out</button>
+              <button onClick={()=>handleSignOut(false)} style={{...S.pBtn,marginTop:0,background:"transparent",border:"1px solid #EF444466",color:"#EF4444"}}>Sign Out Without Saving</button>
+              <button onClick={()=>setShowSignOutConfirm(false)} style={{background:"none",border:"none",color:"#5A6480",fontSize:12,cursor:"pointer",fontFamily:"Manrope,sans-serif",marginTop:4}}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       {extractModal&&<ExtractReviewModal extracted={extractModal.items} sourceType={extractModal.sourceType} sourceLabel={extractModal.sourceLabel} onConfirm={confirmExtractedItems} onCancel={()=>setExtractModal(null)} AR={AR} S={S}/>}
       {showDonate&&<DonateModal cfg={dnCfg} presets={DONATION_PRESETS} onClose={()=>setShowDonate(false)} cur={cur} amt={dnAmt} setAmt={setDnAmt} custom={dnCustom} setCustom={setDnCustom} S={S}/>}
       <Toaster toasts={toasts} onDismiss={id=>setToasts(prev=>prev.filter(t=>t.id!==id))}/>
