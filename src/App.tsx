@@ -1062,6 +1062,99 @@ const secs=parseSections(bodyText);
   await pptx.writeFile({fileName:(co.name||"Deck").replace(/\s+/g,"-")+"-"+typeLabel.replace(/\s+/g,"-")+"-"+Date.now()+".pptx"});
 }
 
+// ─── QUALITY ENGINE: archetype renderers (pptxgenjs) ────────────────────────
+const QE_PAL={bg:"0A0E1A",panel:"131825",border:"1A2030",text:"F1F5F9",textMuted:"A0AAC0",textDim:"5A6480",accent:"14B8A6",red:"EF4444",amber:"F59E0B",green:"10B981"};
+
+function renderTitleSlideQE(pptx,slide,A){
+  const s=pptx.addSlide();s.background={color:QE_PAL.bg};
+  s.addShape(pptx.ShapeType.rect,{x:0,y:3.1,w:0.35,h:1.3,fill:{color:A}});
+  s.addText(slide.companyName||"Company",{x:0.7,y:2.9,w:12,h:1,fontSize:40,bold:true,color:QE_PAL.text,fontFace:"Arial"});
+  s.addText(slide.deckTitle||"",{x:0.7,y:3.9,w:12,h:0.8,fontSize:22,color:A,fontFace:"Arial"});
+  s.addText(slide.subtitle||"",{x:0.7,y:4.7,w:12,h:0.5,fontSize:13,color:QE_PAL.textMuted,fontFace:"Arial"});
+  s.addText("Generated "+new Date().toLocaleDateString()+"  ·  Confidential",{x:0.7,y:6.7,w:12,h:0.4,fontSize:10,color:QE_PAL.textDim,fontFace:"Arial"});
+}
+
+function renderExecSummarySlideQE(pptx,slide,A,idx){
+  const s=pptx.addSlide();s.background={color:QE_PAL.bg};
+  s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:13.333,h:1.6,fill:{color:QE_PAL.panel}});
+  s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:0.25,h:1.6,fill:{color:A}});
+  s.addText(slide.answerFirstTitle||"",{x:0.55,y:0.18,w:12.2,h:1.3,fontSize:22,bold:true,color:QE_PAL.text,fontFace:"Arial",valign:"middle"});
+  let y=2.0;
+  if(slide.headlineMetric){
+    s.addText(slide.headlineMetric.value,{x:0.55,y,w:4,h:1.2,fontSize:44,bold:true,color:A,fontFace:"Arial"});
+    s.addText(slide.headlineMetric.label,{x:0.55,y:y+1.2,w:4,h:0.5,fontSize:12,color:QE_PAL.textMuted,fontFace:"Arial"});
+    const points=(slide.keyPoints||[]).map(p=>({text:p,options:{bullet:{code:"2022"},color:QE_PAL.textMuted,fontSize:15,fontFace:"Arial",paraSpaceAfter:10}}));
+    s.addText(points,{x:5.0,y,w:7.7,h:4.5,valign:"top"});
+  }else{
+    const points=(slide.keyPoints||[]).map(p=>({text:p,options:{bullet:{code:"2022"},color:QE_PAL.textMuted,fontSize:16,fontFace:"Arial",paraSpaceAfter:12}}));
+    s.addText(points,{x:0.7,y,w:12,h:4.5,valign:"top"});
+  }
+  s.addText(String(idx+1).padStart(2,"0"),{x:12.3,y:0.5,w:0.9,h:0.6,fontSize:14,color:A,align:"right"});
+}
+
+function renderMatrix2x2SlideQE(pptx,slide,A,idx){
+  const s=pptx.addSlide();s.background={color:QE_PAL.bg};
+  s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:13.333,h:0.95,fill:{color:QE_PAL.panel}});
+  s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:0.25,h:0.95,fill:{color:A}});
+  s.addText(slide.answerFirstTitle||"",{x:0.55,y:0.1,w:11.5,h:0.75,fontSize:18,bold:true,color:QE_PAL.text,fontFace:"Arial",valign:"middle"});
+  s.addText(String(idx+1).padStart(2,"0"),{x:12.3,y:0.1,w:0.9,h:0.75,fontSize:14,color:A,align:"right",valign:"middle"});
+  const gx=1.6,gy=1.5,gw=10.1,gh=5.3;
+  const midX=gx+gw/2,midY=gy+gh/2;
+  const quadColors=["3B82F622","10B98122","F59E0B22","EF444422"];
+  s.addText(slide.xAxisLabel||"",{x:gx,y:gy+gh+0.1,w:gw,h:0.4,fontSize:11,color:QE_PAL.textDim,align:"center",fontFace:"Arial"});
+  s.addText(slide.yAxisLabel||"",{x:0.2,y:gy,w:0.4,h:gh,fontSize:11,color:QE_PAL.textDim,align:"center",valign:"middle",rotate:270,fontFace:"Arial"});
+  s.addShape(pptx.ShapeType.rect,{x:gx,y:gy,w:gw/2,h:gh/2,fill:{color:quadColors[0]},line:{color:QE_PAL.border,width:1}});
+  s.addShape(pptx.ShapeType.rect,{x:midX,y:gy,w:gw/2,h:gh/2,fill:{color:quadColors[1]},line:{color:QE_PAL.border,width:1}});
+  s.addShape(pptx.ShapeType.rect,{x:gx,y:midY,w:gw/2,h:gh/2,fill:{color:quadColors[2]},line:{color:QE_PAL.border,width:1}});
+  s.addShape(pptx.ShapeType.rect,{x:midX,y:midY,w:gw/2,h:gh/2,fill:{color:quadColors[3]},line:{color:QE_PAL.border,width:1}});
+  const q=slide.quadrants||{};
+  const renderQuad=(data,x,y)=>{
+    if(!data)return;
+    s.addText(data.label||"",{x:x+0.15,y:y+0.1,w:gw/2-0.3,h:0.4,fontSize:12,bold:true,color:QE_PAL.text,fontFace:"Arial"});
+    const items=(data.items||[]).slice(0,4).map(it=>({text:it,options:{bullet:{code:"2022"},fontSize:10.5,color:QE_PAL.textMuted,paraSpaceAfter:4}}));
+    s.addText(items,{x:x+0.15,y:y+0.55,w:gw/2-0.3,h:gh/2-0.65,valign:"top",fontFace:"Arial"});
+  };
+  renderQuad(q.topLeft,gx,gy);
+  renderQuad(q.topRight,midX,gy);
+  renderQuad(q.bottomLeft,gx,midY);
+  renderQuad(q.bottomRight,midX,midY);
+}
+
+function renderRagStatusSlideQE(pptx,slide,A,idx){
+  const s=pptx.addSlide();s.background={color:QE_PAL.bg};
+  s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:13.333,h:0.95,fill:{color:QE_PAL.panel}});
+  s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:0.25,h:0.95,fill:{color:A}});
+  s.addText(slide.answerFirstTitle||"",{x:0.55,y:0.1,w:11.5,h:0.75,fontSize:18,bold:true,color:QE_PAL.text,fontFace:"Arial",valign:"middle"});
+  s.addText(String(idx+1).padStart(2,"0"),{x:12.3,y:0.1,w:0.9,h:0.75,fontSize:14,color:A,align:"right",valign:"middle"});
+  const statusColor=st=>st==="green"?QE_PAL.green:st==="amber"?QE_PAL.amber:QE_PAL.red;
+  const rows=slide.rows||[];
+  const hasOwner=rows.some(r=>r.owner);
+  const header=hasOwner
+    ?[{text:"Item",options:{fill:{color:A},color:QE_PAL.bg,bold:true,fontSize:11}},{text:"Status",options:{fill:{color:A},color:QE_PAL.bg,bold:true,fontSize:11,align:"center"}},{text:"Owner",options:{fill:{color:A},color:QE_PAL.bg,bold:true,fontSize:11}},{text:"Note",options:{fill:{color:A},color:QE_PAL.bg,bold:true,fontSize:11}}]
+    :[{text:"Item",options:{fill:{color:A},color:QE_PAL.bg,bold:true,fontSize:11}},{text:"Status",options:{fill:{color:A},color:QE_PAL.bg,bold:true,fontSize:11,align:"center"}},{text:"Note",options:{fill:{color:A},color:QE_PAL.bg,bold:true,fontSize:11}}];
+  const body=rows.map(r=>{
+    const cells=[
+      {text:r.item||"",options:{fill:{color:QE_PAL.panel},color:QE_PAL.textMuted,fontSize:10.5}},
+      {text:(r.status||"amber").toUpperCase(),options:{fill:{color:QE_PAL.panel},color:statusColor(r.status),bold:true,fontSize:10,align:"center"}},
+    ];
+    if(hasOwner)cells.push({text:r.owner||"",options:{fill:{color:QE_PAL.panel},color:QE_PAL.textMuted,fontSize:10.5}});
+    cells.push({text:r.note||"",options:{fill:{color:QE_PAL.panel},color:QE_PAL.textMuted,fontSize:10.5}});
+    return cells;
+  });
+  s.addTable([header,...body],{x:0.55,y:1.3,w:12.2,border:{type:"solid",color:QE_PAL.border,pt:1},autoPage:false,colW:hasOwner?[4.5,1.8,1.8,4.1]:[4.5,1.8,5.9]});
+}
+
+function renderStructuredDeck(pptx,slides,A){
+  slides.forEach((slide,idx)=>{
+    switch(slide.type){
+      case "title":renderTitleSlideQE(pptx,slide,A);break;
+      case "exec_summary":renderExecSummarySlideQE(pptx,slide,A,idx);break;
+      case "matrix_2x2":renderMatrix2x2SlideQE(pptx,slide,A,idx);break;
+      case "rag_status":renderRagStatusSlideQE(pptx,slide,A,idx);break;
+    }
+  });
+}
+
 // ─── MAIN APP ────────────────────────────────────────────────────────────────
 
 export default function App(){
