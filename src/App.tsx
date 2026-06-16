@@ -655,8 +655,9 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false){
         }
       }
     }
-    throw err;
+ throw err;
   }
+}
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 
