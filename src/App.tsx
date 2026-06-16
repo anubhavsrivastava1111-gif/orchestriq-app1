@@ -1980,13 +1980,44 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
       const structureHint=isPdf
         ?"Produce a "+tLabel+". Use ## for each major section heading. Under each, use concise bullet points and markdown tables where data is comparative. Sections must suit a "+tLabel+": "+(dtype==="summary"?"single tight executive summary with key metrics and the one recommendation.":dtype==="investor"?"Executive Summary (3-4 sentence overview of the opportunity and ask - never leave empty or use placeholder dashes), Problem, Market & TAM, Solution, Traction/Metrics, Business Model, Financials, Risks, The Ask.":dtype==="executive"?"Executive Summary (3-4 sentence overview - never leave empty or use placeholder dashes), Key Findings, Strategic Recommendations, Financials, Risk Register, 90-Day Action Plan.":"full detailed report covering every theme found in the workspace.")
         :"Produce a "+tLabel+" as a slide deck. Each ## heading = one slide title. Under each, 3-6 short punchy bullet points (slide-ready, not paragraphs) OR a markdown table. Aim for 8-12 slides. Structure for a "+tLabel+": "+(dtype==="investor"?"Title, Problem, Solution, Market, Traction, Business Model, Competition, Financials, Team, The Ask.":dtype==="pitch"?"Hook, Problem, Solution, Why Now, Market, Product, Traction, Ask.":dtype==="roadmap"?"Vision, Now, Next, Later, Milestones, Metrics.":dtype==="research"?"Objective, Method, Findings, Analysis, Implications, Next Steps.":dtype==="operational"?"Overview, KPIs, Wins, Issues, Actions, Outlook.":dtype==="strategy"?"Context, Strategic Goals, Initiatives, Roadmap, Risks, Metrics.":"Agenda, Key Themes, Insights, Recommendations, Risks, Next Steps.");
-      const sys=buildSys(pa,co,compData)+"\n\nWORKSPACE CORPUS TO SYNTHESIZE:\n"+corpus+"\n\nOUTPUT INSTRUCTIONS: "+structureHint+" Be specific and use real numbers from the corpus in "+cur.sym+cur.code+". Do not include any preamble - start directly with the first ## section. EVERY section must contain real content - never output a section with only a horizontal rule, dash, or placeholder. If data for a section is genuinely unavailable, write 1-2 sentences explaining what is needed instead of leaving it blank.";
       const userTitle=expTitle.trim()||(tLabel+" — "+co.name);
-      const synth=await ask(sys,[{role:"user",content:"Build: \""+userTitle+"\". Synthesize across the entire workspace corpus above."}],4000);
-      setExpSynthesis(synth);
-      setExpStep(isPdf?"📄 Rendering PDF…":"📊 Building PowerPoint…");
-      if(isPdf)await generatePDF(dtype,userTitle,synth,co,cur);
-      else await generatePPTX(dtype,userTitle,synth,co,cur);
+
+      // QUALITY ENGINE: for PPTX only, try the structured archetype pipeline first.
+      // Falls back to the original markdown pipeline if the AI response doesn't
+      // parse as valid structured JSON — this can never make PPTX generation worse,
+      // only better when it succeeds.
+      let usedQualityEngine=false;
+      if(!isPdf){
+        try{
+          const qeSys=buildSys(pa,co,compData)+"\n\nWORKSPACE CORPUS TO SYNTHESIZE:\n"+corpus+"\n\n"+buildStructuredDeckPrompt(userTitle,tLabel);
+          const qeRaw=await ask(qeSys,[{role:"user",content:"Build the structured slide JSON now."}],4000);
+          const slides=parseStructuredDeck(qeRaw);
+          if(slides){
+            setExpStep("📊 Building PowerPoint (consulting-grade)…");
+            const PptxGenJS=await ensurePptx();
+            const pptx=new PptxGenJS();
+            pptx.defineLayout({name:"WIDE",width:13.333,height:7.5});pptx.layout="WIDE";
+            const PAL={briefing:"14B8A6",strategy:"6366F1",investor:"A855F7",pitch:"F97316",roadmap:"8B5CF6",research:"06B6D4",operational:"F59E0B"};
+            const A=PAL[dtype]||"14B8A6";
+            slides.forEach(s=>{if(s.type==="title"){s.companyName=s.companyName||co.name;s.deckTitle=s.deckTitle||userTitle;}});
+            renderStructuredDeck(pptx,slides,A);
+            await pptx.writeFile({fileName:(co.name||"Deck").replace(/\s+/g,"-")+"-"+tLabel.replace(/\s+/g,"-")+"-"+Date.now()+".pptx"});
+            setExpSynthesis(slides.map(s=>"## "+(s.answerFirstTitle||s.deckTitle||s.type)+"\n"+(s.keyPoints||[]).join("\n")).join("\n\n"));
+            usedQualityEngine=true;
+          }
+        }catch(qeErr){
+          console.warn("[OrchestrIQ] Quality engine pipeline failed, falling back to legacy:",qeErr);
+        }
+      }
+
+      if(!usedQualityEngine){
+        const sys=buildSys(pa,co,compData)+"\n\nWORKSPACE CORPUS TO SYNTHESIZE:\n"+corpus+"\n\nOUTPUT INSTRUCTIONS: "+structureHint+" Be specific and use real numbers from the corpus in "+cur.sym+cur.code+". Do not include any preamble - start directly with the first ## section. EVERY section must contain real content - never output a section with only a horizontal rule, dash, or placeholder. If data for a section is genuinely unavailable, write 1-2 sentences explaining what is needed instead of leaving it blank.";
+        const synth=await ask(sys,[{role:"user",content:"Build: \""+userTitle+"\". Synthesize across the entire workspace corpus above."}],4000);
+        setExpSynthesis(synth);
+        setExpStep(isPdf?"📄 Rendering PDF…":"📊 Building PowerPoint…");
+        if(isPdf)await generatePDF(dtype,userTitle,synth,co,cur);
+        else await generatePPTX(dtype,userTitle,synth,co,cur);
+      }
       showToast((isPdf?"PDF":"PowerPoint")+" generated and downloaded ✓","success");
       setExpStep("");
     }catch(e){showToast("Export failed: "+e.message,"error");setExpStep("");}
