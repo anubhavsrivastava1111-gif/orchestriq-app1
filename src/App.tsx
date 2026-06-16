@@ -817,6 +817,41 @@ function parseSections(text){
   return secs.filter(s=>s.lines.length||s.title);
 }
 
+// ─── QUALITY ENGINE: structured slide schema, prompt, and parser ───────────
+function buildStructuredDeckPrompt(deckTitle,tLabel){
+  return `You are producing a consulting-grade slide deck (think McKinsey/Deloitte quality bar) as STRICT JSON. Output ONLY a valid JSON array, no preamble, no markdown fences, no commentary.
+
+Each element is one slide. Use ONLY these 4 slide types for this version: "title", "exec_summary", "matrix_2x2", "rag_status".
+
+RULES THAT DEFINE CONSULTING QUALITY (non-negotiable):
+1. Every slide except "title" needs "answerFirstTitle": a COMPLETE SENTENCE stating the conclusion. WRONG: "Cost Breakdown". RIGHT: "Technology spend represents 20% of total project cost and de-risks 3 of the top 5 execution risks."
+2. Exactly ONE "title" slide, first in the array. Shape: {type,companyName,deckTitle,subtitle}.
+3. Exactly ONE "exec_summary" slide, second in the array. Shape: {type,answerFirstTitle,keyPoints:[3-5 sentences],headlineMetric?:{label,value}}.
+4. Use "matrix_2x2" when comparing options, prioritizing initiatives, or positioning along two dimensions. Shape: {type,answerFirstTitle,xAxisLabel,yAxisLabel,quadrants:{topLeft,topRight,bottomLeft,bottomRight}} where each quadrant is {label,items:[strings]}.
+5. Use "rag_status" for progress, risk, or multi-item status tracking. Shape: {type,answerFirstTitle,rows:[{item,status:"red"|"amber"|"green",note,owner?}]}.
+6. Never invent data. If a number is not in the provided corpus, write "data not yet available" rather than fabricating.
+7. Total slides: 5-9 for this version.
+
+DECK TITLE: "${deckTitle}"
+DECK TYPE: "${tLabel}"
+
+Return the JSON array now.`;
+}
+
+function parseStructuredDeck(raw){
+  try{
+    let cleaned=raw.trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/```\s*$/,"");
+    const arr=JSON.parse(cleaned);
+    if(!Array.isArray(arr)||arr.length===0)return null;
+    const validTypes=["title","exec_summary","matrix_2x2","rag_status"];
+    const allValid=arr.every(s=>s&&validTypes.includes(s.type));
+    if(!allValid)return null;
+    return arr;
+  }catch{
+    return null;
+  }
+}
+
 // Gather all workspace knowledge into a single corpus
 // ─── PHASE 2: CAPABILITY & COST BRIEF ───────────────────────────────────────
 async function fetchExchangeRate(toCode){
