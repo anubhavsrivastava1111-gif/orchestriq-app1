@@ -799,6 +799,168 @@ async function ensureJsPDF(){
   if(!window.jspdf?.jsPDF)throw new Error("jsPDF unavailable");
   return window.jspdf.jsPDF;
 }
+async function ensureHtml2Canvas(){
+  if(window.html2canvas)return window.html2canvas;
+  await loadScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js");
+  if(!window.html2canvas)throw new Error("html2canvas unavailable");
+  return window.html2canvas;
+}
+
+// Escape HTML so raw text from the AI can't inject markup.
+function escHtml(s){return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+// Inline-format a single line: **bold**, *italic*, `code`. Runs AFTER escaping.
+function fmtInline(s){
+  return escHtml(s)
+    .replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g,"<em>$1</em>")
+    .replace(/`(.+?)`/g,"<code>$1</code>");
+}
+
+// Convert the AI's markdown into clean, styled HTML BLOCKS.
+// Each top-level child of the returned container is one atomic block, so the
+// paginator can place or page-break between blocks without splitting them.
+function mdToHtmlBlocks(text,accent){
+  const lines=(text||"").split("\n");
+  const out=[];
+  let i=0;
+  let tableBuf=[];
+  const flushTable=()=>{
+    if(!tableBuf.length)return;
+    const rows=tableBuf.filter(r=>!r.trim().match(/^\|[\s|:\-]+\|$/)); // drop the |---|---| separator
+    const cells=rows.map(r=>r.split("|").filter((c,j,a)=>j>0&&j<a.length-1).map(c=>c.trim()));
+    if(cells.length){
+      let html="<table class='pq-tbl'><thead><tr>";
+      cells[0].forEach(c=>html+="<th>"+fmtInline(c)+"</th>");
+      html+="</tr></thead><tbody>";
+      cells.slice(1).forEach(row=>{html+="<tr>";row.forEach(c=>html+="<td>"+fmtInline(c)+"</td>");html+="</tr>";});
+      html+="</tbody></table>";
+      out.push(html);
+    }
+    tableBuf=[];
+  };
+  while(i<lines.length){
+    const l=lines[i];
+    // table rows accumulate
+    if(l.includes("|")&&l.trim().startsWith("|")){tableBuf.push(l);i++;continue;}
+    else flushTable();
+    if(l.trim()===""){i++;continue;}
+    if(l.startsWith("### "))out.push("<h4 class='pq-h4'>"+fmtInline(l.slice(4))+"</h4>");
+    else if(l.startsWith("## "))out.push("<h3 class='pq-h3'>"+fmtInline(l.slice(3))+"</h3>");
+    else if(l.startsWith("# "))out.push("<h2 class='pq-h2'>"+fmtInline(l.slice(2))+"</h2>");
+    else if(l.match(/^[-*]\s/))out.push("<div class='pq-li'><span class='pq-bul'>&bull;</span><span>"+fmtInline(l.replace(/^[-*]\s+/,""))+"</span></div>");
+    else if(l.match(/^\d+\.\s/)){const n=l.match(/^(\d+)\./)[1];out.push("<div class='pq-li'><span class='pq-num'>"+n+".</span><span>"+fmtInline(l.replace(/^\d+\.\s+/,""))+"</span></div>");}
+    else if(l.startsWith("> "))out.push("<div class='pq-quote'>"+fmtInline(l.slice(2))+"</div>");
+    else if(l.startsWith("---"))out.push("<hr class='pq-hr'/>");
+    else out.push("<p class='pq-p'>"+fmtInline(l)+"</p>");
+    i++;
+  }
+  flushTable();
+  return out;
+}
+
+// WYSIWYG PDF: render markdown -> styled HTML blocks -> html2canvas per block ->
+// place into jsPDF with block-aware page breaks (never split a block; only a
+// too-tall table is sliced, and html2canvas keeps rows intact visually).
+async function generatePDFv2(type,title,bodyText,co,cur){
+  const jsPDF=await ensureJsPDF();
+  const html2canvas=await ensureHtml2Canvas();
+  const A={summary:"#14B8A6",detailed:"#3B82F6",executive:"#64748B",investor:"#A855F7"}[type]||"#14B8A6";
+  const typeLabel=PDF_TYPES.find(t=>t.id===type)?.label||"Report";
+
+  // Offscreen render container at fixed content width (px @ ~96dpi for A4 usable width)
+  const CONTENT_W=720; // px; maps to ~190mm printable width
+  const host=document.createElement("div");
+  host.style.cssText="position:fixed;left:-99999px;top:0;width:"+CONTENT_W+"px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#1e1e1e;";
+  const style=document.createElement("style");
+  style.textContent=`
+    .pq-wrap{padding:0;background:#fff}
+    .pq-block{padding:0 4px}
+    .pq-h2{font-size:20px;font-weight:800;color:#111;margin:14px 0 6px}
+    .pq-h3{font-size:16px;font-weight:800;color:`+A+`;margin:14px 0 5px;border-bottom:2px solid `+A+`33;padding-bottom:3px}
+    .pq-h4{font-size:13px;font-weight:700;color:#333;margin:10px 0 4px}
+    .pq-p{font-size:12px;line-height:1.55;margin:5px 0;color:#222}
+    .pq-li{font-size:12px;line-height:1.5;margin:3px 0;padding-left:16px;position:relative;color:#222}
+    .pq-bul{position:absolute;left:2px;color:`+A+`}
+    .pq-num{position:absolute;left:0;color:`+A+`;font-weight:700}
+    .pq-quote{font-size:12px;font-style:italic;color:#555;border-left:3px solid `+A+`55;padding-left:10px;margin:6px 0}
+    .pq-hr{border:none;border-top:1px solid #ddd;margin:8px 0}
+    .pq-tbl{width:100%;border-collapse:collapse;margin:8px 0;font-size:11px}
+    .pq-tbl th{background:`+A+`;color:#fff;text-align:left;padding:6px 8px;font-weight:700;font-size:10px}
+    .pq-tbl td{padding:5px 8px;border-bottom:1px solid #e2e2e2;color:#222;vertical-align:top}
+    .pq-tbl tr:nth-child(even) td{background:#f6f8fb}
+    strong{color:#000}code{background:#f0f0f0;padding:1px 4px;border-radius:3px;font-family:monospace;font-size:11px}
+  `;
+  host.appendChild(style);
+  const wrap=document.createElement("div");wrap.className="pq-wrap";
+  const blocks=mdToHtmlBlocks(bodyText,A);
+  blocks.forEach(b=>{const d=document.createElement("div");d.className="pq-block";d.innerHTML=b;wrap.appendChild(d);});
+  host.appendChild(wrap);
+  document.body.appendChild(host);
+
+  try{
+    const doc=new jsPDF({unit:"pt",format:"a4"});
+    const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight();
+    const M=42;
+    const usableW=W-2*M;
+    const pxToPt=usableW/CONTENT_W; // scale factor: canvas px -> pdf pt
+    const maxBlockH=H-2*M;
+
+    // Cover band
+    const rgb=(hex)=>{const h=hex.replace("#","");return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];};
+    const AC=rgb(A);
+    doc.setFillColor(AC[0],AC[1],AC[2]);doc.rect(0,0,W,84,"F");
+    doc.setTextColor(255,255,255);doc.setFont("helvetica","bold");doc.setFontSize(20);
+    doc.text(co.name||"Company",M,42,{maxWidth:usableW});
+    doc.setFontSize(10);doc.setFont("helvetica","normal");
+    doc.text(typeLabel+"  ·  "+(co.industry||"")+"  ·  "+(co.location||""),M,64);
+    let y=104;
+    doc.setTextColor(20,20,20);doc.setFont("helvetica","bold");doc.setFontSize(15);
+    const titleLines=doc.splitTextToSize(title,usableW);
+    titleLines.forEach(line=>{doc.text(line,M,y);y+=18;});
+    doc.setFontSize(8);doc.setTextColor(120,120,120);doc.setFont("helvetica","normal");
+    doc.text("Generated "+new Date().toLocaleString()+"  ·  Currency: "+cur.code,M,y);y+=14;
+    doc.setDrawColor(AC[0],AC[1],AC[2]);doc.setLineWidth(1.2);doc.line(M,y,W-M,y);y+=14;
+
+    // Render each block to its own canvas, place with page-break awareness
+    const blockEls=Array.from(wrap.children);
+    for(const el of blockEls){
+      const canvas=await html2canvas(el,{scale:2,backgroundColor:"#ffffff",logging:false});
+      const imgH=canvas.height/2*pxToPt; // /2 because scale:2
+      const imgW=usableW;
+      // If block fits on current page, place it. Else new page. If taller than a
+      // whole page, slice it vertically across pages (row borders stay intact visually).
+      if(imgH<=maxBlockH){
+        if(y+imgH>H-M){doc.addPage();y=M;}
+        doc.addImage(canvas.toDataURL("image/png"),"PNG",M,y,imgW,imgH);
+        y+=imgH+4;
+      }else{
+        // tall block: slice the source canvas into page-height chunks
+        const pageCanvasH=Math.floor((maxBlockH/pxToPt)*2); // source px per page slice
+        let sy=0;
+        if(y>M+10){doc.addPage();y=M;} // start tall block on a fresh page
+        while(sy<canvas.height){
+          const sliceH=Math.min(pageCanvasH,canvas.height-sy);
+          const slice=document.createElement("canvas");
+          slice.width=canvas.width;slice.height=sliceH;
+          slice.getContext("2d").drawImage(canvas,0,sy,canvas.width,sliceH,0,0,canvas.width,sliceH);
+          const sliceImgH=sliceH/2*pxToPt;
+          if(y+sliceImgH>H-M){doc.addPage();y=M;}
+          doc.addImage(slice.toDataURL("image/png"),"PNG",M,y,imgW,sliceImgH);
+          y+=sliceImgH+4;
+          sy+=sliceH;
+        }
+      }
+    }
+
+    // Footer page numbers
+    const pages=doc.internal.getNumberOfPages();
+    for(let p=1;p<=pages;p++){doc.setPage(p);doc.setFontSize(7);doc.setTextColor(150,150,150);doc.text((co.name||"")+" · Confidential · Page "+p+" of "+pages,M,H-18);}
+    doc.save((co.name||"Report").replace(/\s+/g,"-")+"-"+typeLabel.replace(/\s+/g,"-")+"-"+Date.now()+".pdf");
+  }finally{
+    document.body.removeChild(host);
+  }
+}
 async function ensurePptx(){
   if(window.PptxGenJS)return window.PptxGenJS;
   await loadScript("https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js");
