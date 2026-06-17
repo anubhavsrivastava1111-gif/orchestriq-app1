@@ -1194,6 +1194,8 @@ export default function App(){
   const [brRun,setBrRun]=useState(false);
   const [brPh,setBrPh]=useState("");
   const [drillRole,setDrillRole]=useState(null);
+  const [brShowHistory,setBrShowHistory]=useState(false);
+  const [brFollowUp,setBrFollowUp]=useState("");
   const [drillQ,setDrillQ]=useState("");
   const [drillRun,setDrillRun]=useState(false);
   const [tmDec,setTmDec]=useState("");
@@ -1566,6 +1568,34 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       if(!cancelRef.current.br){setError(err.message);showToast("Boardroom error: "+err.message,"error");}
     }finally{setBrRun(false);setBrPh("");setBrResearching(false);cancelRef.current.br=false;}
   },[brQ,brAg,brRun,co,compData,brSessions,keys,defP,showToast]);
+
+  // Continue a reopened/finished debate with a follow-up. Same executives respond
+  // again using the prior debate + synthesis as context. Appends to the live debate.
+  const runBRContinue=useCallback(async()=>{
+    if(!brFollowUp.trim()||brRun)return;
+    cancelRef.current.br=false;
+    setBrRun(true);setError(null);
+    const priorContext=brCur.debate.map(d=>d.ag.t+": "+d.text).join("\n\n")+(brCur.synthesis?"\n\nPRIOR SYNTHESIS:\n"+brCur.synthesis:"");
+    const agents=(brCur.debate.length?brCur.debate.map(d=>d.ag):brAg.map(id=>AR.find(r=>r.id===id))).filter(Boolean);
+    const res=[...brCur.debate];
+    const synCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
+    try{
+      for(let i=0;i<agents.length;i++){
+        if(cancelRef.current.br){showToast("Cancelled","warning");break;}
+        const ag=agents[i];const p=EP[ag.id]||{};
+        setBrPh(ag.ic+" "+ag.t+" is responding to your follow-up…");
+        const sys="You are "+ag.f+" at \""+co.name+"\".\nPROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+"\nThis is a CONTINUING boardroom debate. Prior debate so far:\n"+priorContext+"\n\nThe user now asks a FOLLOW-UP. Respond ONLY to the new follow-up, in your "+ag.dl+" capacity, building on (not repeating) what was already said. 200-350 words MAX.";
+        const replyFull=await askFull(sys,[{role:"user",content:"FOLLOW-UP QUESTION: "+brFollowUp}],4000);
+        if(cancelRef.current.br)break;
+        res.push({ag,text:replyFull.primary,truncated:!!replyFull.truncated});
+        const updatedCur={...brCur,debate:[...res]};
+        setBrCur(updatedCur);sv("cos-br-live",updatedCur);
+      }
+      setBrFollowUp("");
+    }catch(err){
+      if(!cancelRef.current.br){setError(err.message);showToast("Continue error: "+err.message,"error");}
+    }finally{setBrRun(false);setBrPh("");cancelRef.current.br=false;}
+  },[brFollowUp,brRun,brCur,brAg,co,compData,keys,defP,showToast]);
   
   const runDrill=useCallback(async()=>{
     if(!drillRole||!drillQ.trim()||drillRun)return;
@@ -2255,8 +2285,26 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                 <div>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                     <div><div style={{fontSize:13,fontWeight:800,color:"#F1F5F9",marginBottom:1}}>AI Boardroom</div><p style={{fontSize:10,color:"#5A6480"}}>Live debate · {co.location||"Set location"} · {cur.code}</p></div>
-                    {brSessions.length>0&&<button onClick={()=>dlFile("Boardroom-"+Date.now()+".json",brSessions)} style={S.hBtn}>Export ({brSessions.length})</button>}
+                    <div style={{display:"flex",gap:4}}>
+                      {brSessions.length>0&&<button onClick={()=>setBrShowHistory(s=>!s)} style={{...S.hBtn,...(brShowHistory?{color:"#14B8A6",borderColor:"#14B8A644"}:{})}}>{brShowHistory?"✕ Close":"🕓 Past Sessions ("+brSessions.length+")"}</button>}
+                      {brSessions.length>0&&<button onClick={()=>dlFile("Boardroom-"+Date.now()+".json",brSessions)} style={S.hBtn}>Export</button>}
+                    </div>
                   </div>
+                  {brShowHistory&&(
+                    <div style={{marginBottom:10,background:"#0c1120",border:"1px solid #1a2030",borderRadius:8,padding:"10px 12px"}}>
+                      <div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:0.8,marginBottom:8}}>Saved Boardroom Sessions</div>
+                      {brSessions.map(s=>(
+                        <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"#131825",border:"1px solid #1a2030",borderRadius:6,marginBottom:5}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:11,fontWeight:600,color:"#F1F5F9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.q}</div>
+                            <div style={{fontSize:8,color:"#5A6480",marginTop:2}}>{new Date(s.ts).toLocaleString()} · {s.debate?.length||0} executives</div>
+                          </div>
+                          <button onClick={()=>{const restored={q:s.q,debate:s.debate||[],synthesis:s.synthesis||"",drilldown:{},researchBrief:s.researchBrief||""};setBrCur(restored);setBrQ(s.q);setBrAg(s.agents||brAg);sv("cos-br-live",restored);setBrShowHistory(false);showToast("Session reopened — scroll down to view or continue it","success");}} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633",flexShrink:0}}>Reopen</button>
+                          <button onClick={()=>{if(confirm("Delete this saved session?")){const ns=brSessions.filter(x=>x.id!==s.id);setBrSessions(ns);sv("cos-br",ns);}}} style={{...S.hBtn,color:"#EF4444",borderColor:"#EF444433",flexShrink:0}}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:8}}>
                     {CS.map(a=>{const sel=brAg.includes(a.id);return(<button key={a.id} onClick={()=>!brRun&&setBrAg(sel?brAg.filter(x=>x!==a.id):[...brAg,a.id])} style={{padding:"4px 8px",borderRadius:5,fontSize:10,fontWeight:600,border:"1px solid "+(sel?a.dc+"44":"#1a2030"),background:sel?a.dc+"10":"#0c1120",color:sel?a.dc:"#5A6480",cursor:brRun?"not-allowed":"pointer",fontFamily:"Manrope,sans-serif",opacity:brRun&&!sel?0.5:1}}>{a.ic} {a.t}</button>);})}
                   </div>
@@ -2332,6 +2380,24 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                           </div>
                         </div>
                         <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={brCur.synthesis}/></div>
+                      </div>
+                    </div>
+                  )}
+                  {(brCur.debate.length>0||brCur.synthesis)&&!brRun&&(
+                    <div style={{marginTop:10,background:"#0c1120",border:"1px solid #1a2030",borderRadius:8,padding:"10px 12px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:6}}>
+                        <div style={{fontSize:10,fontWeight:700,color:"#14B8A6"}}>📦 Entire Discussion</div>
+                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                          <button onClick={()=>quickExport("pdf","detailed","Boardroom Discussion — "+brCur.q,(brCur.researchBrief?"## Research Brief\n"+brCur.researchBrief+"\n\n":"")+brCur.debate.map(d=>"## "+d.ag.t+"\n"+d.text).join("\n\n")+(brCur.synthesis?"\n\n## Boardroom Synthesis\n"+brCur.synthesis:""))} style={S.hBtn}>📄 Full PDF</button>
+                          <button onClick={()=>quickExport("pptx","strategy","Boardroom Discussion — "+brCur.q,(brCur.researchBrief?"## Research Brief\n"+brCur.researchBrief+"\n\n":"")+brCur.debate.map(d=>"## "+d.ag.t+"\n"+d.text).join("\n\n")+(brCur.synthesis?"\n\n## Boardroom Synthesis\n"+brCur.synthesis:""))} style={S.hBtn}>📊 Full PPT</button>
+                          <button onClick={()=>dlFile("Boardroom-Full-"+Date.now()+".md","# "+brCur.q+"\n\n"+brCur.debate.map(d=>"## "+d.ag.t+"\n"+d.text).join("\n\n")+(brCur.synthesis?"\n\n## Synthesis\n"+brCur.synthesis:""),"text/markdown")} style={S.hBtn}>Full MD</button>
+                        </div>
+                      </div>
+                      <div style={{fontSize:10,fontWeight:700,color:"#14B8A6",marginBottom:6}}>↻ Continue this debate</div>
+                      <p style={{fontSize:9,color:"#5A6480",marginBottom:8,lineHeight:1.5}}>Ask a follow-up. The same executives respond again, with the full debate above as context.</p>
+                      <div style={{display:"flex",gap:5}}>
+                        <textarea style={{...S.inp,flex:1,minHeight:42,resize:"vertical"}} value={brFollowUp} onChange={e=>setBrFollowUp(e.target.value)} placeholder="e.g. What changes if our budget is halved?" disabled={brRun}/>
+                        <button onClick={runBRContinue} disabled={brRun||!brFollowUp.trim()} style={{...S.pBtn,width:"auto",padding:"7px 14px",marginTop:0,fontSize:11,alignSelf:"flex-end",opacity:brRun||!brFollowUp.trim()?0.3:1}}>{brRun?"…":"Continue"}</button>
                       </div>
                     </div>
                   )}
