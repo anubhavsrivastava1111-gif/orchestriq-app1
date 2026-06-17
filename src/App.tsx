@@ -1074,25 +1074,57 @@ function gatherWorkspace(co,compData,chats,brSessions,workflows,tQueue,extras){
 }
 // ─── CHART DETECTION ────────────────────────────────────────────────────────
 // Detects if a markdown table is chartable: first column = labels, remaining columns = numbers
+// Detects the "unit" implied by a header label or a cell's formatting, so we
+// never chart incompatible units (months vs % vs currency) on one axis.
+function detectUnit(headerLabel,sampleCells){
+  const h=(headerLabel||"").toLowerCase();
+  const sample=sampleCells.join(" ");
+  if(h.includes("%")||sample.includes("%"))return "percent";
+  if(h.includes("₹")||h.includes("rs.")||h.includes("rs ")||h.includes("usd")||h.includes("$")||sample.includes("₹")||sample.includes("rs.")||sample.includes("$"))return "currency";
+  if(h.includes("month"))return "months";
+  if(h.includes("day"))return "days";
+  if(h.includes("year")||h.includes("yr"))return "years";
+  if(h.includes("week"))return "weeks";
+  if(h.includes("score")||h.includes("rating"))return "score";
+  return "count"; // generic/unitless number — only compatible with other "count" columns
+}
+
 function tableToChartData(rows){
   if(rows.length<2)return null;
   const header=rows[0].split("|").filter((c,i,a)=>i>0&&i<a.length-1).map(c=>c.trim());
   const dataRows=rows.slice(1).filter(r=>!r.trim().match(/^\|[\s|:-]+\|$/));
   if(dataRows.length<2||header.length<2)return null;
   const labels=[];const series=header.slice(1).map(()=>[]);
+  const rawCellsPerCol=header.slice(1).map(()=>[]);
   let numericCount=0;
   for(const r of dataRows){
     const cells=r.split("|").filter((c,i,a)=>i>0&&i<a.length-1).map(c=>c.trim());
     if(cells.length<2)continue;
     labels.push(cells[0]);
     for(let c=1;c<header.length;c++){
-      const raw=(cells[c]||"").replace(/[^\d.\-]/g,"");
+      const cellRaw=cells[c]||"";
+      const raw=cellRaw.replace(/[^\d.\-]/g,"");
       const n=parseFloat(raw);
       series[c-1].push(isNaN(n)?0:n);
+      rawCellsPerCol[c-1].push(cellRaw);
       if(!isNaN(n)&&raw!=="")numericCount++;
     }
   }
   if(numericCount<2)return null; // not enough numeric data to chart
+
+  // UNIT-SAFETY GATE: detect each numeric column's unit. If two or more columns
+  // have DIFFERENT units (e.g. one is %, another is months, another is currency),
+  // charting them together would be misleading — bail out and let the caller fall
+  // back to a plain table instead of plotting incompatible quantities on one axis.
+  const colUnits=header.slice(1).map((name,i)=>detectUnit(name,rawCellsPerCol[i]));
+  const uniqueUnits=[...new Set(colUnits)];
+  if(uniqueUnits.length>1)return null;
+
+  // Additional sanity gate: if it's "count" (no detectable unit at all) and there
+  // are 3+ series, this is more likely a mixed qualitative table than real chart
+  // data — be conservative and skip rather than risk a meaningless chart.
+  if(uniqueUnits[0]==="count"&&header.length-1>=3)return null;
+
   return{labels,series:header.slice(1).map((name,i)=>({name,values:series[i]}))};
 }
 
