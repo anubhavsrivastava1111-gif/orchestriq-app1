@@ -2230,7 +2230,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
         const synth=await ask(sys,[{role:"user",content:"Build: \""+userTitle+"\". Synthesize across the entire workspace corpus above."}],4000);
         setExpSynthesis(synth);
         setExpStep(isPdf?"📄 Rendering PDF…":"📊 Building PowerPoint…");
-        if(isPdf)await generatePDF(dtype,userTitle,synth,co,cur);
+        if(isPdf)await generatePDFv2(dtype,userTitle,synth,co,cur);
         else await generatePPTX(dtype,userTitle,synth,co,cur);
       }
       showToast((isPdf?"PDF":"PowerPoint")+" generated and downloaded ✓","success");
@@ -2242,7 +2242,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
   // Quick single-source export (used inline in chat/boardroom/etc.)
   const quickExport=useCallback(async(mode,dtype,title,body)=>{
     try{showToast("Generating "+(mode==="pdf"?"PDF":"PowerPoint")+"…","info");
-      if(mode==="pdf")await generatePDF(dtype,title,body,co,cur);
+      if(mode==="pdf")await generatePDFv2(dtype,title,body,co,cur);
       else await generatePPTX(dtype,title,body,co,cur);
       showToast("Downloaded ✓","success");
     }catch(e){showToast("Export failed: "+e.message,"error");}
