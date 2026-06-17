@@ -1201,6 +1201,8 @@ export default function App(){
   const [tmRun,setTmRun]=useState(false);
   const [tmResearchBrief,setTmResearchBrief]=useState("");
   const [tmPh,setTmPh]=useState("");
+  const [tmSessions,setTmSessions]=useState([]);
+  const [tmShowHistory,setTmShowHistory]=useState(false);
   const [apRes,setApRes]=useState("");
   const [apRun,setApRun]=useState(false);
   const [apResearchBrief,setApResearchBrief]=useState("");
@@ -1309,6 +1311,10 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{const ac=localStorage.getItem("cos-admin-config");if(ac)setAdminConfig({...adminConfig,...JSON.parse(ac)});}catch{}
     try{const br=localStorage.getItem("cos-br");if(br)setBrSessions(JSON.parse(br));}catch{}
     try{const brLive=localStorage.getItem("cos-br-live");if(brLive){const parsed=JSON.parse(brLive);if(parsed?.q)setBrCur(parsed);}}catch{}
+    try{const tm=localStorage.getItem("cos-tm");if(tm)setTmSessions(JSON.parse(tm));}catch{}
+    try{const tmLive=localStorage.getItem("cos-tm-live");if(tmLive){const p=JSON.parse(tmLive);if(p?.dec){setTmDec(p.dec);setTmRes(p.res||"");setTmResearchBrief(p.brief||"");}}}catch{}
+    try{const ap=localStorage.getItem("cos-ap");if(ap)setApSessions(JSON.parse(ap));}catch{}
+    try{const apLive=localStorage.getItem("cos-ap-live");if(apLive){const p=JSON.parse(apLive);if(p?.res){setApRes(p.res);setApResearchBrief(p.brief||"");}}}catch{}
     try{const dn=localStorage.getItem("cos-dn");if(dn){const parsed=JSON.parse(dn);setDnCfg(parsed);setLocalDn(parsed);}}catch{}
     try{const wf=localStorage.getItem("cos-wf");if(wf)setWorkflows(JSON.parse(wf));}catch{}
     try{const tq=localStorage.getItem("cos-tq");if(tq){const p=JSON.parse(tq);setTQueue(p);tQRef.current=p;}}catch{}
@@ -1460,7 +1466,12 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       const researchContext="\nVERIFIED RESEARCH BRIEF (current data for this simulation - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n";
       const sys="You are a Business Simulation Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nSimulate TWO parallel 12-month timelines. ALL figures in "+tmCur.sym+tmCur.code+".\nSections: Decision, Baseline Assumptions, TIMELINE A PROCEED (table: Month/Revenue/OpEx/Cash/Key Event), TIMELINE B DO NOT PROCEED (same table), Divergence Summary, Best/Worst/Black Swan scenarios, Verdict table (Expected Value A&B, Cost of Waiting per week, Reversibility, Recommendation with confidence %), First 30 Days Action Plan, Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled 'ESTIMATE (unverified)'. Do not present invented numbers as fact.";
       const res=await ask(sys,[{role:"user",content:"Simulate: \""+tmDec+"\""}],4500);
-      if(!cancelRef.current.tm)setTmRes(res);
+      if(!cancelRef.current.tm){
+        setTmRes(res);
+        sv("cos-tm-live",{dec:tmDec,res,brief:researchBrief});
+        const session={id:Date.now(),dec:tmDec,res,brief:researchBrief,ts:new Date().toISOString()};
+        setTmSessions(prev=>{const ns=[session,...prev].slice(0,20);sv("cos-tm",ns);return ns;});
+      }
     }catch(err){
       if(!cancelRef.current.tm){setError(err.message);showToast("Time Machine: "+err.message,"error");}
     }finally{
@@ -2331,8 +2342,26 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
               {/* TIME MACHINE */}
               {nTab==="timemachine"&&(
                 <div>
-                  <div style={{fontSize:13,fontWeight:800,color:"#F1F5F9",marginBottom:2}}>Business Time Machine</div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:2}}>
+                    <div style={{fontSize:13,fontWeight:800,color:"#F1F5F9"}}>Business Time Machine</div>
+                    {tmSessions.length>0&&<button onClick={()=>setTmShowHistory(s=>!s)} style={{...S.hBtn,...(tmShowHistory?{color:"#8B5CF6",borderColor:"#8B5CF644"}:{})}}>{tmShowHistory?"✕ Close":"🕓 Past Runs ("+tmSessions.length+")"}</button>}
+                  </div>
                   <p style={{fontSize:10,color:"#5A6480",marginBottom:10}}>Two parallel 12-month futures · {co.location||"Set location"} · {cur.code} · 60s timeout</p>
+                  {tmShowHistory&&(
+                    <div style={{marginBottom:10,background:"#0c1120",border:"1px solid #1a2030",borderRadius:8,padding:"10px 12px"}}>
+                      <div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:0.8,marginBottom:8}}>Saved Simulations</div>
+                      {tmSessions.map(s=>(
+                        <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"#131825",border:"1px solid #1a2030",borderRadius:6,marginBottom:5}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:11,fontWeight:600,color:"#F1F5F9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.dec}</div>
+                            <div style={{fontSize:8,color:"#5A6480",marginTop:2}}>{new Date(s.ts).toLocaleString()}</div>
+                          </div>
+                          <button onClick={()=>{setTmDec(s.dec);setTmRes(s.res);setTmResearchBrief(s.brief||"");sv("cos-tm-live",{dec:s.dec,res:s.res,brief:s.brief||""});setTmShowHistory(false);showToast("Simulation reopened","success");}} style={{...S.hBtn,color:"#8B5CF6",borderColor:"#8B5CF633",flexShrink:0}}>Reopen</button>
+                          <button onClick={()=>{if(confirm("Delete this saved simulation?")){setTmSessions(prev=>{const ns=prev.filter(x=>x.id!==s.id);sv("cos-tm",ns);return ns;});}}} style={{...S.hBtn,color:"#EF4444",borderColor:"#EF444433",flexShrink:0}}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div style={{display:"flex",gap:5,marginBottom:12}}>
                     <textarea style={{...S.inp,flex:1,minHeight:55}} value={tmDec} onChange={e=>setTmDec(e.target.value)} placeholder={"Describe the decision… e.g. Hire 5 engineers and launch in "+(co.location||"Delhi")+" Q3 with "+cur.sym+"50L budget"} disabled={tmRun}/>
                     <div style={{display:"flex",flexDirection:"column",gap:4,alignSelf:"flex-end"}}>
