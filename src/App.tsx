@@ -693,6 +693,68 @@ function buildSys(role,co,compData){
   );
 }
 
+// ─── CROSS-MODULE INTELLIGENCE LAYER ────────────────────────────────────────
+// Builds a prompt-safe Ledger summary. Defensive field access — works regardless
+// of exact JournalEntry internals (never throws on unknown field names).
+function buildLedgerSnapshot(entries,cur){
+  if(!entries?.length)return null;
+  const sym=cur?.sym||"₹";const code=cur?.code||"";
+  let totalDebits=0,totalCredits=0;
+  entries.forEach(e=>{
+    const lines=e.lines||e.entries||e.items||[];
+    lines.forEach(l=>{totalDebits+=parseFloat(l.debit||l.dr||0);totalCredits+=parseFloat(l.credit||l.cr||0);});
+    if(!lines.length){totalDebits+=parseFloat(e.debit||e.amount||0);totalCredits+=parseFloat(e.credit||0);}
+  });
+  const recent=entries.slice(-5).map(e=>e.description||e.desc||e.narration||e.memo||e.particular||"").filter(Boolean);
+  return[
+    "LEDGER: "+entries.length+" posted journal entries | Currency: "+sym+code,
+    totalDebits>0?"Total Debits: "+sym+totalDebits.toLocaleString("en-IN"):"",
+    totalCredits>0?"Total Credits: "+sym+totalCredits.toLocaleString("en-IN"):"",
+    (totalDebits>0||totalCredits>0)?"Net Position: "+sym+(totalDebits-totalCredits).toLocaleString("en-IN"):"",
+    recent.length?"Recent entries: "+recent.slice(0,3).join("; "):"",
+    "These are the user's own real recorded transactions. Use them — do not substitute generic assumptions.",
+  ].filter(Boolean).join("\n");
+}
+
+// Returns ONLY the module data relevant to a specific task category.
+// Rule: each category declares its own permitted data sources. Irrelevant
+// sources never enter the prompt. This prevents cross-module data pollution
+// while ensuring each chain has the real business context it needs.
+function getModuleContext(category,{ledgerEntries,brSessions,workflows,tQueue,tmRes,apRes,cur}){
+  const parts=[];
+  const FINANCE=["finance","tax","audit"];
+  const STRATEGY=["strategy_task","executive_task"];
+  // Finance/Tax/Audit: inject live Ledger snapshot — the real numbers, not AI assumptions
+  if(FINANCE.includes(category)&&ledgerEntries?.length){
+    const snap=buildLedgerSnapshot(ledgerEntries,cur);
+    if(snap)parts.push("=== LIVE LEDGER DATA (real transactions from this company's General Ledger) ===\n"+snap);
+  }
+  // Strategy/Executive: inject Boardroom decisions, Time Machine results, Autopilot scan
+  if(STRATEGY.includes(category)){
+    const recentBR=(brSessions||[]).slice(0,3);
+    if(recentBR.length){
+      parts.push("=== RECENT BOARDROOM SESSIONS (strategic context) ===");
+      recentBR.forEach(s=>parts.push("Q: \""+s.q+"\"\n"+(s.synthesis?stripMd(s.synthesis).slice(0,500):"")));
+    }
+    if(tmRes)parts.push("=== LAST TIME MACHINE SIMULATION ===\n"+stripMd(tmRes).slice(0,600));
+    if(apRes)parts.push("=== LAST AUTOPILOT DECISION SCAN ===\n"+stripMd(apRes).slice(0,600));
+  }
+  // All categories: inject same-category approved task outputs so the chain builds
+  // forward rather than repeating what was already decided.
+  const prevTasks=(tQueue||[]).filter(t=>t.category===category&&t.status==="approved"&&t.finalOutput).slice(-2);
+  if(prevTasks.length){
+    parts.push("=== PREVIOUSLY APPROVED TASKS (same category — build on these, never repeat them) ===");
+    prevTasks.forEach(t=>parts.push("\""+t.task+"\"\n"+stripMd(t.finalOutput).slice(0,400)));
+  }
+  // All categories: most recent approved workflow from the same chain type
+  const prevWF=(workflows||[]).filter(w=>w.category===category&&w.status==="approved").slice(-1);
+  if(prevWF.length){
+    const wf=prevWF[0];const last=wf.steps[wf.steps.length-1];
+    if(last?.output)parts.push("=== RELATED APPROVED WORKFLOW ===\n\""+wf.task+"\"\n"+stripMd(last.output).slice(0,500));
+  }
+  return parts.length?parts.join("\n\n"):"";
+}
+
 function Md({text,ac}){
   if(!text)return null;
   const c=ac||"#14B8A6";
@@ -1944,6 +2006,12 @@ const runWorkflow=useCallback(async()=>{
   const steps:any[]=[];
   const wfCurr=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
 
+  // Same relevance-scoped context injection as processTask — Flow chains
+  // get real Ledger/Boardroom data rather than reasoning from scratch.
+  const wfModuleContext=getModuleContext(taskCat,{
+    ledgerEntries,brSessions,workflows,tQueue:tQRef.current,tmRes,apRes,cur:wfCurr
+  });
+
   for(let i=0;i<ch.chain.length;i++){
     if(cancelRef.current.wf){
       showToast("Workflow cancelled at Level "+(i+1),"warning");
@@ -1978,7 +2046,8 @@ if(!role){
   "TASK: \""+taskText+"\"\n"+
   (steps.length>0?prevWork+"\n\n":"")+
   (isFirst
-    ?"INITIATING: First, check the COMPANY DATA section above (in CONTEXT) for any figures relevant to this task - such as budget, revenue, headcount, pricing, or other numbers the company has already provided. If relevant data EXISTS there, USE THOSE EXACT FIGURES as your constraints - do not invent different numbers. If NO relevant company data exists for a needed figure, then: (1) State clearly what specific information is missing - list it once, briefly. (2) State your assumptions explicitly as a numbered list (budget, timeline, audience, product type) - these become FIXED CONSTRAINTS that all subsequent levels must honor and build upon, not re-invent. (3) Produce a structured FIRST DRAFT. Label your assumptions section clearly as FIXED ASSUMPTIONS FOR THIS CHAIN (noting which came from existing Company Data vs. which are new assumptions) so downstream levels treat them as given."
+      ?"INITIATING: First, check the COMPANY DATA section above (in CONTEXT) for any figures relevant to this task - such as budget, revenue, headcount, pricing, or other numbers the company has already provided. If relevant data EXISTS there, USE THOSE EXACT FIGURES as your constraints - do not invent different numbers. If NO relevant company data exists for a needed figure, then: (1) State clearly what specific information is missing - list it once, briefly. (2) State your assumptions explicitly as a numbered list (budget, timeline, audience, product type) - these become FIXED CONSTRAINTS that all subsequent levels must honor and build upon, not re-invent. (3) Produce a structured FIRST DRAFT. Label your assumptions section clearly as FIXED ASSUMPTIONS FOR THIS CHAIN (noting which came from existing Company Data vs. which are new assumptions) so downstream levels treat them as given."+
+      (wfModuleContext?"\n\nPLATFORM DATA (from connected modules — consult these real figures before stating any assumption):\n"+wfModuleContext:"")
     :isLast
     ?"FINAL APPROVAL: Review all previous levels. Produce DEFINITIVE FINAL OUTPUT with these mandatory sections: (1) BUDGET RECONCILIATION: State the original budget constraint set at Level 1. State the final recommended budget. If they differ, provide explicit line-by-line ROI justification for every amount above the original - if you cannot justify it with numbers, bring it back within the original constraint. (2) Chain Review. (3) Corrections. (4) FINAL APPROVED OUTPUT. (5) Strategic Commentary. (6) Cross-functional Actions.\n\nDELIVERABLE PACK (produce the actual items, not descriptions - copy-paste usable immediately): "+(DELIVERABLE_SPECS[taskCat]||"a structured action plan with specific owners and deadlines, and a one-page executive summary")+". Every item must be specific to this company and the FIXED ASSUMPTIONS from Level 1 - never generic placeholder text.\n\nAFTER finishing the above, on its own new line write exactly: ===CAPABILITY_BRIEF===\nThen output ONLY a single valid JSON object:\n{\"info_needed\":[\"...\"],\"tools_required\":[{\"name\":\"...\",\"available\":true,\"why\":\"...\"}],\"manual_steps\":[\"...\"],\"automated_steps\":[\"...\"],\"est_cost_usd\":0,\"notes\":\"...\"}"
     :"MID-LEVEL: You are reviewing the previous level output as a critical, senior "+role.dl+" expert. DO NOT restate or repeat what was already said. Instead: (1) Identify 2-3 specific gaps, errors, or unrealistic assumptions in the previous output - be direct and critical. Specifically flag if any constraints (budget, headcount, timeline, scope, cost) have drifted from the FIXED ASSUMPTIONS established at Level 1 - if they have, either bring them back in line or explicitly justify the revision with quantified ROI or business impact showing why the change is warranted. (2) You MUST search for and cite at least ONE piece of specific current data that the previous level did not have - for example: actual current rates, costs, or benchmarks for this specific industry and function in the company's location and market, real competitor activity, or regulatory requirements published in the last 12 months. Do not use generic global averages - find something specific and actionable for this company's context. (3) Add ONE substantive new dimension that only someone at your seniority level in "+role.dl+" would contribute - something that genuinely changes the quality of the output, not just a restatement with different words. (4) Output ONLY: a short Critical Review section, then New Contribution section, then an updated consolidated summary table. Be concise - quality over length."
@@ -2029,7 +2098,7 @@ if(!role){
 
   setWfRunning(false);setWfPhase("");
   cancelRef.current.wf=false;
-},[wfTask,wfCat,wfRunning,co,compData,keys,defP,showToast]);
+},[wfTask,wfCat,wfRunning,co,compData,keys,defP,showToast,ledgerEntries,brSessions,tmRes,apRes]);
 
   const approveWF=useCallback(()=>{
     if(!wfActive)return;
@@ -2090,6 +2159,14 @@ const processTask=useCallback(async(task:any)=>{
   upd({status:TS.RUNNING,startedAt:new Date().toISOString()});
   addN("Chain started: "+ch.label,"running");
 
+  // Retrieve relevant cross-module context scoped to this task's category.
+  // Finance tasks get Ledger data. Strategy tasks get Boardroom sessions.
+  // All tasks get prior approved outputs from the same category.
+  // Nothing irrelevant enters the prompt.
+  const moduleContext=getModuleContext(task.category,{
+    ledgerEntries,brSessions,workflows,tQueue:tQRef.current,tmRes,apRes,cur:p3Curr
+  });
+
   for(let i=0;i<ch.chain.length;i++){
     if(cancelRef.current.q){
       upd({status:TS.FAILED,error:"Cancelled by user"});
@@ -2142,7 +2219,8 @@ const processTask=useCallback(async(task:any)=>{
       "Task: \""+task.task+"\"\n"+
       (!isFirst?prevWork+"\n":"")+
       (isFirst
-        ?"INITIATING: Acknowledge task, produce FIRST DRAFT. Use "+p3Curr.sym+p3Curr.code+"."
+        ?"INITIATING: Acknowledge task, produce FIRST DRAFT. Use "+p3Curr.sym+p3Curr.code+"."+
+          (moduleContext?"\n\n=== PLATFORM DATA — USE THESE REAL FIGURES ===\n"+moduleContext+"\n\nDATA RULE: The figures above come from real modules in this platform (Ledger transactions, prior Boardroom decisions, approved task history). Start your analysis from this real data. Only declare an assumption if a specific figure is genuinely absent from the platform data above — and label it explicitly as an assumption.":"")
         :isLast
         ?"FINAL APPROVAL: Review all levels. Produce DEFINITIVE FINAL OUTPUT."
         :"MID-LEVEL: Review previous level, add "+role.dl+" expertise. Enhanced output in "+p3Curr.sym+p3Curr.code+"."
@@ -2258,7 +2336,7 @@ const processTask=useCallback(async(task:any)=>{
     completeBenchmarkSession(benchSession);
   }
 
-},[co,compData,keys,defP,showToast]);
+},[co,compData,keys,defP,showToast,ledgerEntries,brSessions,workflows,tmRes,apRes]);
 
   const runQueue=useCallback(async()=>{
     if(qRunning)return;
