@@ -1526,6 +1526,7 @@ export default function App(){
   const [expGenerating,setExpGenerating]=useState(false);
   const [expSynthesis,setExpSynthesis]=useState("");
   const [expStep,setExpStep]=useState("");
+  const [expStyleResult,setExpStyleResult]=useState(null);
   // FEATURE 2: resume banner
  const [resumeInfo,setResumeInfo]=useState(null);
 const [wfResumeData,setWfResumeData]=useState<ResumeState|null>(null);
@@ -3282,6 +3283,31 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
               <button onClick={()=>setExpMode("pdf")} style={{flex:1,padding:"9px",borderRadius:6,fontSize:12,fontWeight:700,border:"1px solid "+(expMode==="pdf"?"#3B82F6":"#1a2030"),background:expMode==="pdf"?"rgba(59,130,246,0.1)":"#0a0e1a",color:expMode==="pdf"?"#3B82F6":"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>📄 PDF Report</button>
               <button onClick={()=>setExpMode("pptx")} style={{flex:1,padding:"9px",borderRadius:6,fontSize:12,fontWeight:700,border:"1px solid "+(expMode==="pptx"?"#A855F7":"#1a2030"),background:expMode==="pptx"?"rgba(168,85,247,0.1)":"#0a0e1a",color:expMode==="pptx"?"#A855F7":"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>📊 PowerPoint</button>
             </div>
+            {expMode==="pptx"&&(
+              <div style={{marginBottom:14,padding:"10px 12px",background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:7}}>
+                <label style={S.lbl}>Match a Sample PPT's Style (optional)</label>
+                <p style={{fontSize:9,color:"#5A6480",marginBottom:8,lineHeight:1.5}}>Upload a .pptx and we'll match its colors, fonts, and slide shape. Nothing else from the file is read or stored.</p>
+                <label style={{...S.inp,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#5A6480",fontSize:11,padding:"10px"}}>
+                  {expStyleResult?.extracting?"⏳ Reading style…":expStyleResult?.ok?"📎 "+expStyleResult.sourceFileName:"📎 Upload a .pptx to match its style"}
+                  <input type="file" accept=".pptx" style={{display:"none"}} onChange={async e=>{
+                    const f=e.target.files[0];
+                    if(!f)return;
+                    setExpStyleResult({extracting:true});
+                    setExpStyleResult(await extractPptxStyle(f));
+                  }}/>
+                </label>
+                {expStyleResult?.ok&&(
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
+                    <div style={{display:"flex",gap:3}}>
+                      {Object.values(expStyleResult.colors||{}).slice(0,6).map((c,i)=><span key={i} style={{width:14,height:14,borderRadius:3,background:c,border:"1px solid #1a2030"}}/>)}
+                    </div>
+                    <span style={{fontSize:9,color:"#10B981"}}>✓ Style captured{expStyleResult.fonts?.heading?" — "+expStyleResult.fonts.heading:""}</span>
+                    <button onClick={()=>setExpStyleResult(null)} style={{...S.hBtn,marginLeft:"auto"}}>Remove</button>
+                  </div>
+                )}
+                {expStyleResult?.error&&<div style={{fontSize:9,color:"#EF4444",marginTop:6}}>{expStyleResult.error}</div>}
+              </div>
+            )}
             <label style={S.lbl}>Type</label>
             <div style={{display:"grid",gridTemplateColumns:expMode==="pdf"?"repeat(2,1fr)":"repeat(2,1fr)",gap:5,marginBottom:12}}>
               {(expMode==="pdf"?PDF_TYPES:PPT_TYPES).map(t=>{const sel=expMode==="pdf"?expDocType===t.id:expPptType===t.id;const c=expMode==="pdf"?"#3B82F6":"#A855F7";return(
