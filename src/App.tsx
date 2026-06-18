@@ -1021,7 +1021,14 @@ async function extractPptxStyle(file){
     if(file.size>20*1024*1024)return{error:"File too large (max 20MB)."};
     const JSZip=await ensureJSZip();
     const zip=await JSZip.loadAsync(await file.arrayBuffer());
-    const themeFile=zip.file("ppt/theme/theme1.xml"),presFile=zip.file("ppt/presentation.xml");
+    // Theme numbering varies — theme1.xml is typical, but decks with multiple
+    // slide masters (common in downloaded templates) use theme11.xml, theme23.xml etc.
+    // Match any themeN.xml and use the lowest-numbered one.
+    const themeMatches=zip.file(/^ppt\/theme\/theme\d+\.xml$/);
+    const themeFile=themeMatches&&themeMatches.length
+      ?themeMatches.sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}))[0]
+      :null;
+    const presFile=zip.file("ppt/presentation.xml");
     if(!themeFile||!presFile)return{error:"This doesn't look like a valid PowerPoint (.pptx) file."};
     const parser=new DOMParser();
     const themeDoc=parser.parseFromString(await themeFile.async("string"),"application/xml");
