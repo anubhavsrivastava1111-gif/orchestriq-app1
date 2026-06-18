@@ -584,8 +584,10 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false){
   if(!key?.trim())throw new Error("No API key for "+(MODELS[provider]?.name||provider)+". Add it in Settings.");
   const msgs=rawMsgs.map(m=>({role:m.role==="user"?"user":"assistant",content:m.content}));
   let timerId;
-  // Search-enabled calls take longer (multiple search round-trips inside one request) - extend timeout
-  const timeoutMs=enableSearch?100000:60000;
+  // Search-enabled calls take longer (multiple search round-trips inside one request) - extend timeout.
+  // Non-search calls raised to 120s: dense long-form completions (4000+ tokens) under provider load
+  // can legitimately take >60s, and the timeout only exists as a safety net against truly stuck requests.
+  const timeoutMs=enableSearch?100000:120000;
   const timeout=new Promise((_,rej)=>{
     timerId=setTimeout(()=>rej(new Error("Request timed out after "+(timeoutMs/1000)+"s. The AI provider may be busy — try switching to Gemini (free tier).")),timeoutMs);
   });
@@ -1773,20 +1775,47 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     const agents=(brCur.debate.length?brCur.debate.map(d=>d.ag):brAg.map(id=>AR.find(r=>r.id===id))).filter(Boolean);
     const res=[...brCur.debate];
     const synCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
+    const failedAgents=[];
     try{
       for(let i=0;i<agents.length;i++){
         if(cancelRef.current.br){showToast("Cancelled","warning");break;}
         const ag=agents[i];const p=EP[ag.id]||{};
         setBrPh(ag.ic+" "+ag.t+" is responding to your follow-up…");
         const sys="You are "+ag.f+" at \""+co.name+"\".\nPROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+"\nThis is a CONTINUING boardroom debate. Prior debate so far:\n"+priorContext+"\n\nThe user now asks a FOLLOW-UP. Respond ONLY to the new follow-up, in your "+ag.dl+" capacity, building on (not repeating) what was already said. 200-350 words MAX.";
-        const replyFull=await askFull(sys,[{role:"user",content:"FOLLOW-UP QUESTION: "+brFollowUp}],4000);
+        // PER-AGENT ERROR ISOLATION: a single agent failing (timeout, rate limit, network)
+        // must not kill the whole follow-up round. We catch here, attempt one retry, and if
+        // both attempts fail we record a visible placeholder for that agent and move on.
+        let replyFull=null;
+        let lastErr=null;
+        for(let attempt=0;attempt<2;attempt++){
+          if(cancelRef.current.br)break;
+          try{
+            replyFull=await askFull(sys,[{role:"user",content:"FOLLOW-UP QUESTION: "+brFollowUp}],4000);
+            lastErr=null;
+            break;
+          }catch(agentErr){
+            lastErr=agentErr;
+            // Brief pause before retry to let any transient provider issue clear
+            if(attempt===0)await new Promise(r=>setTimeout(r,1500));
+          }
+        }
         if(cancelRef.current.br)break;
-        res.push({ag,text:replyFull.primary,truncated:!!replyFull.truncated});
+        if(replyFull){
+          res.push({ag,text:replyFull.primary,truncated:!!replyFull.truncated});
+        }else if(lastErr){
+          failedAgents.push(ag.t);
+          res.push({ag,text:"_"+ag.t+" could not respond to this follow-up ("+lastErr.message+"). You can re-ask by sending the follow-up again._",truncated:false});
+        }
         const updatedCur={...brCur,debate:[...res]};
         setBrCur(updatedCur);sv("cos-br-live",updatedCur);
       }
       setBrFollowUp("");
+      if(failedAgents.length){
+        showToast(failedAgents.length+" executive(s) couldn't respond: "+failedAgents.join(", ")+". The rest of the round completed.","warning");
+      }
     }catch(err){
+      // Only reached for non-agent errors (e.g. setup failure). Per-agent failures
+      // are now isolated above and never reach this catch.
       if(!cancelRef.current.br){setError(err.message);showToast("Continue error: "+err.message,"error");}
     }finally{setBrRun(false);setBrPh("");cancelRef.current.br=false;}
   },[brFollowUp,brRun,brCur,brAg,co,compData,keys,defP,showToast]);
