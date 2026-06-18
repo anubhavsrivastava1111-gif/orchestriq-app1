@@ -970,6 +970,69 @@ if(!window.PptxGenJS)throw new Error("PptxGenJS unavailable");
   return window.PptxGenJS;
 }
 
+// ─── PPTX STYLE EXTRACTION (Step 1 — standalone, not wired into any generator yet) ──
+async function ensureJSZip(){
+  if(window.JSZip)return window.JSZip;
+  await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js");
+  if(!window.JSZip)throw new Error("JSZip unavailable");
+  return window.JSZip;
+}
+function findByLocalName(root,name){
+  const all=root.getElementsByTagName("*");
+  for(let i=0;i<all.length;i++)if(all[i].localName===name)return all[i];
+  return null;
+}
+function extractColorFromEl(el){
+  if(!el)return null;
+  const srgb=findByLocalName(el,"srgbClr");
+  if(srgb)return "#"+srgb.getAttribute("val").toUpperCase();
+  const sys=findByLocalName(el,"sysClr");
+  if(sys)return "#"+(sys.getAttribute("lastClr")||"").toUpperCase();
+  return null;
+}
+function extractThemeColors(themeDoc){
+  const scheme=findByLocalName(themeDoc,"clrScheme");
+  if(!scheme)return null;
+  const slots=["dk1","lt1","dk2","lt2","accent1","accent2","accent3","accent4","accent5","accent6"];
+  const colors={};
+  slots.forEach(s=>{const c=extractColorFromEl(findByLocalName(scheme,s));if(c)colors[s]=c;});
+  return Object.keys(colors).length?colors:null;
+}
+function extractThemeFonts(themeDoc){
+  const scheme=findByLocalName(themeDoc,"fontScheme");
+  if(!scheme)return null;
+  const get=which=>{const f=findByLocalName(scheme,which);const l=f&&findByLocalName(f,"latin");return l?.getAttribute("typeface")||null;};
+  const heading=get("majorFont"),body=get("minorFont");
+  return(heading||body)?{heading,body}:null;
+}
+function extractSlideSize(presDoc){
+  const sz=findByLocalName(presDoc,"sldSz");
+  if(!sz)return null;
+  const cx=parseInt(sz.getAttribute("cx"),10),cy=parseInt(sz.getAttribute("cy"),10);
+  if(!cx||!cy)return null;
+  return{widthIn:cx/914400,heightIn:cy/914400,isWidescreen:(cx/cy)>1.5};
+}
+// Reads a user-uploaded .pptx and extracts theme colors/fonts/aspect ratio.
+// Never throws — returns {error} on any problem, {ok:true,...} on success.
+async function extractPptxStyle(file){
+  try{
+    if(!file)return{error:"No file provided."};
+    if(!file.name?.toLowerCase().endsWith(".pptx"))return{error:"Please upload a .pptx file (older .ppt isn't supported)."};
+    if(file.size>20*1024*1024)return{error:"File too large (max 20MB)."};
+    const JSZip=await ensureJSZip();
+    const zip=await JSZip.loadAsync(await file.arrayBuffer());
+    const themeFile=zip.file("ppt/theme/theme1.xml"),presFile=zip.file("ppt/presentation.xml");
+    if(!themeFile||!presFile)return{error:"This doesn't look like a valid PowerPoint (.pptx) file."};
+    const parser=new DOMParser();
+    const themeDoc=parser.parseFromString(await themeFile.async("string"),"application/xml");
+    const presDoc=parser.parseFromString(await presFile.async("string"),"application/xml");
+    const colors=extractThemeColors(themeDoc),fonts=extractThemeFonts(themeDoc),slideSize=extractSlideSize(presDoc);
+    if(!colors&&!fonts&&!slideSize)return{error:"Could not read any style information from this file."};
+    return{ok:true,colors,fonts,slideSize,sourceFileName:file.name};
+  }catch(err){return{error:"Could not read this file: "+(err.message||"unknown error")};}
+}
+if(typeof window!=="undefined")window.__testPptxStyle=extractPptxStyle;
+
 // Strip markdown to plain text for PDF/PPTX bodies
 function stripMd(s){
   return (s||"").replace(/\*\*(.+?)\*\*/g,"$1").replace(/\*(.+?)\*/g,"$1").replace(/`(.+?)`/g,"$1").replace(/^#+\s+/gm,"").replace(/^>\s+/gm,"").replace(/^[-*]\s+/gm,"• ");
