@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+const RefreshCw = () => <span style={{fontSize:10}}>↻</span>;
+const ChevronDown = ({size}:{size?:number}) => <span style={{fontSize:10}}>▾</span>;
+const ChevronUp = ({size}:{size?:number}) => <span style={{fontSize:10}}>▴</span>;
 import type { NewsItem, MarketItem, NewsCategory } from '../../types/news';
 import { ImpactBadge } from './ImpactBadge';
 import { IntelligenceDrawer } from './IntelligenceDrawer';
