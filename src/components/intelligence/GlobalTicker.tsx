@@ -1,87 +1,463 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-const RefreshCw = () => <span style={{fontSize:10}}>↻</span>;
-const ChevronDown = ({size}:{size?:number}) => <span style={{fontSize:10}}>▾</span>;
-const ChevronUp = ({size}:{size?:number}) => <span style={{fontSize:10}}>▴</span>;
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import type { NewsItem, MarketItem, NewsCategory } from '../../types/news';
-import { ImpactBadge } from './ImpactBadge';
-import { IntelligenceDrawer } from './IntelligenceDrawer';
 import { useNewsFeed } from '../../hooks/useNewsFeed';
 import { useMarketFeed } from '../../hooks/useMarketFeed';
+import { deduplicateNews, processMarketItems, formatAge, formatUpdatedAt } from '../../utils/dataValidation';
+import { COLOR, TYPE, SPACE, RADIUS, TICKER, TRANSITION } from '../../styles/tokens';
+
+const IMPACT = {
+  critical: { label: 'CRITICAL', color: COLOR.critical,  bg: COLOR.criticalDim, dot: true  },
+  high:     { label: 'HIGH',     color: COLOR.high,       bg: COLOR.highDim,     dot: false },
+  medium:   { label: 'MEDIUM',   color: COLOR.medium,     bg: COLOR.mediumDim,   dot: false },
+  low:      { label: 'LOW',      color: COLOR.low,        bg: COLOR.lowDim,      dot: false },
+} as const;
 
 const CATEGORIES: { id: NewsCategory; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'markets', label: 'Markets' },
-  { id: 'business', label: 'Business' },
-  { id: 'ai', label: 'AI' },
-  { id: 'world', label: 'World' },
-  { id: 'india', label: 'India' },
+  { id: 'all',         label: 'All'         },
+  { id: 'markets',     label: 'Markets'     },
+  { id: 'india',       label: 'India'       },
+  { id: 'business',    label: 'Business'    },
+  { id: 'ai',          label: 'AI'          },
+  { id: 'world',       label: 'World'       },
   { id: 'commodities', label: 'Commodities' },
 ];
 
-function timeAgo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 2) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  return `${Math.floor(mins / 60)}h ago`;
+const S = {
+  bar: {
+    position: 'fixed' as const,
+    top: 0, left: 0, right: 0,
+    height: TICKER.height,
+    background: COLOR.bg,
+    borderBottom: `1px solid ${COLOR.border}`,
+    display: 'flex',
+    alignItems: 'center',
+    zIndex: 9990,
+    fontFamily: TYPE.fontUI,
+    userSelect: 'none' as const,
+    overflow: 'hidden',
+  },
+  liveBadge: {
+    flexShrink: 0,
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    padding: `0 ${SPACE.px3}`,
+    background: COLOR.accent,
+    borderRight: `1px solid rgba(59,130,246,0.4)`,
+    gap: SPACE.px1,
+  },
+  liveDot: {
+    width: 5, height: 5,
+    borderRadius: RADIUS.full,
+    background: '#fff',
+    animation: 'oiq-pulse 1.4s ease-in-out infinite',
+    flexShrink: 0,
+  },
+  liveLabel: {
+    fontSize: TYPE.size10,
+    fontWeight: TYPE.black,
+    color: '#fff',
+    letterSpacing: TYPE.wider_ls,
+    textTransform: 'uppercase' as const,
+  },
+  filterBtn: (active: boolean) => ({
+    flexShrink: 0,
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    padding: `0 ${SPACE.px3}`,
+    background: active ? COLOR.accentDim : COLOR.bgSurface,
+    borderRight: `1px solid ${COLOR.border}`,
+    fontSize: TYPE.size10,
+    fontWeight: TYPE.semibold,
+    color: active ? COLOR.accent : COLOR.textTertiary,
+    cursor: 'pointer',
+    border: 'none',
+    letterSpacing: TYPE.wide_ls,
+    textTransform: 'uppercase' as const,
+    gap: SPACE.px1,
+    transition: TRANSITION.fast,
+    fontFamily: TYPE.fontUI,
+  }),
+  viewport: {
+    flex: 1,
+    overflow: 'hidden',
+    position: 'relative' as const,
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  track: {
+    display: 'flex',
+    alignItems: 'center',
+    whiteSpace: 'nowrap' as const,
+    willChange: 'transform' as const,
+  },
+  controls: {
+    flexShrink: 0,
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    borderLeft: `1px solid ${COLOR.border}`,
+  },
+  ctrlBtn: {
+    width: 32,
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'none',
+    border: 'none',
+    borderRight: `1px solid ${COLOR.border}`,
+    color: COLOR.textTertiary,
+    fontSize: 11,
+    cursor: 'pointer',
+    transition: TRANSITION.fast,
+    fontFamily: TYPE.fontUI,
+  },
+  skeleton: {
+    height: 12,
+    background: `linear-gradient(90deg, ${COLOR.bgPanel} 25%, ${COLOR.bgElevated} 50%, ${COLOR.bgPanel} 75%)`,
+    backgroundSize: '200% 100%',
+    animation: 'oiq-shimmer 1.5s infinite',
+    borderRadius: RADIUS.sm,
+    flexShrink: 0,
+  },
+  backdrop: {
+    position: 'fixed' as const,
+    inset: 0,
+    background: 'rgba(4,8,16,0.7)',
+    backdropFilter: 'blur(4px)',
+    zIndex: 9998,
+  },
+  drawer: {
+    position: 'fixed' as const,
+    top: 0, right: 0,
+    width: '100%',
+    maxWidth: 520,
+    height: '100%',
+    background: COLOR.bgPanel,
+    borderLeft: `1px solid ${COLOR.border}`,
+    zIndex: 9999,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    overflow: 'hidden',
+    fontFamily: TYPE.fontUI,
+  },
+  drawerHeader: {
+    padding: `${SPACE.px4} ${SPACE.px5}`,
+    borderBottom: `1px solid ${COLOR.border}`,
+    background: COLOR.bgElevated,
+    flexShrink: 0,
+  },
+  drawerBody: {
+    flex: 1,
+    overflowY: 'auto' as const,
+    padding: `${SPACE.px5}`,
+  },
+  sectionLabel: {
+    fontSize: TYPE.size10,
+    fontWeight: TYPE.black,
+    color: COLOR.textTertiary,
+    letterSpacing: TYPE.caps_ls,
+    textTransform: 'uppercase' as const,
+    marginBottom: SPACE.px2,
+    display: 'block',
+  },
+  actionTag: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: `3px 8px`,
+    borderRadius: RADIUS.full,
+    fontSize: TYPE.size11,
+    fontWeight: TYPE.medium,
+    background: COLOR.accentDim,
+    color: COLOR.accent,
+    border: `1px solid ${COLOR.borderAccent}`,
+  },
+};
+
+function ImpactBadge({ level }: { level: keyof typeof IMPACT }) {
+  const cfg = IMPACT[level] ?? IMPACT.low;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 3,
+      padding: '1px 5px',
+      borderRadius: RADIUS.sm,
+      fontSize: TYPE.size10,
+      fontWeight: TYPE.black,
+      letterSpacing: TYPE.wide_ls,
+      color: cfg.color,
+      background: cfg.bg,
+      border: `1px solid ${cfg.color}30`,
+      flexShrink: 0,
+    }}>
+      {cfg.dot && (
+        <span style={{
+          width: 4, height: 4,
+          borderRadius: RADIUS.full,
+          background: cfg.color,
+          animation: 'oiq-pulse 1s ease-in-out infinite',
+        }} />
+      )}
+      {cfg.label}
+    </span>
+  );
+}
+
+function MarketChip({ item, onClick, onMouseEnter, onMouseLeave }: {
+  item: ReturnType<typeof processMarketItems>[0];
+  onClick: () => void;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}) {
+  return (
+    <button onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: SPACE.px2,
+        padding: `0 ${SPACE.px4}`, height: TICKER.height,
+        background: 'none', border: 'none',
+        borderRight: `1px solid ${COLOR.border}`,
+        cursor: 'pointer', fontFamily: TYPE.fontUI, flexShrink: 0,
+      }}
+      aria-label={`${item.name}: ${item.displayValue}`}
+    >
+      <span style={{ fontSize: 12 }}>{item.icon}</span>
+      <span style={{ fontSize: TYPE.size11, fontWeight: TYPE.medium, color: COLOR.textTertiary, letterSpacing: TYPE.wide_ls }}>
+        {item.symbol}
+      </span>
+      {item.isUnavailable ? (
+        <span style={{ fontSize: TYPE.size11, color: COLOR.textMuted, fontStyle: 'italic' }}>Unavailable</span>
+      ) : (
+        <>
+          <span style={{ fontSize: TYPE.size12, fontWeight: TYPE.bold, color: COLOR.textPrimary, fontFamily: TYPE.fontData }}>
+            {item.displayValue}
+          </span>
+          <span style={{ fontSize: TYPE.size10, fontWeight: TYPE.semibold, color: item.isPositive ? COLOR.positive : COLOR.negative, fontFamily: TYPE.fontData }}>
+            {item.isPositive ? '▲' : '▼'} {item.changePercent}
+          </span>
+        </>
+      )}
+    </button>
+  );
+}
+
+function NewsChip({ item, onClick, onMouseEnter, onMouseLeave }: {
+  item: NewsItem;
+  onClick: () => void;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}) {
+  return (
+    <button onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: SPACE.px2,
+        padding: `0 ${SPACE.px4}`, height: TICKER.height,
+        background: 'none', border: 'none',
+        borderRight: `1px solid ${COLOR.border}`,
+        cursor: 'pointer', fontFamily: TYPE.fontUI, flexShrink: 0,
+      }}
+      aria-label={item.headline}
+    >
+      <span style={{ fontSize: 12, flexShrink: 0 }}>{item.icon}</span>
+      <ImpactBadge level={item.impact} />
+      <span style={{ fontSize: TYPE.size12, fontWeight: TYPE.medium, color: COLOR.textSecondary, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {item.headline}
+      </span>
+      <span style={{ fontSize: TYPE.size10, color: COLOR.textMuted, fontFamily: TYPE.fontData, flexShrink: 0 }}>
+        {formatAge(item.publishedAt)}
+      </span>
+    </button>
+  );
+}
+
+function IntelligenceDrawer({ news, market, onClose }: {
+  news: NewsItem | null;
+  market: ReturnType<typeof processMarketItems>[0] | null;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const isNews = !!news;
+  const item = news ?? market;
+  if (!item) return null;
+  const impactCfg = isNews ? IMPACT[(news!.impact as keyof typeof IMPACT)] ?? IMPACT.low : null;
+
+  return (
+    <>
+      <div style={S.backdrop} onClick={onClose} aria-hidden />
+      <div style={S.drawer} role="dialog" aria-modal aria-label="Intelligence Detail">
+        <div style={S.drawerHeader}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: SPACE.px4 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.px2, marginBottom: SPACE.px2 }}>
+                <span style={{ fontSize: 14 }}>{item.icon}</span>
+                <span style={{ fontSize: TYPE.size10, fontWeight: TYPE.black, color: COLOR.textTertiary, letterSpacing: TYPE.caps_ls, textTransform: 'uppercase' }}>
+                  {isNews ? (news as NewsItem).category : 'Market Data'}
+                </span>
+                {isNews && impactCfg && <ImpactBadge level={(news as NewsItem).impact as keyof typeof IMPACT} />}
+              </div>
+              <h2 style={{ fontSize: TYPE.size16, fontWeight: TYPE.bold, color: COLOR.textPrimary, lineHeight: TYPE.snug, margin: 0 }}>
+                {isNews ? (news as NewsItem).headline : `${(market!).name} — Live`}
+              </h2>
+              {isNews && (
+                <div style={{ display: 'flex', gap: SPACE.px4, marginTop: SPACE.px2, fontSize: TYPE.size11, color: COLOR.textTertiary }}>
+                  <span>{formatAge((news as NewsItem).publishedAt, true)}</span>
+                  <span style={{ color: COLOR.borderMid }}>·</span>
+                  <span>{(news as NewsItem).source}</span>
+                </div>
+              )}
+            </div>
+            <button onClick={onClose} style={{ background: 'none', border: `1px solid ${COLOR.border}`, borderRadius: RADIUS.md, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', color: COLOR.textTertiary, cursor: 'pointer', fontSize: 14, flexShrink: 0, fontFamily: TYPE.fontUI }}>×</button>
+          </div>
+        </div>
+
+        <div style={S.drawerBody}>
+          {!isNews && market && (
+            <div style={{ background: COLOR.bgElevated, border: `1px solid ${COLOR.border}`, borderRadius: RADIUS.lg, padding: SPACE.px5, marginBottom: SPACE.px6 }}>
+              <div style={{ fontSize: TYPE.size24, fontWeight: TYPE.black, color: COLOR.textPrimary, fontFamily: TYPE.fontData, marginBottom: SPACE.px1 }}>
+                {market.isUnavailable ? <span style={{ color: COLOR.textMuted, fontSize: TYPE.size16, fontStyle: 'italic' }}>Data temporarily unavailable</span> : market.displayValue}
+              </div>
+              {!market.isUnavailable && (
+                <div style={{ fontSize: TYPE.size13, fontWeight: TYPE.semibold, color: market.isPositive ? COLOR.positive : COLOR.negative, fontFamily: TYPE.fontData }}>
+                  {market.isPositive ? '▲' : '▼'} {market.change} ({market.changePercent})
+                </div>
+              )}
+              <div style={{ fontSize: TYPE.size11, color: COLOR.textMuted, marginTop: SPACE.px2 }}>{formatAge(market.updatedAt, true)}</div>
+            </div>
+          )}
+
+          {isNews && news && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.px6 }}>
+              {news.summary && (
+                <div>
+                  <span style={S.sectionLabel}>Summary</span>
+                  <p style={{ fontSize: TYPE.size13, lineHeight: TYPE.relaxed, color: COLOR.textSecondary, margin: 0 }}>{news.summary}</p>
+                </div>
+              )}
+              {news.aiAnalysis && (
+                <div style={{ background: COLOR.accentGlow, border: `1px solid ${COLOR.borderAccent}`, borderRadius: RADIUS.lg, padding: SPACE.px4 }}>
+                  <span style={{ ...S.sectionLabel, color: COLOR.accent }}>⚡ AI Analysis</span>
+                  <p style={{ fontSize: TYPE.size13, lineHeight: TYPE.relaxed, color: COLOR.textSecondary, margin: 0 }}>{news.aiAnalysis}</p>
+                </div>
+              )}
+              {news.businessImpact && (
+                <div>
+                  <span style={S.sectionLabel}>Business Impact</span>
+                  <p style={{ fontSize: TYPE.size13, lineHeight: TYPE.relaxed, color: COLOR.textSecondary, margin: 0 }}>{news.businessImpact}</p>
+                </div>
+              )}
+              {news.recommendedActions && news.recommendedActions.length > 0 && (
+                <div>
+                  <span style={S.sectionLabel}>Recommended Actions</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.px2 }}>
+                    {news.recommendedActions.map((action, i) => (
+                      <div key={i} style={{ display: 'flex', gap: SPACE.px3, alignItems: 'flex-start', padding: `${SPACE.px2} ${SPACE.px3}`, background: COLOR.bgElevated, borderRadius: RADIUS.md, borderLeft: `2px solid ${COLOR.accent}` }}>
+                        <span style={{ color: COLOR.accent, fontSize: TYPE.size12, flexShrink: 0, marginTop: 1 }}>→</span>
+                        <span style={{ fontSize: TYPE.size12, lineHeight: TYPE.normal, color: COLOR.textSecondary }}>{action}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {news.affectedIndustries && news.affectedIndustries.length > 0 && (
+                <div>
+                  <span style={S.sectionLabel}>Affected Industries</span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: SPACE.px2 }}>
+                    {news.affectedIndustries.map(ind => <span key={ind} style={S.actionTag}>{ind}</span>)}
+                  </div>
+                </div>
+              )}
+              {news.relatedNews && news.relatedNews.length > 0 && (
+                <div>
+                  <span style={S.sectionLabel}>Related</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.px1 }}>
+                    {news.relatedNews.map((rel, i) => (
+                      <div key={i} style={{ fontSize: TYPE.size12, color: COLOR.textTertiary, lineHeight: TYPE.normal, paddingLeft: SPACE.px3, borderLeft: `1px solid ${COLOR.border}` }}>{rel}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function FilterDropdown({ active, onChange, onClose }: {
+  active: NewsCategory;
+  onChange: (cat: NewsCategory) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div style={{ position: 'fixed', top: TICKER.height, left: 0, background: COLOR.bgPanel, border: `1px solid ${COLOR.border}`, borderTop: 'none', borderRadius: `0 0 ${RADIUS.lg} ${RADIUS.lg}`, padding: SPACE.px2, display: 'flex', gap: SPACE.px1, zIndex: 9989, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+      {CATEGORIES.map(cat => (
+        <button key={cat.id} onClick={() => { onChange(cat.id); onClose(); }}
+          style={{ padding: `${SPACE.px1} ${SPACE.px3}`, borderRadius: RADIUS.md, fontSize: TYPE.size11, fontWeight: active === cat.id ? TYPE.bold : TYPE.medium, background: active === cat.id ? COLOR.accentDim : 'none', border: `1px solid ${active === cat.id ? COLOR.borderAccent : 'transparent'}`, color: active === cat.id ? COLOR.accent : COLOR.textTertiary, cursor: 'pointer', fontFamily: TYPE.fontUI, transition: TRANSITION.fast }}>
+          {cat.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export function GlobalTicker() {
-  const { news, loading: newsLoading, lastUpdated, refetch } = useNewsFeed(60000);
-  const { markets, loading: marketsLoading } = useMarketFeed(30000);
-  const [activeCategory, setActiveCategory] = useState<NewsCategory>('all');
-  const [paused, setPaused] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
-  const [selectedNews, setSelectedNews] = useState<NewsItem | null>(null);
-  const [selectedMarket, setSelectedMarket] = useState<MarketItem | null>(null);
-  const [drawerType, setDrawerType] = useState<'news' | 'market' | null>(null);
-  const [showFilters, setShowFilters] = useState(false);
-  const trackRef = useRef<HTMLDivElement>(null);
-  const animRef = useRef<Animation | null>(null);
+  const { news: rawNews, loading: newsLoading, lastUpdated, refetch } = useNewsFeed(TICKER.refreshMs);
+  const { markets: rawMarkets, loading: marketsLoading } = useMarketFeed(TICKER.refreshMs / 2);
 
-  const filteredNews = activeCategory === 'all' ? news : news.filter(n => n.category === activeCategory);
-  const filteredMarkets = (activeCategory === 'all' || activeCategory === 'markets') ? markets : activeCategory === 'commodities' ? markets.filter(m => m.category === 'commodities') : markets;
-  const loading = newsLoading || marketsLoading;
+  const [category, setCategory]           = useState<NewsCategory>('all');
+  const [paused, setPaused]               = useState(false);
+  const [collapsed, setCollapsed]         = useState(false);
+  const [showFilters, setShowFilters]     = useState(false);
+  const [selectedNews, setSelectedNews]   = useState<NewsItem | null>(null);
+  const [selectedMarket, setSelectedMarket] = useState<ReturnType<typeof processMarketItems>[0] | null>(null);
+
+  const trackRef = useRef<HTMLDivElement>(null);
+  const animRef  = useRef<Animation | null>(null);
+  const loading  = newsLoading || marketsLoading;
+
+  const news = useMemo(() => {
+    const filtered = category === 'all' ? rawNews : rawNews.filter(n => n.category === category);
+    return deduplicateNews(filtered);
+  }, [rawNews, category]);
+
+  const markets = useMemo(() => {
+    const all = processMarketItems(rawMarkets);
+    if (category === 'all' || category === 'markets') return all;
+    if (category === 'commodities') return all.filter(m => m.category === 'commodities');
+    return [];
+  }, [rawMarkets, category]);
 
   const startAnimation = useCallback(() => {
     const track = trackRef.current;
-    if (!track) return;
-    const totalWidth = track.scrollWidth / 2;
-    if (animRef.current) animRef.current.cancel();
+    if (!track || track.children.length === 0) return;
+    const totalW = track.scrollWidth / 2;
+    if (totalW <= 0) return;
+    animRef.current?.cancel();
     animRef.current = track.animate(
-      [{ transform: 'translateX(0)' }, { transform: `translateX(-${totalWidth}px)` }],
-      { duration: totalWidth * 25, iterations: Infinity, easing: 'linear' }
+      [{ transform: 'translateX(0)' }, { transform: `translateX(-${totalW}px)` }],
+      { duration: totalW * (1000 / TICKER.scrollSpeed), iterations: Infinity, easing: 'linear' }
     );
   }, []);
 
-  useEffect(() => {
-    if (!loading) setTimeout(startAnimation, 100);
-  }, [loading, filteredNews, filteredMarkets, startAnimation]);
+  useEffect(() => { if (!loading) setTimeout(startAnimation, 80); }, [loading, news, markets, startAnimation]);
+  useEffect(() => { if (animRef.current) animRef.current.playbackRate = paused ? 0 : 1; }, [paused]);
 
-  useEffect(() => {
-    if (animRef.current) animRef.current.playbackRate = paused ? 0 : 1;
-  }, [paused]);
-
-  const openNewsDrawer = (item: NewsItem) => {
-    setSelectedNews(item); setSelectedMarket(null);
-    setDrawerType('news'); setPaused(true);
-  };
-
-  const openMarketDrawer = (item: MarketItem) => {
-    setSelectedMarket(item); setSelectedNews(null);
-    setDrawerType('market'); setPaused(true);
-  };
-
-  const closeDrawer = () => {
-    setSelectedNews(null); setSelectedMarket(null);
-    setDrawerType(null); setPaused(false);
-  };
+  const openNews    = (item: NewsItem) => { setSelectedNews(item); setSelectedMarket(null); setPaused(true); };
+  const openMarket  = (item: ReturnType<typeof processMarketItems>[0]) => { setSelectedMarket(item); setSelectedNews(null); setPaused(true); };
+  const closeDrawer = () => { setSelectedNews(null); setSelectedMarket(null); setPaused(false); };
 
   if (collapsed) {
     return (
-      <div className="fixed top-0 left-0 right-0 z-[9990] flex justify-end">
-        <button onClick={() => setCollapsed(false)} className="bg-[#070d1a] border border-zinc-800 border-t-0 rounded-b-md px-3 py-1 text-xs text-zinc-400 hover:text-white transition-colors flex items-center gap-1">
-          <ChevronDown size={12} /> Intelligence Ticker
+      <div style={{ position: 'fixed', top: 0, right: 0, zIndex: 9990 }}>
+        <button onClick={() => setCollapsed(false)} style={{ background: COLOR.bgPanel, border: `1px solid ${COLOR.border}`, borderTop: 'none', borderRight: 'none', borderRadius: `0 0 0 ${RADIUS.md}`, padding: `${SPACE.px1} ${SPACE.px3}`, fontSize: TYPE.size10, color: COLOR.textTertiary, cursor: 'pointer', fontFamily: TYPE.fontUI, display: 'flex', alignItems: 'center', gap: SPACE.px1 }}>
+          ▾ Intelligence Feed
         </button>
       </div>
     );
@@ -89,84 +465,49 @@ export function GlobalTicker() {
 
   return (
     <>
-      <div className="fixed top-0 left-0 right-0 z-[9990] bg-[#070d1a] border-b border-zinc-800/80 select-none" style={{ height: '36px' }}>
-        <div className="absolute left-0 top-0 bottom-0 z-10 flex items-center">
-          <div className="flex items-center h-full">
-            <div className="px-3 h-full flex items-center bg-[#002FA7] border-r border-blue-800">
-              <span className="text-[10px] font-bold text-white tracking-widest uppercase">LIVE</span>
-            </div>
-            <button onClick={() => setShowFilters(v => !v)} className="px-3 h-full flex items-center gap-1 bg-zinc-900 border-r border-zinc-800 text-[10px] text-zinc-400 hover:text-white transition-colors uppercase tracking-wider whitespace-nowrap">
-              Intelligence <ChevronDown size={10} className={`transition-transform ${showFilters ? 'rotate-180' : ''}`} />
-            </button>
-          </div>
+      <div style={S.bar} role="marquee" aria-label="Live intelligence feed">
+        <div style={S.liveBadge}>
+          <span style={S.liveDot} />
+          <span style={S.liveLabel}>Live</span>
         </div>
 
-        <div className="absolute left-[140px] right-[80px] top-0 bottom-0 overflow-hidden"
-          onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+        <button onClick={() => setShowFilters(v => !v)} style={S.filterBtn(showFilters)} aria-expanded={showFilters}>
+          {CATEGORIES.find(c => c.id === category)?.label ?? 'All'}
+          <span style={{ fontSize: 8, marginLeft: 2 }}>{showFilters ? '▴' : '▾'}</span>
+        </button>
+
+        <div style={S.viewport} onMouseEnter={() => setPaused(true)} onMouseLeave={() => !selectedNews && !selectedMarket && setPaused(false)}>
           {loading ? (
-            <div className="flex items-center h-full gap-4 px-4">
-              {[1,2,3,4,5].map(i => <div key={i} className="h-3 bg-zinc-800 rounded animate-pulse w-32 flex-shrink-0" />)}
+            <div style={{ display: 'flex', gap: SPACE.px4, padding: `0 ${SPACE.px4}` }}>
+              {[120, 90, 160, 80, 140].map((w, i) => <div key={i} style={{ ...S.skeleton, width: w }} />)}
             </div>
           ) : (
-            <div ref={trackRef} className="flex items-center h-full whitespace-nowrap will-change-transform">
-              {[...filteredMarkets, ...filteredMarkets].map((m, i) => (
-                <button key={`m-${i}`} onClick={() => openMarketDrawer(m)}
-                  onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}
-                  className="inline-flex items-center gap-1.5 px-4 cursor-pointer group focus:outline-none">
-                  <span className="text-sm">{m.icon}</span>
-                  <span className="text-xs text-zinc-400 whitespace-nowrap">{m.name}</span>
-                  <span className="text-xs font-semibold text-white whitespace-nowrap">{m.value}</span>
-                  <span className={`text-[10px] font-medium whitespace-nowrap ${m.isPositive ? 'text-green-400' : 'text-red-400'}`}>
-                    {m.isPositive ? '▲' : '▼'}{m.changePercent}
-                  </span>
-                  <span className="text-zinc-700 ml-1">|</span>
-                </button>
-              ))}
-              {[...filteredNews, ...filteredNews].map((n, i) => (
-                <button key={`n-${i}`} onClick={() => openNewsDrawer(n)}
-                  onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}
-                  className="inline-flex items-center gap-2 px-4 cursor-pointer group focus:outline-none">
-                  <span className="text-sm">{n.icon}</span>
-                  <ImpactBadge impact={n.impact} />
-                  <span className="text-xs text-zinc-200 group-hover:text-white transition-colors whitespace-nowrap">{n.headline}</span>
-                  <span className="text-[10px] text-zinc-600 whitespace-nowrap">{timeAgo(n.publishedAt)}</span>
-                  <span className="text-zinc-700 ml-1">|</span>
-                </button>
-              ))}
+            <div ref={trackRef} style={S.track}>
+              {markets.map((m, i) => <MarketChip key={`m1-${i}`} item={m} onClick={() => openMarket(m)} onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} />)}
+              {news.map((n, i) => <NewsChip key={`n1-${i}`} item={n} onClick={() => openNews(n)} onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} />)}
+              {markets.map((m, i) => <MarketChip key={`m2-${i}`} item={m} onClick={() => openMarket(m)} onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} />)}
+              {news.map((n, i) => <NewsChip key={`n2-${i}`} item={n} onClick={() => openNews(n)} onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} />)}
             </div>
           )}
         </div>
 
-        <div className="absolute right-0 top-0 bottom-0 flex items-center">
-          <button onClick={() => refetch()} className="px-2 h-full flex items-center text-zinc-600 hover:text-zinc-400 transition-colors border-l border-zinc-800" title={lastUpdated ? `Updated ${timeAgo(lastUpdated.toISOString())}` : 'Refresh'}>
-            <RefreshCw size={11} />
-          </button>
-          <button onClick={() => setCollapsed(true)} className="px-2 h-full flex items-center text-zinc-600 hover:text-zinc-400 transition-colors border-l border-zinc-800">
-            <ChevronUp size={11} />
-          </button>
+        <div style={S.controls}>
+          <div style={{ padding: `0 ${SPACE.px3}`, fontSize: TYPE.size10, color: COLOR.textMuted, borderRight: `1px solid ${COLOR.border}`, whiteSpace: 'nowrap', fontFamily: TYPE.fontData }}>
+            {formatUpdatedAt(lastUpdated)}
+          </div>
+          <button onClick={() => refetch()} style={S.ctrlBtn} title="Refresh" aria-label="Refresh">↻</button>
+          <button onClick={() => setCollapsed(true)} style={S.ctrlBtn} title="Collapse" aria-label="Collapse">▴</button>
         </div>
       </div>
 
-      {showFilters && (
-        <div className="fixed top-[36px] left-0 z-[9989] bg-[#070d1a] border border-zinc-800 border-t-0 rounded-b-lg shadow-xl">
-          <div className="flex items-center gap-1 p-2">
-            {CATEGORIES.map(cat => (
-              <button key={cat.id} onClick={() => { setActiveCategory(cat.id); setShowFilters(false); }}
-                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${activeCategory === cat.id ? 'bg-[#002FA7] text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}>
-                {cat.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {showFilters && <FilterDropdown active={category} onChange={setCategory} onClose={() => setShowFilters(false)} />}
 
-      {drawerType && (
-        <IntelligenceDrawer
-          item={drawerType === 'news' ? selectedNews : selectedMarket}
-          itemType={drawerType}
-          onClose={closeDrawer}
-        />
-      )}
+      {(selectedNews || selectedMarket) && <IntelligenceDrawer news={selectedNews} market={selectedMarket} onClose={closeDrawer} />}
+
+      <style>{`
+        @keyframes oiq-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+        @keyframes oiq-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+      `}</style>
     </>
   );
 }
