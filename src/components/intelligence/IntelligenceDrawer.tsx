@@ -1,5 +1,11 @@
 import React, { useEffect } from 'react';
-import { X, Clock, ExternalLink, TrendingUp, Zap, Target, Building2 } from 'lucide-react';
+const X = () => <span>×</span>;
+const Clock = ({size}:{size?:number}) => <span style={{fontSize:size||12}}>🕐</span>;
+const ExternalLink = ({size}:{size?:number}) => <span style={{fontSize:size||12}}>↗</span>;
+const TrendingUp = ({size}:{size?:number}) => <span style={{fontSize:size||12}}>📈</span>;
+const Zap = ({size}:{size?:number}) => <span style={{fontSize:size||12}}>⚡</span>;
+const Target = ({size}:{size?:number}) => <span style={{fontSize:size||12}}>🎯</span>;
+const Building2 = ({size}:{size?:number}) => <span style={{fontSize:size||12}}>🏢</span>;
 import type { NewsItem, MarketItem } from '../../types/news';
 import { ImpactBadge } from './ImpactBadge';
 
