@@ -1,3 +1,4 @@
+import { GlobalTicker } from "./components/intelligence/GlobalTicker";
 import { getExecutivesCached } from "./lib/executives";
 import { supabase } from "./lib/supabase";
 
@@ -2609,8 +2610,9 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
 
   return(
     <div id="oiq-root" style={{display:"flex",height:"100vh",background:"#0a0e1a",fontFamily:"Manrope,sans-serif",color:"#A0AAC0"}}>
+      <GlobalTicker />
       {/* ── SIDEBAR ── */}
-      <div style={{width:210,background:"#0c1120",borderRight:"1px solid #14192a",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden"}}>
+      <div style={{width:210,background:"#0c1120",borderRight:"1px solid #14192a",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden",paddingTop:'36px'}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 8px",borderBottom:"1px solid #14192a"}}>
           <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
             <span style={{color:"#14B8A6",fontSize:13,fontWeight:900}}>◆</span>
