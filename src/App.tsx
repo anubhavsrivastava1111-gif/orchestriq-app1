@@ -1899,23 +1899,27 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         const sys="You are "+ag.f+" at \""+co.name+"\".\nPROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+researchContext+"\nLIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State position with calculations in "+synCur.sym+".":"Previous:\n"+prev+"\n\nSTRICT NO-REPEAT RULE: Do NOT restate, recompute, or rebuild TAM/SAM/SOM, the full budget breakdown, the cap table, unit economics tables, or any other table/section a previous speaker already gave in full above. Assume the user has already read it. Reference a prior number only briefly and only if challenging/correcting it (e.g. 'CFO's CAC figure above undercounts X because...'). Your entire contribution must be NEW: something no previous speaker covered, a risk they missed, or a sharper figure in YOUR "+ag.dl+" domain that genuinely wasn't addressed. If you have nothing genuinely new beyond what's already on the table, say so plainly in 2-3 sentences instead of padding with a restated plan.")+"\n200-350 words MAX. Brevity signals confidence, not limitation.\n\nVERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it explicitly as 'ESTIMATE (unverified)'. Never present an invented number as fact.";
         let agText="";
         let agTruncated=false;
-        let mainAttempts=0;
-        while(mainAttempts<5&&!cancelRef.current.br){
-          mainAttempts++;
+        let gotResponse=false;
+        for(let attempt=1;attempt<=3&&!cancelRef.current.br&&!gotResponse;attempt++){
           try{
+            setBrPh(ag.ic+" "+ag.t+(attempt>1?" — retrying (attempt "+attempt+"/3)…":" is analyzing…"));
             const replyFull=await askFull(sys,[{role:"user",content:brQ}],5000);
             agText=replyFull.primary;
             agTruncated=!!replyFull.truncated;
-            break;
+            gotResponse=true;
           }catch(mainErr:any){
-            if(isRateLimit(mainErr.message)&&mainAttempts<5){
-              for(let countdown=30;countdown>0;countdown--){
-                if(cancelRef.current.br)break;
-                setBrPh(ag.ic+" "+ag.t+" — API limit reached. Retrying in "+countdown+"s… (attempt "+mainAttempts+"/5)");
-                await new Promise(r=>setTimeout(r,1000));
-              }
+            if(isRateLimit(mainErr.message)&&attempt<3){
+              setBrPh(ag.ic+" "+ag.t+" — API limit hit. Switching provider & waiting 20s…");
+              await new Promise(r=>setTimeout(r,20000));
+            }else if(attempt===3){
+              // All attempts failed — record partial and continue to next executive
+              agText="_("+ag.t+" could not respond due to API limits. Use Drill to ask "+ag.t+" directly.)_";
+              agTruncated=false;
+              gotResponse=true;
+              showToast(ag.t+" skipped — API limit. Use Drill to get their view.","warning");
             }else{
-              throw mainErr;
+              agText="_("+ag.t+" encountered an error: "+mainErr.message+")_";
+              gotResponse=true;
             }
           }
         }
