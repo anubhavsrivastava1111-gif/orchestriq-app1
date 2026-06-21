@@ -406,7 +406,23 @@ function FilterDropdown({ active, onChange, onClose }: {
     </div>
   );
 }
-
+function TradingViewTicker() {
+  return (
+    <div style={{ flex: 1, overflow: 'hidden', height: '36px' }}>
+      <iframe
+        scrolling="no"
+        allowTransparency={true}
+        frameBorder="0"
+        src="https://s.tradingview.com/embed-widget/ticker-tape/?locale=en#%7B%22symbols%22%3A%5B%7B%22proName%22%3A%22BSE%3ASENSEX%22%2C%22title%22%3A%22Sensex%22%7D%2C%7B%22proName%22%3A%22NSE%3ANIFTY%22%2C%22title%22%3A%22Nifty%2050%22%7D%2C%7B%22proName%22%3A%22FX_IDC%3AUSDINR%22%2C%22title%22%3A%22USD%2FINR%22%7D%2C%7B%22proName%22%3A%22FX_IDC%3AEURINR%22%2C%22title%22%3A%22EUR%2FINR%22%7D%2C%7B%22proName%22%3A%22FX_IDC%3AGBPINR%22%2C%22title%22%3A%22GBP%2FINR%22%7D%2C%7B%22proName%22%3A%22FX_IDC%3AJPYINR%22%2C%22title%22%3A%22JPY%2FINR%22%7D%2C%7B%22proName%22%3A%22FX_IDC%3AAEDINR%22%2C%22title%22%3A%22AED%2FINR%22%7D%2C%7B%22proName%22%3A%22MCX%3AGOLD1%21%22%2C%22title%22%3A%22Gold%22%7D%2C%7B%22proName%22%3A%22MCX%3ASILVER1%21%22%2C%22title%22%3A%22Silver%22%7D%2C%7B%22proName%22%3A%22MCX%3ACRUDEOIL1%21%22%2C%22title%22%3A%22Crude%20Oil%22%7D%2C%7B%22proName%22%3A%22BITSTAMP%3ABTCUSD%22%2C%22title%22%3A%22Bitcoin%22%7D%2C%7B%22proName%22%3A%22BITSTAMP%3AETHUSD%22%2C%22title%22%3A%22Ethereum%22%7D%5D%2C%22showSymbolLogo%22%3Afalse%2C%22isTransparent%22%3Atrue%2C%22displayMode%22%3A%22compact%22%2C%22colorTheme%22%3A%22dark%22%2C%22locale%22%3A%22en%22%7D"
+        style={{
+          width: '100%',
+          height: '36px',
+          display: 'block',
+        }}
+      />
+    </div>
+  );
+}
 export function GlobalTicker() {
   const { news: rawNews, loading: newsLoading, lastUpdated, refetch } = useNewsFeed(TICKER.refreshMs);
   const { markets: rawMarkets, loading: marketsLoading } = useMarketFeed(TICKER.refreshMs / 2);
@@ -476,7 +492,7 @@ export function GlobalTicker() {
           <span style={{ fontSize: 8, marginLeft: 2 }}>{showFilters ? '▴' : '▾'}</span>
         </button>
 
-        <div style={S.viewport} onMouseEnter={() => setPaused(true)} onMouseLeave={() => !selectedNews && !selectedMarket && setPaused(false)}>
+        <TradingViewTicker />
           {loading ? (
             <div style={{ display: 'flex', gap: SPACE.px4, padding: `0 ${SPACE.px4}` }}>
               {[120, 90, 160, 80, 140].map((w, i) => <div key={i} style={{ ...S.skeleton, width: w }} />)}
