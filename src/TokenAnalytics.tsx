@@ -44,13 +44,13 @@ export function saveRecord(rec: Omit<TokenRecord, "id" | "ts">) {
 }
 
 function fmt(n: number): string {
-  return n >= 1_000_000 ? (n / 1_000_000).toFixed(1) + "M" : n >= 1_000 ? (n / 1_000).toFixed(1) + "K" : String(n);
+  return (n ?? 0) >= 1_000_000 ? ((n ?? 0) / 1_000_000).toFixed(1) + "M" : (n ?? 0) >= 1_000 ? ((n ?? 0) / 1_000).toFixed(1) + "K" : String(n ?? 0);
 }
 
 function fmtCost(c: number): string {
   if (c === 0) return "Free";
   if (c < 0.001) return "<$0.001";
-  return "$" + c.toFixed(3);
+  return "$" + (c ?? 0).toFixed(3);
 }
 
 const FEATURE_COLORS: Record<string, string> = {
