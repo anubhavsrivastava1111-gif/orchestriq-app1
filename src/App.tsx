@@ -1,4 +1,5 @@
 import { GlobalTicker } from "./components/intelligence/GlobalTicker";
+import FundingIntelligence from "./FundingIntelligence";
 import { getExecutivesCached } from "./lib/executives";
 import { supabase } from "./lib/supabase";
 
@@ -2640,7 +2641,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
           ))}
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat("+([true,true,true,true,true,adminConfig.ledgerEnabled,adminConfig.dispatchEnabled,adminConfig.actionsEnabled,true].filter(Boolean).length)+",1fr)",gap:1,padding:"2px 6px 4px"}}>
-          {[["nerve","🧠","Nerve"],["workflow","⚡","Flow"],["p3","🤖","Auto"],["chat","💬","Chat"],["data","🗄️","Data"],["ledger","📒","Ledger"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
+          {[["nerve","🧠","Nerve"],["workflow","⚡","Flow"],["p3","🤖","Auto"],["chat","💬","Chat"],["data","🗄️","Data"],["ledger","📒","Ledger"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
             <button key={v} onClick={()=>setView(v)} style={{...S.nTab,...(view===v?{background:"rgba(20,184,166,0.08)",color:"#14B8A6",borderColor:"rgba(20,184,166,0.18)"}:{})}}>
               <span style={{fontSize:10}}>{ic}</span><span style={{fontSize:6,fontWeight:600}}>{lb}</span>
             </button>
@@ -3244,8 +3245,10 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
           </div>
         )}
 
-        {/* PRESENTATION STUDIO — FEATURE 4/5/6 */}
-        {view==="studio"&&(
+        {/* FUNDING INTELLIGENCE */}
+        {view==="funding"&&(
+          <FundingIntelligence co={co} compData={compData} ask={ask}/>
+        )}
           <div style={{flex:1,padding:"14px 18px",overflowY:"auto"}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
               <span style={{fontSize:20}}>🎨</span>
