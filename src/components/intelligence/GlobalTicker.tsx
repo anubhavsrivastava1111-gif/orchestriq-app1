@@ -488,7 +488,23 @@ export function GlobalTicker() {
           <span style={S.liveLabel}>Live</span>
         </div>
 
-        <TradingViewTicker />
+        <button onClick={() => setShowFilters(v => !v)} style={S.filterBtn(showFilters)} aria-expanded={showFilters}>
+          {CATEGORIES.find(c => c.id === category)?.label ?? 'All'}
+          <span style={{ fontSize: 8, marginLeft: 2 }}>{showFilters ? '▴' : '▾'}</span>
+        </button>
+
+        <div style={S.viewport} onMouseEnter={() => setPaused(true)} onMouseLeave={() => !selectedNews && !selectedMarket && setPaused(false)}>
+          {loading ? (
+            <div style={{ display: 'flex', gap: SPACE.px4, padding: `0 ${SPACE.px4}` }}>
+              {[120, 90, 160, 80, 140].map((w, i) => <div key={i} style={{ ...S.skeleton, width: w }} />)}
+            </div>
+          ) : (
+            <div ref={trackRef} style={S.track}>
+              {news.map((n, i) => <NewsChip key={`n1-${i}`} item={n} onClick={() => openNews(n)} onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} />)}
+              {news.map((n, i) => <NewsChip key={`n2-${i}`} item={n} onClick={() => openNews(n)} onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} />)}
+            </div>
+          )}
+        </div>
 
         <div style={S.controls}>
           <div style={{ padding: `0 ${SPACE.px3}`, fontSize: TYPE.size10, color: COLOR.textMuted, borderRight: `1px solid ${COLOR.border}`, whiteSpace: 'nowrap', fontFamily: TYPE.fontData }}>
