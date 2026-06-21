@@ -1897,9 +1897,29 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         const prev=res.map(r=>"\n--- "+r.ag.t+" ---\n"+r.text).join("\n");
         setBrPh(ag.ic+" "+ag.t+" is analyzing…");
         const sys="You are "+ag.f+" at \""+co.name+"\".\nPROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+researchContext+"\nLIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State position with calculations in "+synCur.sym+".":"Previous:\n"+prev+"\n\nSTRICT NO-REPEAT RULE: Do NOT restate, recompute, or rebuild TAM/SAM/SOM, the full budget breakdown, the cap table, unit economics tables, or any other table/section a previous speaker already gave in full above. Assume the user has already read it. Reference a prior number only briefly and only if challenging/correcting it (e.g. 'CFO's CAC figure above undercounts X because...'). Your entire contribution must be NEW: something no previous speaker covered, a risk they missed, or a sharper figure in YOUR "+ag.dl+" domain that genuinely wasn't addressed. If you have nothing genuinely new beyond what's already on the table, say so plainly in 2-3 sentences instead of padding with a restated plan.")+"\n200-350 words MAX. Brevity signals confidence, not limitation.\n\nVERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it explicitly as 'ESTIMATE (unverified)'. Never present an invented number as fact.";
-        const replyFull=await askFull(sys,[{role:"user",content:brQ}],5000);
+        let replyFull=await askFull(sys,[{role:"user",content:brQ}],5000);
         if(cancelRef.current.br)break;
-        res.push({ag,text:replyFull.primary,truncated:!!replyFull.truncated});
+        let agText=replyFull.primary;
+        let agTruncated=!!replyFull.truncated;
+        let contAttempts=0;
+        while(agTruncated&&contAttempts<3&&!cancelRef.current.br){
+          contAttempts++;
+          setBrPh(ag.ic+" "+ag.t+" is continuing response… (part "+(contAttempts+1)+")");
+          try{
+            const contSys="You are "+ag.f+" at \""+co.name+"\". You were speaking in a boardroom debate and your response was cut off. Here is what you wrote so far:\n\n"+agText+"\n\nContinue EXACTLY from where you left off. Do not repeat anything already written. Do not restart. Pick up mid-sentence if needed.";
+            const cont=await askFull(contSys,[{role:"user",content:"Continue your response now."}],3000);
+            agText=agText+cont.primary;
+            agTruncated=!!cont.truncated;
+          }catch(contErr:any){
+            if(isRateLimit(contErr.message)){
+              setBrPh(ag.ic+" "+ag.t+" — API limit reached. Waiting 30s before retrying…");
+              await new Promise(r=>setTimeout(r,30000));
+            }else{
+              agTruncated=false;
+            }
+          }
+        }
+        res.push({ag,text:agText,truncated:agTruncated});
         const updatedCur={q:brQ,debate:[...res],synthesis:"",drilldown:{},researchBrief};
         setBrCur(updatedCur);
         sv("cos-br-live",updatedCur);
