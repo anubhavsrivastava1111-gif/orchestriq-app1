@@ -3245,10 +3245,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
           </div>
         )}
 
-        {/* FUNDING INTELLIGENCE */}
-        {view==="funding"&&(
-          <FundingIntelligence co={co} compData={compData} ask={ask}/>
-        )}
+        {view==="funding"&&<FundingIntelligence co={co} compData={compData} ask={ask}/>}
           <div style={{flex:1,padding:"14px 18px",overflowY:"auto"}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
               <span style={{fontSize:20}}>🎨</span>
