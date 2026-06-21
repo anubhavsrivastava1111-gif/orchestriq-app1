@@ -1,6 +1,6 @@
 import { GlobalTicker } from "./components/intelligence/GlobalTicker";
 import FundingIntelligence from "./FundingIntelligence";
-import TokenAnalytics, { saveRecord, estimateTokens, estimateCost } from "./TokenAnalytics";
+import TokenAnalytics, { saveRecord, estimateCost } from "./TokenAnalytics";
 import TokenBadge from "./components/TokenBadge";
 import { getExecutivesCached } from "./lib/executives";
 import { supabase } from "./lib/supabase";
