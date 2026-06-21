@@ -1575,6 +1575,9 @@ export default function App(){
   const [wfView,setWfView]=useState("new");
   const [wfCustomChain,setWfCustomChain]=useState([]);
   const [wfShowExtra,setWfShowExtra]=useState(false);
+  const [wfPreflight,setWfPreflight]=useState<{questions:{persona:string;personaIc:string;q:string;placeholder:string}[];answers:string[];contextSummary:string}|null>(null);
+  const [wfPreflightActive,setWfPreflightActive]=useState(false);
+  const [wfPreflightLoading,setWfPreflightLoading]=useState(false);
   const [wfTask,setWfTask]=useState("");
   const [wfCat,setWfCat]=useState("finance");
   const [wfActive,setWfActive]=useState(null);
