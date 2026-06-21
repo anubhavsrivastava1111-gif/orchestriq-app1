@@ -2042,6 +2042,44 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   },[drillRole,drillQ,drillRun,brCur,co,compData,keys,defP,showToast]);
 
   // FIX BUG 4: Workflow — per-level error handling + cancel + progress
+  const runPreflight=useCallback(async()=>{
+  const taskText=wfTask.trim();
+  if(!taskText||!wfCat)return;
+  const ch=CHAINS[wfCat];if(!ch)return;
+  const activeChain=wfCustomChain.length?wfCustomChain:ch.chain;
+  const seniorId=activeChain[activeChain.length-1];
+  const seniorRole=AR.find(r=>r.id===seniorId)||AR.find(r=>r.id==="ceo");
+  const p=EP[seniorRole.id]||{};
+  setWfPreflightLoading(true);
+  setWfPreflight(null);
+  const existingData=Object.keys(compData).length?"\n\nCOMPANY DATA ALREADY PROVIDED:\n"+Object.entries(compData).map(([k,v])=>k+": "+v).join("\n"):"";
+  const ledgerSummary=ledgerEntries.length?"\n\nLEDGER: "+ledgerEntries.length+" journal entries posted. Recent: "+ledgerEntries.slice(-3).map(e=>e.description||e.narration||"entry").join(", "):"";
+  const sys="You are "+seniorRole.f+" at \""+co.name+"\". "+buildCtx(co,compData)+"\n\nThe user wants to run a workflow task. Your job is to ask 3-5 smart, simple questions that will allow the team to produce a HIGH QUALITY FINAL DELIVERABLE — not a report or plan, but the actual output the user needs.\n\nRULES:\n1. Each question must be asked AS YOUR PERSONA — speak as "+seniorRole.t+", not as a generic AI.\n2. Questions must be SHORT and conversational. One sentence maximum.\n3. Only ask what is GENUINELY missing. Do not ask for things already in Company Data or Ledger below.\n4. Focus on what directly shapes the deliverable quality — audience, tone, constraints, specific content.\n5. Output ONLY valid JSON, no preamble, no markdown fences.\n\nFORMAT (strict JSON array):\n[{\"persona\":\""+seniorRole.t+"\",\"personaIc\":\""+seniorRole.ic+"\",\"q\":\"question text\",\"placeholder\":\"example answer\"}]\n\nEXISTING CONTEXT (do NOT ask about these):"+existingData+ledgerSummary;
+  try{
+    const raw=await ask(sys,[{role:"user",content:"TASK: \""+taskText+"\"\nCATEGORY: "+ch.label+"\nEXECUTIVES SELECTED: "+activeChain.map(id=>{const r=AR.find(x=>x.id===id);return r?r.t:id;}).join(", ")+"\n\nGenerate the pre-flight questions now."}],800);
+    let questions=[];
+    try{
+      const cleaned=raw.trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/```\s*$/,"");
+      questions=JSON.parse(cleaned);
+      if(!Array.isArray(questions))questions=[];
+    }catch{questions=[];}
+    if(!questions.length){
+      // No questions needed — run directly
+      setWfPreflightLoading(false);
+      const activeChainFinal=wfCustomChain.length?wfCustomChain:ch.chain;
+      runWorkflow(activeChainFinal,null);
+      return;
+    }
+    setWfPreflight({questions,answers:questions.map(()=>""),contextSummary:existingData+ledgerSummary});
+    setWfPreflightActive(true);
+  }catch(e:any){
+    showToast("Pre-flight check failed: "+e.message+". Running chain directly.","warning");
+    const activeChainFinal=wfCustomChain.length?wfCustomChain:ch.chain;
+    runWorkflow(activeChainFinal,null);
+  }finally{
+    setWfPreflightLoading(false);
+  }
+},[wfTask,wfCat,wfCustomChain,co,compData,ledgerEntries,ask,showToast]);
 const runWorkflow=useCallback(async(customChainOverride?:string[])=>{
   const taskText=wfTask.trim();
   const taskCat=wfCat;
