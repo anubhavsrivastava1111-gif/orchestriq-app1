@@ -2996,7 +2996,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                     const ch=CHAINS[wfCat];
                     const defaultIds=ch.chain;
                     const currentSelected=wfCustomChain.length?wfCustomChain:defaultIds;
-                    const allOtherRoles=AR.filter(r=>!defaultIds.includes(r.id)&&r.id!=="pres_arch");
+                    const allOtherRoles=AR.filter(r=>!defaultIds.includes(r.id)&&r.id!=="pres_arch"&&EP[r.id]);
                     return(
                       <div style={{marginBottom:12}}>
                         <div style={{padding:"10px 12px",background:"#0a0e1a",borderRadius:7,border:"1px solid "+ch.color+"22",marginBottom:8}}>
