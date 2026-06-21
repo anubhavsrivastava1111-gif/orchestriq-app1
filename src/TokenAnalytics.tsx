@@ -91,11 +91,11 @@ export default function TokenAnalytics({ defP, keys }: { defP: string; keys: Rec
     byFeature[r.feature].cost += r.costUsd;
     byFeature[r.feature].count++;
   });
-  const maxTokens = Math.max(...Object.values(byFeature).map(v => v.tokens), 1);
+  const maxTokens = Object.values(byFeature).length > 0 ? Math.max(...Object.values(byFeature).map(v => v.tokens ?? 0), 1) : 1;
 
   const exportCSV = () => {
     const csv = ["Feature,Provider,Input Tokens,Output Tokens,Cost USD,Time",
-      ...records.map(r => `${r.feature},${r.provider},${r.inputTokens},${r.outputTokens},${r.costUsd.toFixed(6)},${r.ts}`)
+      ...records.map(r => `${r.feature},${r.provider},${r.inputTokens ?? 0},${r.outputTokens ?? 0},${(r.costUsd ?? 0).toFixed(6)},${r.ts}`)
     ].join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
