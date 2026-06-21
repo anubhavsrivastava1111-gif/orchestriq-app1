@@ -2171,6 +2171,9 @@ if(!role){
       return;
     }
 
+    const inputTokens=estimateTokens(sys);
+    const outputTokens=estimateTokens(reply);
+    saveRecord({feature:"Workflow — "+ch.label+" L"+(i+1)+" ("+role.t+")",provider:defP,inputTokens,outputTokens,cost:estimateCost(defP,inputTokens,outputTokens)});
     let stepOutput=reply;
     let stepCapability=null;
     if(isLast){
