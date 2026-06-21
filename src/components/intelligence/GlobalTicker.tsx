@@ -482,15 +482,11 @@ export function GlobalTicker() {
   return (
     <>
       <div style={S.bar} role="marquee" aria-label="Live intelligence feed">
+
         <div style={S.liveBadge}>
           <span style={S.liveDot} />
           <span style={S.liveLabel}>Live</span>
         </div>
-
-        <button onClick={() => setShowFilters(v => !v)} style={S.filterBtn(showFilters)} aria-expanded={showFilters}>
-          {CATEGORIES.find(c => c.id === category)?.label ?? 'All'}
-          <span style={{ fontSize: 8, marginLeft: 2 }}>{showFilters ? '▴' : '▾'}</span>
-        </button>
 
         <TradingViewTicker />
 
