@@ -629,7 +629,7 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false){
     const fallbackKey=effectiveKeys[fallback]?.trim();
     if(!fallbackKey)throw new Error("No API keys available. Check Cloudflare environment variables.");
     const r=await callAI(fallback,fallbackKey,sys,msgs,maxT,false);
-    return{primary:r.text};
+    return{primary:r.text,usedProvider:fallback};
   }
 
   try{
@@ -647,7 +647,7 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false){
         break; // if continuation fails, return what we have rather than losing it
       }
     }
-    return{primary:text,truncated:stillTruncated};
+    return{primary:text,truncated:stillTruncated,usedProvider:active};
   }catch(err:any){
     if(isRateLimit(err.message)){
       markProviderExhausted(active);
@@ -660,7 +660,7 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false){
         if(!fallbackKey)continue;
         try{
           const r=await callAI(fallback,fallbackKey,sys,msgs,maxT,enableSearch&&fallback==="claude");
-          return{primary:r.text};
+          return{primary:r.text,usedProvider:fallback};
         }catch(err2:any){
           if(isRateLimit(err2.message)){markProviderExhausted(fallback);continue;}
           throw err2;
@@ -2155,7 +2155,13 @@ if(!role){
     let failMsg="";
 
     try{
-      reply=await ask(sys,[{role:"user",content:"Process: \""+taskText+"\""}],isLast?2800:1500);
+      const replyFull=await askFull(sys,[{role:"user",content:"Process: \""+taskText+"\""}],isLast?2800:1500);
+      reply=replyFull.primary;
+      const usedProv=replyFull.usedProvider||defP;
+      const usedModel=MODELS[usedProv]?.model||usedProv;
+      const inputTok=estimateTokens(sys);
+      const outputTok=estimateTokens(reply);
+      saveRecord({feature:"Flow: "+ch.label+" L"+(i+1)+" — "+role.t,provider:usedProv,model:usedModel,inputTokens:inputTok,outputTokens:outputTok,cost:estimateCost(usedProv,inputTok,outputTok)});
     }catch(err:any){
       stepFailed=true;
       failMsg=err.message||"Unknown error";
@@ -2171,9 +2177,6 @@ if(!role){
       return;
     }
 
-    const inputTokens=estimateTokens(sys);
-    const outputTokens=estimateTokens(reply);
-    saveRecord({feature:"Workflow — "+ch.label+" L"+(i+1)+" ("+role.t+")",provider:defP,inputTokens,outputTokens,cost:estimateCost(defP,inputTokens,outputTokens)});
     let stepOutput=reply;
     let stepCapability=null;
     if(isLast){
