@@ -2613,8 +2613,6 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
       <style>{CSS}</style>
     </div>
   );
-}
-
 
   if(page==="onboard"){
     const hasKey=Object.values(keys).some(k=>k?.trim())||!!EFF_GEMINI;
