@@ -2609,11 +2609,12 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
         </div>
       </div>
       {showDonate&&<DonateModal cfg={dnCfg} presets={DONATION_PRESETS} onClose={()=>setShowDonate(false)} cur={cur} amt={dnAmt} setAmt={setDnAmt} custom={dnCustom} setCustom={setDnCustom} S={S}/>}
+      <TokenBadge defP={defP} setDefP={p=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} keys={keys}/>
       <Toaster toasts={toasts} onDismiss={id=>setToasts(prev=>prev.filter(t=>t.id!==id))}/>
       <style>{CSS}</style>
     </div>
   );
-
+  }
   if(page==="onboard"){
     const hasKey=Object.values(keys).some(k=>k?.trim())||!!EFF_GEMINI;
     return(
