@@ -1573,6 +1573,8 @@ export default function App(){
   const [isAdmin,setIsAdmin]=useState(false);
   const [showSignOutConfirm,setShowSignOutConfirm]=useState(false);
   const [wfView,setWfView]=useState("new");
+  const [wfCustomChain,setWfCustomChain]=useState([]);
+  const [wfShowExtra,setWfShowExtra]=useState(false);
   const [wfTask,setWfTask]=useState("");
   const [wfCat,setWfCat]=useState("finance");
   const [wfActive,setWfActive]=useState(null);
@@ -2037,11 +2039,12 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   },[drillRole,drillQ,drillRun,brCur,co,compData,keys,defP,showToast]);
 
   // FIX BUG 4: Workflow — per-level error handling + cancel + progress
-const runWorkflow=useCallback(async()=>{
+const runWorkflow=useCallback(async(customChainOverride?:string[])=>{
   const taskText=wfTask.trim();
   const taskCat=wfCat;
   if(!taskText||wfRunning)return;
   const ch=CHAINS[taskCat];if(!ch)return;
+  const activeChain=customChainOverride&&customChainOverride.length?customChainOverride:ch.chain;
   cancelRef.current.wf=false;
   setWfRunning(true);setError(null);setWfPauseMsg("");
 
@@ -2062,7 +2065,7 @@ const runWorkflow=useCallback(async()=>{
     ledgerEntries,brSessions,workflows,tQueue:tQRef.current,tmRes,apRes,cur:wfCurr
   });
 
-  for(let i=0;i<ch.chain.length;i++){
+  for(let i=0;i<activeChain.length;i++){
     if(cancelRef.current.wf){
       showToast("Workflow cancelled at Level "+(i+1),"warning");
       setWfActive(prev=>prev?{...prev,status:"cancelled"}:null);
@@ -2070,7 +2073,7 @@ const runWorkflow=useCallback(async()=>{
       return;
     }
 
-    const roleId=ch.chain[i];
+    const roleId=activeChain[i];
     const role=AR.find(r=>r.id===roleId);
 if(!role){
   console.error("[OrchestrIQ] Chain config error: role id '"+roleId+"' not found in AR. Level "+(i+1)+" of "+ch.label+" skipped.");
@@ -2079,8 +2082,8 @@ if(!role){
 }
     const p=EP[roleId]||{};
     const isFirst=i===0;
-    const isLast=i===ch.chain.length-1;
-    setWfPhase(role.ic+" "+role.t+" - Level "+(i+1)+"/"+ch.chain.length);
+    const isLast=i===activeChain.length-1;
+    setWfPhase(role.ic+" "+role.t+" - Level "+(i+1)+"/"+activeChain.length);
 
     const prevWork=steps.length>0
   ?"PREVIOUS LEVEL (build on this, do not repeat it):\nCompleted by "+steps[steps.length-1].role.t+":\n"+steps[steps.length-1].output+
@@ -2225,13 +2228,13 @@ const processTask=useCallback(async(task:any)=>{
       return;
     }
 
-    const roleId=ch.chain[i];
+    const roleId=activeChain[i];
     const role=AR.find(r=>r.id===roleId);
     if(!role)continue;
 
     const p=EP[roleId]||{};
     const isFirst=i===0;
-    const isLast=i===ch.chain.length-1;
+    const isLast=i===activeChain.length-1;
     setP3Phase(role.ic+" "+role.t+" — Level "+(i+1)+"/"+ch.chain.length);
     upd({currentLevel:i+1,status:TS.RUNNING});
 
@@ -2934,28 +2937,94 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
             <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
               {wfView==="new"&&(
                 <div>
-                  <div style={{fontSize:13,fontWeight:800,color:"#F1F5F9",marginBottom:6}}>Workflow Task Engine</div>
-                  <p style={{fontSize:11,color:"#8892B0",marginBottom:12,lineHeight:1.6}}>Select a chain, describe your task, and watch the hierarchy process it level by level. Each level builds on the last. You approve at the end.</p>
+                  <div style={{fontSize:13,fontWeight:800,color:"#F1F5F9",marginBottom:4}}>Workflow Task Engine</div>
+                  <p style={{fontSize:10,color:"#8892B0",marginBottom:12,lineHeight:1.6}}>Pick a category, customize which executives you want, then describe your task. You get the actual deliverable — not a discussion.</p>
                   <label style={S.lbl}>Step 1: Select Task Category</label>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:5,marginBottom:12}}>
                     {Object.entries(CHAINS).map(([key,ch])=>(
-                      <button key={key} onClick={()=>setWfCat(key)} style={{display:"flex",alignItems:"flex-start",gap:7,padding:"9px 10px",borderRadius:7,border:"1px solid "+(wfCat===key?ch.color+"66":"#1a2030"),background:wfCat===key?ch.color+"08":"#0a0e1a",cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"left"}}>
+                      <button key={key} onClick={()=>{setWfCat(key);}} style={{display:"flex",alignItems:"flex-start",gap:7,padding:"9px 10px",borderRadius:7,border:"1px solid "+(wfCat===key?ch.color+"66":"#1a2030"),background:wfCat===key?ch.color+"08":"#0a0e1a",cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"left"}}>
                         <span style={{fontSize:16,flexShrink:0}}>{ch.ic}</span>
                         <div><div style={{fontSize:10,fontWeight:700,color:wfCat===key?ch.color:"#A0AAC0"}}>{ch.label}</div><div style={{fontSize:8,color:"#3A4060",lineHeight:1.4,marginTop:1}}>{ch.desc}</div></div>
                       </button>
                     ))}
                   </div>
-                  {wfCat&&(()=>{const ch=CHAINS[wfCat];return(<div style={{marginBottom:8,padding:"10px 12px",background:"#0a0e1a",borderRadius:7,border:"1px solid "+ch.color+"22"}}>
-                    <div style={{fontSize:9,fontWeight:700,color:ch.color,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Chain — {ch.chain.length} levels</div>
-                    <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:3}}>{ch.chain.map((id,i)=>{const r=AR.find(x=>x.id===id);if(!r)return null;return(<span key={id} style={{display:"flex",alignItems:"center",gap:3}}><span style={{background:r.dc+"15",border:"1px solid "+r.dc+"33",borderRadius:4,padding:"3px 7px",fontSize:9,fontWeight:600,color:r.dc}}>{r.ic} {r.t}</span>{i<ch.chain.length-1&&<span style={{color:"#3A4060",fontSize:10}}>→</span>}</span>);})}</div>
-                  </div>);})()}
-                  <label style={S.lbl}>Step 2: Describe the Task</label>
+                  {wfCat&&(()=>{
+                    const ch=CHAINS[wfCat];
+                    const defaultIds=ch.chain;
+                    const currentSelected=wfCustomChain.length?wfCustomChain:defaultIds;
+                    const allOtherRoles=AR.filter(r=>!defaultIds.includes(r.id)&&r.id!=="pres_arch");
+                    return(
+                      <div style={{marginBottom:12}}>
+                        <div style={{padding:"10px 12px",background:"#0a0e1a",borderRadius:7,border:"1px solid "+ch.color+"22",marginBottom:8}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                            <div style={{fontSize:9,fontWeight:700,color:ch.color,textTransform:"uppercase",letterSpacing:1}}>Step 2: Choose Your Executives</div>
+                            <button onClick={()=>setWfCustomChain(defaultIds)} style={{...S.hBtn,fontSize:8,color:ch.color,borderColor:ch.color+"44"}}>Reset to Default</button>
+                          </div>
+                          <div style={{fontSize:8,color:"#5A6480",marginBottom:8,lineHeight:1.5}}>Toggle to include or exclude. Drag order doesn't matter — selected executives run sequentially top to bottom. You can also add executives from other departments below.</div>
+                          <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:8}}>
+                            {defaultIds.map((id)=>{
+                              const r=AR.find(x=>x.id===id);if(!r)return null;
+                              const sel=currentSelected.includes(id);
+                              return(
+                                <button key={id} onClick={()=>{const next=sel?currentSelected.filter(x=>x!==id):[...currentSelected,id];setWfCustomChain(next.length?next:currentSelected);}} style={{display:"flex",alignItems:"center",gap:4,padding:"5px 9px",borderRadius:5,border:"1px solid "+(sel?r.dc+"66":"#1a2030"),background:sel?r.dc+"12":"#131825",cursor:"pointer",fontFamily:"Manrope,sans-serif",opacity:sel?1:0.45,transition:"all 0.15s"}}>
+                                  <span style={{fontSize:11}}>{r.ic}</span>
+                                  <span style={{fontSize:9,fontWeight:700,color:sel?r.dc:"#5A6480"}}>{r.t}</span>
+                                  <span style={{fontSize:8,color:sel?"#10B981":"#3A4060",fontWeight:700}}>{sel?"✓":"+"}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {currentSelected.length>0&&(
+                            <div style={{background:"#131825",borderRadius:5,padding:"7px 10px",border:"1px solid #1a2030"}}>
+                              <div style={{fontSize:8,color:"#5A6480",marginBottom:5,textTransform:"uppercase",letterSpacing:0.8}}>Your Chain ({currentSelected.length} executives)</div>
+                              <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:3}}>
+                                {currentSelected.map((id,i)=>{const r=AR.find(x=>x.id===id);if(!r)return null;return(<span key={id} style={{display:"flex",alignItems:"center",gap:3}}><span style={{background:r.dc+"15",border:"1px solid "+r.dc+"33",borderRadius:4,padding:"3px 7px",fontSize:9,fontWeight:600,color:r.dc}}>{r.ic} {r.t}</span>{i<currentSelected.length-1&&<span style={{color:"#3A4060",fontSize:10}}>→</span>}</span>);})}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div style={{background:"#0a0e1a",borderRadius:7,border:"1px solid #1a2030",overflow:"hidden"}}>
+                          <button onClick={()=>setWfShowExtra(s=>!s)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:"none",border:"none",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>
+                            <span style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:0.8}}>+ Add Executives from Other Departments</span>
+                            <span style={{fontSize:9,color:"#3A4060"}}>{wfShowExtra?"▲":"▼"}</span>
+                          </button>
+                          {wfShowExtra&&(
+                            <div style={{padding:"0 12px 12px",maxHeight:260,overflowY:"auto"}}>
+                              {DEPTS.filter(d=>d.id!=="presentation").map(dept=>{
+                                const extra=dept.roles.filter(r=>!defaultIds.includes(r.id));
+                                if(!extra.length)return null;
+                                return(
+                                  <div key={dept.id} style={{marginBottom:10}}>
+                                    <div style={{fontSize:8,fontWeight:700,color:dept.c,textTransform:"uppercase",letterSpacing:0.8,marginBottom:5}}>{dept.l}</div>
+                                    <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                                      {extra.map(r=>{
+                                        const sel=currentSelected.includes(r.id);
+                                        return(
+                                          <button key={r.id} onClick={()=>{const next=sel?currentSelected.filter(x=>x!==r.id):[...currentSelected,r.id];setWfCustomChain(next);}} style={{display:"flex",alignItems:"center",gap:4,padding:"4px 8px",borderRadius:5,border:"1px solid "+(sel?r.dc+"66":"#1a2030"),background:sel?r.dc+"12":"#131825",cursor:"pointer",fontFamily:"Manrope,sans-serif",transition:"all 0.15s"}}>
+                                            <span style={{fontSize:10}}>{r.ic}</span>
+                                            <span style={{fontSize:9,fontWeight:600,color:sel?r.dc:"#8892B0"}}>{r.t}</span>
+                                            <span style={{fontSize:7,color:dept.c,opacity:0.7}}>{dept.l}</span>
+                                            <span style={{fontSize:8,color:sel?"#10B981":"#3A4060",fontWeight:700}}>{sel?"✓":"+"}</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <label style={S.lbl}>Step 3: Describe the Task</label>
                   <div style={{display:"flex",gap:4,alignItems:"flex-start",marginBottom:12}}>
                     <textarea style={{...S.inp,flex:1,minHeight:80,resize:"vertical"}} value={wfTask} onChange={e=>setWfTask(e.target.value)} placeholder="e.g. Prepare Q1 FY2026 P&L statement, highlight variances greater than 10% from budget, and recommend 3 cost reduction measures for board review" disabled={wfRunning}/>
                     <div style={{display:"flex",flexDirection:"column",gap:4}}><LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/><MicButton lang={vLang} onResult={t=>setWfTask(prev=>(prev?prev+" ":"")+t)} disabled={wfRunning}/></div>
                   </div>
                   <div style={{display:"flex",gap:4}}>
-                    <button onClick={runWorkflow} disabled={wfRunning||!wfTask.trim()} style={{...S.pBtn,background:"linear-gradient(135deg,#14B8A6,#3B82F6)",opacity:wfRunning||!wfTask.trim()?0.3:1,marginTop:0,flex:1}}>{wfRunning?"Chain Running…":"Start Workflow Chain"}</button>
+                    <button onClick={()=>{const ch=CHAINS[wfCat];const finalChain=wfCustomChain.length?wfCustomChain:ch.chain;runWorkflow(finalChain);}} disabled={wfRunning||!wfTask.trim()||(wfCustomChain.length===0&&!wfCat)} style={{...S.pBtn,background:"linear-gradient(135deg,#14B8A6,#3B82F6)",opacity:wfRunning||!wfTask.trim()?0.3:1,marginTop:0,flex:1}}>{wfRunning?"Chain Running…":"Start Workflow Chain"}</button>
                     {wfRunning&&<button onClick={()=>cancelRef.current.wf=true} style={{...S.cancelBtn,alignSelf:"flex-end",marginBottom:0}}>Cancel</button>}
                   </div>
                   {wfRunning&&wfPhase&&<div style={{fontSize:10,color:"#14B8A6",marginTop:8,display:"flex",alignItems:"center",gap:5}}><span style={{width:5,height:5,borderRadius:"50%",background:"#14B8A6",display:"inline-block",animation:"pulse 1s infinite"}}/>{wfPhase}</div>}
