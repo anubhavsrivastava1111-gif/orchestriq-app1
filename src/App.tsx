@@ -2080,12 +2080,15 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     setWfPreflightLoading(false);
   }
 },[wfTask,wfCat,wfCustomChain,co,compData,ledgerEntries,ask,showToast]);
-const runWorkflow=useCallback(async(customChainOverride?:string[])=>{
+const runWorkflow=useCallback(async(customChainOverride?:string[],preflightAnswers?:{questions:{persona:string;q:string}[];answers:string[]}|null)=>{
   const taskText=wfTask.trim();
   const taskCat=wfCat;
   if(!taskText||wfRunning)return;
   const ch=CHAINS[taskCat];if(!ch)return;
   const activeChain=customChainOverride&&customChainOverride.length?customChainOverride:ch.chain;
+  const preflightContext=preflightAnswers?.questions?.length
+    ?"\n\n=== PRE-FLIGHT CONTEXT (user answers to executive questions) ===\n"+preflightAnswers.questions.map((q,i)=>"Q ("+q.persona+"): "+q.q+"\nA: "+(preflightAnswers.answers[i]||"Not provided")).join("\n\n")+"\n\nCRITICAL: Use these answers as the primary input for the deliverable. Build everything around what the user said here."
+    :"";
   cancelRef.current.wf=false;
   setWfRunning(true);setError(null);setWfPauseMsg("");
 
@@ -2134,17 +2137,17 @@ if(!role){
     const sys=
   "You are "+role.f+" at \""+co.name+"\".\n"+
   "PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+
-  "OPERATING STYLE: Think critically, not agreeably. Challenge weak assumptions including your own from prior drafts. When current real-world data would strengthen your answer (rates, regulations, market data, competitor moves, benchmarks), search for it and use it. Be decisive and specific; avoid generic frameworks restated without numbers.\n"+
   buildCtx(co,compData)+"\n"+
-  "WORKFLOW CHAIN: \""+ch.label+"\" Level "+(i+1)+"/"+ch.chain.length+"\n"+
+  preflightContext+"\n"+
+  "WORKFLOW CHAIN: \""+ch.label+"\" Level "+(i+1)+"/"+activeChain.length+"\n"+
   "TASK: \""+taskText+"\"\n"+
   (steps.length>0?prevWork+"\n\n":"")+
   (isFirst
-      ?"INITIATING: First, check the COMPANY DATA section above (in CONTEXT) for any figures relevant to this task - such as budget, revenue, headcount, pricing, or other numbers the company has already provided. If relevant data EXISTS there, USE THOSE EXACT FIGURES as your constraints - do not invent different numbers. If NO relevant company data exists for a needed figure, then: (1) State clearly what specific information is missing - list it once, briefly. (2) State your assumptions explicitly as a numbered list (budget, timeline, audience, product type) - these become FIXED CONSTRAINTS that all subsequent levels must honor and build upon, not re-invent. (3) Produce a structured FIRST DRAFT. Label your assumptions section clearly as FIXED ASSUMPTIONS FOR THIS CHAIN (noting which came from existing Company Data vs. which are new assumptions) so downstream levels treat them as given."+
-      (wfModuleContext?"\n\nPLATFORM DATA (from connected modules — consult these real figures before stating any assumption):\n"+wfModuleContext:"")
+    ?"YOUR MANDATE: Produce the ACTUAL DELIVERABLE immediately. Not a plan. Not a strategy. The real thing the user asked for.\n\nSTEP 1: Read the PRE-FLIGHT CONTEXT above carefully — those are the user's own words about what they need. Build everything around those answers.\nSTEP 2: Check COMPANY DATA for any relevant figures (budget, product details, pricing, audience). Use them exactly.\nSTEP 3: Produce the deliverable now. Lead with it. Put it first.\n\nFORMAT YOUR OUTPUT AS:\n[DELIVERABLE]\n(the actual thing — post, document, analysis, SOP, whatever was asked — complete and ready to use)\n\n[ASSUMPTIONS MADE]\n(only list what you assumed because it was genuinely missing — keep this short)\n\n[WHAT WOULD MAKE THIS BETTER]\n(one sentence — what additional info would improve the next draft)"
+    +(wfModuleContext?"\n\nPLATFORM DATA:\n"+wfModuleContext:"")
     :isLast
-    ?"FINAL APPROVAL: Review all previous levels. Produce DEFINITIVE FINAL OUTPUT with these mandatory sections: (1) BUDGET RECONCILIATION: State the original budget constraint set at Level 1. State the final recommended budget. If they differ, provide explicit line-by-line ROI justification for every amount above the original - if you cannot justify it with numbers, bring it back within the original constraint. (2) Chain Review. (3) Corrections. (4) FINAL APPROVED OUTPUT. (5) Strategic Commentary. (6) Cross-functional Actions.\n\nDELIVERABLE PACK (produce the actual items, not descriptions - copy-paste usable immediately): "+(DELIVERABLE_SPECS[taskCat]||"a structured action plan with specific owners and deadlines, and a one-page executive summary")+". Every item must be specific to this company and the FIXED ASSUMPTIONS from Level 1 - never generic placeholder text.\n\nAFTER finishing the above, on its own new line write exactly: ===CAPABILITY_BRIEF===\nThen output ONLY a single valid JSON object:\n{\"info_needed\":[\"...\"],\"tools_required\":[{\"name\":\"...\",\"available\":true,\"why\":\"...\"}],\"manual_steps\":[\"...\"],\"automated_steps\":[\"...\"],\"est_cost_usd\":0,\"notes\":\"...\"}"
-    :"MID-LEVEL: You are reviewing the previous level output as a critical, senior "+role.dl+" expert. DO NOT restate or repeat what was already said. Instead: (1) Identify 2-3 specific gaps, errors, or unrealistic assumptions in the previous output - be direct and critical. Specifically flag if any constraints (budget, headcount, timeline, scope, cost) have drifted from the FIXED ASSUMPTIONS established at Level 1 - if they have, either bring them back in line or explicitly justify the revision with quantified ROI or business impact showing why the change is warranted. (2) You MUST search for and cite at least ONE piece of specific current data that the previous level did not have - for example: actual current rates, costs, or benchmarks for this specific industry and function in the company's location and market, real competitor activity, or regulatory requirements published in the last 12 months. Do not use generic global averages - find something specific and actionable for this company's context. (3) Add ONE substantive new dimension that only someone at your seniority level in "+role.dl+" would contribute - something that genuinely changes the quality of the output, not just a restatement with different words. (4) Output ONLY: a short Critical Review section, then New Contribution section, then an updated consolidated summary table. Be concise - quality over length."
+    ?"YOUR MANDATE: Deliver the FINAL, POLISHED version of the deliverable. This is what the user will copy and use directly.\n\nLook at all previous levels. Take the best version of the deliverable produced so far. Make it excellent.\n\nFORMAT YOUR OUTPUT AS:\n[FINAL DELIVERABLE — READY TO USE]\n(the complete, polished output — no placeholders, no generic text, specific to "+co.name+")\n\n[WHAT CHANGED FROM DRAFT]\n(2-3 bullet points on what you improved)\n\n[OPTIONAL VARIANTS]\n(if relevant, offer 1-2 alternative versions e.g. shorter/longer, different tone)\n\nAFTER finishing the above, on its own new line write exactly: ===CAPABILITY_BRIEF===\nThen output ONLY a single valid JSON object:\n{\"info_needed\":[\"...\"],\"tools_required\":[{\"name\":\"...\",\"available\":true,\"why\":\"...\"}],\"manual_steps\":[\"...\"],\"automated_steps\":[\"...\"],\"est_cost_usd\":0,\"notes\":\"...\"}"
+    :"YOUR MANDATE: Improve the deliverable from the previous level. Do not write reports or strategy sections.\n\nDO:\n- Make the actual deliverable better (sharper copy, stronger numbers, better structure)\n- Add one thing only YOU as "+role.t+" in "+role.dl+" would know that genuinely improves the output\n- Flag if anything is off-brand, unrealistic, or weak — then fix it in the deliverable itself\n\nDO NOT:\n- Write strategy documents or planning sections\n- Repeat what previous levels already said\n- Add budget tables unless the task specifically requires financials\n\nFORMAT: Output the improved deliverable directly, then a brief note on what you changed."
   )+"\nAll figures in "+wfCurr.sym+wfCurr.code+".";
 
     let reply="";
