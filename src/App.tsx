@@ -3067,11 +3067,35 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                     <textarea style={{...S.inp,flex:1,minHeight:80,resize:"vertical"}} value={wfTask} onChange={e=>setWfTask(e.target.value)} placeholder="e.g. Prepare Q1 FY2026 P&L statement, highlight variances greater than 10% from budget, and recommend 3 cost reduction measures for board review" disabled={wfRunning}/>
                     <div style={{display:"flex",flexDirection:"column",gap:4}}><LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/><MicButton lang={vLang} onResult={t=>setWfTask(prev=>(prev?prev+" ":"")+t)} disabled={wfRunning}/></div>
                   </div>
-                  <div style={{display:"flex",gap:4}}>
-                    <button onClick={()=>{const ch=CHAINS[wfCat];const finalChain=wfCustomChain.length?wfCustomChain:ch.chain;runWorkflow(finalChain);}} disabled={wfRunning||!wfTask.trim()||(wfCustomChain.length===0&&!wfCat)} style={{...S.pBtn,background:"linear-gradient(135deg,#14B8A6,#3B82F6)",opacity:wfRunning||!wfTask.trim()?0.3:1,marginTop:0,flex:1}}>{wfRunning?"Chain Running…":"Start Workflow Chain"}</button>
+                  {!wfPreflightActive&&(<div style={{display:"flex",gap:4}}>
+                    <button onClick={runPreflight} disabled={wfRunning||wfPreflightLoading||!wfTask.trim()||!wfCat} style={{...S.pBtn,background:"linear-gradient(135deg,#14B8A6,#3B82F6)",opacity:wfRunning||wfPreflightLoading||!wfTask.trim()?0.3:1,marginTop:0,flex:1}}>{wfPreflightLoading?"Preparing questions…":wfRunning?"Chain Running…":"Start Workflow Chain"}</button>
                     {wfRunning&&<button onClick={()=>cancelRef.current.wf=true} style={{...S.cancelBtn,alignSelf:"flex-end",marginBottom:0}}>Cancel</button>}
-                  </div>
+                  </div>)}
                   {wfRunning&&wfPhase&&<div style={{fontSize:10,color:"#14B8A6",marginTop:8,display:"flex",alignItems:"center",gap:5}}><span style={{width:5,height:5,borderRadius:"50%",background:"#14B8A6",display:"inline-block",animation:"pulse 1s infinite"}}/>{wfPhase}</div>}
+                  {wfPreflightActive&&wfPreflight&&!wfRunning&&(
+                    <div style={{marginTop:12,background:"linear-gradient(135deg,rgba(20,184,166,0.06),rgba(59,130,246,0.04))",border:"1px solid rgba(20,184,166,0.25)",borderRadius:10,padding:"16px 16px 12px"}}>
+                      <div style={{fontSize:12,fontWeight:800,color:"#F1F5F9",marginBottom:4}}>Quick questions before we begin</div>
+                      <p style={{fontSize:10,color:"#8892B0",marginBottom:14,lineHeight:1.6}}>Answer these so the team produces your actual deliverable — not a generic report. Skip any you want.</p>
+                      {wfPreflight.questions.map((q,i)=>(
+                        <div key={i} style={{marginBottom:12,background:"#131825",borderRadius:8,padding:"10px 12px",border:"1px solid #1a2030"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                            <span style={{fontSize:16}}>{q.personaIc||"👔"}</span>
+                            <span style={{fontSize:10,fontWeight:700,color:"#14B8A6"}}>{q.persona}</span>
+                          </div>
+                          <div style={{fontSize:11,color:"#F1F5F9",marginBottom:6,lineHeight:1.5}}>{q.q}</div>
+                          <div style={{display:"flex",gap:4,alignItems:"flex-end"}}>
+                            <textarea style={{...S.inp,flex:1,minHeight:36,resize:"vertical",fontSize:11}} value={wfPreflight.answers[i]||""} onChange={e=>{const na=[...wfPreflight.answers];na[i]=e.target.value;setWfPreflight({...wfPreflight,answers:na});}} placeholder={q.placeholder||"Your answer…"}/>
+                            <MicButton lang={vLang} onResult={t=>{const na=[...wfPreflight.answers];na[i]=(na[i]?na[i]+" ":"")+t;setWfPreflight({...wfPreflight,answers:na});}} disabled={false}/>
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{display:"flex",gap:6,marginTop:4}}>
+                        <button onClick={()=>{const ch=CHAINS[wfCat];const finalChain=wfCustomChain.length?wfCustomChain:ch.chain;setWfPreflightActive(false);runWorkflow(finalChain,wfPreflight);}} style={{...S.pBtn,marginTop:0,flex:1,background:"linear-gradient(135deg,#14B8A6,#3B82F6)"}}>Build My Deliverable</button>
+                        <button onClick={()=>{const ch=CHAINS[wfCat];const finalChain=wfCustomChain.length?wfCustomChain:ch.chain;setWfPreflightActive(false);runWorkflow(finalChain,null);}} style={{...S.hBtn,padding:"10px 14px",fontSize:10}}>Skip & Run</button>
+                        <button onClick={()=>{setWfPreflightActive(false);setWfPreflight(null);}} style={{...S.hBtn,padding:"10px 14px",fontSize:10}}>← Back</button>
+                      </div>
+                    </div>
+                  )}
                   {wfPauseMsg&&(
   <div style={{background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.3)",borderRadius:8,padding:"10px 14px",marginBottom:10,fontSize:11,color:"#F59E0B",display:"flex",alignItems:"center",gap:8}}>
     <span style={{fontSize:14,flexShrink:0}}>⏸</span>
