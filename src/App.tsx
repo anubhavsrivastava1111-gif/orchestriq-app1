@@ -2174,7 +2174,8 @@ if(!role){
     let stepOutput=reply;
     let stepCapability=null;
     if(isLast){
-      const parsed=parseCapabilityBrief(reply);
+      const cleanReply=reply.replace(/===\s*\n?CAPABILITY_BRIEF/g,"===CAPABILITY_BRIEF===");
+      const parsed=parseCapabilityBrief(cleanReply);
       stepOutput=parsed.output;
       if(parsed.capability){
         const fee=computeServiceFee(parsed.capability.est_cost_usd||0);
