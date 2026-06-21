@@ -1897,10 +1897,29 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         const prev=res.map(r=>"\n--- "+r.ag.t+" ---\n"+r.text).join("\n");
         setBrPh(ag.ic+" "+ag.t+" is analyzing…");
         const sys="You are "+ag.f+" at \""+co.name+"\".\nPROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+researchContext+"\nLIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State position with calculations in "+synCur.sym+".":"Previous:\n"+prev+"\n\nSTRICT NO-REPEAT RULE: Do NOT restate, recompute, or rebuild TAM/SAM/SOM, the full budget breakdown, the cap table, unit economics tables, or any other table/section a previous speaker already gave in full above. Assume the user has already read it. Reference a prior number only briefly and only if challenging/correcting it (e.g. 'CFO's CAC figure above undercounts X because...'). Your entire contribution must be NEW: something no previous speaker covered, a risk they missed, or a sharper figure in YOUR "+ag.dl+" domain that genuinely wasn't addressed. If you have nothing genuinely new beyond what's already on the table, say so plainly in 2-3 sentences instead of padding with a restated plan.")+"\n200-350 words MAX. Brevity signals confidence, not limitation.\n\nVERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it explicitly as 'ESTIMATE (unverified)'. Never present an invented number as fact.";
-        let replyFull=await askFull(sys,[{role:"user",content:brQ}],5000);
+        let agText="";
+        let agTruncated=false;
+        let mainAttempts=0;
+        while(mainAttempts<5&&!cancelRef.current.br){
+          mainAttempts++;
+          try{
+            const replyFull=await askFull(sys,[{role:"user",content:brQ}],5000);
+            agText=replyFull.primary;
+            agTruncated=!!replyFull.truncated;
+            break;
+          }catch(mainErr:any){
+            if(isRateLimit(mainErr.message)&&mainAttempts<5){
+              for(let countdown=30;countdown>0;countdown--){
+                if(cancelRef.current.br)break;
+                setBrPh(ag.ic+" "+ag.t+" — API limit reached. Retrying in "+countdown+"s… (attempt "+mainAttempts+"/5)");
+                await new Promise(r=>setTimeout(r,1000));
+              }
+            }else{
+              throw mainErr;
+            }
+          }
+        }
         if(cancelRef.current.br)break;
-        let agText=replyFull.primary;
-        let agTruncated=!!replyFull.truncated;
         let contAttempts=0;
         while(agTruncated&&contAttempts<3&&!cancelRef.current.br){
           contAttempts++;
@@ -1912,8 +1931,11 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
             agTruncated=!!cont.truncated;
           }catch(contErr:any){
             if(isRateLimit(contErr.message)){
-              setBrPh(ag.ic+" "+ag.t+" — API limit reached. Waiting 30s before retrying…");
-              await new Promise(r=>setTimeout(r,30000));
+              for(let countdown=30;countdown>0;countdown--){
+                if(cancelRef.current.br)break;
+                setBrPh(ag.ic+" "+ag.t+" is continuing — API limit. Retrying in "+countdown+"s…");
+                await new Promise(r=>setTimeout(r,1000));
+              }
             }else{
               agTruncated=false;
             }
