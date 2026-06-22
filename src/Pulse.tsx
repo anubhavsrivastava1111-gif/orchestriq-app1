@@ -42,8 +42,8 @@ const C={
 
 /* ── Styles ── */
 const S:Record<string,React.CSSProperties>={
-  wrap:{padding:20,fontFamily:"'Inter',system-ui,sans-serif",color:C.text,minHeight:"100vh"},
-  moduleBar:{display:"flex",gap:6,marginBottom:20,flexWrap:"wrap"},
+  wrap:{padding:0,fontFamily:"'Inter',system-ui,sans-serif",color:C.text,flex:1,display:"flex",flexDirection:"column" as const,height:"100%",overflow:"hidden"},
+  moduleBar:{display:"flex",gap:6,padding:"10px 14px",flexWrap:"wrap" as const,borderBottom:`1px solid ${C.border}`,background:C.bg,flexShrink:0},
   moduleBtn:(a:boolean):React.CSSProperties=>({padding:"8px 16px",borderRadius:8,border:`1px solid ${a?C.accent:C.border}`,background:a?C.accentDim:"transparent",color:a?C.accentText:C.textMid,fontSize:12,fontWeight:600,cursor:"pointer",transition:"all .15s"}),
   subTab:(a:boolean):React.CSSProperties=>({padding:"6px 14px",borderRadius:6,border:"none",background:a?C.card:"transparent",color:a?C.text:C.textDim,fontSize:11,fontWeight:500,cursor:"pointer"}),
   card:{background:C.card,borderRadius:10,border:`1px solid ${C.border}`,padding:16,marginBottom:14},
@@ -782,10 +782,11 @@ PRODUCE:
       </div>
 
       {/* Module content */}
-      {module==="dispatch"&&(existingDispatch||renderDispatch())}
+      <div style={{flex:1,overflowY:"auto" as const,padding:module==="dispatch"?0:20}}>{module==="dispatch"&&(existingDispatch||renderDispatch())}
       {module==="servicenow"&&renderServiceNow()}
       {module==="concur"&&renderConcur()}
       {module==="email"&&renderEmail()}
+      </div>
     </div>
   );
 }
