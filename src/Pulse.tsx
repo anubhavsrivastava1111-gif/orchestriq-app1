@@ -7,34 +7,6 @@ import DataIngestion, { ModuleKey } from "./DataIngestion";
 // Agentic: each module publishes reports to Dispatch Email Drafter
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ─── VISION-ENABLED AI CALL ─────────────────────────────────────────────────
-// Calls Claude API directly with optional base64 image/PDF for vision tasks
-// This is separate from callAI prop so DataIngestion works independently
-const EFF_KEY = (window as any).__EFF_CLAUDE || "";
-async function callVision(prompt: string, imageBase64?: string, imageMime?: string): Promise<string> {
-  const key = EFF_KEY || (window as any).EFF_CLAUDE || "";
-  if (!key) throw new Error("No API key found. Add EFF_CLAUDE in Cloudflare env vars.");
-
-  const userContent: any[] = [];
-
-  if (imageBase64 && imageMime) {
-    if (imageMime === "application/pdf") {
-      userContent.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: imageBase64 } });
-    } else {
-      userContent.push({ type: "image", source: { type: "base64", media_type: imageMime, data: imageBase64 } });
-    }
-  }
-  userContent.push({ type: "text", text: prompt });
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 4096, messages: [{ role: "user", content: userContent }] }),
-  });
-  if (!res.ok) { const e = await res.text(); throw new Error("API error: " + e.slice(0, 200)); }
-  const data = await res.json();
-  return data.content?.map((b: any) => b.text || "").join("") || "";
-}
 
 const C = {
   bg:"#0B1120",card:"#111827",card2:"#0D1829",
@@ -268,7 +240,7 @@ function ConfigPanel({cfg,setCfg,onClose}:{cfg:Config;setCfg:(c:Config)=>void;on
 // ═══════════════════════════════════════════════════════════════════════════
 // CONCUR T&E AUDIT MODULE
 // ═══════════════════════════════════════════════════════════════════════════
-function ConcurModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:string)=>Promise<string>;companyName:string;onPublish:(p:PublishPayload)=>void}) {
+function ConcurModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;callAI?:(p:string)=>Promise<string>;callVision?:(p:string,img?:string,mime?:string)=>Promise<string>;companyName:string;onPublish:(p:PublishPayload)=>void}) {
   const [rows,setRows]=useState<ConcurRow[]>([]);
   const [view,setView]=useState<"dashboard"|"table"|"ai">("dashboard");
   const [chartMode,setChartMode]=useState<"daily"|"weekly">("weekly");
@@ -514,7 +486,7 @@ function ConcurModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:
 // ═══════════════════════════════════════════════════════════════════════════
 // EMAIL HELPDESK MODULE
 // ═══════════════════════════════════════════════════════════════════════════
-function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:string)=>Promise<string>;companyName:string;onPublish:(p:PublishPayload)=>void}) {
+function EmailModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;callAI?:(p:string)=>Promise<string>;callVision?:(p:string,img?:string,mime?:string)=>Promise<string>;companyName:string;onPublish:(p:PublishPayload)=>void}) {
   const [rows,setRows]=useState<EmailRow[]>([]);
   const [view,setView]=useState<"dashboard"|"table"|"ai">("dashboard");
   const [chartMode,setChartMode]=useState<"daily"|"weekly">("weekly");
@@ -688,7 +660,7 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
 // ═══════════════════════════════════════════════════════════════════════════
 // SERVICENOW MODULE
 // ═══════════════════════════════════════════════════════════════════════════
-function ServiceNowModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:string)=>Promise<string>;companyName:string;onPublish:(p:PublishPayload)=>void}) {
+function ServiceNowModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;callAI?:(p:string)=>Promise<string>;callVision?:(p:string,img?:string,mime?:string)=>Promise<string>;companyName:string;onPublish:(p:PublishPayload)=>void}) {
   const [tickets,setTickets]=useState<SNTicket[]>([]);
   const [view,setView]=useState<"dashboard"|"table"|"ai">("dashboard");
   const [aiReport,setAiReport]=useState("");
@@ -1088,11 +1060,22 @@ interface PulseProps {
   ask?:any;askVision?:any;MicButton?:any;vLang?:string;
 }
 
-export default function PulseGovernance({callAI,companyName="Your Company",defaultModule,showToast}:PulseProps) {
+export default function PulseGovernance({callAI,companyName="Your Company",defaultModule,showToast,askVision}:PulseProps) {
   const [module,setModule]=useState<"dispatch"|"concur"|"email"|"servicenow">((defaultModule as any)||"dispatch");
   const [cfg,setCfg]=useState<Config>(DEFAULT_CONFIG);
   const [showConfig,setShowConfig]=useState(false);
   const [pendingPublish,setPendingPublish]=useState<PublishPayload|null>(null);
+
+  // Vision-capable AI call — uses askVision from App.tsx (same key, same auth)
+  // Falls back to text-only callAI if no image (for CSV/Word)
+  const callVision = async (prompt: string, imageBase64?: string, imageMime?: string): Promise<string> => {
+    if (imageBase64 && askVision) {
+      // askVision signature: (systemPrompt, messages, maxTokens, imageBase64, imageMime)
+      return askVision("You are a data extraction AI.", [{role:"user",content:prompt}], 4096, imageBase64, imageMime);
+    }
+    if (callAI) return callAI(prompt);
+    throw new Error("AI not connected. Add your API key in Settings.");
+  };
 
   const handlePublish=(payload:PublishPayload)=>{
     setPendingPublish(payload);
@@ -1126,9 +1109,9 @@ export default function PulseGovernance({callAI,companyName="Your Company",defau
 
       <div style={{flex:1,overflow:"auto"}}>
         {module==="dispatch"&&<DispatchHub callAI={callAI} companyName={companyName} pendingPublish={pendingPublish} onClearPublish={()=>setPendingPublish(null)}/>}
-        {module==="concur"&&<ConcurModule cfg={cfg} callAI={callAI} companyName={companyName} onPublish={handlePublish}/>}
-        {module==="email"&&<EmailModule cfg={cfg} callAI={callAI} companyName={companyName} onPublish={handlePublish}/>}
-        {module==="servicenow"&&<ServiceNowModule cfg={cfg} callAI={callAI} companyName={companyName} onPublish={handlePublish}/>}
+        {module==="concur"&&<ConcurModule cfg={cfg} callAI={callAI} callVision={callVision} companyName={companyName} onPublish={handlePublish}/>}
+        {module==="email"&&<EmailModule cfg={cfg} callAI={callAI} callVision={callVision} companyName={companyName} onPublish={handlePublish}/>}
+        {module==="servicenow"&&<ServiceNowModule cfg={cfg} callAI={callAI} callVision={callVision} companyName={companyName} onPublish={handlePublish}/>}
       </div>
     </div>
   );
