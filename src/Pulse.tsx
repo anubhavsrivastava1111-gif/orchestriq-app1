@@ -773,7 +773,7 @@ PRODUCE:
   return(
     
       {/* Module content */}
-      <div style={{flex:1,overflowY:"auto",padding:module==="dispatch"?0:20}}>{module==="dispatch"&&(existingDispatch||renderDispatch())}
+      <div style={{flex:1,overflowY:"auto",padding:20}}>
       {module==="servicenow"&&renderServiceNow()}
       {module==="concur"&&renderConcur()}
       {module==="email"&&renderEmail()}
