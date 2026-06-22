@@ -58,7 +58,7 @@ interface ConcurRow {
   id:string; date:string;
   untouched:number; freshInflow:number; resubmitted:number;
   totalWorkable:number; processed:number; openEOD:number;
-  pendingOperations Team:number; pendingBusiness:number;
+  pendingOpsTeam:number; pendingBusiness:number;
   tatPct:number; ukAccuracy:number; teamAccuracy:number;
   aging0_2:number; aging3_5:number; aging6_15:number; agingOver15:number;
   rejectionVol:number;
@@ -66,7 +66,7 @@ interface ConcurRow {
 interface EmailRow {
   id:string; date:string;
   received:number; resolved:number; slaPct:number;
-  pendingOperations Team:number; pendingClient:number; carryForward:number;
+  pendingOpsTeam:number; pendingClient:number; carryForward:number;
 }
 interface SNTicket {
   id:string; ticketNo:string; date:string; priority:string; category:string;
@@ -284,7 +284,7 @@ function ConcurModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:
       freshInflow:parseFloat(d.freshInflow)||0,
       resubmitted:parseFloat(d.resubmitted)||0,
       totalWorkable:0,processed:parseFloat(d.processed)||0,openEOD:0,
-      pendingOperations Team:parseFloat(d.pendingOperations Team)||0,
+      pendingOpsTeam:parseFloat(d.pendingOpsTeam)||0,
       pendingBusiness:parseFloat(d.pendingBusiness)||0,
       tatPct:(parseFloat(d.tatPct)||98)/100,
       ukAccuracy:(parseFloat(d.ukAccuracy)||100)/100,
@@ -304,7 +304,7 @@ function ConcurModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:
 
   const addRow=()=>{
     const prev=rows[rows.length-1];
-    setRows(r=>[...r,{id:uid(),date:today(),untouched:prev?prev.openEOD:0,freshInflow:0,resubmitted:0,totalWorkable:0,processed:0,openEOD:0,pendingOperations Team:0,pendingBusiness:0,tatPct:0.98,ukAccuracy:1,teamAccuracy:1,aging0_2:0,aging3_5:0,aging6_15:0,agingOver15:0,rejectionVol:0}]);
+    setRows(r=>[...r,{id:uid(),date:today(),untouched:prev?prev.openEOD:0,freshInflow:0,resubmitted:0,totalWorkable:0,processed:0,openEOD:0,pendingOpsTeam:0,pendingBusiness:0,tatPct:0.98,ukAccuracy:1,teamAccuracy:1,aging0_2:0,aging3_5:0,aging6_15:0,agingOver15:0,rejectionVol:0}]);
   };
 
   const updateRow=useCallback((id:string,field:keyof ConcurRow,val:string)=>{
@@ -324,7 +324,7 @@ function ConcurModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:
     const avgAcc=rows.reduce((s,r)=>s+(r.ukAccuracy+r.teamAccuracy)/2,0)/rows.length;
     const totalRej=rows.reduce((s,r)=>s+r.rejectionVol,0);
     const totalProc=rows.reduce((s,r)=>s+r.processed,0);
-    return {workableInflow:last.totalWorkable,processed:last.processed,pctThreshold:last.processed/processedThresh,backlog:last.pendingOperations Team+last.pendingBusiness,tatPct:avgTAT,accuracy:avgAcc,rejPct:totalProc>0?totalRej/totalProc:0,openEOD:last.openEOD,aging:{a:last.aging0_2,b:last.aging3_5,c:last.aging6_15,d:last.agingOver15}};
+    return {workableInflow:last.totalWorkable,processed:last.processed,pctThreshold:last.processed/processedThresh,backlog:last.pendingOpsTeam+last.pendingBusiness,tatPct:avgTAT,accuracy:avgAcc,rejPct:totalProc>0?totalRej/totalProc:0,openEOD:last.openEOD,aging:{a:last.aging0_2,b:last.aging3_5,c:last.aging6_15,d:last.agingOver15}};
   },[rows,processedThresh]);
 
   const cd=useMemo(()=>{
@@ -475,7 +475,7 @@ function ConcurModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:
                     <td style={{...TD,fontWeight:700,color:r.totalWorkable>workableThresh?C.warn:C.text}}>{r.totalWorkable}</td>
                     <td style={TD}><Cell value={r.processed} onChange={v=>updateRow(r.id,"processed",v)}/></td>
                     <td style={{...TD,color:r.openEOD>cfg.backlogThreshold?C.danger:C.success,fontWeight:700}}>{r.openEOD}</td>
-                    <td style={TD}><Cell value={r.pendingOperations Team} onChange={v=>updateRow(r.id,"pendingOperations Team",v)}/></td>
+                    <td style={TD}><Cell value={r.pendingOpsTeam} onChange={v=>updateRow(r.id,"pendingOpsTeam",v)}/></td>
                     <td style={TD}><Cell value={r.pendingBusiness} onChange={v=>updateRow(r.id,"pendingBusiness",v)}/></td>
                     <td style={{...TD,color:r.tatPct>=cfg.tatSLA?C.success:C.danger,fontWeight:700}}><Cell value={(r.tatPct*100).toFixed(1)} onChange={v=>updateRow(r.id,"tatPct",String(parseFloat(v)/100))}/></td>
                     <td style={{...TD,color:r.ukAccuracy>=cfg.accuracySLA?C.success:C.danger}}><Cell value={(r.ukAccuracy*100).toFixed(1)} onChange={v=>updateRow(r.id,"ukAccuracy",String(parseFloat(v)/100))}/></td>
@@ -527,7 +527,7 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
     const newRows=ingested.map(d=>({
       id:mk(),date:d.date||today(),
       received:parseFloat(d.received)||0,resolved:parseFloat(d.resolved)||0,slaPct:0,
-      pendingOperations Team:parseFloat(d.pendingOperations Team)||0,
+      pendingOpsTeam:parseFloat(d.pendingOpsTeam)||0,
       pendingClient:parseFloat(d.pendingClient)||0,
       carryForward:parseFloat(d.carryForward)||0,
     } as any)).map((r:any)=>{if(r.received>0)r.slaPct=r.resolved/r.received;return r;});
@@ -535,7 +535,7 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
     setShowIngestion(false);setView("table");
   };
 
-  const addRow=()=>setRows(r=>[...r,{id:uid(),date:today(),received:0,resolved:0,slaPct:0,pendingOperations Team:0,pendingClient:0,carryForward:0}]);
+  const addRow=()=>setRows(r=>[...r,{id:uid(),date:today(),received:0,resolved:0,slaPct:0,pendingOpsTeam:0,pendingClient:0,carryForward:0}]);
 
   const updateRow=useCallback((id:string,field:keyof EmailRow,val:string)=>{
     setRows(prev=>prev.map(r=>{
@@ -552,30 +552,30 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
     const total=rows.reduce((s,r)=>s+r.received,0);
     const totalRes=rows.reduce((s,r)=>s+r.resolved,0);
     const avgSLA=rows.reduce((s,r)=>s+r.slaPct,0)/rows.length;
-    return {total,totalRes,avgSLA,pendingOperations Team:last.pendingOperations Team,pendingClient:last.pendingClient,carryForward:last.carryForward};
+    return {total,totalRes,avgSLA,pendingOpsTeam:last.pendingOpsTeam,pendingClient:last.pendingClient,carryForward:last.carryForward};
   },[rows]);
 
   const cd=useMemo(()=>{
     if(chartMode==="daily"){
       const r=rows.slice(-10);
-      return {dates:r.map(x=>x.date),received:r.map(x=>x.received),resolved:r.map(x=>x.resolved),sla:r.map(x=>x.slaPct*100),pgp:r.map(x=>x.pendingOperations Team),pcl:r.map(x=>x.pendingClient)};
+      return {dates:r.map(x=>x.date),received:r.map(x=>x.received),resolved:r.map(x=>x.resolved),sla:r.map(x=>x.slaPct*100),pgp:r.map(x=>x.pendingOpsTeam),pcl:r.map(x=>x.pendingClient)};
     }
     const g=groupByWeek(rows);const keys=Object.keys(g).sort().slice(-4);
-    return {dates:keys.map(k=>weekLabel(k)),received:keys.map(k=>g[k].reduce((s,r)=>s+r.received,0)),resolved:keys.map(k=>g[k].reduce((s,r)=>s+r.resolved,0)),sla:keys.map(k=>{const v=g[k];return v.reduce((s,r)=>s+r.slaPct,0)/v.length*100;}),pgp:keys.map(k=>g[k].reduce((s,r)=>s+r.pendingOperations Team,0)),pcl:keys.map(k=>g[k].reduce((s,r)=>s+r.pendingClient,0))};
+    return {dates:keys.map(k=>weekLabel(k)),received:keys.map(k=>g[k].reduce((s,r)=>s+r.received,0)),resolved:keys.map(k=>g[k].reduce((s,r)=>s+r.resolved,0)),sla:keys.map(k=>{const v=g[k];return v.reduce((s,r)=>s+r.slaPct,0)/v.length*100;}),pgp:keys.map(k=>g[k].reduce((s,r)=>s+r.pendingOpsTeam,0)),pcl:keys.map(k=>g[k].reduce((s,r)=>s+r.pendingClient,0))};
   },[rows,chartMode]);
 
   const generateReport=async()=>{
     if(!callAI||!rows.length)return;
     setAiLoading(true);
     const m=metrics!;
-    try{setAiReport(await callAI(`You are a Helpdesk Communication Governance Analyst for ${companyName}.\n\nLIVE DATA:\n- Total Received: ${m.total}\n- Total Resolved: ${m.totalRes} (${fmtPct(m.totalRes/Math.max(m.total,1))})\n- Average SLA (24hr): ${fmtPct(m.avgSLA)} (Target: ${fmtPct(cfg.helpdeskSLA)})\n- Pending Operations Team: ${m.pendingOperations Team}\n- Pending Client: ${m.pendingClient}\n- Carry Forward: ${m.carryForward}\n\nPRODUCE:\n1. EXECUTIVE SUMMARY\n2. SLA COMPLIANCE — breaches and patterns\n3. PENDING ANALYSIS — Operations Team vs Client split\n4. TOP 3 ACTION ITEMS\n5. RISK FLAGS`));}catch(e:any){setAiReport("Error: "+e.message);}
+    try{setAiReport(await callAI(`You are a Helpdesk Communication Governance Analyst for ${companyName}.\n\nLIVE DATA:\n- Total Received: ${m.total}\n- Total Resolved: ${m.totalRes} (${fmtPct(m.totalRes/Math.max(m.total,1))})\n- Average SLA (24hr): ${fmtPct(m.avgSLA)} (Target: ${fmtPct(cfg.helpdeskSLA)})\n- Pending Ops Team: ${m.pendingOpsTeam}\n- Pending Client: ${m.pendingClient}\n- Carry Forward: ${m.carryForward}\n\nPRODUCE:\n1. EXECUTIVE SUMMARY\n2. SLA COMPLIANCE — breaches and patterns\n3. PENDING ANALYSIS — Ops Team vs Client split\n4. TOP 3 ACTION ITEMS\n5. RISK FLAGS`));}catch(e:any){setAiReport("Error: "+e.message);}
     setAiLoading(false);
   };
 
   const publishToEmail=()=>{
     if(!metrics)return;
     const m=metrics;
-    onPublish({module:"email",subject:`Helpdesk Email Report — ${companyName} — ${today()}`,kpiSummary:`Received: ${m.total} | Resolved: ${m.totalRes} | SLA: ${fmtPct(m.avgSLA)} | Pending Operations Team: ${m.pendingOperations Team} | Pending Client: ${m.pendingClient}`,tableData:`| Metric | Actual | Target | Status |\n|--------|--------|--------|--------|\n| SLA 24hr | ${fmtPct(m.avgSLA)} | ${fmtPct(cfg.helpdeskSLA)} | ${m.avgSLA>=cfg.helpdeskSLA?"✓ Meets":"✗ Breach"} |\n| Resolution Rate | ${fmtPct(m.totalRes/Math.max(m.total,1))} | 100% | ${m.totalRes>=m.total?"✓ Clear":"⚠ Pending"} |\n| Pending Operations Team | ${m.pendingOperations Team} | 0 | ${m.pendingOperations Team===0?"✓ Clear":"⚠ Action Needed"} |`,period:chartMode==="weekly"?"Weekly":"Daily"});
+    onPublish({module:"email",subject:`Helpdesk Email Report — ${companyName} — ${today()}`,kpiSummary:`Received: ${m.total} | Resolved: ${m.totalRes} | SLA: ${fmtPct(m.avgSLA)} | Pending Ops Team: ${m.pendingOpsTeam} | Pending Client: ${m.pendingClient}`,tableData:`| Metric | Actual | Target | Status |\n|--------|--------|--------|--------|\n| SLA 24hr | ${fmtPct(m.avgSLA)} | ${fmtPct(cfg.helpdeskSLA)} | ${m.avgSLA>=cfg.helpdeskSLA?"✓ Meets":"✗ Breach"} |\n| Resolution Rate | ${fmtPct(m.totalRes/Math.max(m.total,1))} | 100% | ${m.totalRes>=m.total?"✓ Clear":"⚠ Pending"} |\n| Pending Ops Team | ${m.pendingOpsTeam} | 0 | ${m.pendingOpsTeam===0?"✓ Clear":"⚠ Action Needed"} |`,period:chartMode==="weekly"?"Weekly":"Daily"});
   };
 
   const TH:React.CSSProperties={padding:"7px 8px",textAlign:"left",fontSize:9,fontWeight:700,textTransform:"uppercase",color:C.textDim,background:C.card2,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",position:"sticky",top:0};
@@ -611,7 +611,7 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
           <KpiTile label="Emails Received" value={fmtN(metrics.total)} color={C.blue}/>
           <KpiTile label="Resolved" value={fmtN(metrics.totalRes)} sub={fmtPct(metrics.totalRes/Math.max(metrics.total,1))} rag={metrics.totalRes>=metrics.total?"green":"amber"}/>
           <KpiTile label="SLA 24hr" value={fmtPct(metrics.avgSLA)} sub={`Target: ${fmtPct(cfg.helpdeskSLA)}`} rag={metrics.avgSLA>=cfg.helpdeskSLA?"green":"red"}/>
-          <KpiTile label="Pend Operations Team" value={metrics.pendingOperations Team} rag={metrics.pendingOperations Team===0?"green":"amber"}/>
+          <KpiTile label="Pend Ops Team" value={metrics.pendingOpsTeam} rag={metrics.pendingOpsTeam===0?"green":"amber"}/>
           <KpiTile label="Pend Client" value={metrics.pendingClient} color={C.textMid}/>
           <KpiTile label="Carry Forward" value={metrics.carryForward} rag={metrics.carryForward===0?"green":"red"}/>
         </div>
@@ -629,7 +629,7 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
           </div>
           <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12,gridColumn:"1 / -1"}}>
             <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Pending Split — Operations Team vs Client</div>
-            <StackedBar dates={cd.dates} buckets={[cd.pgp,cd.pcl]} colors={[C.accent,C.warn]} labels={["Operations Team","Client"]} height={70}/>
+            <StackedBar dates={cd.dates} buckets={[cd.pgp,cd.pcl]} colors={[C.accent,C.warn]} labels={["Ops Team","Client"]} height={70}/>
           </div>
         </div>
       )}
@@ -650,7 +650,7 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
           </div>
           <div style={{overflowX:"auto",borderRadius:8,border:`1px solid ${C.border}`}}>
             <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr>{["Date","Received","Resolved","SLA% (auto)","Pend Operations Team","Pend Client","Carry Fwd",""].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Date","Received","Resolved","SLA% (auto)","Pend Ops Team","Pend Client","Carry Fwd",""].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead>
               <tbody>
                 {rows.map(r=>(
                   <tr key={r.id}>
@@ -658,7 +658,7 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
                     <td style={TD}><Cell value={r.received} onChange={v=>updateRow(r.id,"received",v)}/></td>
                     <td style={TD}><Cell value={r.resolved} onChange={v=>updateRow(r.id,"resolved",v)}/></td>
                     <td style={{...TD,fontWeight:700,color:r.slaPct>=cfg.helpdeskSLA?C.success:C.danger}}>{fmtPct(r.slaPct)}</td>
-                    <td style={TD}><Cell value={r.pendingOperations Team} onChange={v=>updateRow(r.id,"pendingOperations Team",v)}/></td>
+                    <td style={TD}><Cell value={r.pendingOpsTeam} onChange={v=>updateRow(r.id,"pendingOpsTeam",v)}/></td>
                     <td style={TD}><Cell value={r.pendingClient} onChange={v=>updateRow(r.id,"pendingClient",v)}/></td>
                     <td style={{...TD,color:r.carryForward>0?C.danger:C.text}}><Cell value={r.carryForward} onChange={v=>updateRow(r.id,"carryForward",v)}/></td>
                     <td style={TD}><button onClick={()=>setRows(p=>p.filter(x=>x.id!==r.id))} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:14}}>×</button></td>
