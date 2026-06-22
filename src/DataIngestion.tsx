@@ -4,15 +4,34 @@ import React, { useState, useRef, useCallback } from "react";
 // DATA INGESTION ENGINE — Universal Smart Import for Pulse Modules
 
 // ─── DIRECT CLAUDE API CALL (vision + text) ──────────────────────────────
-// Uses EFF_CLAUDE env var — same key used by the rest of the app
-// Self-contained so it works regardless of how callAI prop is wired
+// Key priority: 1) Settings page (localStorage cos-keys → keys.claude)
+//               2) Cloudflare env var (VITE_CLAUDE_API_KEY)
+// This matches exactly how the rest of OrchestrIQ resolves the key.
 async function callClaudeDirectly(
   prompt: string,
   imageBase64?: string,
   imageMime?: string
 ): Promise<string> {
-  const key = (import.meta as any).env?.EFF_CLAUDE || (window as any).__EFF_CLAUDE || "";
-  if (!key) throw new Error("API key not found. Go to Settings and ensure your API key is saved.");
+  // 1. Try user's own key from Settings (localStorage "cos-keys")
+  let key = "";
+  try {
+    const stored = localStorage.getItem("cos-keys");
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      key = parsed?.keys?.claude?.trim() || "";
+    }
+  } catch { /* ignore parse errors */ }
+
+  // 2. Fall back to Cloudflare / Vite build-time env var
+  if (!key) {
+    key = (import.meta as any).env?.VITE_CLAUDE_API_KEY?.trim() || "";
+  }
+
+  if (!key) {
+    throw new Error(
+      "No API key found. Go to Settings → API Keys → enter your Claude API key and save."
+    );
+  }
 
   const userContent: any[] = [];
   if (imageBase64 && imageMime) {
