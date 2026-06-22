@@ -216,50 +216,113 @@ const confidenceLabel = (c: Confidence) =>
   c === "high" ? "✓" : c === "medium" ? "~" : c === "low" ? "?" : "✗";
 
 // ─── PROMPT BUILDERS ──────────────────────────────────────────────────────────
+// ── MODULE-SPECIFIC GROUNDING CONTEXT (prevents hallucination) ───────────
+const MODULE_CONTEXT: Record<string, string> = {
+  concur: [
+    "This is a SAP Concur T&E (Travel & Expense) audit operations tracker used by BPO/shared services teams.",
+    "The source is typically a daily spreadsheet, Concur queue screenshot, email with daily figures, or exported report.",
+    "Each ROW represents one calendar day of audit activity.",
+    "freshInflow = new expense reports received that day.",
+    "processed = reports audited/cleared that day.",
+    "untouched = reports carried over unprocessed from the previous day (openEOD of prior day).",
+    "openEOD = totalWorkable minus processed = reports still open at end of day.",
+    "tatPct = % of reports processed within 2 working days — shown as a whole number like 98.5 (meaning 98.5%, NOT 0.985).",
+    "ukAccuracy and teamAccuracy = audit quality scores — also whole number percentages like 97.0.",
+    "aging0_2, aging3_5, aging6_15, agingOver15 = count of open reports by how many days they have been waiting.",
+    "rejectionVol = number of reports rejected/sent back to employees.",
+    "NEVER invent numbers. Only extract what is clearly visible.",
+  ].join(" "),
+
+  email: [
+    "This is a daily email helpdesk / query management log for a BPO operations team.",
+    "Each ROW represents one calendar day of email activity.",
+    "received = total emails/queries received that day.",
+    "resolved = queries resolved within SLA (24 hours).",
+    "slaPct = percentage resolved on time — whole number like 95.2 (meaning 95.2%, NOT 0.952). Leave blank if not shown.",
+    "pendingOpsTeam = emails waiting for the ops team to respond.",
+    "pendingClient = emails waiting for the client/requester to respond.",
+    "carryForward = unresolved emails moved to next day.",
+    "NEVER invent numbers. Only extract what is clearly visible.",
+  ].join(" "),
+
+  servicenow: [
+    "This is a ServiceNow IT service management queue — a list of support tickets.",
+    "Each ROW in the source is ONE ticket. Do not merge rows. Do not split one ticket into multiple rows.",
+    "ticketNo = the incident/request number exactly as shown (e.g. INC0012345, RITM0056789, CHG0001234).",
+    "date = ticket creation/opened date.",
+    "priority = exactly one of: Critical, High, Medium, Low.",
+    "status = exactly one of: Open, Assigned, In Progress, Pending, Resolved, Closed.",
+    "firstResponse = date when the team first responded to the ticket.",
+    "NEVER invent ticket numbers. Copy them exactly from what you see.",
+    "If a column is cut off or not visible, leave value blank.",
+  ].join(" "),
+};
+
+// ── REALISTIC EXAMPLE VALUES per module (shown to AI as output format guide) ──
+const MODULE_EXAMPLES: Record<string, Record<string, string>> = {
+  concur: {
+    date:"2024-06-15", freshInflow:"45", resubmitted:"8", untouched:"12",
+    processed:"52", pendingOpsTeam:"3", pendingBusiness:"2",
+    tatPct:"98.5", ukAccuracy:"97.2", teamAccuracy:"96.8",
+    aging0_2:"30", aging3_5:"12", aging6_15:"5", agingOver15:"0", rejectionVol:"4",
+  },
+  email: {
+    date:"2024-06-15", received:"62", resolved:"58",
+    pendingOpsTeam:"2", pendingClient:"3", carryForward:"4",
+  },
+  servicenow: {
+    ticketNo:"INC0012345", date:"2024-06-15", priority:"High",
+    category:"Access Management", status:"In Progress",
+    assignedTo:"Priya Sharma", team:"IT Support", firstResponse:"2024-06-16",
+  },
+};
+
 const buildExtractionPrompt = (moduleKey: ModuleKey, sourceType: string, textContent?: string): string => {
   const schema = SCHEMAS[moduleKey];
+  const ctx = MODULE_CONTEXT[moduleKey] || "";
+  const ex = MODULE_EXAMPLES[moduleKey] || {};
+
   const columnDefs = schema.columns.map(col =>
-    `  - "${col.key}": ${col.label} (${col.type}${col.required ? ", REQUIRED" : ""}) — ${col.hint}`
+    `  "${col.key}" (${col.label}${col.required ? " — REQUIRED" : ""}): ${col.hint}`
   ).join("\n");
 
-  const jsonExample = schema.columns.reduce((acc, col) => {
-    acc[col.key] = col.type === "number" ? 0 : col.type === "percent" ? "98.50" : col.type === "date" ? "2024-06-15" : "value";
-    return acc;
-  }, {} as Record<string, string | number>);
+  const exampleCells = schema.columns
+    .map(col => `"${col.key}": {"value": "${ex[col.key] || ""}", "confidence": "high", "rawSource": "text you saw"}`)
+    .join(",\n        ");
 
-  return `You are a data extraction AI specialized in operations and governance data for ${schema.label}.
+  return `You are a precise data extraction AI for ${schema.label} governance reporting.
 
-${textContent ? `SOURCE CONTENT (${sourceType}):\n${textContent.slice(0, 8000)}\n` : `You are analyzing an image/screenshot/photo of a ${sourceType} containing ${schema.label} data.`}
+WHAT THIS DATA IS:
+${ctx}
 
-YOUR TASK: Extract ALL data rows you can identify and return them as a strict JSON array.
+ANTI-HALLUCINATION RULES — MUST FOLLOW:
+1. Extract ONLY values that are VISIBLE in the source. Never guess, invent, or fill in missing data.
+2. If a value is not visible: set "value" to "" and "confidence" to "missing". Do not substitute defaults.
+3. Numbers: copy exactly as shown, remove commas only (e.g. "1,234" becomes "1234").
+4. Percentages: always a WHOLE NUMBER (e.g. if you see "98.5%" write "98.5". Never write "0.985").
+5. Dates: convert to YYYY-MM-DD (e.g. "15/06/2024" or "15-Jun-2024" both become "2024-06-15").
+6. Extract every visible data row. One row of data in the source = one entry in the rows array.
+7. Do not merge rows. Do not split rows. One-to-one mapping.
 
-COLUMNS TO EXTRACT (extract ONLY these fields):
+SOURCE TYPE: ${sourceType}
+${textContent ? `\nSOURCE CONTENT:\n${textContent.slice(0, 8000)}\n` : ""}
+
+FIELDS TO EXTRACT (extract these exact field names only):
 ${columnDefs}
 
-RULES:
-1. Extract EVERY row of data you can identify — even partial rows
-2. For each cell, estimate confidence: "high" (clearly visible), "medium" (inferred/partially visible), "low" (guessed), "missing" (not found)
-3. Dates: normalize to YYYY-MM-DD format
-4. Percentages: return as the numeric value only (e.g., "98.5" not "98.5%")
-5. Numbers: return as plain numbers, remove commas
-6. For ServiceNow priority: normalize to exactly "Critical", "High", "Medium", or "Low"
-7. For ServiceNow status: normalize to "Open", "Assigned", "In Progress", "Pending", "Resolved", or "Closed"
-8. If a field is not visible or not applicable, use "" with confidence "missing"
-9. Extract multiple rows if multiple data rows are visible
-
-RETURN FORMAT — respond with ONLY this JSON, no other text:
+RESPOND WITH ONLY THE FOLLOWING JSON — no explanation, no markdown, no preamble:
 {
   "rows": [
     {
       "cells": {
-        ${schema.columns.map(col => `"${col.key}": {"value": "...", "confidence": "high|medium|low|missing", "rawSource": "exact text seen"}`).join(",\n        ")}
+        ${exampleCells}
       }
     }
   ],
-  "sourceDescription": "brief description of what was in the image/document",
-  "warnings": ["any issues or ambiguities found"],
+  "sourceDescription": "one sentence: what did you see in this source",
+  "warnings": ["list any data quality issues, truncated values, or ambiguities"],
   "totalRowsFound": 1
-}`;
+}`
 };
 
 // ─── MAIN INGESTION COMPONENT ─────────────────────────────────────────────────
