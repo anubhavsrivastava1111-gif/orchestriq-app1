@@ -158,9 +158,10 @@ function mapCSVtoConcur(rows:Record<string,string>[]):ConcurRecord[]{
 interface PulseProps {
   callAI?:(prompt:string)=>Promise<string>;
   companyName?:string;
+  existingDispatch?:React.ReactNode;
 }
 
-export default function PulseGovernance({callAI,companyName="Your Company"}:PulseProps){
+export default function PulseGovernance({callAI,companyName="Your Company",existingDispatch}:PulseProps){
   const [module,setModule]=useState<"dispatch"|"servicenow"|"concur"|"email">("dispatch");
   const [subView,setSubView]=useState<"dashboard"|"table"|"ai">("dashboard");
 
@@ -781,7 +782,7 @@ PRODUCE:
       </div>
 
       {/* Module content */}
-      {module==="dispatch"&&renderDispatch()}
+      {module==="dispatch"&&(existingDispatch||renderDispatch())}
       {module==="servicenow"&&renderServiceNow()}
       {module==="concur"&&renderConcur()}
       {module==="email"&&renderEmail()}
