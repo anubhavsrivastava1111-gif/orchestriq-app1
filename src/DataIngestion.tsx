@@ -377,17 +377,48 @@ export default function DataIngestion({ moduleKey, onConfirm, onClose, callAI }:
         parsed = JSON.parse(jsonMatch[0]);
       }
 
-      // Normalize dates and percents
-      const normalizedRows: ExtractedRow[] = (parsed.rows || []).map((row, idx) => {
+      // Defensively extract rows — AI may return rows directly, nested, or as object
+      let rawRows: any[] = [];
+      if (Array.isArray(parsed.rows)) {
+        rawRows = parsed.rows;
+      } else if (Array.isArray(parsed)) {
+        rawRows = parsed;
+      } else if (parsed.data && Array.isArray(parsed.data)) {
+        rawRows = parsed.data;
+      } else if (parsed.results && Array.isArray(parsed.results)) {
+        rawRows = parsed.results;
+      } else if (parsed.rows && typeof parsed.rows === "object") {
+        // Single row returned as object instead of array
+        rawRows = [parsed.rows];
+      } else {
+        // Last resort: look for any array value in the top-level object
+        const firstArray = Object.values(parsed).find(v => Array.isArray(v));
+        rawRows = (firstArray as any[]) || [];
+      }
+
+      // Normalize each row — handle both {cells:{}} and flat {key:value} shapes
+      const normalizedRows: ExtractedRow[] = rawRows.map((row: any, idx: number) => {
         const normalizedCells: Record<string, ExtractedCell> = {};
+        const hasCells = row && typeof row.cells === "object" && !Array.isArray(row.cells);
         schema.columns.forEach(col => {
-          const cell = row.cells?.[col.key] || { value: "", confidence: "missing" as Confidence };
+          let cell: any;
+          if (hasCells) {
+            // Expected shape: { cells: { key: { value, confidence } } }
+            cell = row.cells?.[col.key];
+          } else {
+            // Flat shape: { key: value } or { key: { value, confidence } }
+            const raw = row?.[col.key];
+            cell = (raw && typeof raw === "object" && "value" in raw)
+              ? raw
+              : { value: raw ?? "", confidence: "medium" };
+          }
+          if (!cell) cell = { value: "", confidence: "missing" };
           let val = String(cell.value ?? "").trim();
           if (col.type === "date" && val) val = normalizeDate(val);
           if (col.type === "percent" && val) val = normalizePercent(val);
           normalizedCells[col.key] = {
             value: val,
-            confidence: cell.confidence as Confidence || "missing",
+            confidence: (cell.confidence as Confidence) || (val ? "medium" : "missing"),
             rawSource: cell.rawSource,
           };
         });
@@ -400,12 +431,12 @@ export default function DataIngestion({ moduleKey, onConfirm, onClose, callAI }:
       const finalResult: ExtractionResult = {
         rows: normalizedRows,
         sourceDescription: parsed.sourceDescription || "",
-        warnings: parsed.warnings || [],
+        warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
         totalRowsFound: parsed.totalRowsFound || normalizedRows.length,
       };
 
       setResult(finalResult);
-      setEditedRows(normalizedRows.map(r => ({ ...r, cells: { ...r.cells } })));
+      setEditedRows(normalizedRows.map((r: ExtractedRow) => ({ ...r, cells: { ...r.cells } })));
       setStage("review");
 
     } catch (err: any) {
