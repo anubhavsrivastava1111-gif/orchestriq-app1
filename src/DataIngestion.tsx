@@ -264,15 +264,35 @@ export default function DataIngestion({ moduleKey, onConfirm, onClose, callAI }:
 
       // ── EXCEL / XLSX ──────────────────────────────────────────────────────
       } else if (isExcel) {
-        setProcessingMsg("Parsing Excel file...");
-        setProcessingPct(20);
+        setProcessingMsg("Loading Excel parser...");
+        setProcessingPct(15);
 
-        // Dynamic import SheetJS
-        const XLSX = await import("xlsx");
-        const arrayBuffer = await file.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer, { type: "array" });
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const csvText = XLSX.utils.sheet_to_csv(firstSheet);
+        // Load SheetJS from CDN at runtime — no npm package needed
+        const csvText = await new Promise<string>((resolve, reject) => {
+          const existingScript = document.getElementById("sheetjs-cdn");
+          const run = () => {
+            const XLSXLib = (window as any).XLSX;
+            if (!XLSXLib) { reject(new Error("SheetJS failed to load from CDN.")); return; }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              try {
+                const data = new Uint8Array(e.target!.result as ArrayBuffer);
+                const workbook = XLSXLib.read(data, { type: "array" });
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                resolve(XLSXLib.utils.sheet_to_csv(sheet));
+              } catch (err) { reject(err); }
+            };
+            reader.onerror = reject;
+            reader.readAsArrayBuffer(file);
+          };
+          if (existingScript && (window as any).XLSX) { run(); return; }
+          const script = document.createElement("script");
+          script.id = "sheetjs-cdn";
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+          script.onload = run;
+          script.onerror = () => reject(new Error("Could not load Excel parser. Check internet connection."));
+          document.head.appendChild(script);
+        });
 
         setProcessingMsg("Mapping columns with AI...");
         setProcessingPct(55);
@@ -299,10 +319,33 @@ export default function DataIngestion({ moduleKey, onConfirm, onClose, callAI }:
         setProcessingMsg("Reading Word document...");
         setProcessingPct(20);
 
-        const mammoth = await import("mammoth");
-        const arrayBuffer = await file.arrayBuffer();
-        const mammothResult = await mammoth.extractRawText({ arrayBuffer });
-        const text = mammothResult.value;
+        // Extract text from .docx (ZIP containing XML) — no npm library needed
+        // Read as binary, find word/document.xml, strip XML tags
+        const text = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const binary = e.target!.result as string;
+              // Search for readable text chunks between XML tags
+              // docx XML contains w:t elements with actual text
+              const wtMatches = binary.match(/<w:t[^>]*>([^<]+)<\/w:t>/g) || [];
+              const extracted = wtMatches
+                .map(m => m.replace(/<[^>]+>/g, ""))
+                .join(" ")
+                .replace(/\s+/g, " ")
+                .trim();
+              if (extracted.length > 20) {
+                resolve(extracted);
+              } else {
+                // Fallback: strip all XML tags from binary read
+                const stripped = binary.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+                resolve(stripped.slice(0, 8000));
+              }
+            } catch (err) { reject(err); }
+          };
+          reader.onerror = reject;
+          reader.readAsBinaryString(file);
+        });
 
         setProcessingMsg("Extracting data from document with AI...");
         setProcessingPct(55);
