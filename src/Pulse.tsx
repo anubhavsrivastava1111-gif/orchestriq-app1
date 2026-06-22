@@ -1,782 +1,1032 @@
-import React,{useState,useRef,useMemo,useCallback} from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 
-// ══════════════════════════════════════════════════════════════════
-// PULSE — Governance Intelligence Module
-// Sub-modules: Dispatch | ServiceNow | Concur Audit | Email
-// ══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// PULSE — Integrated Governance Intelligence Hub v2
+// Tabs: Dispatch Hub | Concur T&E | Email Helpdesk | ServiceNow
+// Agentic: each module publishes reports to Dispatch Email Drafter
+// ═══════════════════════════════════════════════════════════════════════════
 
-/* ── Types ── */
-interface SNTicket {
-  id:string; ticketNumber:string; createdDate:string; priority:string;
-  category:string; status:string; assignedTo:string; team:string;
-  requestor:string; department:string; resolutionDate:string;
-  closedDate:string; csat:string; pendingReason:string;
-  firstResponse:string; resolvedBy:string; notes:string;
-}
-interface ConcurRecord {
-  id:string; reportId:string; employeeName:string; department:string;
-  submissionDate:string; reportAmount:string; policyViolations:string;
-  auditStatus:string; auditor:string; reviewDate:string;
-  exceptionType:string; resolution:string; notes:string;
-}
-interface EmailRecord {
-  id:string; dateSent:string; recipient:string; subject:string;
-  category:string; status:string; responseDueDate:string;
-  respondedDate:string; notes:string;
-}
-
-/* ── Palette (matches OrchestrIQ dark theme) ── */
-const C={
-  bg:"#0B1120",card:"#111827",cardHover:"#1A2332",
-  border:"#1E2D3D",borderLight:"#2A3A4A",
-  accent:"#14B8A6",accentDim:"rgba(20,184,166,0.12)",
-  accentText:"#5EEAD4",
-  warn:"#F59E0B",warnDim:"rgba(245,158,11,0.12)",
-  danger:"#EF4444",dangerDim:"rgba(239,68,68,0.12)",
-  success:"#10B981",successDim:"rgba(16,185,129,0.12)",
-  info:"#3B82F6",infoDim:"rgba(59,130,246,0.12)",
-  purple:"#8B5CF6",purpleDim:"rgba(139,92,246,0.12)",
+const C = {
+  bg:"#0B1120",card:"#111827",card2:"#0D1829",
+  border:"#1E2D3D",
+  accent:"#14B8A6",accentDim:"rgba(20,184,166,0.10)",accentText:"#5EEAD4",
+  blue:"#3B82F6",blueDim:"rgba(59,130,246,0.10)",
+  purple:"#8B5CF6",purpleDim:"rgba(139,92,246,0.10)",
+  warn:"#F59E0B",warnDim:"rgba(245,158,11,0.10)",
+  danger:"#EF4444",dangerDim:"rgba(239,68,68,0.10)",
+  success:"#10B981",
+  orange:"#F97316",
   text:"#E8EFF8",textMid:"#94A3B8",textDim:"#4D6A8A",
-  white:"#FFFFFF",
 };
 
-/* ── Styles ── */
-const S:Record<string,React.CSSProperties>={
-  wrap:{padding:0,fontFamily:"'Inter',system-ui,sans-serif",color:C.text,flex:1,display:"flex",flexDirection:"column" as const,height:"100%",overflow:"hidden"},
-  moduleBar:{display:"flex",gap:6,padding:"10px 14px",flexWrap:"wrap" as const,borderBottom:`1px solid ${C.border}`,background:C.bg,flexShrink:0},
-  moduleBtn:(a:boolean):React.CSSProperties=>({padding:"8px 16px",borderRadius:8,border:`1px solid ${a?C.accent:C.border}`,background:a?C.accentDim:"transparent",color:a?C.accentText:C.textMid,fontSize:12,fontWeight:600,cursor:"pointer",transition:"all .15s"}),
-  subTab:(a:boolean):React.CSSProperties=>({padding:"6px 14px",borderRadius:6,border:"none",background:a?C.card:"transparent",color:a?C.text:C.textDim,fontSize:11,fontWeight:500,cursor:"pointer"}),
-  card:{background:C.card,borderRadius:10,border:`1px solid ${C.border}`,padding:16,marginBottom:14},
-  kpiGrid:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:16},
-  kpi:(color:string):React.CSSProperties=>({background:`${color}11`,border:`1px solid ${color}33`,borderRadius:8,padding:"12px 14px"}),
-  kpiVal:{fontSize:22,fontWeight:700,lineHeight:1.2},
-  kpiLabel:{fontSize:10,fontWeight:500,color:C.textDim,marginTop:4,textTransform:"uppercase" as const,letterSpacing:"0.05em"},
-  tableWrap:{overflowX:"auto" as const,borderRadius:8,border:`1px solid ${C.border}`},
-  table:{width:"100%",borderCollapse:"collapse" as const,fontSize:11},
-  th:{padding:"8px 10px",textAlign:"left" as const,fontWeight:600,fontSize:10,textTransform:"uppercase" as const,letterSpacing:"0.04em",color:C.textDim,background:C.bg,borderBottom:`1px solid ${C.border}`,position:"sticky" as const,top:0,whiteSpace:"nowrap" as const},
-  td:{padding:"6px 10px",borderBottom:`1px solid ${C.border}`,color:C.text,verticalAlign:"top" as const},
-  input:{background:"transparent",border:"none",color:C.text,fontSize:11,width:"100%",outline:"none",padding:"2px 0"},
-  btn:(bg:string):React.CSSProperties=>({padding:"7px 14px",borderRadius:6,border:"none",background:bg,color:C.white,fontSize:11,fontWeight:600,cursor:"pointer"}),
-  btnOutline:{padding:"7px 14px",borderRadius:6,border:`1px solid ${C.border}`,background:"transparent",color:C.textMid,fontSize:11,fontWeight:600,cursor:"pointer"},
-  badge:(bg:string,fg:string):React.CSSProperties=>({display:"inline-block",padding:"2px 8px",borderRadius:4,fontSize:10,fontWeight:600,background:bg,color:fg}),
-  upload:{border:`2px dashed ${C.border}`,borderRadius:8,padding:24,textAlign:"center" as const,cursor:"pointer",transition:"border-color .15s"},
-  aiPanel:{background:"#0D1F2D",border:`1px solid ${C.accent}33`,borderRadius:10,padding:16,marginTop:14,whiteSpace:"pre-wrap" as const,fontSize:12,lineHeight:1.7,color:C.text,maxHeight:500,overflowY:"auto"},
-};
-
-/* ── Helpers ── */
-const uid=()=>Math.random().toString(36).slice(2,10);
-const daysBetween=(a:string,b:string)=>{if(!a)return 0;const d1=new Date(a),d2=b?new Date(b):new Date();const diff=Math.floor((d2.getTime()-d1.getTime())/(864e5));return isNaN(diff)?0:diff;};
-const today=()=>new Date().toISOString().slice(0,10);
-const fmtN=(n:number)=>n.toLocaleString("en-IN");
-
-const PRIORITIES=["Critical","High","Medium","Low"];
-const SN_STATUSES=["Open","Assigned","In Progress","Pending","Resolved","Closed"];
-const CONCUR_STATUSES=["Pending Review","Under Audit","Exception Raised","Cleared","Escalated","Closed"];
-const EMAIL_CATEGORIES=["Follow-up","Escalation","Notification","Reminder","Approval Request","General"];
-const EMAIL_STATUSES=["Sent","Awaiting Response","Responded","Overdue","No Response Required"];
-
-const emptySN=():SNTicket=>({id:uid(),ticketNumber:"",createdDate:today(),priority:"Medium",category:"",status:"Open",assignedTo:"",team:"",requestor:"",department:"",resolutionDate:"",closedDate:"",csat:"",pendingReason:"",firstResponse:"",resolvedBy:"",notes:""});
-const emptyConcur=():ConcurRecord=>({id:uid(),reportId:"",employeeName:"",department:"",submissionDate:today(),reportAmount:"",policyViolations:"0",auditStatus:"Pending Review",auditor:"",reviewDate:"",exceptionType:"",resolution:"",notes:""});
-const emptyEmail=():EmailRecord=>({id:uid(),dateSent:today(),recipient:"",subject:"",category:"Follow-up",status:"Sent",responseDueDate:"",respondedDate:"",notes:""});
-
-/* ── CSV Parser ── */
-function parseCSV(text:string):Record<string,string>[]{
-  const lines=text.split(/\r?\n/).filter(l=>l.trim());
-  if(lines.length<2)return[];
-  const headers=lines[0].split(",").map(h=>h.trim().replace(/^"|"$/g,""));
-  return lines.slice(1).map(line=>{
-    const vals:string[]=[];let cur="",inQ=false;
-    for(const ch of line){if(ch==='"'){inQ=!inQ}else if(ch===","&&!inQ){vals.push(cur.trim());cur=""}else{cur+=ch}}
-    vals.push(cur.trim());
-    const obj:Record<string,string>={};
-    headers.forEach((h,i)=>{obj[h]=vals[i]?.replace(/^"|"$/g,"")||""});
-    return obj;
-  });
+interface Config {
+  fteCount:number; shiftHours:number; minsPerAudit:number;
+  qcSamplePct:number; accuracySLA:number; tatSLA:number;
+  helpdeskSLA:number; rejectionTarget:number; backlogThreshold:number;
+}
+interface ConcurRow {
+  id:string; date:string;
+  untouched:number; freshInflow:number; resubmitted:number;
+  totalWorkable:number; processed:number; openEOD:number;
+  pendingGenpact:number; pendingBusiness:number;
+  tatPct:number; ukAccuracy:number; gpAccuracy:number;
+  aging0_2:number; aging3_5:number; aging6_15:number; agingOver15:number;
+  rejectionVol:number;
+}
+interface EmailRow {
+  id:string; date:string;
+  received:number; resolved:number; slaPct:number;
+  pendingGenpact:number; pendingClient:number; carryForward:number;
+}
+interface SNTicket {
+  id:string; ticketNo:string; date:string; priority:string; category:string;
+  status:string; assignedTo:string; team:string; firstResponse:string;
+  pendingReason:string; notes:string;
+}
+interface PublishPayload {
+  module:"concur"|"email"|"servicenow";
+  subject:string; kpiSummary:string; tableData:string; period:string;
 }
 
-/* ── Column mapping (auto-map common ServiceNow/Concur headers) ── */
-const SN_HEADER_MAP:Record<string,keyof SNTicket>={
-  "ticket number":"ticketNumber","ticket_number":"ticketNumber","ticket id":"ticketNumber","number":"ticketNumber",
-  "created date":"createdDate","created":"createdDate","opened":"createdDate","opened at":"createdDate",
-  "priority":"priority","urgency":"priority",
-  "category":"category","type":"category",
-  "status":"status","state":"status","stage":"status",
-  "assigned to":"assignedTo","assignee":"assignedTo",
-  "team":"team","assignment group":"team","group":"team",
-  "requestor":"requestor","requester":"requestor","caller":"requestor","opened by":"requestor",
-  "department":"department","dept":"department",
-  "resolution date":"resolutionDate","resolved at":"resolutionDate","resolved date":"resolutionDate",
-  "closed date":"closedDate","closed at":"closedDate",
-  "csat":"csat","satisfaction":"csat","rating":"csat",
-  "pending reason":"pendingReason","hold reason":"pendingReason",
-  "first response":"firstResponse","first response date":"firstResponse",
-  "resolved by":"resolvedBy",
-  "notes":"notes","comments":"notes","description":"notes",
+const uid = () => Math.random().toString(36).slice(2, 10);
+const today = () => new Date().toISOString().slice(0, 10);
+const fmtPct = (n:number) => (n * 100).toFixed(1) + "%";
+const fmtN = (n:number) => Math.round(n).toLocaleString("en-IN");
+const daysBetween = (a:string, b:string=today()) => {
+  if (!a) return 0;
+  const diff = Math.floor((new Date(b).getTime() - new Date(a).getTime()) / 864e5);
+  return isNaN(diff) ? 0 : Math.max(0, diff);
 };
-const CONCUR_HEADER_MAP:Record<string,keyof ConcurRecord>={
-  "report id":"reportId","report_id":"reportId","expense report":"reportId",
-  "employee name":"employeeName","employee":"employeeName","name":"employeeName",
-  "department":"department","dept":"department",
-  "submission date":"submissionDate","submitted":"submissionDate","date":"submissionDate",
-  "report amount":"reportAmount","amount":"reportAmount","total":"reportAmount",
-  "policy violations":"policyViolations","violations":"policyViolations",
-  "audit status":"auditStatus","status":"auditStatus",
-  "auditor":"auditor","reviewer":"auditor",
-  "review date":"reviewDate","reviewed":"reviewDate",
-  "exception type":"exceptionType","exception":"exceptionType",
-  "resolution":"resolution",
-  "notes":"notes","comments":"notes",
+const weekLabel = (dateStr:string) => {
+  const d = new Date(dateStr);
+  const mon = new Date(d); mon.setDate(d.getDate() - d.getDay() + 1);
+  const fri = new Date(mon); fri.setDate(mon.getDate() + 4);
+  const fmt = (x:Date) => x.toLocaleDateString("en-GB",{day:"2-digit",month:"short"});
+  return fmt(mon) + "-" + fmt(fri);
 };
+const groupByWeek = <T extends {date:string}>(rows:T[]): Record<string,T[]> => {
+  const g: Record<string,T[]> = {};
+  rows.forEach(r => {
+    const d = new Date(r.date);
+    const mon = new Date(d); mon.setDate(d.getDate() - d.getDay() + 1);
+    const key = mon.toISOString().slice(0,10);
+    if (!g[key]) g[key] = [];
+    g[key].push(r);
+  });
+  return g;
+};
+const DEFAULT_CONFIG: Config = {
+  fteCount:1,shiftHours:8,minsPerAudit:15,
+  qcSamplePct:0.25,accuracySLA:0.95,tatSLA:0.98,
+  helpdeskSLA:0.95,rejectionTarget:0.05,backlogThreshold:10,
+};
+const PRIORITIES = ["Critical","High","Medium","Low"];
+const SN_STATUSES = ["Open","Assigned","In Progress","Pending","Resolved","Closed"];
 
-function mapCSVtoSN(rows:Record<string,string>[]):SNTicket[]{
-  return rows.map(row=>{
-    const t=emptySN();
-    Object.entries(row).forEach(([k,v])=>{
-      const mapped=SN_HEADER_MAP[k.toLowerCase().trim()];
-      if(mapped)(t as any)[mapped]=v;
-    });
-    if(!t.ticketNumber)t.ticketNumber="INC"+uid().slice(0,6).toUpperCase();
-    return t;
-  });
-}
-function mapCSVtoConcur(rows:Record<string,string>[]):ConcurRecord[]{
-  return rows.map(row=>{
-    const r=emptyConcur();
-    Object.entries(row).forEach(([k,v])=>{
-      const mapped=CONCUR_HEADER_MAP[k.toLowerCase().trim()];
-      if(mapped)(r as any)[mapped]=v;
-    });
-    if(!r.reportId)r.reportId="RPT"+uid().slice(0,6).toUpperCase();
-    return r;
-  });
+function RagDot({status}:{status:"green"|"amber"|"red"}) {
+  const col = status==="green"?C.success:status==="amber"?C.warn:C.danger;
+  return <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:col,marginRight:5,flexShrink:0}}/>;
 }
 
-/* ════════════════════════════════════════════════════════════════ */
-/* COMPONENT                                                       */
-/* ════════════════════════════════════════════════════════════════ */
+function KpiTile({label,value,sub,rag,color}:{label:string;value:string|number;sub?:string;rag?:"green"|"amber"|"red";color?:string}) {
+  const col = color??(rag==="green"?C.success:rag==="amber"?C.warn:rag==="red"?C.danger:C.accent);
+  return (
+    <div style={{background:C.card,border:`1px solid ${col}22`,borderRadius:8,padding:"12px 14px",flex:1,minWidth:100}}>
+      <div style={{fontSize:9,color:C.textDim,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:4}}>{label}</div>
+      <div style={{fontSize:21,fontWeight:800,color:col,lineHeight:1.1,display:"flex",alignItems:"center"}}>
+        {rag&&<RagDot status={rag}/>}{value}
+      </div>
+      {sub&&<div style={{fontSize:9,color:C.textMid,marginTop:3}}>{sub}</div>}
+    </div>
+  );
+}
 
+function Cell({value,onChange,type="text",options}:{value:string|number;onChange:(v:string)=>void;type?:string;options?:string[]}) {
+  const s:React.CSSProperties = {background:"transparent",border:"none",color:C.text,fontSize:11,outline:"none",width:"100%",fontFamily:"inherit",padding:"2px 0"};
+  if (options) return <select value={String(value)} onChange={e=>onChange(e.target.value)} style={{...s,cursor:"pointer",background:C.card}}>{options.map(o=><option key={o} value={o} style={{background:C.card}}>{o}</option>)}</select>;
+  return <input type={type} value={String(value)} onChange={e=>onChange(e.target.value)} style={s}/>;
+}
+
+function MiniBarChart({data,height=80}:{data:{label:string;value:number;color:string}[];height?:number}) {
+  if (!data.length) return null;
+  const max = Math.max(...data.map(d=>d.value),1);
+  const bw = Math.max(Math.floor(240/data.length)-4,6);
+  const W = data.length*(bw+4)+8;
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${height+22}`} style={{overflow:"visible"}}>
+      {data.map((d,i)=>{
+        const barH = Math.max((d.value/max)*height,d.value>0?2:0);
+        const x = 4+i*(bw+4);
+        return (
+          <g key={i}>
+            <rect x={x} y={height-barH} width={bw} height={barH} fill={d.color} rx={2} opacity={0.85}/>
+            <text x={x+bw/2} y={height-barH-3} textAnchor="middle" fill={C.textMid} fontSize={8}>{fmtN(d.value)}</text>
+            <text x={x+bw/2} y={height+14} textAnchor="middle" fill={C.textDim} fontSize={7}>{d.label}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function ComboChart({dates,bars,lines,slaLine,height=100}:{dates:string[];bars:{values:number[];color:string}[];lines?:{values:number[];color:string}[];slaLine?:number;height?:number}) {
+  if (!dates.length) return null;
+  const W=320,PAD=8;
+  const allVals=[...bars.flatMap(b=>b.values),...(lines||[]).flatMap(l=>l.values),slaLine??0].filter(v=>!isNaN(v)&&isFinite(v));
+  const maxVal=Math.max(...allVals,1);
+  const bw=Math.max(Math.floor((W-PAD*2)/dates.length)-6,4);
+  const nBars=bars.length;
+  const xFor=(i:number)=>PAD+i*((W-PAD*2)/dates.length);
+  const yFor=(v:number)=>height-4-(v/maxVal)*(height-16);
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${height+20}`} style={{overflow:"visible"}}>
+      {bars.map((b,bi)=>dates.map((_,i)=>{
+        const v=b.values[i]??0;
+        const barH=Math.max((v/maxVal)*(height-16),v>0?2:0);
+        return <rect key={`${bi}-${i}`} x={xFor(i)+bi*(bw/nBars)} y={yFor(v)} width={bw/nBars} height={barH} fill={b.color} rx={1} opacity={0.8}/>;
+      }))}
+      {(lines||[]).map((l,li)=>{
+        const pts=dates.map((_,i)=>`${xFor(i)+bw/2},${yFor(l.values[i]??0)}`).join(" ");
+        return <polyline key={li} points={pts} fill="none" stroke={l.color} strokeWidth={1.5} strokeDasharray="4,2"/>;
+      })}
+      {slaLine!==undefined&&<line x1={PAD} y1={yFor(slaLine)} x2={W-PAD} y2={yFor(slaLine)} stroke={C.danger} strokeWidth={1} strokeDasharray="3,3"/>}
+      {dates.map((d,i)=><text key={i} x={xFor(i)+bw/2} y={height+14} textAnchor="middle" fill={C.textDim} fontSize={6}>{d.slice(-5)}</text>)}
+    </svg>
+  );
+}
+
+function StackedBar({dates,buckets,colors,labels,height=90}:{dates:string[];buckets:number[][];colors:string[];labels:string[];height?:number}) {
+  if (!dates.length) return null;
+  const W=300,PAD=8;
+  const totals=dates.map((_,i)=>buckets.reduce((s,b)=>s+(b[i]??0),0));
+  const maxVal=Math.max(...totals,1);
+  const bw=Math.max(Math.floor((W-PAD*2)/dates.length)-4,6);
+  const xFor=(i:number)=>PAD+i*((W-PAD*2)/dates.length);
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${height+38}`} style={{overflow:"visible"}}>
+      {dates.map((_,i)=>{
+        let yOff=height;
+        return (
+          <g key={i}>
+            {buckets.map((b,bi)=>{
+              const v=b[i]??0;
+              const barH=Math.max((v/maxVal)*height,v>0?2:0);
+              yOff-=barH;
+              return <rect key={bi} x={xFor(i)} y={yOff} width={bw} height={barH} fill={colors[bi]} rx={1} opacity={0.85}/>;
+            })}
+            <text x={xFor(i)+bw/2} y={height-totals[i]/maxVal*height-4} textAnchor="middle" fill={C.textMid} fontSize={7}>{fmtN(totals[i])}</text>
+            <text x={xFor(i)+bw/2} y={height+12} textAnchor="middle" fill={C.textDim} fontSize={6}>{dates[i].slice(-5)}</text>
+          </g>
+        );
+      })}
+      {labels.map((lb,i)=>(
+        <g key={i}>
+          <rect x={PAD+i*68} y={height+20} width={8} height={8} fill={colors[i]} rx={1}/>
+          <text x={PAD+i*68+11} y={height+28} fill={C.textDim} fontSize={7}>{lb}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function ConfigPanel({cfg,setCfg,onClose}:{cfg:Config;setCfg:(c:Config)=>void;onClose:()=>void}) {
+  const [local,setLocal]=useState<Config>({...cfg});
+  const workable=local.fteCount*Math.floor(local.shiftHours*60/local.minsPerAudit);
+  const processed=Math.floor(workable*1.2);
+  const F=({label,field,suffix,step=1}:{label:string;field:keyof Config;suffix?:string;step?:number})=>(
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${C.border}`}}>
+      <span style={{fontSize:11,color:C.textMid}}>{label}</span>
+      <div style={{display:"flex",alignItems:"center",gap:4}}>
+        <input type="number" value={local[field] as number} step={step}
+          onChange={e=>setLocal({...local,[field]:parseFloat(e.target.value)||0})}
+          style={{width:60,background:C.card2,border:`1px solid ${C.border}`,borderRadius:4,color:C.accent,fontSize:12,fontWeight:700,textAlign:"right",padding:"3px 6px"}}/>
+        {suffix&&<span style={{fontSize:10,color:C.textDim}}>{suffix}</span>}
+      </div>
+    </div>
+  );
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"flex-end"}} onClick={onClose}>
+      <div style={{width:320,height:"100%",background:C.card,borderLeft:`1px solid ${C.border}`,padding:"20px 18px",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <span style={{fontSize:14,fontWeight:800,color:C.text}}>⚙ Configuration</span>
+          <button onClick={onClose} style={{background:"none",border:"none",color:C.textDim,fontSize:20,cursor:"pointer"}}>×</button>
+        </div>
+        <div style={{fontSize:10,fontWeight:700,color:C.accent,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>FTE Capacity</div>
+        <F label="Number of FTEs" field="fteCount"/>
+        <F label="Shift hours/day" field="shiftHours" suffix="hrs" step={0.5}/>
+        <F label="Minutes per audit" field="minsPerAudit" suffix="min"/>
+        <div style={{background:C.accentDim,borderRadius:6,padding:"8px 10px",margin:"10px 0",fontSize:11}}>
+          <div style={{color:C.textMid}}>Workable threshold: <strong style={{color:C.accent}}>{workable}/day</strong></div>
+          <div style={{color:C.textMid}}>Processed threshold: <strong style={{color:C.accent}}>{processed}/day</strong></div>
+        </div>
+        <div style={{fontSize:10,fontWeight:700,color:C.accent,textTransform:"uppercase",letterSpacing:"0.08em",margin:"12px 0 8px"}}>SLA Targets</div>
+        <F label="QC Sample Rate" field="qcSamplePct" suffix="%" step={0.01}/>
+        <F label="Accuracy SLA" field="accuracySLA" suffix="%" step={0.01}/>
+        <F label="TAT SLA (2 days)" field="tatSLA" suffix="%" step={0.01}/>
+        <F label="Helpdesk SLA (24hr)" field="helpdeskSLA" suffix="%" step={0.01}/>
+        <F label="Max Rejection %" field="rejectionTarget" suffix="%" step={0.01}/>
+        <F label="Backlog Threshold" field="backlogThreshold"/>
+        <button onClick={()=>{setCfg(local);onClose();}}
+          style={{width:"100%",marginTop:16,background:C.accent,color:"#0B1120",border:"none",borderRadius:7,padding:"11px",fontSize:13,fontWeight:800,cursor:"pointer"}}>
+          Save Configuration
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONCUR T&E AUDIT MODULE
+// ═══════════════════════════════════════════════════════════════════════════
+function ConcurModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:string)=>Promise<string>;companyName:string;onPublish:(p:PublishPayload)=>void}) {
+  const [rows,setRows]=useState<ConcurRow[]>([]);
+  const [view,setView]=useState<"dashboard"|"table"|"ai">("dashboard");
+  const [chartMode,setChartMode]=useState<"daily"|"weekly">("weekly");
+  const [aiReport,setAiReport]=useState("");
+  const [aiLoading,setAiLoading]=useState(false);
+
+  const workableThresh=cfg.fteCount*Math.floor(cfg.shiftHours*60/cfg.minsPerAudit);
+  const processedThresh=Math.floor(workableThresh*1.2);
+
+  const addRow=()=>{
+    const prev=rows[rows.length-1];
+    setRows(r=>[...r,{id:uid(),date:today(),untouched:prev?prev.openEOD:0,freshInflow:0,resubmitted:0,totalWorkable:0,processed:0,openEOD:0,pendingGenpact:0,pendingBusiness:0,tatPct:0.98,ukAccuracy:1,gpAccuracy:1,aging0_2:0,aging3_5:0,aging6_15:0,agingOver15:0,rejectionVol:0}]);
+  };
+
+  const updateRow=useCallback((id:string,field:keyof ConcurRow,val:string)=>{
+    setRows(prev=>prev.map(r=>{
+      if(r.id!==id)return r;
+      const n={...r,[field]:isNaN(parseFloat(val))?val:parseFloat(val)} as ConcurRow;
+      n.totalWorkable=n.untouched+n.freshInflow+n.resubmitted;
+      n.openEOD=n.totalWorkable-n.processed;
+      return n;
+    }));
+  },[]);
+
+  const metrics=useMemo(()=>{
+    if(!rows.length)return null;
+    const last=rows[rows.length-1];
+    const avgTAT=rows.reduce((s,r)=>s+r.tatPct,0)/rows.length;
+    const avgAcc=rows.reduce((s,r)=>s+(r.ukAccuracy+r.gpAccuracy)/2,0)/rows.length;
+    const totalRej=rows.reduce((s,r)=>s+r.rejectionVol,0);
+    const totalProc=rows.reduce((s,r)=>s+r.processed,0);
+    return {workableInflow:last.totalWorkable,processed:last.processed,pctThreshold:last.processed/processedThresh,backlog:last.pendingGenpact+last.pendingBusiness,tatPct:avgTAT,accuracy:avgAcc,rejPct:totalProc>0?totalRej/totalProc:0,openEOD:last.openEOD,aging:{a:last.aging0_2,b:last.aging3_5,c:last.aging6_15,d:last.agingOver15}};
+  },[rows,processedThresh]);
+
+  const cd=useMemo(()=>{
+    if(chartMode==="daily"){
+      const r=rows.slice(-10);
+      return {dates:r.map(x=>x.date),inflow:r.map(x=>x.totalWorkable),processed:r.map(x=>x.processed),threshold:r.map(()=>workableThresh),tatPct:r.map(x=>x.tatPct*100),accuracy:r.map(x=>((x.ukAccuracy+x.gpAccuracy)/2)*100),a0:r.map(x=>x.aging0_2),a3:r.map(x=>x.aging3_5),a6:r.map(x=>x.aging6_15),a15:r.map(x=>x.agingOver15),rej:r.map(x=>x.rejectionVol)};
+    }
+    const g=groupByWeek(rows);const keys=Object.keys(g).sort().slice(-4);
+    return {dates:keys.map(k=>weekLabel(k)),inflow:keys.map(k=>g[k].reduce((s,r)=>s+r.totalWorkable,0)),processed:keys.map(k=>g[k].reduce((s,r)=>s+r.processed,0)),threshold:keys.map(()=>workableThresh*5),tatPct:keys.map(k=>{const v=g[k];return v.reduce((s,r)=>s+r.tatPct,0)/v.length*100;}),accuracy:keys.map(k=>{const v=g[k];return v.reduce((s,r)=>s+(r.ukAccuracy+r.gpAccuracy)/2,0)/v.length*100;}),a0:keys.map(k=>g[k].reduce((s,r)=>s+r.aging0_2,0)),a3:keys.map(k=>g[k].reduce((s,r)=>s+r.aging3_5,0)),a6:keys.map(k=>g[k].reduce((s,r)=>s+r.aging6_15,0)),a15:keys.map(k=>g[k].reduce((s,r)=>s+r.agingOver15,0)),rej:keys.map(k=>g[k].reduce((s,r)=>s+r.rejectionVol,0))};
+  },[rows,chartMode,workableThresh]);
+
+  const generateReport=async()=>{
+    if(!callAI||!rows.length)return;
+    setAiLoading(true);
+    const m=metrics!;
+    try{setAiReport(await callAI(`You are a T&E Audit Governance Analyst for ${companyName}. Produce a structured governance report.\n\nLIVE KPI DATA:\n- Workable Inflow: ${m.workableInflow} (Threshold: ${workableThresh})\n- Processed: ${m.processed} (${fmtPct(m.pctThreshold)} of target)\n- TAT within 2 days: ${fmtPct(m.tatPct)} (SLA: ${fmtPct(cfg.tatSLA)}) — ${m.tatPct>=cfg.tatSLA?"MEETS SLA":"BREACH"}\n- Combined Accuracy: ${fmtPct(m.accuracy)} (SLA: ${fmtPct(cfg.accuracySLA)}) — ${m.accuracy>=cfg.accuracySLA?"MEETS SLA":"BREACH"}\n- Rejection Rate: ${fmtPct(m.rejPct)} (Target: ${fmtPct(cfg.rejectionTarget)}) — ${m.rejPct<=cfg.rejectionTarget?"WITHIN TARGET":"EXCEEDS TARGET"}\n- Backlog: ${m.backlog} (Threshold: ${cfg.backlogThreshold})\n- Aging: 0-2d: ${m.aging.a}, 3-5d: ${m.aging.b}, 6-15d: ${m.aging.c}, >15d: ${m.aging.d}\n\nPRODUCE:\n1. EXECUTIVE SUMMARY (3 sentences with specific numbers)\n2. SLA COMPLIANCE TABLE (TAT | Accuracy | Rejection | Backlog)\n3. AGING RISK ANALYSIS — which items need immediate action\n4. THROUGHPUT ANALYSIS — processed vs threshold\n5. TOP 3 ACTION ITEMS with owner and deadline\n6. RISK FLAGS`));}catch(e:any){setAiReport("Error: "+e.message);}
+    setAiLoading(false);
+  };
+
+  const publishToEmail=()=>{
+    if(!metrics)return;
+    const m=metrics;
+    onPublish({module:"concur",subject:`T&E Audit Report — ${companyName} — ${today()}`,kpiSummary:`Workable Inflow: ${m.workableInflow} | Processed: ${m.processed} (${fmtPct(m.pctThreshold)} of target) | TAT: ${fmtPct(m.tatPct)} | Accuracy: ${fmtPct(m.accuracy)} | Backlog: ${m.backlog} | Aging >15d: ${m.aging.d}`,tableData:`| Metric | Actual | Target | Status |\n|--------|--------|--------|--------|\n| TAT within 2 days | ${fmtPct(m.tatPct)} | ${fmtPct(cfg.tatSLA)} | ${m.tatPct>=cfg.tatSLA?"✓ Meets":"✗ Breach"} |\n| Combined Accuracy | ${fmtPct(m.accuracy)} | ${fmtPct(cfg.accuracySLA)} | ${m.accuracy>=cfg.accuracySLA?"✓ Meets":"✗ Breach"} |\n| Rejection Rate | ${fmtPct(m.rejPct)} | ≤${fmtPct(cfg.rejectionTarget)} | ${m.rejPct<=cfg.rejectionTarget?"✓ OK":"✗ High"} |\n| Backlog | ${m.backlog} | ≤${cfg.backlogThreshold} | ${m.backlog<=cfg.backlogThreshold?"✓ OK":"✗ Over"} |\n| Aging >15d | ${m.aging.d} | 0 | ${m.aging.d===0?"✓ Clear":"✗ Critical"} |`,period:chartMode==="weekly"?"Weekly":"Daily"});
+  };
+
+  const TH:React.CSSProperties={padding:"7px 8px",textAlign:"left",fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",color:C.textDim,background:C.card2,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",position:"sticky",top:0};
+  const TD:React.CSSProperties={padding:"5px 8px",borderBottom:`1px solid ${C.border}`,fontSize:11,color:C.text,verticalAlign:"middle"};
+
+  return (
+    <div style={{padding:16,height:"100%",overflowY:"auto"}}>
+      <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+        {(["dashboard","table","ai"] as const).map(v=>(
+          <button key={v} onClick={()=>setView(v)} style={{padding:"6px 14px",borderRadius:6,fontSize:11,fontWeight:600,border:`1px solid ${view===v?C.accent:C.border}`,background:view===v?C.accentDim:"transparent",color:view===v?C.accentText:C.textMid,cursor:"pointer"}}>
+            {v==="dashboard"?"📊 Dashboard":v==="table"?"📋 Daily Data":"🤖 AI Analysis"}
+          </button>
+        ))}
+        <div style={{marginLeft:"auto",display:"flex",gap:4}}>
+          {(["daily","weekly"] as const).map(m=>(
+            <button key={m} onClick={()=>setChartMode(m)} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:600,border:`1px solid ${chartMode===m?C.blue:C.border}`,background:chartMode===m?C.blueDim:"transparent",color:chartMode===m?C.blue:C.textDim,cursor:"pointer"}}>
+              {m==="daily"?"10-Day":"4-Week"}
+            </button>
+          ))}
+          <button onClick={publishToEmail} disabled={!metrics} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.purple}44`,background:C.purpleDim,color:C.purple,cursor:metrics?"pointer":"not-allowed",opacity:metrics?1:0.4}}>
+            📧 Publish Report
+          </button>
+        </div>
+      </div>
+
+      {metrics&&(
+        <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+          <KpiTile label="Workable Inflow" value={fmtN(metrics.workableInflow)} sub={`Threshold: ${workableThresh}`} rag={metrics.workableInflow<=workableThresh?"green":"amber"}/>
+          <KpiTile label="Processed" value={fmtN(metrics.processed)} sub={`${fmtPct(metrics.pctThreshold)} of target`} rag={metrics.pctThreshold>=1?"green":metrics.pctThreshold>=0.8?"amber":"red"}/>
+          <KpiTile label="TAT within 2d" value={fmtPct(metrics.tatPct)} sub={`SLA: ${fmtPct(cfg.tatSLA)}`} rag={metrics.tatPct>=cfg.tatSLA?"green":"red"}/>
+          <KpiTile label="Accuracy" value={fmtPct(metrics.accuracy)} sub={`SLA: ${fmtPct(cfg.accuracySLA)}`} rag={metrics.accuracy>=cfg.accuracySLA?"green":"red"}/>
+          <KpiTile label="Backlog" value={fmtN(metrics.backlog)} sub={`Threshold: ${cfg.backlogThreshold}`} rag={metrics.backlog<=cfg.backlogThreshold?"green":metrics.backlog<=cfg.backlogThreshold*1.5?"amber":"red"}/>
+          <KpiTile label="Aging >15d" value={metrics.aging.d} sub="Critical: escalate immediately" rag={metrics.aging.d===0?"green":"red"}/>
+        </div>
+      )}
+
+      {metrics&&(
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Non-Compliance Scorecard</div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+              <thead><tr>{["Dimension","Actual","Target","Status"].map(h=><th key={h} style={{...TH,position:"relative"}}>{h}</th>)}</tr></thead>
+              <tbody>
+                {[["Volume",fmtPct(metrics.pctThreshold),"≥100%",metrics.pctThreshold>=1?"✓ OK":"✗ Low"],["Quality",fmtPct(metrics.accuracy),fmtPct(cfg.accuracySLA),metrics.accuracy>=cfg.accuracySLA?"✓ Meets":"✗ Breach"],["TAT SLA",fmtPct(metrics.tatPct),fmtPct(cfg.tatSLA),metrics.tatPct>=cfg.tatSLA?"✓ Meets":"✗ Breach"],["Rejection",fmtPct(metrics.rejPct),`≤${fmtPct(cfg.rejectionTarget)}`,metrics.rejPct<=cfg.rejectionTarget?"✓ OK":"✗ High"]].map(([d,a,t,s])=>(
+                  <tr key={d as string}><td style={TD}>{d}</td><td style={{...TD,fontWeight:700}}>{a}</td><td style={{...TD,color:C.textDim}}>{t}</td><td style={{...TD,color:(s as string).startsWith("✓")?C.success:C.danger,fontWeight:700}}>{s}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>FTE Capacity (Live)</div>
+            {[["FTEs Deployed",cfg.fteCount],["Workable/day",workableThresh],["Processed/day",processedThresh],["QC Sample",fmtPct(cfg.qcSamplePct)],["Capacity Util.",fmtPct(metrics.processed/processedThresh)]].map(([lb,val])=>(
+              <div key={lb as string} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${C.border}`,fontSize:10}}>
+                <span style={{color:C.textMid}}>{lb}</span><span style={{color:C.accent,fontWeight:700}}>{val}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {view==="dashboard"&&rows.length>0&&(
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Inflow vs Processed vs Threshold</div>
+            <ComboChart dates={cd.dates} bars={[{values:cd.inflow,color:C.blue},{values:cd.processed,color:C.accent}]} lines={[{values:cd.threshold,color:C.warn}]} slaLine={workableThresh} height={100}/>
+            <div style={{display:"flex",gap:8,marginTop:4}}>
+              {[["Inflow",C.blue],["Processed",C.accent],["Threshold",C.warn]].map(([lb,col])=>(
+                <div key={lb} style={{display:"flex",alignItems:"center",gap:3,fontSize:9,color:C.textDim}}>
+                  <span style={{width:8,height:8,background:col as string,borderRadius:2,flexShrink:0}}/>{lb}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Backlog Aging Distribution</div>
+            <StackedBar dates={cd.dates} buckets={[cd.a0,cd.a3,cd.a6,cd.a15]} colors={[C.success,C.warn,C.orange,C.danger]} labels={["0-2d","3-5d","6-15d",">15d"]} height={90}/>
+          </div>
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>TAT % — within 2 days (SLA {fmtPct(cfg.tatSLA)})</div>
+            <MiniBarChart data={cd.dates.map((d,i)=>({label:d.slice(-5),value:parseFloat(cd.tatPct[i].toFixed(1)),color:cd.tatPct[i]>=cfg.tatSLA*100?C.success:C.danger}))} height={70}/>
+          </div>
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Accuracy % (SLA {fmtPct(cfg.accuracySLA)})</div>
+            <MiniBarChart data={cd.dates.map((d,i)=>({label:d.slice(-5),value:parseFloat(cd.accuracy[i].toFixed(1)),color:cd.accuracy[i]>=cfg.accuracySLA*100?C.success:C.danger}))} height={70}/>
+          </div>
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12,gridColumn:"1 / -1"}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Rejection Volume (Target ≤{fmtPct(cfg.rejectionTarget)} of processed)</div>
+            <MiniBarChart data={cd.dates.map((d,i)=>({label:d.slice(-5),value:cd.rej[i],color:C.danger}))} height={55}/>
+          </div>
+        </div>
+      )}
+
+      {view==="dashboard"&&rows.length===0&&(
+        <div style={{textAlign:"center",padding:"40px 20px",color:C.textDim}}>
+          <div style={{fontSize:32,marginBottom:8}}>🧾</div>
+          <div style={{fontSize:13,fontWeight:600,color:C.textMid,marginBottom:4}}>No audit data yet</div>
+          <div style={{fontSize:11,marginBottom:16}}>Switch to Daily Data tab and add your first entry</div>
+          <button onClick={()=>setView("table")} style={{padding:"8px 20px",borderRadius:6,background:C.accent,color:"#0B1120",border:"none",fontWeight:700,cursor:"pointer"}}>Add First Entry</button>
+        </div>
+      )}
+
+      {view==="table"&&(
+        <>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            <button onClick={addRow} style={{padding:"7px 14px",borderRadius:6,background:C.accent,color:"#0B1120",border:"none",fontSize:11,fontWeight:700,cursor:"pointer"}}>+ Add Today's Entry</button>
+            {rows.length>0&&<button onClick={()=>{if(window.confirm("Clear all data?"))setRows([]);}} style={{padding:"7px 14px",borderRadius:6,background:"transparent",color:C.danger,border:`1px solid ${C.border}`,fontSize:11,cursor:"pointer"}}>🗑 Clear All</button>}
+          </div>
+          <div style={{overflowX:"auto",borderRadius:8,border:`1px solid ${C.border}`}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr>
+                {["Date","Untouched","Fresh Inflow","Resubmit","Total Workable","Processed","Open EOD","Pend GP","Pend Biz","TAT%","UK Acc%","GP Acc%","0-2d","3-5d","6-15d",">15d","Rejected",""].map(h=><th key={h} style={TH}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {rows.map(r=>(
+                  <tr key={r.id} style={{background:r.agingOver15>0?C.dangerDim:r.aging6_15>0?"rgba(249,115,22,0.07)":"transparent"}}>
+                    <td style={TD}><Cell value={r.date} onChange={v=>updateRow(r.id,"date",v)} type="date"/></td>
+                    <td style={{...TD,color:C.textDim}}>{r.untouched}</td>
+                    <td style={TD}><Cell value={r.freshInflow} onChange={v=>updateRow(r.id,"freshInflow",v)}/></td>
+                    <td style={TD}><Cell value={r.resubmitted} onChange={v=>updateRow(r.id,"resubmitted",v)}/></td>
+                    <td style={{...TD,fontWeight:700,color:r.totalWorkable>workableThresh?C.warn:C.text}}>{r.totalWorkable}</td>
+                    <td style={TD}><Cell value={r.processed} onChange={v=>updateRow(r.id,"processed",v)}/></td>
+                    <td style={{...TD,color:r.openEOD>cfg.backlogThreshold?C.danger:C.success,fontWeight:700}}>{r.openEOD}</td>
+                    <td style={TD}><Cell value={r.pendingGenpact} onChange={v=>updateRow(r.id,"pendingGenpact",v)}/></td>
+                    <td style={TD}><Cell value={r.pendingBusiness} onChange={v=>updateRow(r.id,"pendingBusiness",v)}/></td>
+                    <td style={{...TD,color:r.tatPct>=cfg.tatSLA?C.success:C.danger,fontWeight:700}}><Cell value={(r.tatPct*100).toFixed(1)} onChange={v=>updateRow(r.id,"tatPct",String(parseFloat(v)/100))}/></td>
+                    <td style={{...TD,color:r.ukAccuracy>=cfg.accuracySLA?C.success:C.danger}}><Cell value={(r.ukAccuracy*100).toFixed(1)} onChange={v=>updateRow(r.id,"ukAccuracy",String(parseFloat(v)/100))}/></td>
+                    <td style={{...TD,color:r.gpAccuracy>=cfg.accuracySLA?C.success:C.danger}}><Cell value={(r.gpAccuracy*100).toFixed(1)} onChange={v=>updateRow(r.id,"gpAccuracy",String(parseFloat(v)/100))}/></td>
+                    <td style={TD}><Cell value={r.aging0_2} onChange={v=>updateRow(r.id,"aging0_2",v)}/></td>
+                    <td style={TD}><Cell value={r.aging3_5} onChange={v=>updateRow(r.id,"aging3_5",v)}/></td>
+                    <td style={{...TD,color:r.aging6_15>0?C.warn:C.text}}><Cell value={r.aging6_15} onChange={v=>updateRow(r.id,"aging6_15",v)}/></td>
+                    <td style={{...TD,color:r.agingOver15>0?C.danger:C.text,fontWeight:r.agingOver15>0?700:400}}><Cell value={r.agingOver15} onChange={v=>updateRow(r.id,"agingOver15",v)}/></td>
+                    <td style={TD}><Cell value={r.rejectionVol} onChange={v=>updateRow(r.id,"rejectionVol",v)}/></td>
+                    <td style={TD}><button onClick={()=>setRows(p=>p.filter(x=>x.id!==r.id))} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:14}}>×</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {view==="ai"&&(
+        <>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            <button onClick={generateReport} disabled={aiLoading||rows.length===0} style={{padding:"8px 16px",borderRadius:6,background:C.accent,color:"#0B1120",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",opacity:aiLoading||rows.length===0?0.4:1}}>
+              {aiLoading?"⏳ Analysing...":"🤖 Generate Governance Report"}
+            </button>
+            {aiReport&&<button onClick={publishToEmail} style={{padding:"8px 16px",borderRadius:6,background:C.purpleDim,color:C.purple,border:`1px solid ${C.purple}44`,fontSize:11,fontWeight:700,cursor:"pointer"}}>📧 Send to Email Drafter</button>}
+          </div>
+          {!callAI&&<div style={{fontSize:11,color:C.warn,marginBottom:10}}>⚠ AI not connected — add API key in Settings</div>}
+          {rows.length===0&&<div style={{fontSize:11,color:C.textDim}}>Add daily data first, then generate the report.</div>}
+          {aiReport&&<div style={{background:C.card2,border:`1px solid ${C.accent}33`,borderRadius:8,padding:16,fontSize:12,lineHeight:1.8,color:C.text,whiteSpace:"pre-wrap",maxHeight:500,overflowY:"auto"}}>{aiReport}</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EMAIL HELPDESK MODULE
+// ═══════════════════════════════════════════════════════════════════════════
+function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:string)=>Promise<string>;companyName:string;onPublish:(p:PublishPayload)=>void}) {
+  const [rows,setRows]=useState<EmailRow[]>([]);
+  const [view,setView]=useState<"dashboard"|"table"|"ai">("dashboard");
+  const [chartMode,setChartMode]=useState<"daily"|"weekly">("weekly");
+  const [aiReport,setAiReport]=useState("");
+  const [aiLoading,setAiLoading]=useState(false);
+
+  const addRow=()=>setRows(r=>[...r,{id:uid(),date:today(),received:0,resolved:0,slaPct:0,pendingGenpact:0,pendingClient:0,carryForward:0}]);
+
+  const updateRow=useCallback((id:string,field:keyof EmailRow,val:string)=>{
+    setRows(prev=>prev.map(r=>{
+      if(r.id!==id)return r;
+      const n={...r,[field]:isNaN(parseFloat(val))?val:parseFloat(val)} as EmailRow;
+      if(n.received>0)n.slaPct=n.resolved/n.received;
+      return n;
+    }));
+  },[]);
+
+  const metrics=useMemo(()=>{
+    if(!rows.length)return null;
+    const last=rows[rows.length-1];
+    const total=rows.reduce((s,r)=>s+r.received,0);
+    const totalRes=rows.reduce((s,r)=>s+r.resolved,0);
+    const avgSLA=rows.reduce((s,r)=>s+r.slaPct,0)/rows.length;
+    return {total,totalRes,avgSLA,pendingGenpact:last.pendingGenpact,pendingClient:last.pendingClient,carryForward:last.carryForward};
+  },[rows]);
+
+  const cd=useMemo(()=>{
+    if(chartMode==="daily"){
+      const r=rows.slice(-10);
+      return {dates:r.map(x=>x.date),received:r.map(x=>x.received),resolved:r.map(x=>x.resolved),sla:r.map(x=>x.slaPct*100),pgp:r.map(x=>x.pendingGenpact),pcl:r.map(x=>x.pendingClient)};
+    }
+    const g=groupByWeek(rows);const keys=Object.keys(g).sort().slice(-4);
+    return {dates:keys.map(k=>weekLabel(k)),received:keys.map(k=>g[k].reduce((s,r)=>s+r.received,0)),resolved:keys.map(k=>g[k].reduce((s,r)=>s+r.resolved,0)),sla:keys.map(k=>{const v=g[k];return v.reduce((s,r)=>s+r.slaPct,0)/v.length*100;}),pgp:keys.map(k=>g[k].reduce((s,r)=>s+r.pendingGenpact,0)),pcl:keys.map(k=>g[k].reduce((s,r)=>s+r.pendingClient,0))};
+  },[rows,chartMode]);
+
+  const generateReport=async()=>{
+    if(!callAI||!rows.length)return;
+    setAiLoading(true);
+    const m=metrics!;
+    try{setAiReport(await callAI(`You are a Helpdesk Communication Governance Analyst for ${companyName}.\n\nLIVE DATA:\n- Total Received: ${m.total}\n- Total Resolved: ${m.totalRes} (${fmtPct(m.totalRes/Math.max(m.total,1))})\n- Average SLA (24hr): ${fmtPct(m.avgSLA)} (Target: ${fmtPct(cfg.helpdeskSLA)})\n- Pending Genpact: ${m.pendingGenpact}\n- Pending Client: ${m.pendingClient}\n- Carry Forward: ${m.carryForward}\n\nPRODUCE:\n1. EXECUTIVE SUMMARY\n2. SLA COMPLIANCE — breaches and patterns\n3. PENDING ANALYSIS — Genpact vs Client split\n4. TOP 3 ACTION ITEMS\n5. RISK FLAGS`));}catch(e:any){setAiReport("Error: "+e.message);}
+    setAiLoading(false);
+  };
+
+  const publishToEmail=()=>{
+    if(!metrics)return;
+    const m=metrics;
+    onPublish({module:"email",subject:`Helpdesk Email Report — ${companyName} — ${today()}`,kpiSummary:`Received: ${m.total} | Resolved: ${m.totalRes} | SLA: ${fmtPct(m.avgSLA)} | Pending Genpact: ${m.pendingGenpact} | Pending Client: ${m.pendingClient}`,tableData:`| Metric | Actual | Target | Status |\n|--------|--------|--------|--------|\n| SLA 24hr | ${fmtPct(m.avgSLA)} | ${fmtPct(cfg.helpdeskSLA)} | ${m.avgSLA>=cfg.helpdeskSLA?"✓ Meets":"✗ Breach"} |\n| Resolution Rate | ${fmtPct(m.totalRes/Math.max(m.total,1))} | 100% | ${m.totalRes>=m.total?"✓ Clear":"⚠ Pending"} |\n| Pending Genpact | ${m.pendingGenpact} | 0 | ${m.pendingGenpact===0?"✓ Clear":"⚠ Action Needed"} |`,period:chartMode==="weekly"?"Weekly":"Daily"});
+  };
+
+  const TH:React.CSSProperties={padding:"7px 8px",textAlign:"left",fontSize:9,fontWeight:700,textTransform:"uppercase",color:C.textDim,background:C.card2,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",position:"sticky",top:0};
+  const TD:React.CSSProperties={padding:"5px 8px",borderBottom:`1px solid ${C.border}`,fontSize:11,color:C.text,verticalAlign:"middle"};
+
+  return (
+    <div style={{padding:16,height:"100%",overflowY:"auto"}}>
+      <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+        {(["dashboard","table","ai"] as const).map(v=>(
+          <button key={v} onClick={()=>setView(v)} style={{padding:"6px 14px",borderRadius:6,fontSize:11,fontWeight:600,border:`1px solid ${view===v?C.warn:C.border}`,background:view===v?C.warnDim:"transparent",color:view===v?C.warn:C.textMid,cursor:"pointer"}}>
+            {v==="dashboard"?"📊 Dashboard":v==="table"?"📋 Daily Data":"🤖 AI Analysis"}
+          </button>
+        ))}
+        <div style={{marginLeft:"auto",display:"flex",gap:4}}>
+          {(["daily","weekly"] as const).map(m=>(
+            <button key={m} onClick={()=>setChartMode(m)} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:600,border:`1px solid ${chartMode===m?C.blue:C.border}`,background:chartMode===m?C.blueDim:"transparent",color:chartMode===m?C.blue:C.textDim,cursor:"pointer"}}>
+              {m==="daily"?"10-Day":"4-Week"}
+            </button>
+          ))}
+          <button onClick={publishToEmail} disabled={!metrics} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.purple}44`,background:C.purpleDim,color:C.purple,cursor:metrics?"pointer":"not-allowed",opacity:metrics?1:0.4}}>
+            📧 Publish Report
+          </button>
+        </div>
+      </div>
+
+      {metrics&&(
+        <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+          <KpiTile label="Emails Received" value={fmtN(metrics.total)} color={C.blue}/>
+          <KpiTile label="Resolved" value={fmtN(metrics.totalRes)} sub={fmtPct(metrics.totalRes/Math.max(metrics.total,1))} rag={metrics.totalRes>=metrics.total?"green":"amber"}/>
+          <KpiTile label="SLA 24hr" value={fmtPct(metrics.avgSLA)} sub={`Target: ${fmtPct(cfg.helpdeskSLA)}`} rag={metrics.avgSLA>=cfg.helpdeskSLA?"green":"red"}/>
+          <KpiTile label="Pend Genpact" value={metrics.pendingGenpact} rag={metrics.pendingGenpact===0?"green":"amber"}/>
+          <KpiTile label="Pend Client" value={metrics.pendingClient} color={C.textMid}/>
+          <KpiTile label="Carry Forward" value={metrics.carryForward} rag={metrics.carryForward===0?"green":"red"}/>
+        </div>
+      )}
+
+      {view==="dashboard"&&rows.length>0&&(
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Received vs Resolved</div>
+            <ComboChart dates={cd.dates} bars={[{values:cd.received,color:C.blue},{values:cd.resolved,color:C.success}]} height={90}/>
+          </div>
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>SLA % (24hr — Target: {fmtPct(cfg.helpdeskSLA)})</div>
+            <MiniBarChart data={cd.dates.map((d,i)=>({label:d.slice(-5),value:parseFloat(cd.sla[i].toFixed(1)),color:cd.sla[i]>=cfg.helpdeskSLA*100?C.success:C.danger}))} height={70}/>
+          </div>
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12,gridColumn:"1 / -1"}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Pending Split — Genpact vs Client</div>
+            <StackedBar dates={cd.dates} buckets={[cd.pgp,cd.pcl]} colors={[C.accent,C.warn]} labels={["Genpact","Client"]} height={70}/>
+          </div>
+        </div>
+      )}
+
+      {view==="dashboard"&&rows.length===0&&(
+        <div style={{textAlign:"center",padding:"40px 20px",color:C.textDim}}>
+          <div style={{fontSize:32,marginBottom:8}}>📧</div>
+          <div style={{fontSize:13,fontWeight:600,color:C.textMid,marginBottom:4}}>No helpdesk data yet</div>
+          <button onClick={()=>setView("table")} style={{padding:"8px 20px",borderRadius:6,background:C.warn,color:"#0B1120",border:"none",fontWeight:700,cursor:"pointer"}}>Add First Entry</button>
+        </div>
+      )}
+
+      {view==="table"&&(
+        <>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            <button onClick={addRow} style={{padding:"7px 14px",borderRadius:6,background:C.warn,color:"#0B1120",border:"none",fontSize:11,fontWeight:700,cursor:"pointer"}}>+ Add Entry</button>
+            {rows.length>0&&<button onClick={()=>{if(window.confirm("Clear all?"))setRows([]);}} style={{padding:"7px 14px",borderRadius:6,background:"transparent",color:C.danger,border:`1px solid ${C.border}`,fontSize:11,cursor:"pointer"}}>🗑 Clear</button>}
+          </div>
+          <div style={{overflowX:"auto",borderRadius:8,border:`1px solid ${C.border}`}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr>{["Date","Received","Resolved","SLA% (auto)","Pend Genpact","Pend Client","Carry Fwd",""].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead>
+              <tbody>
+                {rows.map(r=>(
+                  <tr key={r.id}>
+                    <td style={TD}><Cell value={r.date} onChange={v=>updateRow(r.id,"date",v)} type="date"/></td>
+                    <td style={TD}><Cell value={r.received} onChange={v=>updateRow(r.id,"received",v)}/></td>
+                    <td style={TD}><Cell value={r.resolved} onChange={v=>updateRow(r.id,"resolved",v)}/></td>
+                    <td style={{...TD,fontWeight:700,color:r.slaPct>=cfg.helpdeskSLA?C.success:C.danger}}>{fmtPct(r.slaPct)}</td>
+                    <td style={TD}><Cell value={r.pendingGenpact} onChange={v=>updateRow(r.id,"pendingGenpact",v)}/></td>
+                    <td style={TD}><Cell value={r.pendingClient} onChange={v=>updateRow(r.id,"pendingClient",v)}/></td>
+                    <td style={{...TD,color:r.carryForward>0?C.danger:C.text}}><Cell value={r.carryForward} onChange={v=>updateRow(r.id,"carryForward",v)}/></td>
+                    <td style={TD}><button onClick={()=>setRows(p=>p.filter(x=>x.id!==r.id))} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:14}}>×</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {view==="ai"&&(
+        <>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            <button onClick={generateReport} disabled={aiLoading||rows.length===0} style={{padding:"8px 16px",borderRadius:6,background:C.warn,color:"#0B1120",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",opacity:aiLoading||rows.length===0?0.4:1}}>
+              {aiLoading?"⏳ Analysing...":"🤖 Generate Helpdesk Report"}
+            </button>
+            {aiReport&&<button onClick={publishToEmail} style={{padding:"8px 16px",borderRadius:6,background:C.purpleDim,color:C.purple,border:`1px solid ${C.purple}44`,fontSize:11,fontWeight:700,cursor:"pointer"}}>📧 Send to Email Drafter</button>}
+          </div>
+          {aiReport&&<div style={{background:C.card2,border:`1px solid ${C.warn}33`,borderRadius:8,padding:16,fontSize:12,lineHeight:1.8,color:C.text,whiteSpace:"pre-wrap",maxHeight:500,overflowY:"auto"}}>{aiReport}</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SERVICENOW MODULE
+// ═══════════════════════════════════════════════════════════════════════════
+function ServiceNowModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:string)=>Promise<string>;companyName:string;onPublish:(p:PublishPayload)=>void}) {
+  const [tickets,setTickets]=useState<SNTicket[]>([]);
+  const [view,setView]=useState<"dashboard"|"table"|"ai">("dashboard");
+  const [aiReport,setAiReport]=useState("");
+  const [aiLoading,setAiLoading]=useState(false);
+
+  const addTicket=()=>setTickets(t=>[...t,{id:uid(),ticketNo:"INC"+uid().slice(0,6).toUpperCase(),date:today(),priority:"Medium",category:"",status:"Open",assignedTo:"",team:"",firstResponse:"",pendingReason:"",notes:""}]);
+  const upd=useCallback((id:string,field:keyof SNTicket,val:string)=>setTickets(prev=>prev.map(t=>t.id===id?{...t,[field]:val}:t)),[]);
+
+  const metrics=useMemo(()=>{
+    const active=tickets.filter(t=>!["Resolved","Closed"].includes(t.status));
+    const resolved=tickets.filter(t=>["Resolved","Closed"].includes(t.status));
+    const slaMet=tickets.filter(t=>t.firstResponse&&t.date&&daysBetween(t.date,t.firstResponse)<=3);
+    const slaPct=tickets.length>0?slaMet.length/tickets.length:0;
+    const aging={a:active.filter(t=>daysBetween(t.date)<=3).length,b:active.filter(t=>daysBetween(t.date)>3&&daysBetween(t.date)<=5).length,c:active.filter(t=>daysBetween(t.date)>5&&daysBetween(t.date)<=15).length,d:active.filter(t=>daysBetween(t.date)>15).length};
+    const byPriority:Record<string,number>={};
+    PRIORITIES.forEach(p=>{byPriority[p]=tickets.filter(t=>t.priority===p).length;});
+    const byTeam:Record<string,{total:number;resolved:number}>={};
+    tickets.forEach(t=>{const team=t.team||"Unassigned";if(!byTeam[team])byTeam[team]={total:0,resolved:0};byTeam[team].total++;if(["Resolved","Closed"].includes(t.status))byTeam[team].resolved++;});
+    return {total:tickets.length,active:active.length,resolved:resolved.length,slaPct,aging,byPriority,byTeam};
+  },[tickets]);
+
+  const generateReport=async()=>{
+    if(!callAI||!tickets.length)return;
+    setAiLoading(true);
+    const m=metrics;
+    try{setAiReport(await callAI(`You are an IT Service Management governance analyst for ${companyName}.\n\nTICKET DATA:\n- Total: ${m.total} | Active: ${m.active} | Resolved: ${m.resolved}\n- SLA (first response ≤3 days): ${fmtPct(m.slaPct)}\n- Aging: 0-3d: ${m.aging.a}, 4-5d: ${m.aging.b}, 6-15d: ${m.aging.c}, >15d: ${m.aging.d}\n- Priority: ${JSON.stringify(m.byPriority)}\n- Teams: ${JSON.stringify(m.byTeam)}\n\nPRODUCE:\n1. EXECUTIVE SUMMARY\n2. SLA COMPLIANCE ANALYSIS\n3. AGING RISK — items needing escalation\n4. TEAM PERFORMANCE — resolution rates\n5. TOP 3 ACTION ITEMS\n6. RISK FLAGS`));}catch(e:any){setAiReport("Error: "+e.message);}
+    setAiLoading(false);
+  };
+
+  const publishToEmail=()=>{
+    const m=metrics;
+    onPublish({module:"servicenow",subject:`ServiceNow Ticket Report — ${companyName} — ${today()}`,kpiSummary:`Total: ${m.total} | Active: ${m.active} | SLA: ${fmtPct(m.slaPct)} | Aging >15d: ${m.aging.d} | Resolved: ${m.resolved}`,tableData:`| Metric | Value | Status |\n|--------|-------|--------|\n| Total Tickets | ${m.total} | — |\n| Active | ${m.active} | ${m.active>10?"⚠ High":"✓ OK"} |\n| SLA Compliance | ${fmtPct(m.slaPct)} | ${m.slaPct>=0.95?"✓ Meets":"✗ Breach"} |\n| Aging >15d | ${m.aging.d} | ${m.aging.d===0?"✓ Clear":"✗ Critical"} |\n| Resolved | ${m.resolved} | — |`,period:"Current"});
+  };
+
+  const TH:React.CSSProperties={padding:"7px 8px",textAlign:"left",fontSize:9,fontWeight:700,textTransform:"uppercase",color:C.textDim,background:C.card2,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",position:"sticky",top:0};
+  const TD:React.CSSProperties={padding:"5px 8px",borderBottom:`1px solid ${C.border}`,fontSize:11,color:C.text,verticalAlign:"middle"};
+
+  return (
+    <div style={{padding:16,height:"100%",overflowY:"auto"}}>
+      <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+        {(["dashboard","table","ai"] as const).map(v=>(
+          <button key={v} onClick={()=>setView(v)} style={{padding:"6px 14px",borderRadius:6,fontSize:11,fontWeight:600,border:`1px solid ${view===v?C.blue:C.border}`,background:view===v?C.blueDim:"transparent",color:view===v?C.blue:C.textMid,cursor:"pointer"}}>
+            {v==="dashboard"?"📊 Dashboard":v==="table"?"🎫 Tickets":"🤖 AI Analysis"}
+          </button>
+        ))}
+        <div style={{marginLeft:"auto"}}>
+          <button onClick={publishToEmail} disabled={!tickets.length} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.purple}44`,background:C.purpleDim,color:C.purple,cursor:tickets.length?"pointer":"not-allowed",opacity:tickets.length?1:0.4}}>
+            📧 Publish Report
+          </button>
+        </div>
+      </div>
+
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+        <KpiTile label="Total Tickets" value={metrics.total} color={C.blue}/>
+        <KpiTile label="Active" value={metrics.active} rag={metrics.active>10?"amber":"green"}/>
+        <KpiTile label="Resolved" value={metrics.resolved} color={C.success}/>
+        <KpiTile label="SLA Compliance" value={fmtPct(metrics.slaPct)} sub="First response ≤3 days" rag={metrics.slaPct>=0.95?"green":"red"}/>
+        <KpiTile label="Aging >15d" value={metrics.aging.d} rag={metrics.aging.d===0?"green":"red"}/>
+      </div>
+
+      {view==="dashboard"&&(
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Priority Distribution</div>
+            <MiniBarChart data={PRIORITIES.map(p=>({label:p,value:metrics.byPriority[p]??0,color:p==="Critical"?C.danger:p==="High"?C.warn:p==="Medium"?C.blue:C.success}))} height={70}/>
+          </div>
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Aging Buckets (Active)</div>
+            <MiniBarChart data={[{label:"0-3d",value:metrics.aging.a,color:C.success},{label:"4-5d",value:metrics.aging.b,color:C.warn},{label:"6-15d",value:metrics.aging.c,color:C.orange},{label:">15d",value:metrics.aging.d,color:C.danger}]} height={70}/>
+          </div>
+          {Object.keys(metrics.byTeam).length>0&&(
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12,gridColumn:"1 / -1"}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Team Performance</div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+                <thead><tr>{["Team","Total","Resolved","Resolution %"].map(h=><th key={h} style={{...TH,position:"relative"}}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {Object.entries(metrics.byTeam).map(([team,v])=>(
+                    <tr key={team}><td style={TD}>{team}</td><td style={TD}>{v.total}</td><td style={TD}>{v.resolved}</td><td style={{...TD,color:v.total>0&&v.resolved/v.total>=0.7?C.success:C.warn,fontWeight:700}}>{v.total>0?fmtPct(v.resolved/v.total):"—"}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {tickets.length===0&&<div style={{gridColumn:"1 / -1",textAlign:"center",padding:"30px",color:C.textDim}}><div style={{fontSize:28,marginBottom:8}}>🎫</div><div style={{fontSize:12,color:C.textMid}}>No tickets yet — switch to Tickets tab to add</div></div>}
+        </div>
+      )}
+
+      {view==="table"&&(
+        <>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            <button onClick={addTicket} style={{padding:"7px 14px",borderRadius:6,background:C.blue,color:"#fff",border:"none",fontSize:11,fontWeight:700,cursor:"pointer"}}>+ Add Ticket</button>
+            {tickets.length>0&&<button onClick={()=>{if(window.confirm("Clear all?"))setTickets([]);}} style={{padding:"7px 14px",borderRadius:6,background:"transparent",color:C.danger,border:`1px solid ${C.border}`,fontSize:11,cursor:"pointer"}}>🗑 Clear</button>}
+          </div>
+          <div style={{overflowX:"auto",borderRadius:8,border:`1px solid ${C.border}`}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr>{["Ticket #","Date","Priority","Category","Status","Team","Assigned","1st Response","Aging","SLA",""].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead>
+              <tbody>
+                {tickets.map(t=>{
+                  const aging=daysBetween(t.date);
+                  const sla=t.firstResponse?daysBetween(t.date,t.firstResponse)<=3:null;
+                  return (
+                    <tr key={t.id} style={{background:aging>15&&!["Resolved","Closed"].includes(t.status)?C.dangerDim:"transparent"}}>
+                      <td style={TD}><Cell value={t.ticketNo} onChange={v=>upd(t.id,"ticketNo",v)}/></td>
+                      <td style={TD}><Cell value={t.date} onChange={v=>upd(t.id,"date",v)} type="date"/></td>
+                      <td style={TD}><Cell value={t.priority} onChange={v=>upd(t.id,"priority",v)} options={PRIORITIES}/></td>
+                      <td style={TD}><Cell value={t.category} onChange={v=>upd(t.id,"category",v)}/></td>
+                      <td style={TD}><Cell value={t.status} onChange={v=>upd(t.id,"status",v)} options={SN_STATUSES}/></td>
+                      <td style={TD}><Cell value={t.team} onChange={v=>upd(t.id,"team",v)}/></td>
+                      <td style={TD}><Cell value={t.assignedTo} onChange={v=>upd(t.id,"assignedTo",v)}/></td>
+                      <td style={TD}><Cell value={t.firstResponse} onChange={v=>upd(t.id,"firstResponse",v)} type="date"/></td>
+                      <td style={{...TD,fontWeight:700,color:aging>15?C.danger:aging>5?C.warn:C.success}}>{aging}d</td>
+                      <td style={TD}>{sla===null?<span style={{color:C.textDim}}>—</span>:sla?<span style={{color:C.success}}>✓</span>:<span style={{color:C.danger}}>✗</span>}</td>
+                      <td style={TD}><button onClick={()=>setTickets(p=>p.filter(x=>x.id!==t.id))} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:14}}>×</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {view==="ai"&&(
+        <>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            <button onClick={generateReport} disabled={aiLoading||tickets.length===0} style={{padding:"8px 16px",borderRadius:6,background:C.blue,color:"#fff",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",opacity:aiLoading||tickets.length===0?0.4:1}}>
+              {aiLoading?"⏳ Analysing...":"🤖 Generate Ticket Report"}
+            </button>
+            {aiReport&&<button onClick={publishToEmail} style={{padding:"8px 16px",borderRadius:6,background:C.purpleDim,color:C.purple,border:`1px solid ${C.purple}44`,fontSize:11,fontWeight:700,cursor:"pointer"}}>📧 Send to Email Drafter</button>}
+          </div>
+          {aiReport&&<div style={{background:C.card2,border:`1px solid ${C.blue}33`,borderRadius:8,padding:16,fontSize:12,lineHeight:1.8,color:C.text,whiteSpace:"pre-wrap",maxHeight:500,overflowY:"auto"}}>{aiReport}</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DISPATCH HUB — Agentic Publishing Layer
+// ═══════════════════════════════════════════════════════════════════════════
+function DispatchHub({callAI,companyName,pendingPublish,onClearPublish}:{callAI?:(p:string)=>Promise<string>;companyName:string;pendingPublish:PublishPayload|null;onClearPublish:()=>void}) {
+  const [activeAgent,setActiveAgent]=useState<"email"|"status"|"meeting"|"variance"|null>(null);
+  const [emailDraft,setEmailDraft]=useState("");
+  const [emailDraftHTML,setEmailDraftHTML]=useState("");
+  const [emailSubject,setEmailSubject]=useState("");
+  const [generating,setGenerating]=useState(false);
+  const [customInput,setCustomInput]=useState("");
+  const [copied,setCopied]=useState<"text"|"html"|null>(null);
+
+  useEffect(()=>{
+    if(pendingPublish){
+      setActiveAgent("email");
+      setEmailSubject(pendingPublish.subject);
+      generateFromPayload(pendingPublish);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[pendingPublish]);
+
+  const generateFromPayload=async(payload:PublishPayload)=>{
+    if(!callAI)return;
+    setGenerating(true);
+    const label=payload.module==="concur"?"T&E Audit":payload.module==="email"?"Helpdesk Email":"ServiceNow Tickets";
+    try{
+      const result=await callAI(`You are a professional business communication writer for ${companyName}. Draft a ${payload.period} ${label} operational report email.\n\nSUBJECT: ${payload.subject}\n\nKPI SUMMARY:\n${payload.kpiSummary}\n\nDATA TABLE:\n${payload.tableData}\n\nINSTRUCTIONS:\nWrite a professional email body. Lead with overall health status (GREEN/AMBER/RED based on SLA status). Include the KPI table. End with action items if any SLAs are breached. Sign off as "${companyName} Operations Team". Keep under 250 words.\n\nThen on a new line write exactly: ===HTML_VERSION===\nThen write the same email as clean HTML with: dark blue (#1e3a5f) header bar with white subject text, colored status badge (green/amber/red), KPI table with blue (#2563eb) header row and white text, alternating row colors (#f8fafc and white), breach numbers bolded in red (#dc2626), sans-serif font, max-width 600px, professional footer. Output ONLY: plain text email body, then ===HTML_VERSION===, then HTML. No other commentary.`);
+      const split=result.indexOf("===HTML_VERSION===");
+      if(split>-1){setEmailDraft(result.slice(0,split).trim());setEmailDraftHTML(result.slice(split+18).trim());}
+      else{setEmailDraft(result.trim());setEmailDraftHTML("");}
+    }catch(e:any){setEmailDraft("Error generating email: "+e.message);}
+    setGenerating(false);
+  };
+
+  const generateCustomEmail=async()=>{
+    if(!callAI||!customInput.trim())return;
+    setGenerating(true);
+    try{
+      const result=await callAI(`Draft a professional email for ${companyName} based on these bullet points:\n\n${customInput}\n\nWrite: Subject line first as "Subject: ...", then full professional email body. Sign off as "${companyName} Operations Team".\n\nThen on a new line: ===HTML_VERSION===\nThen same email as clean HTML (max-width 600px, dark blue header, professional table if any, sans-serif font).`);
+      const subMatch=result.match(/Subject:\s*(.+)/);
+      if(subMatch)setEmailSubject(subMatch[1].trim());
+      const split=result.indexOf("===HTML_VERSION===");
+      if(split>-1){setEmailDraft(result.slice(0,split).replace(/Subject:.+\n/,"").trim());setEmailDraftHTML(result.slice(split+18).trim());}
+      else setEmailDraft(result.trim());
+    }catch(e:any){setEmailDraft("Error: "+e.message);}
+    setGenerating(false);
+  };
+
+  const copy=(type:"text"|"html")=>{
+    navigator.clipboard.writeText(type==="html"?emailDraftHTML:emailDraft).then(()=>{setCopied(type);setTimeout(()=>setCopied(null),2500);});
+  };
+
+  const AGENTS=[
+    {id:"email" as const,label:"Email Drafter",ic:"✉️",desc:"Draft professional emails from bullet points or auto-generate from Concur, Email & ServiceNow governance reports.",color:C.accent},
+    {id:"status" as const,label:"Status Report",ic:"📊",desc:"Convert raw team updates into formatted SLA and status reports.",color:C.blue},
+    {id:"meeting" as const,label:"Meeting Notes → Actions",ic:"📝",desc:"Extract action items, owners, and deadlines from meeting notes.",color:C.purple},
+    {id:"variance" as const,label:"Variance Explainer",ic:"📉",desc:"Explain what changed between numbers and why it likely happened.",color:C.warn},
+  ];
+
+  return (
+    <div style={{padding:16,height:"100%",overflowY:"auto"}}>
+      {pendingPublish&&(
+        <div style={{background:C.purpleDim,border:`1px solid ${C.purple}44`,borderRadius:8,padding:"10px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:16}}>🔗</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.purple}}>Report received from {pendingPublish.module==="concur"?"Concur T&E":pendingPublish.module==="email"?"Email Helpdesk":"ServiceNow"}</div>
+            <div style={{fontSize:10,color:C.textMid,marginTop:2}}>{pendingPublish.subject}</div>
+          </div>
+          <button onClick={onClearPublish} style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize:18}}>×</button>
+        </div>
+      )}
+
+      {!activeAgent&&(
+        <>
+          <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:4}}>Dispatch Hub</div>
+          <div style={{fontSize:11,color:C.textMid,marginBottom:16,lineHeight:1.7}}>
+            Agentic publishing layer. Use the <strong style={{color:C.purple}}>📧 Publish Report</strong> button in any governance module to auto-send live KPI data here — the Email Drafter generates a ready-to-copy professional email with both plain text and HTML versions.
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            {AGENTS.map(a=>(
+              <button key={a.id} onClick={()=>setActiveAgent(a.id)}
+                style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px 14px",cursor:"pointer",textAlign:"left",display:"flex",flexDirection:"column",gap:6}}
+                onMouseEnter={e=>(e.currentTarget.style.borderColor=a.color)}
+                onMouseLeave={e=>(e.currentTarget.style.borderColor=C.border)}>
+                <span style={{fontSize:24}}>{a.ic}</span>
+                <div style={{fontSize:12,fontWeight:700,color:a.color}}>{a.label}</div>
+                <div style={{fontSize:10,color:C.textMid,lineHeight:1.5}}>{a.desc}</div>
+                {a.id==="email"&&pendingPublish&&<div style={{fontSize:9,background:C.purpleDim,color:C.purple,padding:"2px 8px",borderRadius:10,fontWeight:700,width:"fit-content"}}>1 report waiting →</div>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {activeAgent==="email"&&(
+        <div>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
+            <button onClick={()=>{setActiveAgent(null);onClearPublish();setEmailDraft("");setEmailDraftHTML("");}} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"4px 10px",color:C.textMid,fontSize:11,cursor:"pointer"}}>← Back</button>
+            <span style={{fontSize:14,fontWeight:800,color:C.text}}>✉️ Email Drafter</span>
+          </div>
+
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:10,color:C.textDim,fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.06em"}}>Subject Line</div>
+            <input value={emailSubject} onChange={e=>setEmailSubject(e.target.value)} placeholder="Email subject..."
+              style={{width:"100%",background:C.card2,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 12px",color:C.text,fontSize:12,outline:"none"}}/>
+          </div>
+
+          {pendingPublish?(
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12,marginBottom:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.accent,marginBottom:6}}>📊 DATA FROM {pendingPublish.module.toUpperCase()} MODULE</div>
+              <div style={{fontSize:10,color:C.textMid,lineHeight:1.6,marginBottom:10}}>{pendingPublish.kpiSummary}</div>
+              <button onClick={()=>generateFromPayload(pendingPublish)} disabled={generating||!callAI}
+                style={{padding:"7px 14px",borderRadius:6,background:C.accent,color:"#0B1120",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",opacity:generating||!callAI?0.4:1}}>
+                {generating?"⏳ Drafting...":"🤖 Auto-Draft from Module Data"}
+              </button>
+              {!callAI&&<span style={{fontSize:10,color:C.warn,marginLeft:10}}>⚠ AI not connected</span>}
+            </div>
+          ):(
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:10,color:C.textDim,fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.06em"}}>Your Bullet Points</div>
+              <textarea value={customInput} onChange={e=>setCustomInput(e.target.value)} rows={5}
+                placeholder={"Paste bullets here...\n• TAT this week: 99.7%\n• Backlog reduced to 5\n• 2 items aging >15 days — escalated to manager"}
+                style={{width:"100%",background:C.card2,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 12px",color:C.text,fontSize:11,resize:"vertical",lineHeight:1.6,outline:"none"}}/>
+              <button onClick={generateCustomEmail} disabled={generating||!customInput.trim()||!callAI}
+                style={{marginTop:8,padding:"7px 14px",borderRadius:6,background:C.accent,color:"#0B1120",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",opacity:generating||!customInput.trim()||!callAI?0.4:1}}>
+                {generating?"⏳ Drafting...":"🤖 Draft Email"}
+              </button>
+            </div>
+          )}
+
+          {emailDraft&&(
+            <>
+              {/* Plain text */}
+              <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",borderBottom:`1px solid ${C.border}`}}>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.text}}>Plain Text Version</div>
+                    <div style={{fontSize:9,color:C.textDim}}>Copy and paste directly into Outlook</div>
+                  </div>
+                  <button onClick={()=>copy("text")} style={{padding:"5px 14px",borderRadius:5,background:copied==="text"?C.success:C.accentDim,color:copied==="text"?"#fff":C.accent,border:`1px solid ${C.accent}44`,fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                    {copied==="text"?"✓ Copied!":"📋 Copy Text"}
+                  </button>
+                </div>
+                <textarea readOnly value={emailDraft} rows={12}
+                  style={{width:"100%",background:"transparent",border:"none",color:C.text,fontSize:11,padding:"12px",lineHeight:1.7,resize:"vertical",outline:"none"}}/>
+              </div>
+
+              {/* HTML version */}
+              {emailDraftHTML&&(
+                <div style={{background:C.card,border:`1px solid ${C.purple}33`,borderRadius:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",borderBottom:`1px solid ${C.border}`}}>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>HTML Version</div>
+                      <div style={{fontSize:9,color:C.textDim}}>Rendered preview below — copy HTML for rich email clients</div>
+                    </div>
+                    <button onClick={()=>copy("html")} style={{padding:"5px 14px",borderRadius:5,background:copied==="html"?C.success:C.purpleDim,color:copied==="html"?"#fff":C.purple,border:`1px solid ${C.purple}44`,fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                      {copied==="html"?"✓ Copied!":"📋 Copy HTML"}
+                    </button>
+                  </div>
+                  <div style={{padding:12}}>
+                    <div style={{fontSize:9,color:C.textDim,marginBottom:8,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em"}}>Rendered Preview</div>
+                    <div style={{background:"#fff",borderRadius:6,padding:8,maxHeight:300,overflowY:"auto",border:"1px solid #e2e8f0"}} dangerouslySetInnerHTML={{__html:emailDraftHTML}}/>
+                    <div style={{fontSize:9,color:C.textDim,marginTop:8,lineHeight:1.5}}>
+                      <strong style={{color:C.textMid}}>To use in Outlook:</strong> Copy the HTML code below → In Outlook, create a new email → Insert → Signature (paste there) or use Insert Object → HTML. Alternatively, open any browser email client that accepts HTML paste.
+                    </div>
+                    <div style={{marginTop:8}}>
+                      <div style={{fontSize:9,color:C.textDim,fontWeight:600,marginBottom:4,textTransform:"uppercase"}}>Raw HTML Code</div>
+                      <textarea readOnly value={emailDraftHTML} rows={4}
+                        style={{width:"100%",background:C.card2,border:`1px solid ${C.border}`,borderRadius:4,color:C.textMid,fontSize:9,padding:"6px 8px",resize:"vertical",outline:"none"}}/>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {activeAgent&&activeAgent!=="email"&&(
+        <div>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
+            <button onClick={()=>setActiveAgent(null)} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"4px 10px",color:C.textMid,fontSize:11,cursor:"pointer"}}>← Back</button>
+            <span style={{fontSize:14,fontWeight:800,color:C.text}}>{AGENTS.find(a=>a.id===activeAgent)?.ic} {AGENTS.find(a=>a.id===activeAgent)?.label}</span>
+          </div>
+          <AgentWorkspace agent={AGENTS.find(a=>a.id===activeAgent)!} callAI={callAI} companyName={companyName}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentWorkspace({agent,callAI,companyName}:{agent:{label:string;ic:string;color:string};callAI?:(p:string)=>Promise<string>;companyName:string}) {
+  const [input,setInput]=useState("");
+  const [output,setOutput]=useState("");
+  const [loading,setLoading]=useState(false);
+
+  const run=async()=>{
+    if(!callAI||!input.trim())return;
+    setLoading(true);
+    const prompts:Record<string,string>={
+      "Status Report":`You are a professional report writer for ${companyName}. Convert these raw team updates into a structured, professional status report with: Executive Summary, SLA Status table, Key Highlights, Issues & Risks, Next Steps.\n\nINPUT:\n${input}`,
+      "Meeting Notes → Actions":`Extract all action items from these meeting notes for ${companyName}. Format as a table with: Action Item | Owner | Deadline | Priority | Status. Then list any open decisions and risks identified.\n\nNOTES:\n${input}`,
+      "Variance Explainer":`You are a financial and operational analyst for ${companyName}. Explain the variances in the data provided. Structure your response as: What Changed (the facts), Why It Changed (root cause analysis, 3-4 reasons), What It Means (business impact), and What To Do (recommended actions).\n\nDATA:\n${input}`,
+    };
+    try{setOutput(await callAI(prompts[agent.label]||`Process this for ${companyName}: ${input}`));}catch(e:any){setOutput("Error: "+e.message);}
+    setLoading(false);
+  };
+
+  return (
+    <div>
+      <textarea value={input} onChange={e=>setInput(e.target.value)} rows={6}
+        placeholder="Paste your input here..."
+        style={{width:"100%",background:C.card2,border:`1px solid ${C.border}`,borderRadius:6,padding:"10px 12px",color:C.text,fontSize:11,resize:"vertical",marginBottom:10,outline:"none",lineHeight:1.6}}/>
+      <button onClick={run} disabled={loading||!input.trim()||!callAI}
+        style={{padding:"9px 24px",borderRadius:6,background:agent.color,color:"#0B1120",border:"none",fontSize:12,fontWeight:700,cursor:"pointer",opacity:loading||!input.trim()||!callAI?0.4:1}}>
+        {loading?"⏳ Processing...":"🤖 Process"}
+      </button>
+      {output&&(
+        <div style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,padding:16,fontSize:12,lineHeight:1.8,color:C.text,whiteSpace:"pre-wrap",marginTop:12,maxHeight:500,overflowY:"auto"}}>
+          {output}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MAIN EXPORT
+// ═══════════════════════════════════════════════════════════════════════════
 interface PulseProps {
   callAI?:(prompt:string)=>Promise<string>;
   companyName?:string;
   defaultModule?:string;
+  templates?:any[];setTemplates?:any;sv?:any;S?:any;
+  showToast?:(msg:string,type?:string)=>void;
+  ask?:any;askVision?:any;MicButton?:any;vLang?:string;
 }
 
-export default function PulseGovernance({callAI,companyName="Your Company",defaultModule}:PulseProps){
-  const [module,setModule]=useState<"dispatch"|"servicenow"|"concur"|"email">((defaultModule as any)||"servicenow");
-  const [subView,setSubView]=useState<"dashboard"|"table"|"ai">("dashboard");
+export default function PulseGovernance({callAI,companyName="Your Company",defaultModule,showToast}:PulseProps) {
+  const [module,setModule]=useState<"dispatch"|"concur"|"email"|"servicenow">((defaultModule as any)||"dispatch");
+  const [cfg,setCfg]=useState<Config>(DEFAULT_CONFIG);
+  const [showConfig,setShowConfig]=useState(false);
+  const [pendingPublish,setPendingPublish]=useState<PublishPayload|null>(null);
 
-  /* ── ServiceNow State ── */
-  const [snTickets,setSnTickets]=useState<SNTicket[]>([]);
-  const [snAiReport,setSnAiReport]=useState("");
-  const [snLoading,setSnLoading]=useState(false);
-  const snFileRef=useRef<HTMLInputElement>(null);
-
-  /* ── Concur State ── */
-  const [concurRecords,setConcurRecords]=useState<ConcurRecord[]>([]);
-  const [concurAiReport,setConcurAiReport]=useState("");
-  const [concurLoading,setConcurLoading]=useState(false);
-  const concurFileRef=useRef<HTMLInputElement>(null);
-
-  /* ── Email State ── */
-  const [emailRecords,setEmailRecords]=useState<EmailRecord[]>([]);
-  const [emailAiReport,setEmailAiReport]=useState("");
-  const [emailLoading,setEmailLoading]=useState(false);
-
-  /* ══ ServiceNow Calculations ══ */
-  const snMetrics=useMemo(()=>{
-    const active=snTickets.filter(t=>!["Resolved","Closed"].includes(t.status));
-    const resolved=snTickets.filter(t=>["Resolved","Closed"].includes(t.status));
-    const slaMet=snTickets.filter(t=>{
-      if(!t.firstResponse||!t.createdDate)return false;
-      return daysBetween(t.createdDate,t.firstResponse)<=3;
-    });
-    const slaPct=snTickets.length>0?Math.round((slaMet.length/snTickets.length)*100):0;
-    const aging={bucket0_3:0,bucket4_5:0,bucket5plus:0};
-    active.forEach(t=>{
-      const d=daysBetween(t.createdDate,"");
-      if(d<=3)aging.bucket0_3++;
-      else if(d<=5)aging.bucket4_5++;
-      else aging.bucket5plus++;
-    });
-    const avgResolve=resolved.length>0?Math.round(resolved.reduce((s,t)=>s+daysBetween(t.createdDate,t.resolutionDate||t.closedDate),0)/resolved.length):0;
-    const byTeam:Record<string,{total:number,resolved:number}>={}; 
-    snTickets.forEach(t=>{
-      const team=t.team||"Unassigned";
-      if(!byTeam[team])byTeam[team]={total:0,resolved:0};
-      byTeam[team].total++;
-      if(["Resolved","Closed"].includes(t.status))byTeam[team].resolved++;
-    });
-    const pendingReasons:Record<string,number>={};
-    active.filter(t=>t.pendingReason).forEach(t=>{pendingReasons[t.pendingReason]=(pendingReasons[t.pendingReason]||0)+1});
-    const priorityDist:Record<string,number>={};
-    active.forEach(t=>{priorityDist[t.priority]=(priorityDist[t.priority]||0)+1});
-    return{total:snTickets.length,active:active.length,resolved:resolved.length,slaPct,aging,avgResolve,byTeam,pendingReasons,priorityDist};
-  },[snTickets]);
-
-  /* ══ Concur Calculations ══ */
-  const concurMetrics=useMemo(()=>{
-    const total=concurRecords.length;
-    const cleared=concurRecords.filter(r=>r.auditStatus==="Cleared").length;
-    const exceptions=concurRecords.filter(r=>r.auditStatus==="Exception Raised").length;
-    const escalated=concurRecords.filter(r=>r.auditStatus==="Escalated").length;
-    const pending=concurRecords.filter(r=>["Pending Review","Under Audit"].includes(r.auditStatus)).length;
-    const totalAmt=concurRecords.reduce((s,r)=>s+parseFloat(r.reportAmount||"0"),0);
-    const violationCount=concurRecords.reduce((s,r)=>s+parseInt(r.policyViolations||"0",10),0);
-    const compliancePct=total>0?Math.round((cleared/(total))*100):0;
-    const byDept:Record<string,{count:number,amount:number,violations:number}>={}; 
-    concurRecords.forEach(r=>{
-      const d=r.department||"Unknown";
-      if(!byDept[d])byDept[d]={count:0,amount:0,violations:0};
-      byDept[d].count++;
-      byDept[d].amount+=parseFloat(r.reportAmount||"0");
-      byDept[d].violations+=parseInt(r.policyViolations||"0",10);
-    });
-    const exceptionTypes:Record<string,number>={};
-    concurRecords.filter(r=>r.exceptionType).forEach(r=>{exceptionTypes[r.exceptionType]=(exceptionTypes[r.exceptionType]||0)+1});
-    const avgReview=concurRecords.filter(r=>r.reviewDate&&r.submissionDate).length>0?
-      Math.round(concurRecords.filter(r=>r.reviewDate&&r.submissionDate).reduce((s,r)=>s+daysBetween(r.submissionDate,r.reviewDate),0)/concurRecords.filter(r=>r.reviewDate&&r.submissionDate).length):0;
-    return{total,cleared,exceptions,escalated,pending,totalAmt,violationCount,compliancePct,byDept,exceptionTypes,avgReview};
-  },[concurRecords]);
-
-  /* ══ Email Calculations ══ */
-  const emailMetrics=useMemo(()=>{
-    const total=emailRecords.length;
-    const awaiting=emailRecords.filter(r=>r.status==="Awaiting Response").length;
-    const overdue=emailRecords.filter(r=>{
-      if(r.status!=="Awaiting Response"||!r.responseDueDate)return false;
-      return new Date(r.responseDueDate)<new Date();
-    }).length;
-    const responded=emailRecords.filter(r=>r.status==="Responded").length;
-    const responsePct=total>0?Math.round(((responded)/(total))*100):0;
-    const slaMet=emailRecords.filter(r=>{
-      if(!r.responseDueDate||!r.respondedDate)return false;
-      return new Date(r.respondedDate)<=new Date(r.responseDueDate);
-    }).length;
-    const slaTotal=emailRecords.filter(r=>r.responseDueDate&&r.respondedDate).length;
-    const slaPct=slaTotal>0?Math.round((slaMet/slaTotal)*100):0;
-    const byCategory:Record<string,number>={};
-    emailRecords.forEach(r=>{byCategory[r.category]=(byCategory[r.category]||0)+1});
-    return{total,awaiting,overdue,responded,responsePct,slaPct,byCategory};
-  },[emailRecords]);
-
-  /* ══ Table Edit Handlers ══ */
-  const updateSN=useCallback((id:string,field:keyof SNTicket,val:string)=>{
-    setSnTickets(prev=>prev.map(t=>t.id===id?{...t,[field]:val}:t));
-  },[]);
-  const updateConcur=useCallback((id:string,field:keyof ConcurRecord,val:string)=>{
-    setConcurRecords(prev=>prev.map(r=>r.id===id?{...r,[field]:val}:r));
-  },[]);
-  const updateEmail=useCallback((id:string,field:keyof EmailRecord,val:string)=>{
-    setEmailRecords(prev=>prev.map(r=>r.id===id?{...r,[field]:val}:r));
-  },[]);
-
-  /* ══ CSV Upload ══ */
-  const handleSNUpload=(e:React.ChangeEvent<HTMLInputElement>)=>{
-    const file=e.target.files?.[0];if(!file)return;
-    const reader=new FileReader();
-    reader.onload=(ev)=>{
-      const text=ev.target?.result as string;
-      const rows=parseCSV(text);
-      const mapped=mapCSVtoSN(rows);
-      setSnTickets(prev=>[...prev,...mapped]);
-    };
-    reader.readAsText(file);
-    e.target.value="";
-  };
-  const handleConcurUpload=(e:React.ChangeEvent<HTMLInputElement>)=>{
-    const file=e.target.files?.[0];if(!file)return;
-    const reader=new FileReader();
-    reader.onload=(ev)=>{
-      const text=ev.target?.result as string;
-      const rows=parseCSV(text);
-      const mapped=mapCSVtoConcur(rows);
-      setConcurRecords(prev=>[...prev,...mapped]);
-    };
-    reader.readAsText(file);
-    e.target.value="";
+  const handlePublish=(payload:PublishPayload)=>{
+    setPendingPublish(payload);
+    setModule("dispatch");
+    const src=payload.module==="concur"?"Concur T&E":payload.module==="email"?"Email Helpdesk":"ServiceNow";
+    showToast?.(`Report from ${src} sent to Dispatch Hub`,"success");
   };
 
-  /* ══ AI Report Generation ══ */
-  const generateAIReport=async(type:"servicenow"|"concur"|"email")=>{
-    if(!callAI)return;
-    let prompt="";
-    if(type==="servicenow"){
-      setSnLoading(true);
-      prompt=`You are an IT Service Management governance analyst for ${companyName}. Analyze this ServiceNow ticket data and produce a structured governance report.
+  const TABS=[
+    {id:"dispatch" as const,label:"Dispatch Hub",ic:"🚀",color:C.accent},
+    {id:"concur" as const,label:"Concur T&E",ic:"🧾",color:C.purple},
+    {id:"email" as const,label:"Email Helpdesk",ic:"📧",color:C.warn},
+    {id:"servicenow" as const,label:"ServiceNow",ic:"🎫",color:C.blue},
+  ];
 
-DATA SUMMARY:
-- Total tickets: ${snMetrics.total}
-- Active: ${snMetrics.active} | Resolved: ${snMetrics.resolved}
-- SLA compliance: ${snMetrics.slaPct}%
-- Average resolution time: ${snMetrics.avgResolve} business days
-- Aging buckets — 0-3 days: ${snMetrics.aging.bucket0_3}, 4-5 days: ${snMetrics.aging.bucket4_5}, 5+ days: ${snMetrics.aging.bucket5plus}
-- Team performance: ${JSON.stringify(snMetrics.byTeam)}
-- Pending reasons: ${JSON.stringify(snMetrics.pendingReasons)}
-- Priority distribution: ${JSON.stringify(snMetrics.priorityDist)}
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden",background:C.bg,fontFamily:"'Inter',system-ui,sans-serif",color:C.text}}>
+      {showConfig&&<ConfigPanel cfg={cfg} setCfg={c=>{setCfg(c);showToast?.("Configuration saved","success");}} onClose={()=>setShowConfig(false)}/>}
 
-RAW DATA (last 50 records):
-${JSON.stringify(snTickets.slice(-50).map(t=>({...t,agingDays:daysBetween(t.createdDate,""),slaFirstResponse:t.firstResponse&&t.createdDate?daysBetween(t.createdDate,t.firstResponse)<=3:null})))}
-
-PRODUCE:
-1. EXECUTIVE SUMMARY (3 lines)
-2. SLA COMPLIANCE ANALYSIS — breach patterns, root causes
-3. AGING ANALYSIS — tickets at risk, escalation recommendations
-4. TEAM PERFORMANCE — utilization, resolution rates, bottlenecks
-5. PENDING REASON ANALYSIS — systemic issues, recommendations
-6. TOP 5 ACTION ITEMS with owner and deadline suggestions
-7. RISK FLAGS — anything requiring immediate attention`;
-      try{const r=await callAI(prompt);setSnAiReport(r)}catch(e:any){setSnAiReport("Error: "+e.message)}
-      setSnLoading(false);
-    }else if(type==="concur"){
-      setConcurLoading(true);
-      prompt=`You are a T&E Compliance and Audit governance analyst for ${companyName}. Analyze this SAP Concur audit data and produce a structured compliance report.
-
-DATA SUMMARY:
-- Total expense reports: ${concurMetrics.total}
-- Cleared: ${concurMetrics.cleared} | Exceptions: ${concurMetrics.exceptions} | Escalated: ${concurMetrics.escalated} | Pending: ${concurMetrics.pending}
-- Total report amount: ₹${fmtN(concurMetrics.totalAmt)}
-- Total policy violations: ${concurMetrics.violationCount}
-- Compliance rate: ${concurMetrics.compliancePct}%
-- Average review time: ${concurMetrics.avgReview} days
-- Department breakdown: ${JSON.stringify(concurMetrics.byDept)}
-- Exception types: ${JSON.stringify(concurMetrics.exceptionTypes)}
-
-RAW DATA (last 50 records):
-${JSON.stringify(concurRecords.slice(-50))}
-
-PRODUCE:
-1. EXECUTIVE SUMMARY (3 lines)
-2. COMPLIANCE ANALYSIS — violation patterns, repeat offenders, policy gaps
-3. FINANCIAL EXPOSURE — amount at risk, high-value exceptions
-4. DEPARTMENT ANALYSIS — which teams are most non-compliant and why
-5. EXCEPTION ANALYSIS — root cause patterns, prevention recommendations
-6. AUDIT CYCLE EFFICIENCY — review time optimization
-7. TOP 5 ACTION ITEMS with owner and deadline suggestions
-8. RISK FLAGS — anything requiring immediate management attention`;
-      try{const r=await callAI(prompt);setConcurAiReport(r)}catch(e:any){setConcurAiReport("Error: "+e.message)}
-      setConcurLoading(false);
-    }else{
-      setEmailLoading(true);
-      prompt=`You are a Communication Governance analyst for ${companyName}. Analyze this email communication tracking data and produce a governance report.
-
-DATA SUMMARY:
-- Total tracked communications: ${emailMetrics.total}
-- Awaiting response: ${emailMetrics.awaiting} | Overdue: ${emailMetrics.overdue}
-- Response rate: ${emailMetrics.responsePct}%
-- Response SLA compliance: ${emailMetrics.slaPct}%
-- Category distribution: ${JSON.stringify(emailMetrics.byCategory)}
-
-RAW DATA (last 50 records):
-${JSON.stringify(emailRecords.slice(-50))}
-
-PRODUCE:
-1. EXECUTIVE SUMMARY (3 lines)
-2. RESPONSE COMPLIANCE — SLA adherence, overdue patterns
-3. ESCALATION ANALYSIS — which escalations are unresolved and aging
-4. COMMUNICATION PATTERNS — frequency, category trends
-5. BOTTLENECK IDENTIFICATION — who/what is causing delays
-6. TOP 5 ACTION ITEMS with owner and deadline
-7. RISK FLAGS`;
-      try{const r=await callAI(prompt);setEmailAiReport(r)}catch(e:any){setEmailAiReport("Error: "+e.message)}
-      setEmailLoading(false);
-    }
-  };
-
-  /* ══ Inline Editable Cell ══ */
-  const EditCell=({value,onChange,type="text",options}:{value:string,onChange:(v:string)=>void,type?:string,options?:string[]})=>{
-    if(options){
-      return <select value={value} onChange={e=>onChange(e.target.value)} style={{...S.input,background:"transparent",cursor:"pointer"}}>{options.map(o=><option key={o} value={o} style={{background:C.card}}>{o}</option>)}</select>;
-    }
-    return <input type={type} value={value} onChange={e=>onChange(e.target.value)} style={S.input}/>;
-  };
-
-  /* ══ KPI Card ══ */
-  const KPI=({label,value,color}:{label:string,value:string|number,color:string})=>(
-    <div style={S.kpi(color)}>
-      <div style={{...S.kpiVal,color}}>{value}</div>
-      <div style={S.kpiLabel}>{label}</div>
-    </div>
-  );
-
-  /* ══ Bar (mini chart) ══ */
-  const MiniBar=({data,color}:{data:{label:string,value:number}[],color:string})=>{
-    const max=Math.max(...data.map(d=>d.value),1);
-    return(
-      <div style={{display:"flex",alignItems:"flex-end",gap:6,height:80}}>
-        {data.map((d,i)=>(
-          <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",flex:1}}>
-            <div style={{width:"100%",maxWidth:40,height:Math.max((d.value/max)*60,2),background:color,borderRadius:"3px 3px 0 0",transition:"height .3s"}}/>
-            <div style={{fontSize:9,color:C.textDim,marginTop:4,textAlign:"center",lineHeight:1.2}}>{d.label}</div>
-            <div style={{fontSize:10,fontWeight:600,color:C.textMid}}>{d.value}</div>
-          </div>
+      <div style={{display:"flex",alignItems:"center",gap:4,padding:"8px 14px",borderBottom:`1px solid ${C.border}`,background:C.card2,flexShrink:0,flexWrap:"wrap"}}>
+        {TABS.map(tab=>(
+          <button key={tab.id} onClick={()=>setModule(tab.id)}
+            style={{padding:"7px 14px",borderRadius:7,fontSize:11,fontWeight:700,border:`1px solid ${module===tab.id?tab.color:C.border}`,background:module===tab.id?`${tab.color}15`:"transparent",color:module===tab.id?tab.color:C.textMid,cursor:"pointer",display:"flex",alignItems:"center",gap:5,transition:"all 0.15s"}}>
+            {tab.ic} {tab.label}
+            {tab.id==="dispatch"&&pendingPublish&&<span style={{background:C.purple,color:"#fff",fontSize:8,padding:"1px 5px",borderRadius:8,fontWeight:800}}>1</span>}
+          </button>
         ))}
-      </div>
-    );
-  };
-
-  /* ════════════════════════════════════════════════════════════ */
-  /* DISPATCH — Cross-module overview                            */
-  /* ════════════════════════════════════════════════════════════ */
-  const renderDispatch=()=>(
-    <div>
-      <div style={{...S.card,borderLeft:`3px solid ${C.accent}`}}>
-        <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>Governance Command Center</div>
-        <div style={{fontSize:12,color:C.textMid}}>Real-time operational intelligence across ServiceNow, Concur Audit, and Email communications.</div>
+        <button onClick={()=>setShowConfig(true)} title="Configure FTE & SLA thresholds"
+          style={{marginLeft:"auto",padding:"6px 10px",borderRadius:6,background:"transparent",border:`1px solid ${C.border}`,color:C.textDim,fontSize:14,cursor:"pointer"}}>⚙</button>
       </div>
 
-      <div style={S.kpiGrid}>
-        <KPI label="ServiceNow Active" value={snMetrics.active} color={C.info}/>
-        <KPI label="SN SLA Compliance" value={`${snMetrics.slaPct}%`} color={snMetrics.slaPct>=80?C.success:snMetrics.slaPct>=60?C.warn:C.danger}/>
-        <KPI label="Concur Pending" value={concurMetrics.pending} color={C.purple}/>
-        <KPI label="T&E Compliance" value={`${concurMetrics.compliancePct}%`} color={concurMetrics.compliancePct>=80?C.success:concurMetrics.compliancePct>=60?C.warn:C.danger}/>
-        <KPI label="Emails Awaiting" value={emailMetrics.awaiting} color={C.warn}/>
-        <KPI label="Email Overdue" value={emailMetrics.overdue} color={C.danger}/>
-      </div>
-
-      {/* Cross-module alerts */}
-      <div style={S.card}>
-        <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>⚡ Active Alerts</div>
-        {snMetrics.aging.bucket5plus>0&&<div style={{padding:"8px 12px",background:C.dangerDim,borderRadius:6,marginBottom:6,fontSize:12}}>🎫 <strong>{snMetrics.aging.bucket5plus}</strong> ServiceNow tickets aging beyond 5 days</div>}
-        {concurMetrics.escalated>0&&<div style={{padding:"8px 12px",background:C.warnDim,borderRadius:6,marginBottom:6,fontSize:12}}>🧾 <strong>{concurMetrics.escalated}</strong> Concur reports escalated and unresolved</div>}
-        {emailMetrics.overdue>0&&<div style={{padding:"8px 12px",background:C.dangerDim,borderRadius:6,marginBottom:6,fontSize:12}}>📧 <strong>{emailMetrics.overdue}</strong> emails past response SLA deadline</div>}
-        {snMetrics.active===0&&concurMetrics.pending===0&&emailMetrics.overdue===0&&<div style={{padding:"8px 12px",background:C.successDim,borderRadius:6,fontSize:12,color:C.success}}>✓ All clear — no active alerts across modules</div>}
-      </div>
-
-      {/* Module summary cards */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:12}}>
-        <div style={{...S.card,cursor:"pointer",borderTop:`2px solid ${C.info}`}} onClick={()=>setModule("servicenow")}>
-          <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>🎫 ServiceNow</div>
-          <div style={{fontSize:11,color:C.textMid,marginBottom:8}}>{snMetrics.total} total tickets · {snMetrics.resolved} resolved</div>
-          {Object.keys(snMetrics.byTeam).length>0&&<MiniBar data={Object.entries(snMetrics.byTeam).slice(0,5).map(([k,v])=>({label:k.slice(0,8),value:v.total}))} color={C.info}/>}
-          {snMetrics.total===0&&<div style={{fontSize:11,color:C.textDim,fontStyle:"italic"}}>No data yet — click to add tickets</div>}
-        </div>
-        <div style={{...S.card,cursor:"pointer",borderTop:`2px solid ${C.purple}`}} onClick={()=>setModule("concur")}>
-          <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>🧾 Concur Audit</div>
-          <div style={{fontSize:11,color:C.textMid,marginBottom:8}}>{concurMetrics.total} reports · ₹{fmtN(Math.round(concurMetrics.totalAmt))} total value</div>
-          {Object.keys(concurMetrics.byDept).length>0&&<MiniBar data={Object.entries(concurMetrics.byDept).slice(0,5).map(([k,v])=>({label:k.slice(0,8),value:v.count}))} color={C.purple}/>}
-          {concurMetrics.total===0&&<div style={{fontSize:11,color:C.textDim,fontStyle:"italic"}}>No data yet — click to add reports</div>}
-        </div>
-        <div style={{...S.card,cursor:"pointer",borderTop:`2px solid ${C.warn}`}} onClick={()=>setModule("email")}>
-          <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>📧 Email Governance</div>
-          <div style={{fontSize:11,color:C.textMid,marginBottom:8}}>{emailMetrics.total} tracked · {emailMetrics.responded} responded</div>
-          {Object.keys(emailMetrics.byCategory).length>0&&<MiniBar data={Object.entries(emailMetrics.byCategory).slice(0,5).map(([k,v])=>({label:k.slice(0,6),value:v}))} color={C.warn}/>}
-          {emailMetrics.total===0&&<div style={{fontSize:11,color:C.textDim,fontStyle:"italic"}}>No data yet — click to add communications</div>}
-        </div>
-      </div>
-    </div>
-  );
-
-  /* ════════════════════════════════════════════════════════════ */
-  /* SERVICENOW MODULE                                           */
-  /* ════════════════════════════════════════════════════════════ */
-  const renderServiceNow=()=>(
-    <div>
-      {/* Sub-tabs */}
-      <div style={{display:"flex",gap:4,marginBottom:14,background:C.bg,padding:4,borderRadius:8,width:"fit-content"}}>
-        {(["dashboard","table","ai"] as const).map(v=><button key={v} style={S.subTab(subView===v)} onClick={()=>setSubView(v)}>{v==="dashboard"?"📊 Dashboard":v==="table"?"📋 Table":"🤖 AI Report"}</button>)}
-      </div>
-
-      {subView==="dashboard"&&(
-        <>
-          <div style={S.kpiGrid}>
-            <KPI label="Total Tickets" value={snMetrics.total} color={C.info}/>
-            <KPI label="Active" value={snMetrics.active} color={C.warn}/>
-            <KPI label="Resolved" value={snMetrics.resolved} color={C.success}/>
-            <KPI label="SLA Compliance" value={`${snMetrics.slaPct}%`} color={snMetrics.slaPct>=80?C.success:C.danger}/>
-            <KPI label="Avg Resolution" value={`${snMetrics.avgResolve}d`} color={C.accent}/>
-            <KPI label="5+ Day Aging" value={snMetrics.aging.bucket5plus} color={C.danger}/>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            <div style={S.card}>
-              <div style={{fontSize:12,fontWeight:700,marginBottom:10}}>Aging Distribution</div>
-              <MiniBar data={[{label:"0-3d",value:snMetrics.aging.bucket0_3},{label:"4-5d",value:snMetrics.aging.bucket4_5},{label:"5d+",value:snMetrics.aging.bucket5plus}]} color={C.info}/>
-            </div>
-            <div style={S.card}>
-              <div style={{fontSize:12,fontWeight:700,marginBottom:10}}>Priority Mix</div>
-              <MiniBar data={PRIORITIES.map(p=>({label:p,value:snMetrics.priorityDist[p]||0}))} color={C.purple}/>
-            </div>
-          </div>
-          {Object.keys(snMetrics.pendingReasons).length>0&&(
-            <div style={S.card}>
-              <div style={{fontSize:12,fontWeight:700,marginBottom:10}}>Pending Reasons</div>
-              <MiniBar data={Object.entries(snMetrics.pendingReasons).map(([k,v])=>({label:k.slice(0,12),value:v}))} color={C.warn}/>
-            </div>
-          )}
-          {Object.keys(snMetrics.byTeam).length>0&&(
-            <div style={S.card}>
-              <div style={{fontSize:12,fontWeight:700,marginBottom:10}}>Team Performance</div>
-              <div style={S.tableWrap}>
-                <table style={S.table}>
-                  <thead><tr><th style={S.th}>Team</th><th style={S.th}>Total</th><th style={S.th}>Resolved</th><th style={S.th}>Resolution %</th></tr></thead>
-                  <tbody>{Object.entries(snMetrics.byTeam).map(([team,v])=>(
-                    <tr key={team}><td style={S.td}>{team}</td><td style={S.td}>{v.total}</td><td style={S.td}>{v.resolved}</td><td style={S.td}><span style={{color:v.total>0&&(v.resolved/v.total)*100>=70?C.success:C.warn}}>{v.total>0?Math.round((v.resolved/v.total)*100):0}%</span></td></tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {subView==="table"&&(
-        <>
-          <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-            <button style={S.btn(C.accent)} onClick={()=>setSnTickets(p=>[emptySN(),...p])}>+ Add Ticket</button>
-            <button style={S.btnOutline} onClick={()=>snFileRef.current?.click()}>📄 Import CSV</button>
-            <input ref={snFileRef} type="file" accept=".csv" onChange={handleSNUpload} style={{display:"none"}}/>
-            {snTickets.length>0&&<button style={S.btnOutline} onClick={()=>{if(window.confirm("Clear all ServiceNow tickets?"))setSnTickets([])}}>🗑 Clear All</button>}
-          </div>
-          {snTickets.length===0?(
-            <div style={{...S.card,textAlign:"center",padding:40}}>
-              <div style={{fontSize:28,marginBottom:8}}>🎫</div>
-              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>No tickets yet</div>
-              <div style={{fontSize:11,color:C.textDim}}>Click "Add Ticket" to enter manually, or import a CSV from ServiceNow</div>
-            </div>
-          ):(
-            <div style={{...S.tableWrap,maxHeight:500,overflowY:"auto"}}>
-              <table style={S.table}>
-                <thead><tr>
-                  <th style={S.th}>Ticket #</th><th style={S.th}>Created</th><th style={S.th}>Priority</th><th style={S.th}>Category</th>
-                  <th style={S.th}>Status</th><th style={S.th}>Assigned To</th><th style={S.th}>Team</th><th style={S.th}>Requestor</th>
-                  <th style={S.th}>Aging</th><th style={S.th}>SLA</th><th style={S.th}>Actions</th>
-                </tr></thead>
-                <tbody>{snTickets.map(t=>{
-                  const aging=daysBetween(t.createdDate,"");
-                  const sla=t.firstResponse&&t.createdDate?daysBetween(t.createdDate,t.firstResponse)<=3:null;
-                  return(
-                    <tr key={t.id} style={{background:aging>5&&!["Resolved","Closed"].includes(t.status)?C.dangerDim:"transparent"}}>
-                      <td style={S.td}><EditCell value={t.ticketNumber} onChange={v=>updateSN(t.id,"ticketNumber",v)}/></td>
-                      <td style={S.td}><EditCell value={t.createdDate} onChange={v=>updateSN(t.id,"createdDate",v)} type="date"/></td>
-                      <td style={S.td}><EditCell value={t.priority} onChange={v=>updateSN(t.id,"priority",v)} options={PRIORITIES}/></td>
-                      <td style={S.td}><EditCell value={t.category} onChange={v=>updateSN(t.id,"category",v)}/></td>
-                      <td style={S.td}><EditCell value={t.status} onChange={v=>updateSN(t.id,"status",v)} options={SN_STATUSES}/></td>
-                      <td style={S.td}><EditCell value={t.assignedTo} onChange={v=>updateSN(t.id,"assignedTo",v)}/></td>
-                      <td style={S.td}><EditCell value={t.team} onChange={v=>updateSN(t.id,"team",v)}/></td>
-                      <td style={S.td}><EditCell value={t.requestor} onChange={v=>updateSN(t.id,"requestor",v)}/></td>
-                      <td style={{...S.td,fontWeight:600,color:aging>5?C.danger:aging>3?C.warn:C.success}}>{aging}d</td>
-                      <td style={S.td}>{sla===null?<span style={{color:C.textDim}}>–</span>:sla?<span style={{color:C.success}}>✓</span>:<span style={{color:C.danger}}>⚠</span>}</td>
-                      <td style={S.td}><button style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:14}} onClick={()=>setSnTickets(p=>p.filter(x=>x.id!==t.id))}>×</button></td>
-                    </tr>
-                  );
-                })}</tbody>
-              </table>
-            </div>
-          )}
-        </>
-      )}
-
-      {subView==="ai"&&(
-        <>
-          <div style={{display:"flex",gap:8,marginBottom:12}}>
-            <button style={S.btn(C.accent)} onClick={()=>generateAIReport("servicenow")} disabled={snLoading||snTickets.length===0}>
-              {snLoading?"⏳ Generating...":"🤖 Generate Governance Report"}
-            </button>
-            {!callAI&&<span style={{fontSize:11,color:C.warn,alignSelf:"center"}}>⚠ AI not connected — configure API key in Settings</span>}
-          </div>
-          {snTickets.length===0&&<div style={{...S.card,fontSize:12,color:C.textDim}}>Add ticket data first (Dashboard → Table → enter data), then generate a report.</div>}
-          {snAiReport&&<div style={S.aiPanel}>{snAiReport}</div>}
-        </>
-      )}
-    </div>
-  );
-
-  /* ════════════════════════════════════════════════════════════ */
-  /* CONCUR AUDIT MODULE                                        */
-  /* ════════════════════════════════════════════════════════════ */
-  const renderConcur=()=>(
-    <div>
-      <div style={{display:"flex",gap:4,marginBottom:14,background:C.bg,padding:4,borderRadius:8,width:"fit-content"}}>
-        {(["dashboard","table","ai"] as const).map(v=><button key={v} style={S.subTab(subView===v)} onClick={()=>setSubView(v)}>{v==="dashboard"?"📊 Dashboard":v==="table"?"📋 Table":"🤖 AI Report"}</button>)}
-      </div>
-
-      {subView==="dashboard"&&(
-        <>
-          <div style={S.kpiGrid}>
-            <KPI label="Total Reports" value={concurMetrics.total} color={C.purple}/>
-            <KPI label="Cleared" value={concurMetrics.cleared} color={C.success}/>
-            <KPI label="Exceptions" value={concurMetrics.exceptions} color={C.danger}/>
-            <KPI label="Compliance %" value={`${concurMetrics.compliancePct}%`} color={concurMetrics.compliancePct>=80?C.success:C.danger}/>
-            <KPI label="Total Amount" value={`₹${fmtN(Math.round(concurMetrics.totalAmt))}`} color={C.info}/>
-            <KPI label="Violations" value={concurMetrics.violationCount} color={C.warn}/>
-          </div>
-          {Object.keys(concurMetrics.byDept).length>0&&(
-            <div style={S.card}>
-              <div style={{fontSize:12,fontWeight:700,marginBottom:10}}>Department Breakdown</div>
-              <div style={S.tableWrap}>
-                <table style={S.table}>
-                  <thead><tr><th style={S.th}>Department</th><th style={S.th}>Reports</th><th style={S.th}>Amount</th><th style={S.th}>Violations</th></tr></thead>
-                  <tbody>{Object.entries(concurMetrics.byDept).map(([dept,v])=>(
-                    <tr key={dept}><td style={S.td}>{dept}</td><td style={S.td}>{v.count}</td><td style={S.td}>₹{fmtN(Math.round(v.amount))}</td><td style={{...S.td,color:v.violations>0?C.danger:C.success}}>{v.violations}</td></tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          {Object.keys(concurMetrics.exceptionTypes).length>0&&(
-            <div style={S.card}>
-              <div style={{fontSize:12,fontWeight:700,marginBottom:10}}>Exception Types</div>
-              <MiniBar data={Object.entries(concurMetrics.exceptionTypes).map(([k,v])=>({label:k.slice(0,12),value:v}))} color={C.danger}/>
-            </div>
-          )}
-        </>
-      )}
-
-      {subView==="table"&&(
-        <>
-          <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-            <button style={S.btn(C.purple)} onClick={()=>setConcurRecords(p=>[emptyConcur(),...p])}>+ Add Report</button>
-            <button style={S.btnOutline} onClick={()=>concurFileRef.current?.click()}>📄 Import CSV</button>
-            <input ref={concurFileRef} type="file" accept=".csv" onChange={handleConcurUpload} style={{display:"none"}}/>
-            {concurRecords.length>0&&<button style={S.btnOutline} onClick={()=>{if(window.confirm("Clear all Concur records?"))setConcurRecords([])}}>🗑 Clear All</button>}
-          </div>
-          {concurRecords.length===0?(
-            <div style={{...S.card,textAlign:"center",padding:40}}>
-              <div style={{fontSize:28,marginBottom:8}}>🧾</div>
-              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>No audit records yet</div>
-              <div style={{fontSize:11,color:C.textDim}}>Click "Add Report" to enter manually, or import a CSV from Concur</div>
-            </div>
-          ):(
-            <div style={{...S.tableWrap,maxHeight:500,overflowY:"auto"}}>
-              <table style={S.table}>
-                <thead><tr>
-                  <th style={S.th}>Report ID</th><th style={S.th}>Employee</th><th style={S.th}>Dept</th><th style={S.th}>Submitted</th>
-                  <th style={S.th}>Amount</th><th style={S.th}>Violations</th><th style={S.th}>Status</th><th style={S.th}>Auditor</th>
-                  <th style={S.th}>Exception</th><th style={S.th}>Aging</th><th style={S.th}>Actions</th>
-                </tr></thead>
-                <tbody>{concurRecords.map(r=>{
-                  const aging=daysBetween(r.submissionDate,"");
-                  return(
-                    <tr key={r.id} style={{background:r.auditStatus==="Exception Raised"?C.dangerDim:r.auditStatus==="Escalated"?C.warnDim:"transparent"}}>
-                      <td style={S.td}><EditCell value={r.reportId} onChange={v=>updateConcur(r.id,"reportId",v)}/></td>
-                      <td style={S.td}><EditCell value={r.employeeName} onChange={v=>updateConcur(r.id,"employeeName",v)}/></td>
-                      <td style={S.td}><EditCell value={r.department} onChange={v=>updateConcur(r.id,"department",v)}/></td>
-                      <td style={S.td}><EditCell value={r.submissionDate} onChange={v=>updateConcur(r.id,"submissionDate",v)} type="date"/></td>
-                      <td style={S.td}><EditCell value={r.reportAmount} onChange={v=>updateConcur(r.id,"reportAmount",v)}/></td>
-                      <td style={{...S.td,color:parseInt(r.policyViolations||"0")>0?C.danger:C.success,fontWeight:600}}><EditCell value={r.policyViolations} onChange={v=>updateConcur(r.id,"policyViolations",v)}/></td>
-                      <td style={S.td}><EditCell value={r.auditStatus} onChange={v=>updateConcur(r.id,"auditStatus",v)} options={CONCUR_STATUSES}/></td>
-                      <td style={S.td}><EditCell value={r.auditor} onChange={v=>updateConcur(r.id,"auditor",v)}/></td>
-                      <td style={S.td}><EditCell value={r.exceptionType} onChange={v=>updateConcur(r.id,"exceptionType",v)}/></td>
-                      <td style={{...S.td,fontWeight:600,color:aging>7?C.danger:aging>3?C.warn:C.success}}>{aging}d</td>
-                      <td style={S.td}><button style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:14}} onClick={()=>setConcurRecords(p=>p.filter(x=>x.id!==r.id))}>×</button></td>
-                    </tr>
-                  );
-                })}</tbody>
-              </table>
-            </div>
-          )}
-        </>
-      )}
-
-      {subView==="ai"&&(
-        <>
-          <div style={{display:"flex",gap:8,marginBottom:12}}>
-            <button style={S.btn(C.purple)} onClick={()=>generateAIReport("concur")} disabled={concurLoading||concurRecords.length===0}>
-              {concurLoading?"⏳ Generating...":"🤖 Generate Compliance Report"}
-            </button>
-            {!callAI&&<span style={{fontSize:11,color:C.warn,alignSelf:"center"}}>⚠ AI not connected</span>}
-          </div>
-          {concurRecords.length===0&&<div style={{...S.card,fontSize:12,color:C.textDim}}>Add audit data first, then generate a report.</div>}
-          {concurAiReport&&<div style={S.aiPanel}>{concurAiReport}</div>}
-        </>
-      )}
-    </div>
-  );
-
-  /* ════════════════════════════════════════════════════════════ */
-  /* EMAIL MODULE                                                */
-  /* ════════════════════════════════════════════════════════════ */
-  const renderEmail=()=>(
-    <div>
-      <div style={{display:"flex",gap:4,marginBottom:14,background:C.bg,padding:4,borderRadius:8,width:"fit-content"}}>
-        {(["dashboard","table","ai"] as const).map(v=><button key={v} style={S.subTab(subView===v)} onClick={()=>setSubView(v)}>{v==="dashboard"?"📊 Dashboard":v==="table"?"📋 Table":"🤖 AI Report"}</button>)}
-      </div>
-
-      {subView==="dashboard"&&(
-        <>
-          <div style={S.kpiGrid}>
-            <KPI label="Total Tracked" value={emailMetrics.total} color={C.warn}/>
-            <KPI label="Awaiting Response" value={emailMetrics.awaiting} color={C.info}/>
-            <KPI label="Overdue" value={emailMetrics.overdue} color={C.danger}/>
-            <KPI label="Responded" value={emailMetrics.responded} color={C.success}/>
-            <KPI label="Response Rate" value={`${emailMetrics.responsePct}%`} color={emailMetrics.responsePct>=80?C.success:C.warn}/>
-            <KPI label="SLA Met" value={`${emailMetrics.slaPct}%`} color={emailMetrics.slaPct>=80?C.success:C.danger}/>
-          </div>
-          {Object.keys(emailMetrics.byCategory).length>0&&(
-            <div style={S.card}>
-              <div style={{fontSize:12,fontWeight:700,marginBottom:10}}>Communication by Category</div>
-              <MiniBar data={Object.entries(emailMetrics.byCategory).map(([k,v])=>({label:k,value:v}))} color={C.warn}/>
-            </div>
-          )}
-        </>
-      )}
-
-      {subView==="table"&&(
-        <>
-          <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-            <button style={S.btn(C.warn)} onClick={()=>setEmailRecords(p=>[emptyEmail(),...p])}>+ Add Email</button>
-            {emailRecords.length>0&&<button style={S.btnOutline} onClick={()=>{if(window.confirm("Clear all email records?"))setEmailRecords([])}}>🗑 Clear All</button>}
-          </div>
-          {emailRecords.length===0?(
-            <div style={{...S.card,textAlign:"center",padding:40}}>
-              <div style={{fontSize:28,marginBottom:8}}>📧</div>
-              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>No emails tracked yet</div>
-              <div style={{fontSize:11,color:C.textDim}}>Click "Add Email" to track communications</div>
-            </div>
-          ):(
-            <div style={{...S.tableWrap,maxHeight:500,overflowY:"auto"}}>
-              <table style={S.table}>
-                <thead><tr>
-                  <th style={S.th}>Date Sent</th><th style={S.th}>Recipient</th><th style={S.th}>Subject</th><th style={S.th}>Category</th>
-                  <th style={S.th}>Status</th><th style={S.th}>Due Date</th><th style={S.th}>Responded</th><th style={S.th}>SLA</th><th style={S.th}>Actions</th>
-                </tr></thead>
-                <tbody>{emailRecords.map(r=>{
-                  const overdue=r.status==="Awaiting Response"&&r.responseDueDate&&new Date(r.responseDueDate)<new Date();
-                  const slaMet=r.responseDueDate&&r.respondedDate?new Date(r.respondedDate)<=new Date(r.responseDueDate):null;
-                  return(
-                    <tr key={r.id} style={{background:overdue?C.dangerDim:"transparent"}}>
-                      <td style={S.td}><EditCell value={r.dateSent} onChange={v=>updateEmail(r.id,"dateSent",v)} type="date"/></td>
-                      <td style={S.td}><EditCell value={r.recipient} onChange={v=>updateEmail(r.id,"recipient",v)}/></td>
-                      <td style={S.td}><EditCell value={r.subject} onChange={v=>updateEmail(r.id,"subject",v)}/></td>
-                      <td style={S.td}><EditCell value={r.category} onChange={v=>updateEmail(r.id,"category",v)} options={EMAIL_CATEGORIES}/></td>
-                      <td style={S.td}><EditCell value={r.status} onChange={v=>updateEmail(r.id,"status",v)} options={EMAIL_STATUSES}/></td>
-                      <td style={S.td}><EditCell value={r.responseDueDate} onChange={v=>updateEmail(r.id,"responseDueDate",v)} type="date"/></td>
-                      <td style={S.td}><EditCell value={r.respondedDate} onChange={v=>updateEmail(r.id,"respondedDate",v)} type="date"/></td>
-                      <td style={S.td}>{slaMet===null?<span style={{color:C.textDim}}>–</span>:slaMet?<span style={{color:C.success}}>✓</span>:<span style={{color:C.danger}}>⚠</span>}</td>
-                      <td style={S.td}><button style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:14}} onClick={()=>setEmailRecords(p=>p.filter(x=>x.id!==r.id))}>×</button></td>
-                    </tr>
-                  );
-                })}</tbody>
-              </table>
-            </div>
-          )}
-        </>
-      )}
-
-      {subView==="ai"&&(
-        <>
-          <div style={{display:"flex",gap:8,marginBottom:12}}>
-            <button style={S.btn(C.warn)} onClick={()=>generateAIReport("email")} disabled={emailLoading||emailRecords.length===0}>
-              {emailLoading?"⏳ Generating...":"🤖 Generate Email Governance Report"}
-            </button>
-            {!callAI&&<span style={{fontSize:11,color:C.warn,alignSelf:"center"}}>⚠ AI not connected</span>}
-          </div>
-          {emailRecords.length===0&&<div style={{...S.card,fontSize:12,color:C.textDim}}>Add email tracking data first, then generate a report.</div>}
-          {emailAiReport&&<div style={S.aiPanel}>{emailAiReport}</div>}
-        </>
-      )}
-    </div>
-  );
-
-  /* ════════════════════════════════════════════════════════════ */
-  /* MAIN RENDER                                                 */
-  /* ════════════════════════════════════════════════════════════ */
-  return(
-    <div style={S.wrap}>
-      {/* Module content */}
-      <div style={{flex:1,overflowY:"auto",padding:20}}>
-      {module==="servicenow"&&renderServiceNow()}
-      {module==="concur"&&renderConcur()}
-      {module==="email"&&renderEmail()}
+      <div style={{flex:1,overflow:"auto"}}>
+        {module==="dispatch"&&<DispatchHub callAI={callAI} companyName={companyName} pendingPublish={pendingPublish} onClearPublish={()=>setPendingPublish(null)}/>}
+        {module==="concur"&&<ConcurModule cfg={cfg} callAI={callAI} companyName={companyName} onPublish={handlePublish}/>}
+        {module==="email"&&<EmailModule cfg={cfg} callAI={callAI} companyName={companyName} onPublish={handlePublish}/>}
+        {module==="servicenow"&&<ServiceNowModule cfg={cfg} callAI={callAI} companyName={companyName} onPublish={handlePublish}/>}
       </div>
     </div>
   );
