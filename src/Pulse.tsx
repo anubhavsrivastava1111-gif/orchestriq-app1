@@ -60,7 +60,7 @@ const S:Record<string,React.CSSProperties>={
   btnOutline:{padding:"7px 14px",borderRadius:6,border:`1px solid ${C.border}`,background:"transparent",color:C.textMid,fontSize:11,fontWeight:600,cursor:"pointer"},
   badge:(bg:string,fg:string):React.CSSProperties=>({display:"inline-block",padding:"2px 8px",borderRadius:4,fontSize:10,fontWeight:600,background:bg,color:fg}),
   upload:{border:`2px dashed ${C.border}`,borderRadius:8,padding:24,textAlign:"center" as const,cursor:"pointer",transition:"border-color .15s"},
-  aiPanel:{background:"#0D1F2D",border:`1px solid ${C.accent}33`,borderRadius:10,padding:16,marginTop:14,whiteSpace:"pre-wrap" as const,fontSize:12,lineHeight:1.7,color:C.text,maxHeight:500,overflowY:"auto" as const},
+  aiPanel:{background:"#0D1F2D",border:`1px solid ${C.accent}33`,borderRadius:10,padding:16,marginTop:14,whiteSpace:"pre-wrap" as const,fontSize:12,lineHeight:1.7,color:C.text,maxHeight:500,overflowY:"auto"},
 };
 
 /* ── Helpers ── */
@@ -773,7 +773,7 @@ PRODUCE:
   return(
     
       {/* Module content */}
-      <div style={{flex:1,overflowY:"auto" as const,padding:module==="dispatch"?0:20}}>{module==="dispatch"&&(existingDispatch||renderDispatch())}
+      <div style={{flex:1,overflowY:"auto",padding:module==="dispatch"?0:20}}>{module==="dispatch"&&(existingDispatch||renderDispatch())}
       {module==="servicenow"&&renderServiceNow()}
       {module==="concur"&&renderConcur()}
       {module==="email"&&renderEmail()}
