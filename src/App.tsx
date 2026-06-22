@@ -2,6 +2,7 @@ import { GlobalTicker } from "./components/intelligence/GlobalTicker";
 import FundingIntelligence from "./FundingIntelligence";
 import ServiceDesk from "./ServiceDesk";
 import TokenAnalytics, { saveRecord, estimateCost } from "./TokenAnalytics";
+import PulseGovernance from "./Pulse";
 import TokenBadge from "./components/TokenBadge";
 import { getExecutivesCached } from "./lib/executives";
 import { supabase } from "./lib/supabase";
