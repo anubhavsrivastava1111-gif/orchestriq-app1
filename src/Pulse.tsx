@@ -1,10 +1,40 @@
 import React, { useState, useMemo, useCallback, useEffect } from "react";
+import DataIngestion, { ModuleKey } from "./DataIngestion";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PULSE — Integrated Governance Intelligence Hub v2
 // Tabs: Dispatch Hub | Concur T&E | Email Helpdesk | ServiceNow
 // Agentic: each module publishes reports to Dispatch Email Drafter
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ─── VISION-ENABLED AI CALL ─────────────────────────────────────────────────
+// Calls Claude API directly with optional base64 image/PDF for vision tasks
+// This is separate from callAI prop so DataIngestion works independently
+const EFF_KEY = (window as any).__EFF_CLAUDE || "";
+async function callVision(prompt: string, imageBase64?: string, imageMime?: string): Promise<string> {
+  const key = EFF_KEY || (window as any).EFF_CLAUDE || "";
+  if (!key) throw new Error("No API key found. Add EFF_CLAUDE in Cloudflare env vars.");
+
+  const userContent: any[] = [];
+
+  if (imageBase64 && imageMime) {
+    if (imageMime === "application/pdf") {
+      userContent.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: imageBase64 } });
+    } else {
+      userContent.push({ type: "image", source: { type: "base64", media_type: imageMime, data: imageBase64 } });
+    }
+  }
+  userContent.push({ type: "text", text: prompt });
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 4096, messages: [{ role: "user", content: userContent }] }),
+  });
+  if (!res.ok) { const e = await res.text(); throw new Error("API error: " + e.slice(0, 200)); }
+  const data = await res.json();
+  return data.content?.map((b: any) => b.text || "").join("") || "";
+}
 
 const C = {
   bg:"#0B1120",card:"#111827",card2:"#0D1829",
@@ -28,15 +58,15 @@ interface ConcurRow {
   id:string; date:string;
   untouched:number; freshInflow:number; resubmitted:number;
   totalWorkable:number; processed:number; openEOD:number;
-  pendingGenpact:number; pendingBusiness:number;
-  tatPct:number; ukAccuracy:number; gpAccuracy:number;
+  pendingOperations Team:number; pendingBusiness:number;
+  tatPct:number; ukAccuracy:number; teamAccuracy:number;
   aging0_2:number; aging3_5:number; aging6_15:number; agingOver15:number;
   rejectionVol:number;
 }
 interface EmailRow {
   id:string; date:string;
   received:number; resolved:number; slaPct:number;
-  pendingGenpact:number; pendingClient:number; carryForward:number;
+  pendingOperations Team:number; pendingClient:number; carryForward:number;
 }
 interface SNTicket {
   id:string; ticketNo:string; date:string; priority:string; category:string;
@@ -244,13 +274,37 @@ function ConcurModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:
   const [chartMode,setChartMode]=useState<"daily"|"weekly">("weekly");
   const [aiReport,setAiReport]=useState("");
   const [aiLoading,setAiLoading]=useState(false);
+  const [showIngestion,setShowIngestion]=useState(false);
+
+  const handleIngestConfirm=(ingested:Record<string,string>[])=>{
+    const mk=()=>Math.random().toString(36).slice(2,10);
+    const newRows=ingested.map(d=>({
+      id:mk(),date:d.date||today(),
+      untouched:parseFloat(d.untouched)||0,
+      freshInflow:parseFloat(d.freshInflow)||0,
+      resubmitted:parseFloat(d.resubmitted)||0,
+      totalWorkable:0,processed:parseFloat(d.processed)||0,openEOD:0,
+      pendingOperations Team:parseFloat(d.pendingOperations Team)||0,
+      pendingBusiness:parseFloat(d.pendingBusiness)||0,
+      tatPct:(parseFloat(d.tatPct)||98)/100,
+      ukAccuracy:(parseFloat(d.ukAccuracy)||100)/100,
+      teamAccuracy:(parseFloat(d.teamAccuracy)||100)/100,
+      aging0_2:parseFloat(d.aging0_2)||0,
+      aging3_5:parseFloat(d.aging3_5)||0,
+      aging6_15:parseFloat(d.aging6_15)||0,
+      agingOver15:parseFloat(d.agingOver15)||0,
+      rejectionVol:parseFloat(d.rejectionVol)||0,
+    } as any)).map((r:any)=>{r.totalWorkable=r.untouched+r.freshInflow+r.resubmitted;r.openEOD=r.totalWorkable-r.processed;return r;});
+    setRows((prev:any)=>[...prev,...newRows]);
+    setShowIngestion(false);setView("table");
+  };
 
   const workableThresh=cfg.fteCount*Math.floor(cfg.shiftHours*60/cfg.minsPerAudit);
   const processedThresh=Math.floor(workableThresh*1.2);
 
   const addRow=()=>{
     const prev=rows[rows.length-1];
-    setRows(r=>[...r,{id:uid(),date:today(),untouched:prev?prev.openEOD:0,freshInflow:0,resubmitted:0,totalWorkable:0,processed:0,openEOD:0,pendingGenpact:0,pendingBusiness:0,tatPct:0.98,ukAccuracy:1,gpAccuracy:1,aging0_2:0,aging3_5:0,aging6_15:0,agingOver15:0,rejectionVol:0}]);
+    setRows(r=>[...r,{id:uid(),date:today(),untouched:prev?prev.openEOD:0,freshInflow:0,resubmitted:0,totalWorkable:0,processed:0,openEOD:0,pendingOperations Team:0,pendingBusiness:0,tatPct:0.98,ukAccuracy:1,teamAccuracy:1,aging0_2:0,aging3_5:0,aging6_15:0,agingOver15:0,rejectionVol:0}]);
   };
 
   const updateRow=useCallback((id:string,field:keyof ConcurRow,val:string)=>{
@@ -267,19 +321,19 @@ function ConcurModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:
     if(!rows.length)return null;
     const last=rows[rows.length-1];
     const avgTAT=rows.reduce((s,r)=>s+r.tatPct,0)/rows.length;
-    const avgAcc=rows.reduce((s,r)=>s+(r.ukAccuracy+r.gpAccuracy)/2,0)/rows.length;
+    const avgAcc=rows.reduce((s,r)=>s+(r.ukAccuracy+r.teamAccuracy)/2,0)/rows.length;
     const totalRej=rows.reduce((s,r)=>s+r.rejectionVol,0);
     const totalProc=rows.reduce((s,r)=>s+r.processed,0);
-    return {workableInflow:last.totalWorkable,processed:last.processed,pctThreshold:last.processed/processedThresh,backlog:last.pendingGenpact+last.pendingBusiness,tatPct:avgTAT,accuracy:avgAcc,rejPct:totalProc>0?totalRej/totalProc:0,openEOD:last.openEOD,aging:{a:last.aging0_2,b:last.aging3_5,c:last.aging6_15,d:last.agingOver15}};
+    return {workableInflow:last.totalWorkable,processed:last.processed,pctThreshold:last.processed/processedThresh,backlog:last.pendingOperations Team+last.pendingBusiness,tatPct:avgTAT,accuracy:avgAcc,rejPct:totalProc>0?totalRej/totalProc:0,openEOD:last.openEOD,aging:{a:last.aging0_2,b:last.aging3_5,c:last.aging6_15,d:last.agingOver15}};
   },[rows,processedThresh]);
 
   const cd=useMemo(()=>{
     if(chartMode==="daily"){
       const r=rows.slice(-10);
-      return {dates:r.map(x=>x.date),inflow:r.map(x=>x.totalWorkable),processed:r.map(x=>x.processed),threshold:r.map(()=>workableThresh),tatPct:r.map(x=>x.tatPct*100),accuracy:r.map(x=>((x.ukAccuracy+x.gpAccuracy)/2)*100),a0:r.map(x=>x.aging0_2),a3:r.map(x=>x.aging3_5),a6:r.map(x=>x.aging6_15),a15:r.map(x=>x.agingOver15),rej:r.map(x=>x.rejectionVol)};
+      return {dates:r.map(x=>x.date),inflow:r.map(x=>x.totalWorkable),processed:r.map(x=>x.processed),threshold:r.map(()=>workableThresh),tatPct:r.map(x=>x.tatPct*100),accuracy:r.map(x=>((x.ukAccuracy+x.teamAccuracy)/2)*100),a0:r.map(x=>x.aging0_2),a3:r.map(x=>x.aging3_5),a6:r.map(x=>x.aging6_15),a15:r.map(x=>x.agingOver15),rej:r.map(x=>x.rejectionVol)};
     }
     const g=groupByWeek(rows);const keys=Object.keys(g).sort().slice(-4);
-    return {dates:keys.map(k=>weekLabel(k)),inflow:keys.map(k=>g[k].reduce((s,r)=>s+r.totalWorkable,0)),processed:keys.map(k=>g[k].reduce((s,r)=>s+r.processed,0)),threshold:keys.map(()=>workableThresh*5),tatPct:keys.map(k=>{const v=g[k];return v.reduce((s,r)=>s+r.tatPct,0)/v.length*100;}),accuracy:keys.map(k=>{const v=g[k];return v.reduce((s,r)=>s+(r.ukAccuracy+r.gpAccuracy)/2,0)/v.length*100;}),a0:keys.map(k=>g[k].reduce((s,r)=>s+r.aging0_2,0)),a3:keys.map(k=>g[k].reduce((s,r)=>s+r.aging3_5,0)),a6:keys.map(k=>g[k].reduce((s,r)=>s+r.aging6_15,0)),a15:keys.map(k=>g[k].reduce((s,r)=>s+r.agingOver15,0)),rej:keys.map(k=>g[k].reduce((s,r)=>s+r.rejectionVol,0))};
+    return {dates:keys.map(k=>weekLabel(k)),inflow:keys.map(k=>g[k].reduce((s,r)=>s+r.totalWorkable,0)),processed:keys.map(k=>g[k].reduce((s,r)=>s+r.processed,0)),threshold:keys.map(()=>workableThresh*5),tatPct:keys.map(k=>{const v=g[k];return v.reduce((s,r)=>s+r.tatPct,0)/v.length*100;}),accuracy:keys.map(k=>{const v=g[k];return v.reduce((s,r)=>s+(r.ukAccuracy+r.teamAccuracy)/2,0)/v.length*100;}),a0:keys.map(k=>g[k].reduce((s,r)=>s+r.aging0_2,0)),a3:keys.map(k=>g[k].reduce((s,r)=>s+r.aging3_5,0)),a6:keys.map(k=>g[k].reduce((s,r)=>s+r.aging6_15,0)),a15:keys.map(k=>g[k].reduce((s,r)=>s+r.agingOver15,0)),rej:keys.map(k=>g[k].reduce((s,r)=>s+r.rejectionVol,0))};
   },[rows,chartMode,workableThresh]);
 
   const generateReport=async()=>{
@@ -316,8 +370,13 @@ function ConcurModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:
           <button onClick={publishToEmail} disabled={!metrics} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.purple}44`,background:C.purpleDim,color:C.purple,cursor:metrics?"pointer":"not-allowed",opacity:metrics?1:0.4}}>
             📧 Publish Report
           </button>
+          <button onClick={()=>setShowIngestion(true)} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.accent}44`,background:C.accentDim,color:C.accentText,cursor:"pointer"}}>
+            📥 Import Data
+          </button>
         </div>
       </div>
+
+      {showIngestion&&<DataIngestion moduleKey="concur" onConfirm={handleIngestConfirm} onClose={()=>setShowIngestion(false)} callAI={callVision}/>}
 
       {metrics&&(
         <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
@@ -404,7 +463,7 @@ function ConcurModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:
           <div style={{overflowX:"auto",borderRadius:8,border:`1px solid ${C.border}`}}>
             <table style={{width:"100%",borderCollapse:"collapse"}}>
               <thead><tr>
-                {["Date","Untouched","Fresh Inflow","Resubmit","Total Workable","Processed","Open EOD","Pend GP","Pend Biz","TAT%","UK Acc%","GP Acc%","0-2d","3-5d","6-15d",">15d","Rejected",""].map(h=><th key={h} style={TH}>{h}</th>)}
+                {["Date","Untouched","Fresh Inflow","Resubmit","Total Workable","Processed","Open EOD","Pend GP","Pend Biz","TAT%","UK Acc%","Team Acc%","0-2d","3-5d","6-15d",">15d","Rejected",""].map(h=><th key={h} style={TH}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {rows.map(r=>(
@@ -416,11 +475,11 @@ function ConcurModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:
                     <td style={{...TD,fontWeight:700,color:r.totalWorkable>workableThresh?C.warn:C.text}}>{r.totalWorkable}</td>
                     <td style={TD}><Cell value={r.processed} onChange={v=>updateRow(r.id,"processed",v)}/></td>
                     <td style={{...TD,color:r.openEOD>cfg.backlogThreshold?C.danger:C.success,fontWeight:700}}>{r.openEOD}</td>
-                    <td style={TD}><Cell value={r.pendingGenpact} onChange={v=>updateRow(r.id,"pendingGenpact",v)}/></td>
+                    <td style={TD}><Cell value={r.pendingOperations Team} onChange={v=>updateRow(r.id,"pendingOperations Team",v)}/></td>
                     <td style={TD}><Cell value={r.pendingBusiness} onChange={v=>updateRow(r.id,"pendingBusiness",v)}/></td>
                     <td style={{...TD,color:r.tatPct>=cfg.tatSLA?C.success:C.danger,fontWeight:700}}><Cell value={(r.tatPct*100).toFixed(1)} onChange={v=>updateRow(r.id,"tatPct",String(parseFloat(v)/100))}/></td>
                     <td style={{...TD,color:r.ukAccuracy>=cfg.accuracySLA?C.success:C.danger}}><Cell value={(r.ukAccuracy*100).toFixed(1)} onChange={v=>updateRow(r.id,"ukAccuracy",String(parseFloat(v)/100))}/></td>
-                    <td style={{...TD,color:r.gpAccuracy>=cfg.accuracySLA?C.success:C.danger}}><Cell value={(r.gpAccuracy*100).toFixed(1)} onChange={v=>updateRow(r.id,"gpAccuracy",String(parseFloat(v)/100))}/></td>
+                    <td style={{...TD,color:r.teamAccuracy>=cfg.accuracySLA?C.success:C.danger}}><Cell value={(r.teamAccuracy*100).toFixed(1)} onChange={v=>updateRow(r.id,"teamAccuracy",String(parseFloat(v)/100))}/></td>
                     <td style={TD}><Cell value={r.aging0_2} onChange={v=>updateRow(r.id,"aging0_2",v)}/></td>
                     <td style={TD}><Cell value={r.aging3_5} onChange={v=>updateRow(r.id,"aging3_5",v)}/></td>
                     <td style={{...TD,color:r.aging6_15>0?C.warn:C.text}}><Cell value={r.aging6_15} onChange={v=>updateRow(r.id,"aging6_15",v)}/></td>
@@ -461,8 +520,22 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
   const [chartMode,setChartMode]=useState<"daily"|"weekly">("weekly");
   const [aiReport,setAiReport]=useState("");
   const [aiLoading,setAiLoading]=useState(false);
+  const [showIngestion,setShowIngestion]=useState(false);
 
-  const addRow=()=>setRows(r=>[...r,{id:uid(),date:today(),received:0,resolved:0,slaPct:0,pendingGenpact:0,pendingClient:0,carryForward:0}]);
+  const handleIngestConfirm=(ingested:Record<string,string>[])=>{
+    const mk=()=>Math.random().toString(36).slice(2,10);
+    const newRows=ingested.map(d=>({
+      id:mk(),date:d.date||today(),
+      received:parseFloat(d.received)||0,resolved:parseFloat(d.resolved)||0,slaPct:0,
+      pendingOperations Team:parseFloat(d.pendingOperations Team)||0,
+      pendingClient:parseFloat(d.pendingClient)||0,
+      carryForward:parseFloat(d.carryForward)||0,
+    } as any)).map((r:any)=>{if(r.received>0)r.slaPct=r.resolved/r.received;return r;});
+    setRows((prev:any)=>[...prev,...newRows]);
+    setShowIngestion(false);setView("table");
+  };
+
+  const addRow=()=>setRows(r=>[...r,{id:uid(),date:today(),received:0,resolved:0,slaPct:0,pendingOperations Team:0,pendingClient:0,carryForward:0}]);
 
   const updateRow=useCallback((id:string,field:keyof EmailRow,val:string)=>{
     setRows(prev=>prev.map(r=>{
@@ -479,30 +552,30 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
     const total=rows.reduce((s,r)=>s+r.received,0);
     const totalRes=rows.reduce((s,r)=>s+r.resolved,0);
     const avgSLA=rows.reduce((s,r)=>s+r.slaPct,0)/rows.length;
-    return {total,totalRes,avgSLA,pendingGenpact:last.pendingGenpact,pendingClient:last.pendingClient,carryForward:last.carryForward};
+    return {total,totalRes,avgSLA,pendingOperations Team:last.pendingOperations Team,pendingClient:last.pendingClient,carryForward:last.carryForward};
   },[rows]);
 
   const cd=useMemo(()=>{
     if(chartMode==="daily"){
       const r=rows.slice(-10);
-      return {dates:r.map(x=>x.date),received:r.map(x=>x.received),resolved:r.map(x=>x.resolved),sla:r.map(x=>x.slaPct*100),pgp:r.map(x=>x.pendingGenpact),pcl:r.map(x=>x.pendingClient)};
+      return {dates:r.map(x=>x.date),received:r.map(x=>x.received),resolved:r.map(x=>x.resolved),sla:r.map(x=>x.slaPct*100),pgp:r.map(x=>x.pendingOperations Team),pcl:r.map(x=>x.pendingClient)};
     }
     const g=groupByWeek(rows);const keys=Object.keys(g).sort().slice(-4);
-    return {dates:keys.map(k=>weekLabel(k)),received:keys.map(k=>g[k].reduce((s,r)=>s+r.received,0)),resolved:keys.map(k=>g[k].reduce((s,r)=>s+r.resolved,0)),sla:keys.map(k=>{const v=g[k];return v.reduce((s,r)=>s+r.slaPct,0)/v.length*100;}),pgp:keys.map(k=>g[k].reduce((s,r)=>s+r.pendingGenpact,0)),pcl:keys.map(k=>g[k].reduce((s,r)=>s+r.pendingClient,0))};
+    return {dates:keys.map(k=>weekLabel(k)),received:keys.map(k=>g[k].reduce((s,r)=>s+r.received,0)),resolved:keys.map(k=>g[k].reduce((s,r)=>s+r.resolved,0)),sla:keys.map(k=>{const v=g[k];return v.reduce((s,r)=>s+r.slaPct,0)/v.length*100;}),pgp:keys.map(k=>g[k].reduce((s,r)=>s+r.pendingOperations Team,0)),pcl:keys.map(k=>g[k].reduce((s,r)=>s+r.pendingClient,0))};
   },[rows,chartMode]);
 
   const generateReport=async()=>{
     if(!callAI||!rows.length)return;
     setAiLoading(true);
     const m=metrics!;
-    try{setAiReport(await callAI(`You are a Helpdesk Communication Governance Analyst for ${companyName}.\n\nLIVE DATA:\n- Total Received: ${m.total}\n- Total Resolved: ${m.totalRes} (${fmtPct(m.totalRes/Math.max(m.total,1))})\n- Average SLA (24hr): ${fmtPct(m.avgSLA)} (Target: ${fmtPct(cfg.helpdeskSLA)})\n- Pending Genpact: ${m.pendingGenpact}\n- Pending Client: ${m.pendingClient}\n- Carry Forward: ${m.carryForward}\n\nPRODUCE:\n1. EXECUTIVE SUMMARY\n2. SLA COMPLIANCE — breaches and patterns\n3. PENDING ANALYSIS — Genpact vs Client split\n4. TOP 3 ACTION ITEMS\n5. RISK FLAGS`));}catch(e:any){setAiReport("Error: "+e.message);}
+    try{setAiReport(await callAI(`You are a Helpdesk Communication Governance Analyst for ${companyName}.\n\nLIVE DATA:\n- Total Received: ${m.total}\n- Total Resolved: ${m.totalRes} (${fmtPct(m.totalRes/Math.max(m.total,1))})\n- Average SLA (24hr): ${fmtPct(m.avgSLA)} (Target: ${fmtPct(cfg.helpdeskSLA)})\n- Pending Operations Team: ${m.pendingOperations Team}\n- Pending Client: ${m.pendingClient}\n- Carry Forward: ${m.carryForward}\n\nPRODUCE:\n1. EXECUTIVE SUMMARY\n2. SLA COMPLIANCE — breaches and patterns\n3. PENDING ANALYSIS — Operations Team vs Client split\n4. TOP 3 ACTION ITEMS\n5. RISK FLAGS`));}catch(e:any){setAiReport("Error: "+e.message);}
     setAiLoading(false);
   };
 
   const publishToEmail=()=>{
     if(!metrics)return;
     const m=metrics;
-    onPublish({module:"email",subject:`Helpdesk Email Report — ${companyName} — ${today()}`,kpiSummary:`Received: ${m.total} | Resolved: ${m.totalRes} | SLA: ${fmtPct(m.avgSLA)} | Pending Genpact: ${m.pendingGenpact} | Pending Client: ${m.pendingClient}`,tableData:`| Metric | Actual | Target | Status |\n|--------|--------|--------|--------|\n| SLA 24hr | ${fmtPct(m.avgSLA)} | ${fmtPct(cfg.helpdeskSLA)} | ${m.avgSLA>=cfg.helpdeskSLA?"✓ Meets":"✗ Breach"} |\n| Resolution Rate | ${fmtPct(m.totalRes/Math.max(m.total,1))} | 100% | ${m.totalRes>=m.total?"✓ Clear":"⚠ Pending"} |\n| Pending Genpact | ${m.pendingGenpact} | 0 | ${m.pendingGenpact===0?"✓ Clear":"⚠ Action Needed"} |`,period:chartMode==="weekly"?"Weekly":"Daily"});
+    onPublish({module:"email",subject:`Helpdesk Email Report — ${companyName} — ${today()}`,kpiSummary:`Received: ${m.total} | Resolved: ${m.totalRes} | SLA: ${fmtPct(m.avgSLA)} | Pending Operations Team: ${m.pendingOperations Team} | Pending Client: ${m.pendingClient}`,tableData:`| Metric | Actual | Target | Status |\n|--------|--------|--------|--------|\n| SLA 24hr | ${fmtPct(m.avgSLA)} | ${fmtPct(cfg.helpdeskSLA)} | ${m.avgSLA>=cfg.helpdeskSLA?"✓ Meets":"✗ Breach"} |\n| Resolution Rate | ${fmtPct(m.totalRes/Math.max(m.total,1))} | 100% | ${m.totalRes>=m.total?"✓ Clear":"⚠ Pending"} |\n| Pending Operations Team | ${m.pendingOperations Team} | 0 | ${m.pendingOperations Team===0?"✓ Clear":"⚠ Action Needed"} |`,period:chartMode==="weekly"?"Weekly":"Daily"});
   };
 
   const TH:React.CSSProperties={padding:"7px 8px",textAlign:"left",fontSize:9,fontWeight:700,textTransform:"uppercase",color:C.textDim,background:C.card2,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",position:"sticky",top:0};
@@ -525,15 +598,20 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
           <button onClick={publishToEmail} disabled={!metrics} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.purple}44`,background:C.purpleDim,color:C.purple,cursor:metrics?"pointer":"not-allowed",opacity:metrics?1:0.4}}>
             📧 Publish Report
           </button>
+          <button onClick={()=>setShowIngestion(true)} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.warn}44`,background:C.warnDim,color:C.warn,cursor:"pointer"}}>
+            📥 Import Data
+          </button>
         </div>
       </div>
+
+      {showIngestion&&<DataIngestion moduleKey="email" onConfirm={handleIngestConfirm} onClose={()=>setShowIngestion(false)} callAI={callVision}/>}
 
       {metrics&&(
         <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
           <KpiTile label="Emails Received" value={fmtN(metrics.total)} color={C.blue}/>
           <KpiTile label="Resolved" value={fmtN(metrics.totalRes)} sub={fmtPct(metrics.totalRes/Math.max(metrics.total,1))} rag={metrics.totalRes>=metrics.total?"green":"amber"}/>
           <KpiTile label="SLA 24hr" value={fmtPct(metrics.avgSLA)} sub={`Target: ${fmtPct(cfg.helpdeskSLA)}`} rag={metrics.avgSLA>=cfg.helpdeskSLA?"green":"red"}/>
-          <KpiTile label="Pend Genpact" value={metrics.pendingGenpact} rag={metrics.pendingGenpact===0?"green":"amber"}/>
+          <KpiTile label="Pend Operations Team" value={metrics.pendingOperations Team} rag={metrics.pendingOperations Team===0?"green":"amber"}/>
           <KpiTile label="Pend Client" value={metrics.pendingClient} color={C.textMid}/>
           <KpiTile label="Carry Forward" value={metrics.carryForward} rag={metrics.carryForward===0?"green":"red"}/>
         </div>
@@ -550,8 +628,8 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
             <MiniBarChart data={cd.dates.map((d,i)=>({label:d.slice(-5),value:parseFloat(cd.sla[i].toFixed(1)),color:cd.sla[i]>=cfg.helpdeskSLA*100?C.success:C.danger}))} height={70}/>
           </div>
           <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:12,gridColumn:"1 / -1"}}>
-            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Pending Split — Genpact vs Client</div>
-            <StackedBar dates={cd.dates} buckets={[cd.pgp,cd.pcl]} colors={[C.accent,C.warn]} labels={["Genpact","Client"]} height={70}/>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Pending Split — Operations Team vs Client</div>
+            <StackedBar dates={cd.dates} buckets={[cd.pgp,cd.pcl]} colors={[C.accent,C.warn]} labels={["Operations Team","Client"]} height={70}/>
           </div>
         </div>
       )}
@@ -572,7 +650,7 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
           </div>
           <div style={{overflowX:"auto",borderRadius:8,border:`1px solid ${C.border}`}}>
             <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr>{["Date","Received","Resolved","SLA% (auto)","Pend Genpact","Pend Client","Carry Fwd",""].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Date","Received","Resolved","SLA% (auto)","Pend Operations Team","Pend Client","Carry Fwd",""].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead>
               <tbody>
                 {rows.map(r=>(
                   <tr key={r.id}>
@@ -580,7 +658,7 @@ function EmailModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?:(p:s
                     <td style={TD}><Cell value={r.received} onChange={v=>updateRow(r.id,"received",v)}/></td>
                     <td style={TD}><Cell value={r.resolved} onChange={v=>updateRow(r.id,"resolved",v)}/></td>
                     <td style={{...TD,fontWeight:700,color:r.slaPct>=cfg.helpdeskSLA?C.success:C.danger}}>{fmtPct(r.slaPct)}</td>
-                    <td style={TD}><Cell value={r.pendingGenpact} onChange={v=>updateRow(r.id,"pendingGenpact",v)}/></td>
+                    <td style={TD}><Cell value={r.pendingOperations Team} onChange={v=>updateRow(r.id,"pendingOperations Team",v)}/></td>
                     <td style={TD}><Cell value={r.pendingClient} onChange={v=>updateRow(r.id,"pendingClient",v)}/></td>
                     <td style={{...TD,color:r.carryForward>0?C.danger:C.text}}><Cell value={r.carryForward} onChange={v=>updateRow(r.id,"carryForward",v)}/></td>
                     <td style={TD}><button onClick={()=>setRows(p=>p.filter(x=>x.id!==r.id))} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:14}}>×</button></td>
@@ -615,6 +693,25 @@ function ServiceNowModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?
   const [view,setView]=useState<"dashboard"|"table"|"ai">("dashboard");
   const [aiReport,setAiReport]=useState("");
   const [aiLoading,setAiLoading]=useState(false);
+  const [showIngestion,setShowIngestion]=useState(false);
+
+  const handleIngestConfirm=(ingested:Record<string,string>[])=>{
+    const mk=()=>Math.random().toString(36).slice(2,10);
+    const newTickets=ingested.map(d=>({
+      id:mk(),
+      ticketNo:d.ticketNo||("INC"+mk().slice(0,6).toUpperCase()),
+      date:d.date||today(),
+      priority:d.priority||"Medium",
+      category:d.category||"",
+      status:d.status||"Open",
+      assignedTo:d.assignedTo||"",
+      team:d.team||"",
+      firstResponse:d.firstResponse||"",
+      pendingReason:"",notes:"",
+    }));
+    setTickets((prev:any)=>[...prev,...newTickets]);
+    setShowIngestion(false);setView("table");
+  };
 
   const addTicket=()=>setTickets(t=>[...t,{id:uid(),ticketNo:"INC"+uid().slice(0,6).toUpperCase(),date:today(),priority:"Medium",category:"",status:"Open",assignedTo:"",team:"",firstResponse:"",pendingReason:"",notes:""}]);
   const upd=useCallback((id:string,field:keyof SNTicket,val:string)=>setTickets(prev=>prev.map(t=>t.id===id?{...t,[field]:val}:t)),[]);
@@ -656,12 +753,17 @@ function ServiceNowModule({cfg,callAI,companyName,onPublish}:{cfg:Config;callAI?
             {v==="dashboard"?"📊 Dashboard":v==="table"?"🎫 Tickets":"🤖 AI Analysis"}
           </button>
         ))}
-        <div style={{marginLeft:"auto"}}>
+        <div style={{marginLeft:"auto",display:"flex",gap:4}}>
           <button onClick={publishToEmail} disabled={!tickets.length} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.purple}44`,background:C.purpleDim,color:C.purple,cursor:tickets.length?"pointer":"not-allowed",opacity:tickets.length?1:0.4}}>
             📧 Publish Report
           </button>
+          <button onClick={()=>setShowIngestion(true)} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.blue}44`,background:C.blueDim,color:C.blue,cursor:"pointer"}}>
+            📥 Import Data
+          </button>
         </div>
       </div>
+
+      {showIngestion&&<DataIngestion moduleKey="servicenow" onConfirm={handleIngestConfirm} onClose={()=>setShowIngestion(false)} callAI={callVision}/>}
 
       <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
         <KpiTile label="Total Tickets" value={metrics.total} color={C.blue}/>
