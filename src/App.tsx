@@ -1589,6 +1589,7 @@ export default function App(){
   const [tQueue,setTQueue]=useState([]);
   const [qRunning,setQRunning]=useState(false);
   const [p3View,setP3View]=useState("dashboard");
+  const [pulseTab,setPulseTab]=useState("dispatch");
   const [p3Task,setP3Task]=useState("");
   const [p3Pri,setP3Pri]=useState("medium");
   const [p3Auto,setP3Auto]=useState(true);
@@ -3383,7 +3384,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
 )}
 
         {/* PULSE AGENTIC */}
-{view==="dispatch"&&<PulseGovernance callAI={(prompt)=>ask("You are a governance analyst.",[{role:"user",content:prompt}],4000)} companyName={co.name} existingDispatch={<Dispatch templates={dispatchTemplates} setTemplates={setDispatchTemplates} sv={sv} S={S} showToast={showToast} ask={ask} askVision={askVision} MicButton={MicButton} vLang={vLang}/>}/>}
+{view==="dispatch"&&<div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}><div style={{display:"flex",gap:6,padding:"8px 14px",borderBottom:"1px solid #14192a",background:"#0c1120",flexShrink:0}}>{[["dispatch","📡","Dispatch"],["servicenow","🎫","ServiceNow"],["concur","🧾","Concur Audit"],["email","📧","Email"]].map(([id,ic,lb])=><button key={id} onClick={()=>setPulseTab(id)} style={{padding:"6px 14px",borderRadius:6,border:"1px solid "+(pulseTab===id?"#14B8A6":"#1a2030"),background:pulseTab===id?"rgba(20,184,166,0.08)":"transparent",color:pulseTab===id?"#14B8A6":"#5A6480",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{ic} {lb}</button>)}</div><div style={{flex:1,overflow:"auto"}}>{pulseTab==="dispatch"&&<Dispatch templates={dispatchTemplates} setTemplates={setDispatchTemplates} sv={sv} S={S} showToast={showToast} ask={ask} askVision={askVision} MicButton={MicButton} vLang={vLang}/>}{pulseTab!=="dispatch"&&<PulseGovernance callAI={(prompt)=>ask("You are a governance analyst.",[{role:"user",content:prompt}],4000)} companyName={co.name} defaultModule={pulseTab}/>}</div></div>}
 
         {/* ACTION TRACKER */}
 {view==="actions"&&(
