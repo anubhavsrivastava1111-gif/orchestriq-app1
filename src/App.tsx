@@ -3383,9 +3383,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
 )}
 
         {/* PULSE AGENTIC */}
-{view==="dispatch"&&(
-  <Dispatch templates={dispatchTemplates} setTemplates={setDispatchTemplates} sv={sv} S={S} showToast={showToast} ask={ask} askVision={askVision} MicButton={MicButton} vLang={vLang}/>
-)}
+{view==="dispatch"&&<PulseGovernance callAI={(prompt)=>ask("You are a governance analyst.",[{role:"user",content:prompt}],4000)} companyName={co.name}/>}
 
         {/* ACTION TRACKER */}
 {view==="actions"&&(
