@@ -250,25 +250,30 @@ function ConcurModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;
 
   const handleIngestConfirm=(ingested:Record<string,string>[])=>{
     const mk=()=>Math.random().toString(36).slice(2,10);
+    // Smart percent: AI sends whole numbers (98.5). Module stores decimals (0.985).
+    // If n > 1 it's a whole-number percent. If n <= 1 it's already decimal.
+    const pct=(v:string,def:number)=>{const n=parseFloat(v);if(isNaN(n))return def/100;return n>1?n/100:n;};
+    const num=(v:string)=>parseFloat(v)||0;
     const newRows=ingested.map(d=>({
       id:mk(),date:d.date||today(),
-      untouched:parseFloat(d.untouched)||0,
-      freshInflow:parseFloat(d.freshInflow)||0,
-      resubmitted:parseFloat(d.resubmitted)||0,
-      totalWorkable:0,processed:parseFloat(d.processed)||0,openEOD:0,
-      pendingOpsTeam:parseFloat(d.pendingOpsTeam)||0,
-      pendingBusiness:parseFloat(d.pendingBusiness)||0,
-      tatPct:(parseFloat(d.tatPct)||98)/100,
-      ukAccuracy:(parseFloat(d.ukAccuracy)||100)/100,
-      teamAccuracy:(parseFloat(d.teamAccuracy)||100)/100,
-      aging0_2:parseFloat(d.aging0_2)||0,
-      aging3_5:parseFloat(d.aging3_5)||0,
-      aging6_15:parseFloat(d.aging6_15)||0,
-      agingOver15:parseFloat(d.agingOver15)||0,
-      rejectionVol:parseFloat(d.rejectionVol)||0,
+      untouched:num(d.untouched),
+      freshInflow:num(d.freshInflow),
+      resubmitted:num(d.resubmitted),
+      totalWorkable:0,processed:num(d.processed),openEOD:0,
+      pendingOpsTeam:num(d.pendingOpsTeam),
+      pendingBusiness:num(d.pendingBusiness),
+      tatPct:pct(d.tatPct,98),
+      ukAccuracy:pct(d.ukAccuracy,100),
+      teamAccuracy:pct(d.teamAccuracy,100),
+      aging0_2:num(d.aging0_2),
+      aging3_5:num(d.aging3_5),
+      aging6_15:num(d.aging6_15),
+      agingOver15:num(d.agingOver15),
+      rejectionVol:num(d.rejectionVol),
     } as any)).map((r:any)=>{r.totalWorkable=r.untouched+r.freshInflow+r.resubmitted;r.openEOD=r.totalWorkable-r.processed;return r;});
     setRows((prev:any)=>[...prev,...newRows]);
     setShowIngestion(false);setView("table");
+    showToast?.(`${newRows.length} row${newRows.length!==1?"s":""} imported into Concur T&E`,"success");
   };
 
   const workableThresh=cfg.fteCount*Math.floor(cfg.shiftHours*60/cfg.minsPerAudit);
@@ -496,15 +501,19 @@ function EmailModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;c
 
   const handleIngestConfirm=(ingested:Record<string,string>[])=>{
     const mk=()=>Math.random().toString(36).slice(2,10);
+    const pct=(v:string)=>{const n=parseFloat(v);if(isNaN(n))return 0;return n>1?n/100:n;};
+    const num=(v:string)=>parseFloat(v)||0;
     const newRows=ingested.map(d=>({
       id:mk(),date:d.date||today(),
-      received:parseFloat(d.received)||0,resolved:parseFloat(d.resolved)||0,slaPct:0,
-      pendingOpsTeam:parseFloat(d.pendingOpsTeam)||0,
-      pendingClient:parseFloat(d.pendingClient)||0,
-      carryForward:parseFloat(d.carryForward)||0,
-    } as any)).map((r:any)=>{if(r.received>0)r.slaPct=r.resolved/r.received;return r;});
+      received:num(d.received),resolved:num(d.resolved),
+      slaPct:d.slaPct?pct(d.slaPct):0,
+      pendingOpsTeam:num(d.pendingOpsTeam),
+      pendingClient:num(d.pendingClient),
+      carryForward:num(d.carryForward),
+    } as any)).map((r:any)=>{if(!r.slaPct&&r.received>0)r.slaPct=r.resolved/r.received;return r;});
     setRows((prev:any)=>[...prev,...newRows]);
     setShowIngestion(false);setView("table");
+    showToast?.(`${newRows.length} row${newRows.length!==1?"s":""} imported into Email Helpdesk`,"success");
   };
 
   const addRow=()=>setRows(r=>[...r,{id:uid(),date:today(),received:0,resolved:0,slaPct:0,pendingOpsTeam:0,pendingClient:0,carryForward:0}]);
@@ -669,13 +678,17 @@ function ServiceNowModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Con
 
   const handleIngestConfirm=(ingested:Record<string,string>[])=>{
     const mk=()=>Math.random().toString(36).slice(2,10);
+    const VALID_PRIORITIES=["Critical","High","Medium","Low"];
+    const VALID_STATUSES=["Open","Assigned","In Progress","Pending","Resolved","Closed"];
+    const normPriority=(v:string)=>VALID_PRIORITIES.find(p=>p.toLowerCase()===v?.toLowerCase())||"Medium";
+    const normStatus=(v:string)=>VALID_STATUSES.find(s=>s.toLowerCase()===v?.toLowerCase())||"Open";
     const newTickets=ingested.map(d=>({
       id:mk(),
       ticketNo:d.ticketNo||("INC"+mk().slice(0,6).toUpperCase()),
       date:d.date||today(),
-      priority:d.priority||"Medium",
+      priority:normPriority(d.priority),
       category:d.category||"",
-      status:d.status||"Open",
+      status:normStatus(d.status),
       assignedTo:d.assignedTo||"",
       team:d.team||"",
       firstResponse:d.firstResponse||"",
@@ -683,6 +696,7 @@ function ServiceNowModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Con
     }));
     setTickets((prev:any)=>[...prev,...newTickets]);
     setShowIngestion(false);setView("table");
+    showToast?.(`${newTickets.length} ticket${newTickets.length!==1?"s":""} imported into ServiceNow`,"success");
   };
 
   const addTicket=()=>setTickets(t=>[...t,{id:uid(),ticketNo:"INC"+uid().slice(0,6).toUpperCase(),date:today(),priority:"Medium",category:"",status:"Open",assignedTo:"",team:"",firstResponse:"",pendingReason:"",notes:""}]);
