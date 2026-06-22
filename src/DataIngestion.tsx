@@ -2,6 +2,56 @@ import React, { useState, useRef, useCallback } from "react";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DATA INGESTION ENGINE — Universal Smart Import for Pulse Modules
+
+// ─── DIRECT CLAUDE API CALL (vision + text) ──────────────────────────────
+// Uses EFF_CLAUDE env var — same key used by the rest of the app
+// Self-contained so it works regardless of how callAI prop is wired
+async function callClaudeDirectly(
+  prompt: string,
+  imageBase64?: string,
+  imageMime?: string
+): Promise<string> {
+  const key = (import.meta as any).env?.EFF_CLAUDE || (window as any).__EFF_CLAUDE || "";
+  if (!key) throw new Error("API key not found. Go to Settings and ensure your API key is saved.");
+
+  const userContent: any[] = [];
+  if (imageBase64 && imageMime) {
+    if (imageMime === "application/pdf") {
+      userContent.push({
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: imageBase64 },
+      });
+    } else {
+      userContent.push({
+        type: "image",
+        source: { type: "base64", media_type: imageMime, data: imageBase64 },
+      });
+    }
+  }
+  userContent.push({ type: "text", text: prompt });
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 4096,
+      messages: [{ role: "user", content: userContent }],
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error("Claude API error: " + errText.slice(0, 300));
+  }
+  const data = await res.json();
+  return (data.content || []).map((b: any) => b.text || "").join("");
+}
 // Supports: Camera | Screenshot | PDF | Excel/CSV | Word (.docx)
 // Pipeline: File → AI Vision/Text Extraction → Staging Review → Confirm Load
 // ═══════════════════════════════════════════════════════════════════════════
@@ -242,10 +292,8 @@ export default function DataIngestion({ moduleKey, onConfirm, onClose, callAI }:
         setProcessingMsg("Analysing image with AI vision...");
         setProcessingPct(50);
 
-        if (!callAI) throw new Error("AI not connected. Please add your API key in Settings.");
-
         const prompt = buildExtractionPrompt(moduleKey, "screenshot or photo");
-        extractionJSON = await callAI(prompt, base64, mime);
+        extractionJSON = await callClaudeDirectly(prompt, base64, mime);
 
       // ── PDF ───────────────────────────────────────────────────────────────
       } else if (isPDF) {
@@ -256,11 +304,9 @@ export default function DataIngestion({ moduleKey, onConfirm, onClose, callAI }:
         setProcessingMsg("Extracting data from PDF with AI...");
         setProcessingPct(50);
 
-        if (!callAI) throw new Error("AI not connected.");
-
         // Send PDF as document to Claude
         const prompt = buildExtractionPrompt(moduleKey, "PDF document");
-        extractionJSON = await callAI(prompt, base64, "application/pdf");
+        extractionJSON = await callClaudeDirectly(prompt, base64, "application/pdf");
 
       // ── EXCEL / XLSX ──────────────────────────────────────────────────────
       } else if (isExcel) {
@@ -297,9 +343,8 @@ export default function DataIngestion({ moduleKey, onConfirm, onClose, callAI }:
         setProcessingMsg("Mapping columns with AI...");
         setProcessingPct(55);
 
-        if (!callAI) throw new Error("AI not connected.");
         const prompt = buildExtractionPrompt(moduleKey, "Excel spreadsheet", csvText);
-        extractionJSON = await callAI(prompt);
+        extractionJSON = await callClaudeDirectly(prompt);
 
       // ── CSV ───────────────────────────────────────────────────────────────
       } else if (isCSV) {
@@ -310,9 +355,8 @@ export default function DataIngestion({ moduleKey, onConfirm, onClose, callAI }:
         setProcessingMsg("Mapping columns with AI...");
         setProcessingPct(55);
 
-        if (!callAI) throw new Error("AI not connected.");
         const prompt = buildExtractionPrompt(moduleKey, "CSV file", text);
-        extractionJSON = await callAI(prompt);
+        extractionJSON = await callClaudeDirectly(prompt);
 
       // ── WORD DOCUMENT ─────────────────────────────────────────────────────
       } else if (isWord) {
@@ -350,9 +394,8 @@ export default function DataIngestion({ moduleKey, onConfirm, onClose, callAI }:
         setProcessingMsg("Extracting data from document with AI...");
         setProcessingPct(55);
 
-        if (!callAI) throw new Error("AI not connected.");
         const prompt = buildExtractionPrompt(moduleKey, "Word document", text);
-        extractionJSON = await callAI(prompt);
+        extractionJSON = await callClaudeDirectly(prompt);
 
       } else {
         throw new Error(`Unsupported file type: ${mime || "unknown"}. Please use image, PDF, Excel, CSV, or Word.`);
@@ -508,8 +551,13 @@ export default function DataIngestion({ moduleKey, onConfirm, onClose, callAI }:
         </div>
 
         {error && (
-          <div style={{ background:C.dangerDim,border:`1px solid ${C.danger}44`,borderRadius:8,padding:"10px 12px",marginBottom:16,fontSize:11,color:C.danger }}>
+          <div style={{ background:C.dangerDim,border:`1px solid ${C.danger}44`,borderRadius:8,padding:"10px 12px",marginBottom:16,fontSize:11,color:C.danger,lineHeight:1.6 }}>
             ⚠ {error}
+            {error.includes("API key") && (
+              <div style={{marginTop:6,fontSize:10,color:C.textMid}}>
+                The API key is read from your Cloudflare environment variable <strong style={{color:C.accent}}>EFF_CLAUDE</strong>. If it is set, try refreshing the page.
+              </div>
+            )}
           </div>
         )}
 
