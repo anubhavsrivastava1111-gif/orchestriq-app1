@@ -158,11 +158,11 @@ function mapCSVtoConcur(rows:Record<string,string>[]):ConcurRecord[]{
 interface PulseProps {
   callAI?:(prompt:string)=>Promise<string>;
   companyName?:string;
-  existingDispatch?:React.ReactNode;
+  defaultModule?:string;
 }
 
-export default function PulseGovernance({callAI,companyName="Your Company",existingDispatch}:PulseProps){
-  const [module,setModule]=useState<"dispatch"|"servicenow"|"concur"|"email">("dispatch");
+export default function PulseGovernance({callAI,companyName="Your Company",defaultModule}:PulseProps){
+  const [module,setModule]=useState<"dispatch"|"servicenow"|"concur"|"email">((defaultModule as any)||"servicenow");
   const [subView,setSubView]=useState<"dashboard"|"table"|"ai">("dashboard");
 
   /* ── ServiceNow State ── */
@@ -771,16 +771,7 @@ PRODUCE:
   /* MAIN RENDER                                                 */
   /* ════════════════════════════════════════════════════════════ */
   return(
-    <div style={S.wrap}>
-      {/* Module selector */}
-      <div style={S.moduleBar}>
-        {([["dispatch","📡","Dispatch"],["servicenow","🎫","ServiceNow"],["concur","🧾","Concur Audit"],["email","📧","Email"]] as const).map(([id,ic,label])=>(
-          <button key={id} style={S.moduleBtn(module===id)} onClick={()=>{setModule(id as any);setSubView("dashboard")}}>
-            {ic} {label}
-          </button>
-        ))}
-      </div>
-
+    
       {/* Module content */}
       <div style={{flex:1,overflowY:"auto" as const,padding:module==="dispatch"?0:20}}>{module==="dispatch"&&(existingDispatch||renderDispatch())}
       {module==="servicenow"&&renderServiceNow()}
