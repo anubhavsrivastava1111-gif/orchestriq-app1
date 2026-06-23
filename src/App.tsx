@@ -1,4 +1,5 @@
 import { GlobalTicker } from "./components/intelligence/GlobalTicker";
+import BoardroomView from "./BoardroomView";
 import FundingIntelligence from "./FundingIntelligence";
 import ServiceDesk from "./ServiceDesk";
 import TokenAnalytics, { saveRecord, estimateCost } from "./TokenAnalytics";
@@ -2785,128 +2786,28 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
             <div style={{flex:1,overflowY:"auto",padding:"12px 16px"}}>
               {/* BOARDROOM */}
               {nTab==="boardroom"&&(
-                <div>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-                    <div><div style={{fontSize:13,fontWeight:800,color:"#F1F5F9",marginBottom:1}}>AI Boardroom</div><p style={{fontSize:10,color:"#5A6480"}}>Live debate · {co.location||"Set location"} · {cur.code}</p></div>
-                    <div style={{display:"flex",gap:4}}>
-                      {brSessions.length>0&&<button onClick={()=>setBrShowHistory(s=>!s)} style={{...S.hBtn,...(brShowHistory?{color:"#14B8A6",borderColor:"#14B8A644"}:{})}}>{brShowHistory?"✕ Close":"🕓 Past Sessions ("+brSessions.length+")"}</button>}
-                      {brSessions.length>0&&<button onClick={()=>dlFile("Boardroom-"+Date.now()+".json",brSessions)} style={S.hBtn}>Export</button>}
-                    </div>
-                  </div>
-                  {brShowHistory&&(
-                    <div style={{marginBottom:10,background:"#0c1120",border:"1px solid #1a2030",borderRadius:8,padding:"10px 12px"}}>
-                      <div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:0.8,marginBottom:8}}>Saved Boardroom Sessions</div>
-                      {brSessions.map(s=>(
-                        <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"#131825",border:"1px solid #1a2030",borderRadius:6,marginBottom:5}}>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:11,fontWeight:600,color:"#F1F5F9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.q}</div>
-                            <div style={{fontSize:8,color:"#5A6480",marginTop:2}}>{new Date(s.ts).toLocaleString()} · {s.debate?.length||0} executives</div>
-                          </div>
-                          <button onClick={()=>{const restored={q:s.q,debate:s.debate||[],synthesis:s.synthesis||"",drilldown:{},researchBrief:s.researchBrief||""};setBrCur(restored);setBrQ(s.q);setBrAg(s.agents||brAg);sv("cos-br-live",restored);setBrShowHistory(false);showToast("Session reopened — scroll down to view or continue it","success");}} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633",flexShrink:0}}>Reopen</button>
-                          <button onClick={()=>{if(confirm("Delete this saved session?")){const ns=brSessions.filter(x=>x.id!==s.id);setBrSessions(ns);sv("cos-br",ns);}}} style={{...S.hBtn,color:"#EF4444",borderColor:"#EF444433",flexShrink:0}}>×</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:8}}>
-                    {CS.map(a=>{const sel=brAg.includes(a.id);return(<button key={a.id} onClick={()=>!brRun&&setBrAg(sel?brAg.filter(x=>x!==a.id):[...brAg,a.id])} style={{padding:"4px 8px",borderRadius:5,fontSize:10,fontWeight:600,border:"1px solid "+(sel?a.dc+"44":"#1a2030"),background:sel?a.dc+"10":"#0c1120",color:sel?a.dc:"#5A6480",cursor:brRun?"not-allowed":"pointer",fontFamily:"Manrope,sans-serif",opacity:brRun&&!sel?0.5:1}}>{a.ic} {a.t}</button>);})}
-                  </div>
-                  <div style={{display:"flex",gap:5,marginBottom:10}}>
-                    <textarea style={{...S.inp,flex:1,minHeight:50,resize:"vertical"}} value={brQ} onChange={e=>setBrQ(e.target.value)} placeholder="e.g. Should we expand to UAE next quarter?" disabled={brRun}/>
-                    <div style={{display:"flex",flexDirection:"column",gap:4,alignSelf:"flex-end"}}>
-                      <div style={{display:"flex",gap:3}}><LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/><MicButton lang={vLang} onResult={t=>setBrQ(prev=>(prev?prev+" ":"")+t)} disabled={brRun}/></div>
-                      <div style={{display:"flex",gap:3}}>
-                        {brRun&&<button onClick={()=>{cancelRef.current.br=true;}} style={S.cancelBtn}>Cancel</button>}
-                        <button onClick={runBR} disabled={brRun||!brQ.trim()||brAg.length<2} style={{...S.pBtn,width:"auto",padding:"7px 14px",marginTop:0,fontSize:11,opacity:brRun||!brQ.trim()||brAg.length<2?0.3:1}}>{brRun?"Live…":"Start"}</button>
-                      </div>
-                    </div>
-                  </div>
-                  {brPh&&<div style={{fontSize:10,color:"#14B8A6",marginBottom:8}}><span style={{width:5,height:5,borderRadius:"50%",background:"#EF4444",display:"inline-block",marginRight:5,animation:"pulse 1s infinite"}}/>{brPh}</div>}
-                  {brCur.researchBrief&&(
-                    <div style={{marginBottom:10,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:7,padding:"10px 12px"}}>
-                      <div style={{fontSize:10,fontWeight:800,color:"#3B82F6",marginBottom:5,textTransform:"uppercase",letterSpacing:0.8}}>📡 Research Brief — Current Data, Generated {new Date().toLocaleString()}</div>
-                      <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={brCur.researchBrief} ac="#3B82F6"/></div>
-                      <div style={{fontSize:9,color:"#5A6480",marginTop:6,fontStyle:"italic"}}>Click source links to verify independently. AI-generated — please confirm critical figures before external use.</div>
-                    </div>
-                  )}
-                  {brCur.debate.map((e,i)=>(
-                    <div key={i} style={{marginBottom:8,animation:"fadeIn 0.3s ease"}}>
-                      <div style={{background:"#131825",borderRadius:7,padding:"10px 12px",borderLeft:"3px solid "+e.ag.dc}}>
-                        <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5}}>
-                          <span style={{fontSize:14}}>{e.ag.ic}</span><span style={{fontSize:11,fontWeight:700,color:e.ag.dc}}>{e.ag.t}</span>
-                          <span style={{fontSize:8,color:"#3A4060",marginLeft:"auto"}}>Round {i+1}</span>
-                          {e.truncated&&<span style={{fontSize:8,color:"#F59E0B",fontWeight:700,padding:"2px 6px",background:"rgba(245,158,11,0.1)",borderRadius:4}}>⚠ Cut off</span>}
-                          <button onClick={()=>setDrillRole(drillRole===e.ag.id?null:e.ag.id)} style={{...S.hBtn,fontSize:8,padding:"2px 6px"}}>Drill</button>
-                          <button onClick={()=>cp(e.text)} style={S.hBtn}>Copy</button>
-                        </div>
-                        <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={e.text} ac={e.ag.dc}/></div>
-                        {e.truncated&&(
-                          <button onClick={async()=>{
-                            const idx=brCur.debate.findIndex(d=>d.ag.id===e.ag.id);
-                            if(idx===-1)return;
-                            const contFull=await askFull(buildSys(e.ag,co,compData),[{role:"user",content:brQ},{role:"assistant",content:e.text},{role:"user",content:"Continue exactly where you left off. Do not repeat any content already written."}],3000);
-                            const updatedDebate=[...brCur.debate];
-                            updatedDebate[idx]={...updatedDebate[idx],text:updatedDebate[idx].text+contFull.primary,truncated:!!contFull.truncated};
-                            const updatedCur={...brCur,debate:updatedDebate};
-                            setBrCur(updatedCur);sv("cos-br-live",updatedCur);
-                          }} style={{...S.hBtn,marginTop:6,color:"#F59E0B",borderColor:"#F59E0B44"}}>▶ Continue this response</button>
-                        )}
-                        {brCur.drilldown[e.ag.id]?.map((d,di)=>(
-                          <div key={di} style={{marginTop:8,paddingTop:8,borderTop:"1px dashed #1a2030"}}>
-                            <div style={{fontSize:10,color:e.ag.dc,fontWeight:600,marginBottom:3}}>Q: {d.q}</div>
-                            <div style={{fontSize:11,lineHeight:1.65,color:"#8892B0"}}><Md text={d.a} ac={e.ag.dc}/></div>
-                          </div>
-                        ))}
-                        {drillRole===e.ag.id&&(
-                          <div style={{marginTop:8,paddingTop:8,borderTop:"1px dashed #1a2030"}}>
-                            <div style={{display:"flex",gap:4}}>
-                              <input style={{...S.inp,flex:1,padding:"6px 9px",fontSize:11}} value={drillQ} onChange={ev=>setDrillQ(ev.target.value)} placeholder={"Ask "+e.ag.t+" a follow-up…"} onKeyDown={ev=>ev.key==="Enter"&&runDrill()} disabled={drillRun}/>
-                              <button onClick={runDrill} disabled={drillRun||!drillQ.trim()} style={{...S.pBtn,padding:"5px 12px",fontSize:10,marginTop:0,width:"auto",background:e.ag.dc,color:"#0a0e1a"}}>{drillRun?"…":"Ask"}</button>
-                              <button onClick={()=>{setDrillRole(null);setDrillQ("");}} style={S.hBtn}>×</button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                  {brCur.synthesis&&(
-                    <div style={{marginTop:10,animation:"fadeIn 0.4s"}}>
-                      <div style={{background:"linear-gradient(135deg,rgba(20,184,166,0.06),rgba(59,130,246,0.04))",borderRadius:8,padding:"14px 16px",border:"1px solid rgba(20,184,166,0.18)"}}>
-                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                          <div style={{fontSize:12,fontWeight:800,color:"#14B8A6"}}>BOARDROOM SYNTHESIS</div>
-                          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                            <button onClick={()=>cp(brCur.synthesis)} style={S.hBtn}>Copy</button>
-                            <button onClick={()=>quickExport("pdf","executive","Boardroom — "+brCur.q,brCur.synthesis)} style={S.hBtn}>📄 PDF</button>
-                            <button onClick={()=>quickExport("pptx","strategy","Boardroom — "+brCur.q,brCur.synthesis)} style={S.hBtn}>📊 PPT</button>
-                            <button onClick={()=>dlFile("Synthesis-"+Date.now()+".md","# "+brCur.q+"\n\n"+brCur.synthesis,"text/markdown")} style={S.hBtn}>MD</button>
-                            <button onClick={()=>extractActionItems("boardroom","Boardroom — \""+brCur.q+"\"",brCur.synthesis)} disabled={extracting==="boardroom"} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>{extracting==="boardroom"?"Extracting...":"✅ Extract Action Items"}</button>
-                          </div>
-                        </div>
-                        <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={brCur.synthesis}/></div>
-                      </div>
-                    </div>
-                  )}
-                  {(brCur.debate.length>0||brCur.synthesis)&&!brRun&&(
-                    <div style={{marginTop:10,background:"#0c1120",border:"1px solid #1a2030",borderRadius:8,padding:"10px 12px"}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:6}}>
-                        <div style={{fontSize:10,fontWeight:700,color:"#14B8A6"}}>📦 Entire Discussion</div>
-                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                          <button onClick={()=>quickExport("pdf","detailed","Boardroom Discussion — "+brCur.q,(brCur.researchBrief?"## Research Brief\n"+brCur.researchBrief+"\n\n":"")+brCur.debate.map(d=>"## "+d.ag.t+"\n"+d.text).join("\n\n")+(brCur.synthesis?"\n\n## Boardroom Synthesis\n"+brCur.synthesis:""))} style={S.hBtn}>📄 Full PDF</button>
-                          <button onClick={()=>quickExport("pptx","strategy","Boardroom Discussion — "+brCur.q,(brCur.researchBrief?"## Research Brief\n"+brCur.researchBrief+"\n\n":"")+brCur.debate.map(d=>"## "+d.ag.t+"\n"+d.text).join("\n\n")+(brCur.synthesis?"\n\n## Boardroom Synthesis\n"+brCur.synthesis:""))} style={S.hBtn}>📊 Full PPT</button>
-                          <button onClick={()=>dlFile("Boardroom-Full-"+Date.now()+".md","# "+brCur.q+"\n\n"+brCur.debate.map(d=>"## "+d.ag.t+"\n"+d.text).join("\n\n")+(brCur.synthesis?"\n\n## Synthesis\n"+brCur.synthesis:""),"text/markdown")} style={S.hBtn}>Full MD</button>
-                        </div>
-                      </div>
-                      <div style={{fontSize:10,fontWeight:700,color:"#14B8A6",marginBottom:6}}>↻ Continue this debate</div>
-                      <p style={{fontSize:9,color:"#5A6480",marginBottom:8,lineHeight:1.5}}>Ask a follow-up. The same executives respond again, with the full debate above as context.</p>
-                      <div style={{display:"flex",gap:5}}>
-                        <textarea style={{...S.inp,flex:1,minHeight:42,resize:"vertical"}} value={brFollowUp} onChange={e=>setBrFollowUp(e.target.value)} placeholder="e.g. What changes if our budget is halved?" disabled={brRun}/>
-                        <button onClick={runBRContinue} disabled={brRun||!brFollowUp.trim()} style={{...S.pBtn,width:"auto",padding:"7px 14px",marginTop:0,fontSize:11,alignSelf:"flex-end",opacity:brRun||!brFollowUp.trim()?0.3:1}}>{brRun?"…":"Continue"}</button>
-                      </div>
-                    </div>
-                  )}
-                  <div ref={brEnd}/>
-                </div>
-              )}
+  <BoardroomView
+    brQ={brQ} setBrQ={setBrQ}
+    brAg={brAg} setBrAg={setBrAg}
+    brCur={brCur} brRun={brRun} brPh={brPh}
+    brSessions={brSessions} setBrSessions={setBrSessions}
+    brShowHistory={brShowHistory} setBrShowHistory={setBrShowHistory}
+    brFollowUp={brFollowUp} setBrFollowUp={setBrFollowUp}
+    drillRole={drillRole} setDrillRole={setDrillRole}
+    drillQ={drillQ} setDrillQ={setDrillQ}
+    drillRun={drillRun} brEnd={brEnd}
+    runBR={runBR} runBRContinue={runBRContinue} runDrill={runDrill}
+    cancelBR={()=>{cancelRef.current.br=true;}}
+    dlFile={dlFile} cp={cp}
+    quickExport={quickExport}
+    extractActionItems={extractActionItems}
+    extracting={extracting}
+    showToast={showToast} sv={sv} setBrCur={setBrCur}
+    CS={CS} co={co} cur={cur}
+    isDark={theme==="dark"||theme==="blue"||theme==="gray"}
+    MicButton={MicButton} vLang={vLang}
+  />
+)}
 
               {/* TIME MACHINE */}
               {nTab==="timemachine"&&(
