@@ -116,14 +116,17 @@
   flex-shrink: 0 !important;
 }
 
-/* ── LAYOUT: sidebar + main below header ── */
-#oiq-root > .oiq-content-row,
-#oiq-root > div[style*="display:flex"][style*="flex:1"] {
+/* ── LAYOUT: body row (sidebar + main) sits below header + ticker ── */
+.oiq-body-row {
   display: flex !important;
   flex: 1 !important;
   overflow: hidden !important;
   min-height: 0 !important;
-  margin-top: var(--header-h) !important;
+}
+
+/* Root is flex-column: header(fixed), ticker, body-row */
+#oiq-root {
+  padding-top: var(--header-h) !important;
 }
 
 /* ── SIDEBAR ── */
@@ -263,7 +266,7 @@
 #oiq-sb-overlay.oiq-overlay-visible { opacity: 1 !important; }
 
 /* ── MAIN CONTENT ── */
-#oiq-root > div[style*="flex:1"][style*="overflow:\"hidden\""][style*="display:\"flex\""] {
+#oiq-main {
   margin-left: 0 !important;
   overflow: hidden !important;
   height: 100% !important;
