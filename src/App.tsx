@@ -2761,7 +2761,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
         onClick={()=>{setSbOpen(false);const r=document.getElementById("oiq-root");if(r)r.classList.remove("oiq-sb-open");const ov=document.getElementById("oiq-sb-overlay");if(ov)ov.classList.remove("oiq-overlay-visible");}}/>
       <GlobalTicker />
       {/* ── SIDEBAR ── */}
-      <div id="oiq-sidebar" role="navigation" aria-label="Executive roster and module navigation" style={{width:210,background:"#0c1120",borderRight:"1px solid #14192a",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden",paddingTop:'0'}}>
+      <div id="oiq-sidebar" className="oiq-sidebar" role="navigation" aria-label="Executive roster and module navigation" style={{width:210,background:"#0c1120",borderRight:"1px solid #14192a",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden",paddingTop:'0'}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 8px",borderBottom:"1px solid #14192a"}}>
           <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
             <span style={{color:"#14B8A6",fontSize:13,fontWeight:900}}>◆</span>
@@ -2820,9 +2820,9 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
         {/* NERVE CENTER */}
         {view==="nerve"&&(
           <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}>
-            <div style={{display:"flex",gap:3,padding:"8px 14px",borderBottom:"1px solid #14192a",background:"#0c1120"}}>
+            <div className="oiq-nerve-tabs" style={{display:"flex",gap:3,padding:"8px 14px",borderBottom:"1px solid #14192a",background:"#0c1120"}}>
               {[["boardroom","🏛️","AI Boardroom","#14B8A6"],["timemachine","⏳","Time Machine","#8B5CF6"],["autopilot","🤖","Autopilot","#F59E0B"]].map(([id,ic,lb,c])=>(
-                <button key={id} onClick={()=>setNTab(id)} style={{...S.nrvTab,...(nTab===id?{background:c+"10",color:c,borderColor:c+"30"}:{})}}><span style={{fontSize:15}}>{ic}</span><span style={{fontSize:10,fontWeight:700}}>{lb}</span></button>
+                <button key={id} className="oiq-nerve-btn" onClick={()=>setNTab(id)} style={{...S.nrvTab,...(nTab===id?{background:c+"10",color:c,borderColor:c+"30"}:{})}}><span style={{fontSize:15}}>{ic}</span><span style={{fontSize:10,fontWeight:700}}>{lb}</span></button>
               ))}
             </div>
             <div style={{flex:1,overflowY:"auto",padding:"12px 16px"}}>
