@@ -64,6 +64,21 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    GLOBAL RESET
    ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Root app container — flex column (header on top, then flex row of sidebar+main) */
+#oiq-root {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+}
+/* Inner wrapper for sidebar + main — sits below header */
+#oiq-root > header + * {
+  display: flex !important;
+  flex: 1 !important;
+  overflow: hidden !important;
+  min-height: 0 !important;
+}
 #oiq-root, #oiq-root * {
   font-family: var(--font) !important;
   box-sizing: border-box;
@@ -179,26 +194,24 @@
    SIDEBAR — Collapsible, responsive, touch-friendly
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* Target App.tsx sidebar div */
+/* Target App.tsx sidebar div — flex layout (not fixed) for correct content sizing */
 #oiq-root > div[style*="width:210"],
 #oiq-root > div[style*="width: 210"] {
-  position: fixed !important;
-  top: var(--header-h) !important;
-  left: 0 !important;
-  bottom: 0 !important;
+  position: relative !important;
   width: var(--sb-w) !important;
   min-width: var(--sb-w) !important;
   max-width: var(--sb-w) !important;
+  flex-shrink: 0 !important;
   background: var(--bg2, #0c1120) !important;
   border-right: 1px solid var(--border, #1a2030) !important;
   display: flex !important;
   flex-direction: column !important;
   overflow: hidden !important;
   padding-top: 0 !important;
-  z-index: 150 !important;
-  transition: width var(--sb-transition), transform var(--sb-transition) !important;
-  box-shadow: 2px 0 16px rgba(0,0,0,0.18) !important;
-  will-change: width, transform !important;
+  z-index: 10 !important;
+  transition: width var(--sb-transition), min-width var(--sb-transition) !important;
+  will-change: width !important;
+  height: 100% !important;
 }
 
 /* Collapsed sidebar — icon only */
@@ -360,16 +373,18 @@
    MAIN CONTENT — shifts with sidebar
    ═══════════════════════════════════════════════════════════════════════════ */
 #oiq-root > div[style*="flex:1"] {
-  margin-left: var(--sb-w) !important;
-  margin-top: var(--header-h) !important;
-  transition: margin-left var(--sb-transition) !important;
+  margin-left: 0 !important;
+  margin-top: 0 !important;
+  transition: none !important;
   overflow: hidden !important;
-  height: calc(100vh - var(--header-h)) !important;
+  height: 100% !important;
   display: flex !important;
   flex-direction: column !important;
+  flex: 1 !important;
+  min-width: 0 !important;
 }
 #oiq-root.oiq-sb-collapsed > div[style*="flex:1"] {
-  margin-left: var(--sb-w-col) !important;
+  margin-left: 0 !important;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1090,4 +1105,215 @@
   #oiq-root > div[style*="width:210"] { display: none !important; }
   #oiq-root > div[style*="flex:1"] { margin-left: 0 !important; }
   #oiq-header { position: static !important; }
+}
+
+/* ═══ NERVE CENTER TABS FIX ═══════════════════════════════════════════════
+   The nrvTab buttons (Boardroom / Time Machine / Autopilot) were hidden
+   because the CSS selector was too specific. Fixed with broader matching. */
+
+/* The tab bar container */
+#oiq-root div[style*="nrvTab"],
+#oiq-root div[style*="gap:3"][style*="background:"#0c1120""],
+#oiq-root div[style*="gap:3,padding:"8px 14px""],
+#oiq-root > div[style*="flex:1"] > div > div[style*="display:"flex""][style*="gap:3"][style*="padding"] {
+  display: flex !important;
+  gap: 8px !important;
+  padding: 12px 16px !important;
+  background: var(--panel, #0c1120) !important;
+  border-bottom: 1px solid var(--border, #1a2030) !important;
+  flex-shrink: 0 !important;
+}
+
+/* Nerve center tab BUTTONS — Boardroom / Time Machine / Autopilot */
+#oiq-root button[style*="nrvTab"],
+#oiq-root div[style*="gap:3"][style*="background:"#0c1120""] button,
+#oiq-root div[style*="gap:3"][style*="padding:"8px 14px""] > button {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 12px 18px !important;
+  border-radius: var(--r-md) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  transition: all var(--tr) !important;
+  flex: 1 !important;
+  min-height: 56px !important;
+  cursor: pointer !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Nerve tab icon */
+#oiq-root button[style*="nrvTab"] span:first-child {
+  font-size: 20px !important;
+  line-height: 1 !important;
+}
+
+/* Nerve tab label */
+#oiq-root button[style*="nrvTab"] span:last-child {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.04em !important;
+}
+
+/* ═══ SIDEBAR COLLAPSED — icon only, clean look ═══════════════════════════ */
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"],
+#oiq-root.oiq-sb-collapsed > div[style*="width: 210"] {
+  width: var(--sb-w-col) !important;
+  min-width: var(--sb-w-col) !important;
+  max-width: var(--sb-w-col) !important;
+}
+
+/* Hide text in collapsed mode — only show icons */
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] span[style*="fontWeight:700"][style*="fontSize:12"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] span[style*="overflow:"hidden""],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] > div:first-child > div:first-child > span:last-child,
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] > div:nth-child(2),
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] > div[style*="padding:"3px 8px 2px""],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] > div[style*="gap:1"][style*="padding:"3px 6px""],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div[style*="fontSize:7"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div[style*="fontSize:8"]:not([style*="width"]),
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div[style*="fontSize:9"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div[style*="flex:1"][style*="minWidth:0"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] span[style*="marginLeft:"auto""] {
+  display: none !important;
+}
+
+/* Keep icons visible in collapsed mode */
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] button span[style*="fontSize:12"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] button span[style*="fontSize:14"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] button span[style*="fontSize:16"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] button span[style*="fontSize:18"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] button span[style*="fontSize:20"] {
+  display: flex !important;
+}
+
+/* Centre icons in collapsed buttons */
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div > button {
+  justify-content: center !important;
+  padding: 8px 4px !important;
+}
+
+/* Module nav grid in collapsed mode */
+#oiq-root.oiq-sb-collapsed div[style*="gridTemplateColumns"] {
+  grid-template-columns: 1fr !important;
+  padding: 6px 4px !important;
+}
+#oiq-root.oiq-sb-collapsed div[style*="gridTemplateColumns"] button span:last-child {
+  display: none !important;
+}
+#oiq-root.oiq-sb-collapsed div[style*="gridTemplateColumns"] button {
+  padding: 10px 4px !important;
+}
+
+/* ═══ TOKEN BADGE — Draggable position ═════════════════════════════════════ */
+/* TokenBadge component is fixed bottom-right by default.
+   We make it draggable via CSS user-select + grab cursor.
+   The actual drag JS is injected via initA11y() in a11y.ts */
+#oiq-root [class*="TokenBadge"],
+#oiq-root div[style*="54K tokens"],
+#oiq-root div[style*="tokens"][style*="fixed"],
+#oiq-root div[style*="position:"fixed""][style*="zIndex:9000"] {
+  cursor: grab !important;
+  user-select: none !important;
+  touch-action: none !important;
+  transition: box-shadow var(--tr) !important;
+}
+#oiq-root [class*="TokenBadge"]:active,
+#oiq-root div[style*="54K tokens"]:active {
+  cursor: grabbing !important;
+  box-shadow: var(--shadow-xl) !important;
+}
+
+/* ═══ HEADER + GLOBAL TICKER LAYOUT ════════════════════════════════════════ */
+/* Header sits at top, GlobalTicker (Intelligence Feed) sits below it.
+   The content area below fills remaining space correctly. */
+#oiq-header {
+  flex-shrink: 0 !important;
+  z-index: 500 !important;
+}
+
+/* GlobalTicker (Intelligence Feed) — below header, above content */
+#oiq-root > [class*="Ticker"],
+#oiq-root > div[style*="MARKETS"],
+#oiq-root > div[style*="ticker"],
+.global-ticker,
+[class*="GlobalTicker"] {
+  position: relative !important;
+  z-index: 400 !important;
+  flex-shrink: 0 !important;
+  width: 100% !important;
+}
+
+/* The flex row containing sidebar + main — fills remaining space */
+#oiq-root > div[style*="display:"flex""][style*="height:"100vh""] {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+}
+
+/* The inner layout row (sidebar + main content side by side) */
+#oiq-root > div[style*="display:"flex""][style*="height:"100vh""] > div[style*="flex:1"] {
+  min-height: 0 !important;
+}
+
+/* ═══ TABLET RESPONSIVE FIX ════════════════════════════════════════════════ */
+@media (max-width: 1024px) {
+  #oiq-hamburger { display: flex !important; }
+
+  /* Sidebar off-screen by default on tablet */
+  #oiq-root > div[style*="width:210"],
+  #oiq-root > div[style*="width: 210"] {
+    position: fixed !important;
+    top: var(--header-h) !important;
+    left: 0 !important;
+    bottom: 0 !important;
+    transform: translateX(calc(-1 * var(--sb-w))) !important;
+    z-index: 300 !important;
+    box-shadow: none !important;
+    transition: transform var(--sb-transition) !important;
+  }
+  /* Open state */
+  #oiq-root.oiq-sb-open > div[style*="width:210"],
+  #oiq-root.oiq-sb-open > div[style*="width: 210"] {
+    transform: translateX(0) !important;
+    box-shadow: var(--shadow-xl) !important;
+  }
+  /* Main content always full width on tablet — no margin */
+  #oiq-root > div[style*="flex:1"] {
+    margin-left: 0 !important;
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 767px) {
+  #oiq-root > div[style*="width:210"],
+  #oiq-root > div[style*="width: 210"] {
+    position: fixed !important;
+    top: var(--header-h) !important;
+    left: 0 !important;
+    bottom: 0 !important;
+    transform: translateX(calc(-1 * var(--sb-w))) !important;
+    z-index: 300 !important;
+    width: min(var(--sb-w), 85vw) !important;
+    min-width: min(var(--sb-w), 85vw) !important;
+  }
+  #oiq-root.oiq-sb-open > div[style*="width:210"],
+  #oiq-root.oiq-sb-open > div[style*="width: 210"] {
+    transform: translateX(0) !important;
+    box-shadow: var(--shadow-xl) !important;
+  }
+  #oiq-root > div[style*="flex:1"] {
+    margin-left: 0 !important;
+    width: 100% !important;
+  }
+  /* Show overlay */
+  #oiq-root.oiq-sb-open #oiq-sb-overlay {
+    display: block !important;
+    opacity: 1 !important;
+  }
 }
