@@ -1,4 +1,5 @@
 import { GlobalTicker } from "./components/intelligence/GlobalTicker";
+import { initA11y, announce, announceAIResponse, announceLoading, announceBoardroomPhase } from "./a11y";
 import VoiceEngine from "./VoiceEngine";
 import BoardroomView from "./BoardroomView";
 import FundingIntelligence from "./FundingIntelligence";
@@ -1520,6 +1521,8 @@ function renderStructuredDeck(pptx,slides,A,pal=QE_PAL){
 
 export default function App(){
   const [page,setPage]=useState("landing");
+  const [sbOpen,setSbOpen]=useState(false);
+  const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return localStorage.getItem("oiq-sb-col")==="1";}catch{return false;}});
   const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:""});
   const [defP,setDefP]=useState("groq");
   const [multiAI,setMultiAI]=useState(false);
@@ -1686,6 +1689,10 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     const saved=loadResumeState();
     if(saved)setWfResumeData(saved);
     enrichEPFromSupabase();
+    setTimeout(()=>{
+      initA11y();
+      try{const r=document.getElementById("oiq-root");if(r&&localStorage.getItem("oiq-sb-col")==="1")r.classList.add("oiq-sb-collapsed");}catch{}
+    },300);
   })();
 },[]);
   
@@ -1783,13 +1790,14 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     const msgs=chats[selRole]||[];
     const nm={role:"user",content:text};
     const upd={...chats,[selRole]:[...msgs,nm]};
-    setChats(upd);setInput("");setLoading(true);
+    setChats(upd);setInput("");setLoading(true);announceLoading(true,role.t);
     try{
       const sys=buildSys(role,co,compData);
       const apiM=[...msgs,nm].map(m=>({role:m.role==="user"?"user":"assistant",content:m.content})).slice(-16);
       const reply=await ask(sys,apiM);
       const fin={...upd,[selRole]:[...upd[selRole],{role:"assistant",content:reply}]};
       setChats(fin);sv("cos-ch",fin);
+      announceAIResponse(reply,role.t);
     }catch(e){
       setError(e.message);
       showToast(e.message,"error");
@@ -1906,7 +1914,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         if(cancelRef.current.br){showToast("Boardroom cancelled","warning");break;}
         const ag=agents[i];const p=EP[ag.id]||{};
         const prev=res.map(r=>"\n--- "+r.ag.t+" ---\n"+r.text).join("\n");
-        setBrPh(ag.ic+" "+ag.t+" is analyzing…");
+        setBrPh(ag.ic+" "+ag.t+" is analyzing…");announceBoardroomPhase(ag.t+" is analyzing");
         const sys="You are "+ag.f+" at \""+co.name+"\".\nPROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+researchContext+"\nLIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State position with calculations in "+synCur.sym+".":"Previous:\n"+prev+"\n\nSTRICT NO-REPEAT RULE: Do NOT restate, recompute, or rebuild TAM/SAM/SOM, the full budget breakdown, the cap table, unit economics tables, or any other table/section a previous speaker already gave in full above. Assume the user has already read it. Reference a prior number only briefly and only if challenging/correcting it (e.g. 'CFO's CAC figure above undercounts X because...'). Your entire contribution must be NEW: something no previous speaker covered, a risk they missed, or a sharper figure in YOUR "+ag.dl+" domain that genuinely wasn't addressed. If you have nothing genuinely new beyond what's already on the table, say so plainly in 2-3 sentences instead of padding with a restated plan.")+"\n200-350 words MAX. Brevity signals confidence, not limitation.\n\nVERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it explicitly as 'ESTIMATE (unverified)'. Never present an invented number as fact.";
         let agText="";
         let agTruncated=false;
@@ -2717,9 +2725,43 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
 
   return(
     <div id="oiq-root" style={{display:"flex",height:"100vh",background:"#0a0e1a",fontFamily:"Manrope,sans-serif",color:"#A0AAC0"}}>
+      <a href="#oiq-main" className="skip-link">Skip to main content</a>
+      <div id="oiq-live" aria-live="polite" aria-atomic="false" className="sr-only"/>
+      <header id="oiq-header" role="banner" aria-label="OrchestrIQ navigation">
+        <button id="oiq-hamburger" aria-label="Toggle navigation menu" aria-expanded={sbOpen}
+          onClick={()=>{const open=!sbOpen;setSbOpen(open);const r=document.getElementById("oiq-root");if(r){r.classList.toggle("oiq-sb-open",open);}const ov=document.getElementById("oiq-sb-overlay");if(ov){ov.classList.toggle("oiq-overlay-visible",open);}}}>
+          {sbOpen?"✕":"☰"}
+        </button>
+        <div id="oiq-header-logo">
+          <span className="oiq-brand-mark">◆</span>
+          <span className="oiq-brand-name">OrchestrIQ</span>
+        </div>
+        <div id="oiq-header-workspace" title={co.name||"Set company name in Settings"}>
+          {co.name||"Set workspace"}
+        </div>
+        <div id="oiq-header-actions">
+          <select value={theme} onChange={e=>changeTheme(e.target.value)} aria-label="Select theme"
+            style={{background:"none",border:"1px solid #1a2030",borderRadius:20,color:"#A0AAC0",fontSize:12,cursor:"pointer",padding:"4px 8px",fontFamily:"Inter,sans-serif",height:32}}>
+            {Object.entries(THEMES).map(([id,t])=><option key={id} value={id} style={{background:"#0a0e1a"}}>{t.ic} {t.name}</option>)}
+          </select>
+          <button aria-label={sbCollapsed?"Expand sidebar":"Collapse sidebar"}
+            onClick={()=>{const next=!sbCollapsed;setSbCollapsed(next);try{localStorage.setItem("oiq-sb-col",next?"1":"0");}catch{}const r=document.getElementById("oiq-root");if(r)r.classList.toggle("oiq-sb-collapsed",next);}}
+            style={{background:"none",border:"1px solid #1a2030",borderRadius:8,padding:"4px 10px",color:"#A0AAC0",cursor:"pointer",fontSize:14,fontFamily:"Inter,sans-serif",height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            {sbCollapsed?"»":"«"}
+          </button>
+          <button onClick={()=>setShowExport(true)} aria-label="Export Studio" title="Export Studio — PDF and PowerPoint"
+            style={{background:"none",border:"1px solid #1a2030",borderRadius:8,padding:"4px 10px",color:"#A855F7",cursor:"pointer",fontSize:16,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>🎨</button>
+          <button onClick={()=>{setShowSettings(true);setSTab("api");}} aria-label="Settings" title="Settings"
+            style={{background:"none",border:"1px solid #1a2030",borderRadius:8,padding:"4px 10px",color:"#A0AAC0",cursor:"pointer",fontSize:16,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>⚙</button>
+          <button onClick={()=>setShowSignOutConfirm(true)} aria-label="Sign out" title="Sign out"
+            style={{background:"none",border:"1px solid #1a2030",borderRadius:8,padding:"4px 10px",color:"#EF4444",cursor:"pointer",fontSize:16,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>⎋</button>
+        </div>
+      </header>
+      <div id="oiq-sb-overlay" aria-hidden="true"
+        onClick={()=>{setSbOpen(false);const r=document.getElementById("oiq-root");if(r)r.classList.remove("oiq-sb-open");const ov=document.getElementById("oiq-sb-overlay");if(ov)ov.classList.remove("oiq-overlay-visible");}}/>
       <GlobalTicker />
       {/* ── SIDEBAR ── */}
-      <div style={{width:210,background:"#0c1120",borderRight:"1px solid #14192a",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden",paddingTop:'72px'}}>
+      <div id="oiq-sidebar" role="navigation" aria-label="Executive roster and module navigation" style={{width:210,background:"#0c1120",borderRight:"1px solid #14192a",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden",paddingTop:'0'}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 8px",borderBottom:"1px solid #14192a"}}>
           <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
             <span style={{color:"#14B8A6",fontSize:13,fontWeight:900}}>◆</span>
@@ -2773,7 +2815,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
       </div>
 
       {/* ── MAIN PANEL ── */}
-      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+      <div id="oiq-main" role="main" tabIndex={-1} style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
 
         {/* NERVE CENTER */}
         {view==="nerve"&&(
