@@ -1,4 +1,5 @@
 import { GlobalTicker } from "./components/intelligence/GlobalTicker";
+import VoiceEngine from "./VoiceEngine";
 import BoardroomView from "./BoardroomView";
 import FundingIntelligence from "./FundingIntelligence";
 import ServiceDesk from "./ServiceDesk";
@@ -3461,7 +3462,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
               <div style={S.inpR}>
                 <textarea style={S.ta} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send(input);}}} placeholder={"Message "+curRole.t+"… (Enter to send, Shift+Enter for newline)"} rows={1} disabled={loading}/>
                 <LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/>
-                <MicButton lang={vLang} onResult={t=>setInput(prev=>(prev?prev+" ":"")+t)} disabled={loading}/>
+                <VoiceEngine send={send} setInput={setInput} lang={vLang} roleColor={curRole?.dc||"#14B8A6"} disabled={loading}/>
                 <button onClick={()=>send(input)} disabled={!input.trim()||loading} style={{...S.sBtn,background:curRole.dc,opacity:input.trim()&&!loading?1:0.2}}>↑</button>
               </div>
             </div>
