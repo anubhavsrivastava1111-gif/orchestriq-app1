@@ -322,6 +322,92 @@ export function initSidebarKeyNav(): void {
   }
 }
 
+
+// ─── DRAGGABLE ELEMENTS ───────────────────────────────────────────────────
+// Makes fixed-position elements draggable by touch and mouse.
+// Call initDraggable(el) on any fixed element to enable drag repositioning.
+// Position is saved to localStorage so it persists across sessions.
+
+export function initDraggable(el: HTMLElement, storageKey: string = "oiq-drag-pos"): void {
+  try {
+    // Restore saved position
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
+      const { bottom, right } = JSON.parse(saved);
+      el.style.bottom = bottom;
+      el.style.right = right;
+      el.style.top = "auto";
+      el.style.left = "auto";
+    }
+  } catch {}
+
+  let startX = 0, startY = 0, startBottom = 0, startRight = 0;
+  let dragging = false;
+
+  const getPos = () => {
+    const rect = el.getBoundingClientRect();
+    return {
+      bottom: window.innerHeight - rect.bottom,
+      right: window.innerWidth - rect.right,
+    };
+  };
+
+  const onMove = (clientX: number, clientY: number) => {
+    if (!dragging) return;
+    const dx = startX - clientX;
+    const dy = startY - clientY;
+    const newRight = Math.max(0, Math.min(window.innerWidth - 60, startRight + dx));
+    const newBottom = Math.max(0, Math.min(window.innerHeight - 60, startBottom + dy));
+    el.style.right = newRight + "px";
+    el.style.bottom = newBottom + "px";
+    el.style.top = "auto";
+    el.style.left = "auto";
+  };
+
+  const onEnd = () => {
+    if (!dragging) return;
+    dragging = false;
+    el.style.cursor = "grab";
+    try {
+      const pos = getPos();
+      localStorage.setItem(storageKey, JSON.stringify({
+        bottom: pos.bottom + "px",
+        right: pos.right + "px",
+      }));
+    } catch {}
+  };
+
+  // Mouse events
+  el.addEventListener("mousedown", (e) => {
+    dragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    const pos = getPos();
+    startBottom = pos.bottom;
+    startRight = pos.right;
+    el.style.cursor = "grabbing";
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", (e) => onMove(e.clientX, e.clientY));
+  document.addEventListener("mouseup", onEnd);
+
+  // Touch events
+  el.addEventListener("touchstart", (e) => {
+    dragging = true;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    const pos = getPos();
+    startBottom = pos.bottom;
+    startRight = pos.right;
+    e.preventDefault();
+  }, { passive: false });
+  document.addEventListener("touchmove", (e) => {
+    if (dragging) onMove(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  document.addEventListener("touchend", onEnd);
+}
+
+
 // ─── FULL INIT ────────────────────────────────────────────────────────────
 // Call once from App.tsx useEffect after first render.
 // Handles all passive setup that doesn't require props.
@@ -330,6 +416,14 @@ export function initA11y(): void {
   initLandmarks();
   patchIconButtons();
   initSidebarKeyNav();
+
+  // Make token badge draggable
+  setTimeout(() => {
+    const badge = document.querySelector<HTMLElement>(
+      '[class*="TokenBadge"], div[style*="token"][style*="fixed"], div[style*="tokens"][style*="9000"]'
+    );
+    if (badge) initDraggable(badge, "oiq-token-pos");
+  }, 800);
 
   // Re-patch buttons whenever DOM changes (new modals, dynamic content)
   if (typeof MutationObserver !== "undefined") {
