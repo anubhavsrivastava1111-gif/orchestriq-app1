@@ -2760,6 +2760,8 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
       <div id="oiq-sb-overlay" aria-hidden="true"
         onClick={()=>{setSbOpen(false);const r=document.getElementById("oiq-root");if(r)r.classList.remove("oiq-sb-open");const ov=document.getElementById("oiq-sb-overlay");if(ov)ov.classList.remove("oiq-overlay-visible");}}/>
       <GlobalTicker />
+      {/* ── BODY ROW: sidebar + main side by side ── */}
+      <div className="oiq-body-row" style={{display:"flex",flex:1,overflow:"hidden",minHeight:0}}>
       {/* ── SIDEBAR ── */}
       <div id="oiq-sidebar" className="oiq-sidebar" role="navigation" aria-label="Executive roster and module navigation" style={{width:210,background:"#0c1120",borderRight:"1px solid #14192a",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden",paddingTop:'0'}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 8px",borderBottom:"1px solid #14192a"}}>
@@ -3805,6 +3807,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
       <TokenBadge defP={defP} setDefP={p=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} keys={keys}/>
       <Toaster toasts={toasts} onDismiss={id=>setToasts(prev=>prev.filter(t=>t.id!==id))}/>
       <style>{CSS}</style>
+      </div>{/* end oiq-body-row */}
     </div>
   );
 }
