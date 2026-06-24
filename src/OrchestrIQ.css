@@ -195,8 +195,8 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* Target App.tsx sidebar div — flex layout (not fixed) for correct content sizing */
-#oiq-root > div[style*="width:210"],
-#oiq-root > div[style*="width: 210"] {
+#oiq-root > div[style*="width:210],
+#oiq-root > div[style*=width: 210"] {
   position: relative !important;
   width: var(--sb-w) !important;
   min-width: var(--sb-w) !important;
@@ -215,8 +215,8 @@
 }
 
 /* Collapsed sidebar — icon only */
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"],
-#oiq-root.oiq-sb-collapsed > div[style*="width: 210"] {
+#oiq-root.oiq-sb-collapsed > div[style*="width:210],
+#oiq-root.oiq-sb-collapsed > div[style*=width: 210"] {
   width: var(--sb-w-col) !important;
   min-width: var(--sb-w-col) !important;
   max-width: var(--sb-w-col) !important;
@@ -224,12 +224,12 @@
 }
 
 /* Hide text labels when collapsed */
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] span[style*="fontSize:12"],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] span[style*="fontWeight:700"][style*="fontSize:12"],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div[style*="fontSize:9"],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div[style*="fontSize:7"],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div[style*="fontSize:8"],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div[style*="flex:1"] {
+#oiq-root.oiq-sb-collapsed > div[style*="width:210] span[style*=fontSize:12"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210] span[style*=fontWeight:700"][style*="fontSize:12],
+#oiq-root.oiq-sb-collapsed > div[style*=width:210"] div[style*="fontSize:9],
+#oiq-root.oiq-sb-collapsed > div[style*=width:210"] div[style*="fontSize:7],
+#oiq-root.oiq-sb-collapsed > div[style*=width:210"] div[style*="fontSize:8],
+#oiq-root.oiq-sb-collapsed > div[style*=width:210"] div[style*="flex:1] {
   display: none !important;
 }
 
@@ -264,7 +264,7 @@
 }
 
 /* Sidebar header */
-#oiq-root > div[style*="width:210"] > div:first-child {
+#oiq-root > div[style*=width:210"] > div:first-child {
   padding: 12px 14px !important;
   border-bottom: 1px solid var(--border, #1a2030) !important;
   display: flex !important;
@@ -276,7 +276,7 @@
 }
 
 /* Sidebar company name */
-#oiq-root > div[style*="width:210"] > div:first-child span[style*="fontWeight:700"] {
+#oiq-root > div[style*="width:210] > div:first-child span[style*=fontWeight:700"] {
   font-size: 14px !important;
   font-weight: 700 !important;
   letter-spacing: -0.01em !important;
@@ -286,7 +286,7 @@
 }
 
 /* Module nav grid */
-#oiq-root div[style*="gridTemplateColumns"][style*="gap:1"] {
+#oiq-root div[style*="gridTemplateColumns][style*=gap:1"] {
   display: grid !important;
   gap: 3px !important;
   padding: 8px 8px !important;
@@ -295,7 +295,7 @@
 }
 
 /* Module nav buttons */
-#oiq-root div[style*="gridTemplateColumns"][style*="gap:1"] button {
+#oiq-root div[style*="gridTemplateColumns][style*=gap:1"] button {
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
@@ -309,24 +309,24 @@
   transition: all var(--tr) !important;
   min-height: var(--touch-min) !important;
 }
-#oiq-root div[style*="gridTemplateColumns"][style*="gap:1"] button span:first-child {
+#oiq-root div[style*="gridTemplateColumns][style*=gap:1"] button span:first-child {
   font-size: 18px !important;
   line-height: 1 !important;
 }
-#oiq-root div[style*="gridTemplateColumns"][style*="gap:1"] button span:last-child {
+#oiq-root div[style*="gridTemplateColumns][style*=gap:1"] button span:last-child {
   font-size: 9px !important;
   font-weight: 600 !important;
   letter-spacing: 0.04em !important;
   text-transform: uppercase !important;
 }
-#oiq-root div[style*="gridTemplateColumns"][style*="gap:1"] button:hover {
+#oiq-root div[style*="gridTemplateColumns][style*=gap:1"] button:hover {
   background: rgba(20,184,166,0.10) !important;
   border-color: rgba(20,184,166,0.2) !important;
 }
 
 /* Role buttons */
-#oiq-root > div[style*="width:210"] div button[style*="padding"][style*="4px 5px 4px 16px"],
-#oiq-root > div[style*="width:210"] div button[style*="rBtn"] {
+#oiq-root > div[style*="width:210] div button[style*=padding"][style*="4px 5px 4px 16px],
+#oiq-root > div[style*=width:210"] div button[style*="rBtn] {
   padding: 9px 12px 9px 16px !important;
   border-radius: var(--r-sm) !important;
   margin-bottom: 2px !important;
@@ -334,11 +334,11 @@
   transition: all var(--tr) !important;
   width: 100% !important;
 }
-#oiq-root > div[style*="width:210"] div button div div:first-child {
+#oiq-root > div[style*=width:210"] div button div div:first-child {
   font-size: 12px !important;
   font-weight: 600 !important;
 }
-#oiq-root > div[style*="width:210"] div button div div:last-child {
+#oiq-root > div[style*="width:210] div button div div:last-child {
   font-size: 10px !important;
   opacity: 0.7 !important;
   white-space: nowrap !important;
@@ -347,7 +347,7 @@
 }
 
 /* Sidebar scrollable area */
-#oiq-root > div[style*="width:210"] > div[style*="flex:1"][style*="overflowY"] {
+#oiq-root > div[style*=width:210"] > div[style*="flex:1][style*=overflowY"] {
   padding: 8px 8px !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
@@ -372,7 +372,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    MAIN CONTENT — shifts with sidebar
    ═══════════════════════════════════════════════════════════════════════════ */
-#oiq-root > div[style*="flex:1"] {
+#oiq-root > div[style*="flex:1] {
   margin-left: 0 !important;
   margin-top: 0 !important;
   transition: none !important;
@@ -383,7 +383,7 @@
   flex: 1 !important;
   min-width: 0 !important;
 }
-#oiq-root.oiq-sb-collapsed > div[style*="flex:1"] {
+#oiq-root.oiq-sb-collapsed > div[style*=flex:1"] {
   margin-left: 0 !important;
 }
 
@@ -392,7 +392,7 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* Page titles */
-#oiq-root div[style*="fontSize:13"][style*="fontWeight:800"] {
+#oiq-root div[style*="fontSize:13][style*=fontWeight:800"] {
   font-size: var(--text-xl) !important;
   font-weight: 800 !important;
   letter-spacing: -0.02em !important;
@@ -400,28 +400,28 @@
 }
 
 /* AI response body — must be readable */
-#oiq-root div[style*="lineHeight:1.7"],
-#oiq-root div[style*="lineHeight:1.65"],
-#oiq-root div[style*="lineHeight:1.6"] {
+#oiq-root div[style*="lineHeight:1.7],
+#oiq-root div[style*=lineHeight:1.65"],
+#oiq-root div[style*="lineHeight:1.6] {
   font-size: var(--text-md) !important;
   line-height: 1.75 !important;
 }
-#oiq-root div[style*="fontSize:11"][style*="lineHeight"] {
+#oiq-root div[style*=fontSize:11"][style*="lineHeight] {
   font-size: var(--text-base) !important;
   line-height: 1.75 !important;
 }
 
 /* Small descriptive text — minimum 13px */
-#oiq-root p[style*="fontSize:10"],
-#oiq-root div[style*="fontSize:10"][style*="color:\"#5A6480\""],
-#oiq-root div[style*="fontSize:10"][style*="color:\"#8892B0\""] {
+#oiq-root p[style*=fontSize:10"],
+#oiq-root div[style*="fontSize:10"][style*="color:\#5A6480\"],
+#oiq-root div[style*="fontSize:10"][style*="color:\#8892B0\"] {
   font-size: var(--text-sm) !important;
   line-height: 1.6 !important;
 }
 
 /* Labels */
-#oiq-root div[style*="fontSize:9"][style*="textTransform"],
-#oiq-root label[style*="fontSize:9"] {
+#oiq-root div[style*="fontSize:9][style*=textTransform"],
+#oiq-root label[style*="fontSize:9] {
   font-size: 11px !important;
   font-weight: 700 !important;
   letter-spacing: 0.08em !important;
@@ -430,14 +430,14 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    NERVE CENTER TABS
    ═══════════════════════════════════════════════════════════════════════════ */
-#oiq-root div[style*="gap:3"][style*="padding:\"8px 14px\""][style*="borderBottom"] {
+#oiq-root div[style*=gap:3"][style*="padding:\8px 14px\"][style*="borderBottom] {
   display: flex !important;
   gap: 8px !important;
   padding: 12px 16px !important;
   background: var(--panel, #0c1120) !important;
   border-bottom: 1px solid var(--border, #1a2030) !important;
 }
-#oiq-root div[style*="gap:3"][style*="padding:\"8px 14px\""][style*="borderBottom"] button {
+#oiq-root div[style*=gap:3"][style*="padding:\8px 14px\"][style*="borderBottom] button {
   display: flex !important;
   align-items: center !important;
   gap: 8px !important;
@@ -456,15 +456,15 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* Max content width for readability */
-#oiq-root div[style*="flex:1"][style*="overflowY:\"auto\""][style*="padding:\"12px 16px\""] {
+#oiq-root div[style*=flex:1"][style*="overflowY:\auto\"][style*="padding:\12px 16px\"] {
   padding: 24px !important;
 }
-#oiq-root div[style*="flex:1"][style*="overflowY:\"auto\""][style*="padding:\"12px 16px\""] > * {
+#oiq-root div[style*="flex:1"][style*="overflowY:\auto\"][style*="padding:\12px 16px\"] > * {
   max-width: var(--content-max) !important;
 }
 
 /* Executive debate cards */
-#oiq-root div[style*="background:\"#131825\""][style*="borderRadius:7"][style*="borderLeft"] {
+#oiq-root div[style*="background:\#131825\"][style*="borderRadius:7][style*=borderLeft"] {
   border-radius: var(--r-lg) !important;
   padding: 20px 22px !important;
   margin-bottom: 16px !important;
@@ -472,12 +472,12 @@
   border-left-width: 4px !important;
   transition: box-shadow var(--tr) !important;
 }
-#oiq-root div[style*="background:\"#131825\""][style*="borderRadius:7"][style*="borderLeft"]:hover {
+#oiq-root div[style*="background:\#131825\"][style*="borderRadius:7][style*=borderLeft"]:hover {
   box-shadow: var(--shadow-md) !important;
 }
 
 /* Executive card header */
-#oiq-root div[style*="borderLeft"] > div[style*="alignItems:\"center\""][style*="gap:5"][style*="marginBottom:5"] {
+#oiq-root div[style*="borderLeft"] > div[style*="alignItems:\center\"][style*="gap:5][style*=marginBottom:5"] {
   padding-bottom: 12px !important;
   margin-bottom: 14px !important;
   border-bottom: 1px solid var(--border, #1a2030) !important;
@@ -485,7 +485,7 @@
 }
 
 /* Executive icon */
-#oiq-root div[style*="borderLeft"] > div span[style*="fontSize:14"] {
+#oiq-root div[style*="borderLeft] > div span[style*=fontSize:14"] {
   font-size: 22px !important;
   width: 40px !important;
   height: 40px !important;
@@ -498,13 +498,13 @@
 }
 
 /* Executive name */
-#oiq-root div[style*="borderLeft"] > div span[style*="fontSize:11"][style*="fontWeight:700"] {
+#oiq-root div[style*="borderLeft] > div span[style*=fontSize:11"][style*="fontWeight:700] {
   font-size: 15px !important;
   font-weight: 700 !important;
 }
 
 /* Synthesis card */
-#oiq-root div[style*="linear-gradient"][style*="borderRadius:8"][style*="rgba(20,184,166"] {
+#oiq-root div[style*=linear-gradient"][style*="borderRadius:8][style*=rgba(20,184,166"] {
   border-radius: var(--r-xl) !important;
   padding: 24px 28px !important;
   box-shadow: var(--shadow-lg) !important;
@@ -512,7 +512,7 @@
 }
 
 /* Synthesis title */
-#oiq-root div[style*="fontSize:12"][style*="fontWeight:800"][style*="color:\"#14B8A6\""] {
+#oiq-root div[style*="fontSize:12][style*=fontWeight:800"][style*="color:\#14B8A6\"] {
   font-size: 15px !important;
   font-weight: 800 !important;
   letter-spacing: 0.05em !important;
@@ -521,7 +521,7 @@
 }
 
 /* Research brief */
-#oiq-root div[style*="rgba(59,130,246,0.05)"][style*="borderRadius:7"] {
+#oiq-root div[style*="rgba(59,130,246,0.05)][style*=borderRadius:7"] {
   border-radius: var(--r-lg) !important;
   padding: 18px 20px !important;
   margin-bottom: 20px !important;
@@ -565,8 +565,8 @@
 }
 
 /* Question inputs */
-#oiq-root textarea[style*="minHeight:50"],
-#oiq-root textarea[placeholder*="Should we"],
+#oiq-root textarea[style*="minHeight:50],
+#oiq-root textarea[placeholder*=Should we"],
 #oiq-root textarea[placeholder*="Describe"] {
   font-size: 16px !important;
   min-height: 80px !important;
@@ -592,16 +592,16 @@
 }
 
 /* Exception: micro buttons keep compact but get padding */
-#oiq-root button[style*="fontSize:8"],
-#oiq-root button[style*="fontSize:9"] {
+#oiq-root button[style*="fontSize:8],
+#oiq-root button[style*=fontSize:9"] {
   min-height: 30px !important;
   min-width: 30px !important;
   padding: 4px 8px !important;
 }
 
 /* Primary buttons */
-#oiq-root button[style*="background:\"#14B8A6\""],
-#oiq-root button[style*="background:\"#10B981\""] {
+#oiq-root button[style*="background:\#14B8A6\"],
+#oiq-root button[style*="background:\#10B981\"] {
   font-size: 14px !important;
   font-weight: 700 !important;
   padding: 12px 22px !important;
@@ -609,16 +609,16 @@
   letter-spacing: 0.01em !important;
   box-shadow: 0 2px 8px rgba(20,184,166,0.25) !important;
 }
-#oiq-root button[style*="background:\"#14B8A6\""]:hover:not(:disabled),
-#oiq-root button[style*="background:\"#10B981\""]:hover:not(:disabled) {
+#oiq-root button[style*="background:\#14B8A6\"]:hover:not(:disabled),
+#oiq-root button[style*="background:\#10B981\"]:hover:not(:disabled) {
   transform: translateY(-1px) !important;
   box-shadow: 0 4px 16px rgba(20,184,166,0.35) !important;
 }
-#oiq-root button[style*="background:\"#14B8A6\""]:active { transform: translateY(0) !important; }
+#oiq-root button[style*="background:\#14B8A6\"]:active { transform: translateY(0) !important; }
 
 /* Icon/secondary buttons */
-#oiq-root button[style*="iBtn"],
-#oiq-root button[style*="hBtn"] {
+#oiq-root button[style*="iBtn],
+#oiq-root button[style*=hBtn"] {
   font-size: 13px !important;
   padding: 8px 12px !important;
   border-radius: var(--r-sm) !important;
@@ -648,23 +648,23 @@
    CHAT INTERFACE
    ═══════════════════════════════════════════════════════════════════════════ */
 #oiq-root div[style*="inpA"],
-#oiq-root div[style*="padding:\"6px 12px 8px\""][style*="borderTop"] {
+#oiq-root div[style*="padding:\6px 12px 8px\"][style*="borderTop] {
   padding: 14px 18px !important;
   background: var(--panel, #0c1120) !important;
   border-top: 1px solid var(--border, #1a2030) !important;
 }
-#oiq-root div[style*="inpR"],
-#oiq-root div[style*="padding:\"3px 3px 3px 10px\""][style*="borderRadius:6"] {
+#oiq-root div[style*=inpR"],
+#oiq-root div[style*="padding:\3px 3px 3px 10px\"][style*="borderRadius:6] {
   border-radius: var(--r-lg) !important;
   padding: 8px 8px 8px 16px !important;
   box-shadow: var(--shadow-sm) !important;
   transition: box-shadow var(--tr) !important;
 }
-#oiq-root div[style*="inpR"]:focus-within { box-shadow: 0 0 0 2px rgba(20,184,166,0.3) !important; }
+#oiq-root div[style*=inpR"]:focus-within { box-shadow: 0 0 0 2px rgba(20,184,166,0.3) !important; }
 
 /* User bubble */
 #oiq-root div[style*="uMsg"],
-#oiq-root div[style*="background:\"rgba(20,184,166,0.04)\""][style*="borderLeft:\"3px solid #14B8A6\""] {
+#oiq-root div[style*="background:\rgba(20,184,166,0.04)\"][style*="borderLeft:\3px solid #14B8A6\"] {
   border-radius: var(--r-lg) !important;
   padding: 16px 18px !important;
   margin-bottom: 12px !important;
@@ -675,7 +675,7 @@
 
 /* AI response bubble */
 #oiq-root div[style*="aMsg"],
-#oiq-root div[style*="background:\"#131825\""][style*="borderRadius:6"][style*="padding:\"9px 11px\""][style*="border:\"1px solid #1a2030\""] {
+#oiq-root div[style*="background:\#131825\"][style*="borderRadius:6"][style*="padding:\9px 11px\"][style*="border:\1px solid #1a2030\"] {
   border-radius: var(--r-lg) !important;
   padding: 20px 22px !important;
   margin-bottom: 12px !important;
@@ -685,8 +685,8 @@
 }
 
 /* Message label */
-#oiq-root div[style*="mLbl"],
-#oiq-root div[style*="fontSize:8"][style*="fontWeight:700"][style*="textTransform:\"uppercase\""] {
+#oiq-root div[style*="mLbl],
+#oiq-root div[style*=fontSize:8"][style*="fontWeight:700"][style*="textTransform:\uppercase\"] {
   font-size: 11px !important;
   font-weight: 700 !important;
   letter-spacing: 0.08em !important;
@@ -706,25 +706,25 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    WORKFLOW CARDS
    ═══════════════════════════════════════════════════════════════════════════ */
-#oiq-root div[style*="gridTemplateColumns:\"repeat(2,1fr)\""][style*="gap:5"] button[style*="alignItems:\"flex-start\""] {
+#oiq-root div[style*="gridTemplateColumns:\repeat(2,1fr)\"][style*="gap:5"] button[style*="alignItems:\flex-start\"] {
   padding: 14px 16px !important;
   border-radius: var(--r-lg) !important;
   transition: all var(--tr) !important;
   min-height: 80px !important;
 }
-#oiq-root div[style*="gridTemplateColumns:\"repeat(2,1fr)\""][style*="gap:5"] button:hover {
+#oiq-root div[style*="gridTemplateColumns:\repeat(2,1fr)\"][style*="gap:5"] button:hover {
   transform: translateY(-2px) !important;
   box-shadow: var(--shadow-md) !important;
 }
-#oiq-root div[style*="gridTemplateColumns:\"repeat(2,1fr)\""][style*="gap:5"] button span:first-child {
+#oiq-root div[style*="gridTemplateColumns:\repeat(2,1fr)\"][style*="gap:5"] button span:first-child {
   font-size: 22px !important;
 }
-#oiq-root div[style*="gridTemplateColumns:\"repeat(2,1fr)\""][style*="gap:5"] button div div:first-child {
+#oiq-root div[style*="gridTemplateColumns:\repeat(2,1fr)\"][style*="gap:5"] button div div:first-child {
   font-size: 13px !important;
   font-weight: 700 !important;
   margin-bottom: 4px !important;
 }
-#oiq-root div[style*="gridTemplateColumns:\"repeat(2,1fr)\""][style*="gap:5"] button div div:last-child {
+#oiq-root div[style*="gridTemplateColumns:\repeat(2,1fr)\"][style*="gap:5"] button div div:last-child {
   font-size: 11px !important;
   line-height: 1.5 !important;
 }
@@ -732,24 +732,24 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    MODALS
    ═══════════════════════════════════════════════════════════════════════════ */
-#oiq-root div[style*="position:\"fixed\""][style*="backdrop"],
-#oiq-root div[style*="position: fixed"][style*="backdrop"] {
+#oiq-root div[style*="position:\fixed\"][style*="backdrop],
+#oiq-root div[style*=position: fixed"][style*="backdrop] {
   backdrop-filter: blur(8px) !important;
   background: rgba(0,0,0,0.65) !important;
 }
-#oiq-root div[style*="borderRadius:12"][style*="padding:\"20px 22px\""] {
+#oiq-root div[style*=borderRadius:12"][style*="padding:\20px 22px\"] {
   border-radius: var(--r-xl) !important;
   padding: 28px !important;
   box-shadow: var(--shadow-xl) !important;
 }
-#oiq-root div[style*="borderRadius:12"] h2[style*="fontSize:16"] {
+#oiq-root div[style*="borderRadius:12] h2[style*=fontSize:16"] {
   font-size: 20px !important;
   font-weight: 800 !important;
   letter-spacing: -0.02em !important;
 }
 /* Settings tabs */
-#oiq-root div[style*="paddingBottom:12"][style*="borderBottom"] button,
-#oiq-root div[style*="paddingBottom:14"][style*="borderBottom"] button {
+#oiq-root div[style*="paddingBottom:12][style*=borderBottom"] button,
+#oiq-root div[style*="paddingBottom:14][style*=borderBottom"] button {
   font-size: 13px !important;
   padding: 8px 14px !important;
   border-radius: var(--r-md) !important;
@@ -760,24 +760,24 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    STATUS BADGES — Colour + icon (colour-blind safe)
    ═══════════════════════════════════════════════════════════════════════════ */
-#oiq-root span[style*="borderRadius:10"][style*="fontWeight:700"],
-#oiq-root span[style*="borderRadius:8"][style*="fontWeight:700"] {
+#oiq-root span[style*="borderRadius:10][style*=fontWeight:700"],
+#oiq-root span[style*="borderRadius:8][style*=fontWeight:700"] {
   font-size: 11px !important;
   padding: 4px 10px !important;
   border-radius: var(--r-pill) !important;
   font-weight: 700 !important;
   letter-spacing: 0.04em !important;
 }
-#oiq-root span[style*="borderRadius:8"][style*="APPROVED"]::before,
-#oiq-root span[style*="borderRadius:10"][style*="APPROVED"]::before { content: "✓ "; }
-#oiq-root span[style*="borderRadius:8"][style*="REJECTED"]::before,
-#oiq-root span[style*="borderRadius:10"][style*="REJECTED"]::before { content: "✗ "; }
-#oiq-root span[style*="borderRadius:8"][style*="FAILED"]::before,
-#oiq-root span[style*="borderRadius:10"][style*="FAILED"]::before   { content: "⚠ "; }
-#oiq-root span[style*="borderRadius:8"][style*="QUEUED"]::before,
-#oiq-root span[style*="borderRadius:10"][style*="QUEUED"]::before   { content: "● "; }
-#oiq-root span[style*="borderRadius:8"][style*="RUNNING"]::before,
-#oiq-root span[style*="borderRadius:10"][style*="RUNNING"]::before  { content: "▶ "; }
+#oiq-root span[style*="borderRadius:8][style*=APPROVED"]::before,
+#oiq-root span[style*="borderRadius:10][style*=APPROVED"]::before { content: "✓ "; }
+#oiq-root span[style*="borderRadius:8][style*=REJECTED"]::before,
+#oiq-root span[style*="borderRadius:10][style*=REJECTED"]::before { content: "✗ "; }
+#oiq-root span[style*="borderRadius:8][style*=FAILED"]::before,
+#oiq-root span[style*="borderRadius:10][style*=FAILED"]::before   { content: "⚠ "; }
+#oiq-root span[style*="borderRadius:8][style*=QUEUED"]::before,
+#oiq-root span[style*="borderRadius:10][style*=QUEUED"]::before   { content: "● "; }
+#oiq-root span[style*="borderRadius:8][style*=RUNNING"]::before,
+#oiq-root span[style*="borderRadius:10][style*=RUNNING"]::before  { content: "▶ "; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MARKDOWN OUTPUT — Tables, code, lists
@@ -818,7 +818,7 @@
 }
 
 /* List items */
-#oiq-root div[style*="paddingLeft:14"][style*="position:\"relative\""] {
+#oiq-root div[style*="paddingLeft:14"][style*="position:\relative\"] {
   font-size: 15px !important;
   line-height: 1.7 !important;
   margin-bottom: 6px !important;
@@ -827,22 +827,22 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    LANDING PAGE
    ═══════════════════════════════════════════════════════════════════════════ */
-#oiq-root h1[style*="fontSize:34"] {
+#oiq-root h1[style*="fontSize:34] {
   font-size: var(--text-3xl) !important;
   font-weight: 900 !important;
   letter-spacing: -0.04em !important;
   line-height: 1.1 !important;
 }
-#oiq-root p[style*="fontSize:14"][style*="maxWidth:540"] {
+#oiq-root p[style*=fontSize:14"][style*="maxWidth:540"] {
   font-size: 17px !important;
   line-height: 1.7 !important;
 }
-#oiq-root div[style*="gridTemplateColumns:\"repeat(3,1fr)\""] > div {
+#oiq-root div[style*="gridTemplateColumns:\repeat(3,1fr)\"] > div {
   border-radius: var(--r-xl) !important;
   padding: 22px 20px !important;
   transition: all var(--tr) !important;
 }
-#oiq-root div[style*="gridTemplateColumns:\"repeat(3,1fr)\""] > div:hover {
+#oiq-root div[style*="gridTemplateColumns:\repeat(3,1fr)\"] > div:hover {
   transform: translateY(-3px) !important;
   box-shadow: var(--shadow-lg) !important;
 }
@@ -850,7 +850,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    TOAST NOTIFICATIONS
    ═══════════════════════════════════════════════════════════════════════════ */
-#oiq-root div[style*="position:\"fixed\""][style*="bottom:20"][style*="right:20"] > div {
+#oiq-root div[style*="position:\fixed\"][style*="bottom:20][style*=right:20"] > div {
   border-radius: var(--r-lg) !important;
   padding: 14px 18px !important;
   font-size: 14px !important;
@@ -864,11 +864,11 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    PROGRESS BARS
    ═══════════════════════════════════════════════════════════════════════════ */
-#oiq-root div[style*="height:4"][style*="borderRadius:20"][style*="background:\"#1a2030\""] {
+#oiq-root div[style*="height:4][style*=borderRadius:20"][style*="background:\#1a2030\"] {
   height: 6px !important;
   border-radius: var(--r-pill) !important;
 }
-#oiq-root div[style*="height:4"][style*="borderRadius:20"][style*="background:\"#1a2030\""] > div {
+#oiq-root div[style*="height:4][style*=borderRadius:20"][style*="background:\#1a2030\"] > div {
   height: 6px !important;
   border-radius: var(--r-pill) !important;
 }
@@ -895,10 +895,10 @@
   from { transform: translateX(-100%); }
   to   { transform: translateX(0); }
 }
-#oiq-root div[style*="animation:\"fadeIn 0.3s"] {
+#oiq-root div[style*="fadeIn 0.3s"] {
   animation: oiq-fadeInUp 0.3s cubic-bezier(0.4,0,0.2,1) !important;
 }
-#oiq-root div[style*="animation:\"fadeIn 0.4s"] {
+#oiq-root div[style*="fadeIn 0.4s"] {
   animation: oiq-fadeInUp 0.4s cubic-bezier(0.4,0,0.2,1) !important;
 }
 
@@ -954,7 +954,7 @@
 #oiq-root button:not(:disabled),
 #oiq-root a,
 #oiq-root select,
-#oiq-root label[style*="cursor:\"pointer\""],
+#oiq-root label[style*="cursor:\pointer\"],
 #oiq-root [role="button"] { cursor: pointer !important; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -967,8 +967,8 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
-  #oiq-root > div[style*="width:210"],
-  #oiq-root > div[style*="flex:1"],
+  #oiq-root > div[style*="width:210],
+  #oiq-root > div[style*=flex:1"],
   #oiq-sb-overlay { transition: none !important; }
 }
 
@@ -994,33 +994,33 @@
   #oiq-sb-toggle { display: none !important; }
 
   /* Sidebar collapsed by default on tablet */
-  #oiq-root > div[style*="width:210"],
-  #oiq-root > div[style*="width: 210"] {
+  #oiq-root > div[style*="width:210],
+  #oiq-root > div[style*=width: 210"] {
     transform: translateX(calc(-1 * var(--sb-w))) !important;
     box-shadow: none !important;
   }
   /* When open */
-  #oiq-root.oiq-sb-open > div[style*="width:210"],
-  #oiq-root.oiq-sb-open > div[style*="width: 210"] {
+  #oiq-root.oiq-sb-open > div[style*="width:210],
+  #oiq-root.oiq-sb-open > div[style*=width: 210"] {
     transform: translateX(0) !important;
     box-shadow: var(--shadow-xl) !important;
   }
   /* Main always full width on tablet */
-  #oiq-root > div[style*="flex:1"] { margin-left: 0 !important; }
-  #oiq-root.oiq-sb-collapsed > div[style*="flex:1"] { margin-left: 0 !important; }
+  #oiq-root > div[style*="flex:1] { margin-left: 0 !important; }
+  #oiq-root.oiq-sb-collapsed > div[style*=flex:1"] { margin-left: 0 !important; }
 
   /* Content padding reduced */
-  #oiq-root div[style*="flex:1"][style*="overflowY:\"auto\""][style*="padding:\"12px 16px\""] {
+  #oiq-root div[style*="flex:1"][style*="overflowY:\auto\"][style*="padding:\12px 16px\"] {
     padding: 18px 16px !important;
   }
 
   /* 2-col workflow grid on tablet */
-  #oiq-root div[style*="gridTemplateColumns:\"repeat(3,1fr)\""] {
+  #oiq-root div[style*="gridTemplateColumns:\repeat(3,1fr)\"] {
     grid-template-columns: 1fr 1fr !important;
   }
 
   /* Landing page */
-  #oiq-root h1[style*="fontSize:34"] { font-size: 28px !important; }
+  #oiq-root h1[style*="fontSize:34] { font-size: 28px !important; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1037,44 +1037,44 @@
   #oiq-root.oiq-sb-open #oiq-sb-overlay { display: block !important; }
 
   /* Content padding mobile */
-  #oiq-root div[style*="flex:1"][style*="overflowY:\"auto\""][style*="padding:\"12px 16px\""] {
+  #oiq-root div[style*=flex:1"][style*="overflowY:\auto\"][style*="padding:\12px 16px\"] {
     padding: 14px 14px !important;
   }
 
   /* Single column grids */
-  #oiq-root div[style*="gridTemplateColumns:\"repeat(3,1fr)\""],
-  #oiq-root div[style*="gridTemplateColumns:\"repeat(4,1fr)\""] {
+  #oiq-root div[style*="gridTemplateColumns:\repeat(3,1fr)\"],
+  #oiq-root div[style*="gridTemplateColumns:\repeat(4,1fr)\"] {
     grid-template-columns: 1fr 1fr !important;
   }
-  #oiq-root div[style*="gridTemplateColumns:\"repeat(2,1fr)\""][style*="gap:5"] {
+  #oiq-root div[style*="gridTemplateColumns:\repeat(2,1fr)\"][style*="gap:5] {
     grid-template-columns: 1fr !important;
   }
 
   /* Chat input area */
-  #oiq-root div[style*="inpA"],
-  #oiq-root div[style*="padding:\"6px 12px 8px\""][style*="borderTop"] {
+  #oiq-root div[style*=inpA"],
+  #oiq-root div[style*="padding:\6px 12px 8px\"][style*="borderTop] {
     padding: 10px 12px !important;
   }
 
   /* Nerve center tabs — stack to 2 */
-  #oiq-root div[style*="gap:3"][style*="padding:\"8px 14px\""][style*="borderBottom"] button {
+  #oiq-root div[style*=gap:3"][style*="padding:\8px 14px\"][style*="borderBottom"] button {
     padding: 10px 12px !important;
     font-size: 12px !important;
     gap: 5px !important;
   }
 
   /* Executive selector wrap tighter */
-  #oiq-root div[style*="flexWrap:\"wrap\""][style*="gap:3"][style*="marginBottom:8"] button {
+  #oiq-root div[style*="flexWrap:\wrap\"][style*="gap:3][style*=marginBottom:8"] button {
     font-size: 12px !important;
     padding: 6px 10px !important;
   }
 
   /* Modal full-screen on mobile */
-  #oiq-root div[style*="position:\"fixed\""][style*="backdrop"] {
+  #oiq-root div[style*="position:\fixed\"][style*="backdrop] {
     align-items: flex-end !important;
     padding: 0 !important;
   }
-  #oiq-root div[style*="borderRadius:12"][style*="padding:\"20px 22px\""] {
+  #oiq-root div[style*=borderRadius:12"][style*="padding:\20px 22px\"] {
     border-radius: var(--r-xl) var(--r-xl) 0 0 !important;
     max-width: 100% !important;
     width: 100% !important;
@@ -1083,14 +1083,14 @@
   }
 
   /* Landing hero */
-  #oiq-root h1[style*="fontSize:34"] { font-size: 24px !important; line-height: 1.2 !important; }
-  #oiq-root p[style*="fontSize:14"][style*="maxWidth:540"] { font-size: 15px !important; }
+  #oiq-root h1[style*="fontSize:34] { font-size: 24px !important; line-height: 1.2 !important; }
+  #oiq-root p[style*=fontSize:14"][style*="maxWidth:540"] { font-size: 15px !important; }
 
   /* Hide workspace name on tiny screens */
   #oiq-header-workspace { display: none !important; }
 
   /* Toast bottom-right → bottom-center */
-  #oiq-root div[style*="position:\"fixed\""][style*="bottom:20"][style*="right:20"] {
+  #oiq-root div[style*="position:\fixed\"][style*="bottom:20][style*=right:20"] {
     right: 12px !important;
     left: 12px !important;
     bottom: 12px !important;
@@ -1102,8 +1102,8 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 @media print {
   #oiq-root .skip-link, #oiq-root #oiq-live, #oiq-root .sr-only { display: none !important; }
-  #oiq-root > div[style*="width:210"] { display: none !important; }
-  #oiq-root > div[style*="flex:1"] { margin-left: 0 !important; }
+  #oiq-root > div[style*="width:210] { display: none !important; }
+  #oiq-root > div[style*=flex:1"] { margin-left: 0 !important; }
   #oiq-header { position: static !important; }
 }
 
@@ -1112,9 +1112,10 @@
    because the CSS selector was too specific. Fixed with broader matching. */
 
 /* The tab bar container */
-#oiq-root div[style*="nrvTab"],
-#oiq-root div[style*="gap:3"][style*="0c1120"],
-#oiq-root div[style*="gap:3"][style*="padding"][style*="8px 14px"] {
+#oiq-root div[style*="nrvTab],
+#oiq-root div[style*=gap:3"][style*="background:#0c1120"],
+#oiq-root div[style*="gap:3,padding:8px 14px"],
+#oiq-root > div[style*="flex:1"] > div > div[style*="display:flex"][style*="gap:3][style*=padding"] {
   display: flex !important;
   gap: 8px !important;
   padding: 12px 16px !important;
@@ -1124,9 +1125,9 @@
 }
 
 /* Nerve center tab BUTTONS — Boardroom / Time Machine / Autopilot */
-#oiq-root button[style*="nrvTab"],
-#oiq-root div[style*="gap:3"][style*="0c1120"] button,
-#oiq-root div[style*="gap:3"][style*="padding"][style*="8px 14px"] > button {
+#oiq-root button[style*="nrvTab],
+#oiq-root div[style*=gap:3"][style*="background:#0c1120"] button,
+#oiq-root div[style*="gap:3"][style*="padding:8px 14px"] > button {
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
@@ -1145,13 +1146,13 @@
 }
 
 /* Nerve tab icon */
-#oiq-root button[style*="nrvTab"] span:first-child {
+#oiq-root button[style*="nrvTab] span:first-child {
   font-size: 20px !important;
   line-height: 1 !important;
 }
 
 /* Nerve tab label */
-#oiq-root button[style*="nrvTab"] span:last-child {
+#oiq-root button[style*=nrvTab"] span:last-child {
   font-size: 11px !important;
   font-weight: 700 !important;
   text-transform: uppercase !important;
@@ -1159,52 +1160,52 @@
 }
 
 /* ═══ SIDEBAR COLLAPSED — icon only, clean look ═══════════════════════════ */
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"],
-#oiq-root.oiq-sb-collapsed > div[style*="width: 210"] {
+#oiq-root.oiq-sb-collapsed > div[style*="width:210],
+#oiq-root.oiq-sb-collapsed > div[style*=width: 210"] {
   width: var(--sb-w-col) !important;
   min-width: var(--sb-w-col) !important;
   max-width: var(--sb-w-col) !important;
 }
 
 /* Hide text in collapsed mode — only show icons */
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] span[style*="fontWeight:700"][style*="fontSize:12"],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] span[style*="overflow:"hidden""],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] > div:first-child > div:first-child > span:last-child,
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] > div:nth-child(2),
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] > div[style*="padding:"3px 8px 2px""],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] > div[style*="gap:1"][style*="padding:"3px 6px""],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div[style*="fontSize:7"],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div[style*="fontSize:8"]:not([style*="width"]),
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div[style*="fontSize:9"],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div[style*="flex:1"][style*="minWidth:0"],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] span[style*="marginLeft:"auto""] {
+#oiq-root.oiq-sb-collapsed > div[style*="width:210] span[style*=fontWeight:700"][style*="fontSize:12],
+#oiq-root.oiq-sb-collapsed > div[style*=width:210"] span[style*="overflow:hidden],
+#oiq-root.oiq-sb-collapsed > div[style*=width:210"] > div:first-child > div:first-child > span:last-child,
+#oiq-root.oiq-sb-collapsed > div[style*="width:210] > div:nth-child(2),
+#oiq-root.oiq-sb-collapsed > div[style*=width:210"] > div[style*="padding:3px 8px 2px"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210] > div[style*=gap:1"][style*="padding:3px 6px"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210] div[style*=fontSize:7"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210] div[style*=fontSize:8"]:not([style*="width]),
+#oiq-root.oiq-sb-collapsed > div[style*=width:210"] div[style*="fontSize:9],
+#oiq-root.oiq-sb-collapsed > div[style*=width:210"] div[style*="flex:1][style*=minWidth:0"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210"] span[style*="marginLeft:auto"] {
   display: none !important;
 }
 
 /* Keep icons visible in collapsed mode */
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] button span[style*="fontSize:12"],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] button span[style*="fontSize:14"],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] button span[style*="fontSize:16"],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] button span[style*="fontSize:18"],
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] button span[style*="fontSize:20"] {
+#oiq-root.oiq-sb-collapsed > div[style*="width:210] button span[style*=fontSize:12"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210] button span[style*=fontSize:14"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210] button span[style*=fontSize:16"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210] button span[style*=fontSize:18"],
+#oiq-root.oiq-sb-collapsed > div[style*="width:210] button span[style*=fontSize:20"] {
   display: flex !important;
 }
 
 /* Centre icons in collapsed buttons */
-#oiq-root.oiq-sb-collapsed > div[style*="width:210"] div > button {
+#oiq-root.oiq-sb-collapsed > div[style*="width:210] div > button {
   justify-content: center !important;
   padding: 8px 4px !important;
 }
 
 /* Module nav grid in collapsed mode */
-#oiq-root.oiq-sb-collapsed div[style*="gridTemplateColumns"] {
+#oiq-root.oiq-sb-collapsed div[style*=gridTemplateColumns"] {
   grid-template-columns: 1fr !important;
   padding: 6px 4px !important;
 }
-#oiq-root.oiq-sb-collapsed div[style*="gridTemplateColumns"] button span:last-child {
+#oiq-root.oiq-sb-collapsed div[style*="gridTemplateColumns] button span:last-child {
   display: none !important;
 }
-#oiq-root.oiq-sb-collapsed div[style*="gridTemplateColumns"] button {
+#oiq-root.oiq-sb-collapsed div[style*=gridTemplateColumns"] button {
   padding: 10px 4px !important;
 }
 
@@ -1213,16 +1214,16 @@
    We make it draggable via CSS user-select + grab cursor.
    The actual drag JS is injected via initA11y() in a11y.ts */
 #oiq-root [class*="TokenBadge"],
-#oiq-root div[style*="54K tokens"],
-#oiq-root div[style*="tokens"][style*="fixed"],
-#oiq-root div[style*="position:"fixed""][style*="zIndex:9000"] {
+#oiq-root div[style*="54K tokens],
+#oiq-root div[style*=tokens"][style*="fixed"],
+#oiq-root div[style*="position:fixed"][style*="zIndex:9000] {
   cursor: grab !important;
   user-select: none !important;
   touch-action: none !important;
   transition: box-shadow var(--tr) !important;
 }
-#oiq-root [class*="TokenBadge"]:active,
-#oiq-root div[style*="54K tokens"]:active {
+#oiq-root [class*=TokenBadge"]:active,
+#oiq-root div[style*="54K tokens]:active {
   cursor: grabbing !important;
   box-shadow: var(--shadow-xl) !important;
 }
@@ -1236,9 +1237,9 @@
 }
 
 /* GlobalTicker (Intelligence Feed) — below header, above content */
-#oiq-root > [class*="Ticker"],
-#oiq-root > div[style*="MARKETS"],
-#oiq-root > div[style*="ticker"],
+#oiq-root > [class*=Ticker"],
+#oiq-root > div[style*="MARKETS],
+#oiq-root > div[style*=ticker"],
 .global-ticker,
 [class*="GlobalTicker"] {
   position: relative !important;
@@ -1248,7 +1249,7 @@
 }
 
 /* The flex row containing sidebar + main — fills remaining space */
-#oiq-root > div[style*="height:"][style*="100vh"] {
+#oiq-root > div[style*="display:flex"][style*="height:100vh"] {
   display: flex !important;
   flex-direction: column !important;
   height: 100vh !important;
@@ -1256,7 +1257,7 @@
 }
 
 /* The inner layout row (sidebar + main content side by side) */
-#oiq-root > div[style*="height:"][style*="100vh"] > div[style*="flex:1"] {
+#oiq-root > div[style*="display:flex"][style*="height:100vh"] > div[style*="flex:1] {
   min-height: 0 !important;
 }
 
@@ -1265,8 +1266,8 @@
   #oiq-hamburger { display: flex !important; }
 
   /* Sidebar off-screen by default on tablet */
-  #oiq-root > div[style*="width:210"],
-  #oiq-root > div[style*="width: 210"] {
+  #oiq-root > div[style*=width:210"],
+  #oiq-root > div[style*="width: 210] {
     position: fixed !important;
     top: var(--header-h) !important;
     left: 0 !important;
@@ -1277,21 +1278,21 @@
     transition: transform var(--sb-transition) !important;
   }
   /* Open state */
-  #oiq-root.oiq-sb-open > div[style*="width:210"],
-  #oiq-root.oiq-sb-open > div[style*="width: 210"] {
+  #oiq-root.oiq-sb-open > div[style*=width:210"],
+  #oiq-root.oiq-sb-open > div[style*="width: 210] {
     transform: translateX(0) !important;
     box-shadow: var(--shadow-xl) !important;
   }
   /* Main content always full width on tablet — no margin */
-  #oiq-root > div[style*="flex:1"] {
+  #oiq-root > div[style*=flex:1"] {
     margin-left: 0 !important;
     width: 100% !important;
   }
 }
 
 @media (max-width: 767px) {
-  #oiq-root > div[style*="width:210"],
-  #oiq-root > div[style*="width: 210"] {
+  #oiq-root > div[style*="width:210],
+  #oiq-root > div[style*=width: 210"] {
     position: fixed !important;
     top: var(--header-h) !important;
     left: 0 !important;
@@ -1301,8 +1302,8 @@
     width: min(var(--sb-w), 85vw) !important;
     min-width: min(var(--sb-w), 85vw) !important;
   }
-  #oiq-root.oiq-sb-open > div[style*="width:210"],
-  #oiq-root.oiq-sb-open > div[style*="width: 210"] {
+  #oiq-root.oiq-sb-open > div[style*="width:210],
+  #oiq-root.oiq-sb-open > div[style*=width: 210"] {
     transform: translateX(0) !important;
     box-shadow: var(--shadow-xl) !important;
   }
