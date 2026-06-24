@@ -1113,9 +1113,8 @@
 
 /* The tab bar container */
 #oiq-root div[style*="nrvTab"],
-#oiq-root div[style*="gap:3"][style*="background:"#0c1120""],
-#oiq-root div[style*="gap:3,padding:"8px 14px""],
-#oiq-root > div[style*="flex:1"] > div > div[style*="display:"flex""][style*="gap:3"][style*="padding"] {
+#oiq-root div[style*="gap:3"][style*="0c1120"],
+#oiq-root div[style*="gap:3"][style*="padding"][style*="8px 14px"] {
   display: flex !important;
   gap: 8px !important;
   padding: 12px 16px !important;
@@ -1126,8 +1125,8 @@
 
 /* Nerve center tab BUTTONS — Boardroom / Time Machine / Autopilot */
 #oiq-root button[style*="nrvTab"],
-#oiq-root div[style*="gap:3"][style*="background:"#0c1120""] button,
-#oiq-root div[style*="gap:3"][style*="padding:"8px 14px""] > button {
+#oiq-root div[style*="gap:3"][style*="0c1120"] button,
+#oiq-root div[style*="gap:3"][style*="padding"][style*="8px 14px"] > button {
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
@@ -1249,7 +1248,7 @@
 }
 
 /* The flex row containing sidebar + main — fills remaining space */
-#oiq-root > div[style*="display:"flex""][style*="height:"100vh""] {
+#oiq-root > div[style*="height:"][style*="100vh"] {
   display: flex !important;
   flex-direction: column !important;
   height: 100vh !important;
@@ -1257,7 +1256,7 @@
 }
 
 /* The inner layout row (sidebar + main content side by side) */
-#oiq-root > div[style*="display:"flex""][style*="height:"100vh""] > div[style*="flex:1"] {
+#oiq-root > div[style*="height:"][style*="100vh"] > div[style*="flex:1"] {
   min-height: 0 !important;
 }
 
