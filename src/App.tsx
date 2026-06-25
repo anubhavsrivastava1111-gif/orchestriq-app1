@@ -227,16 +227,14 @@ const PRESS_DOMAINS=["reuters","bloomberg","economic times","livemint","financia
 
 function badgeBrief(brief){
   if(!brief)return brief;
-  return brief.split("
-").map(line=>{
+  return brief.split("\n").map(line=>{
     if(!line.trim().startsWith("•")&&!line.trim().startsWith("-")&&!line.trim().startsWith("*"))return line;
     const lower=line.toLowerCase();
     const isOfficial=OFFICIAL_DOMAINS.some(d=>lower.includes(d));
     const isPress=!isOfficial&&PRESS_DOMAINS.some(d=>lower.includes(d));
     const badge=isOfficial?"🟢 ":isPress?"🟡 ":"🔴 ";
     return badge+line.trim().replace(/^[•\-\*]\s*/,"");
-  }).join("
-");
+  }).join("\n");
 }
 
 async function runResearchDesk(ask,co,compData,question,showToast){
@@ -746,7 +744,8 @@ function buildSys(role,co,compData,liveRates=""){
     "PROFILE: " + profileSection + "\n" +
     "CONTEXT:\n" + buildCtx(co, compData) + "\n" +
     "MANDATE: " + (p.m || "Give elite specific quantified advice as " + role.f + ".") + "\n" +
-    "+(liveRates&&FINANCE_ROLES.includes(role.id)?"\n\n"+liveRates+"\n":"")+"\n\nOUTPUT FORMAT — MANDATORY (McKinsey/BCG/Deloitte standard):\nStructure every response with these exact sections:\n\n# Executive Summary\n(2-4 sentences: core finding, headline number in " + cur.sym + ", recommended action)\n---\n## Key Insights\n(4-6 bullets, each opening with a **bold keyword**)\n---\n## Detailed Analysis\n(logical subsections with headers; tables for all comparative data)\n---\n## Financial Impact\n(all figures in " + cur.sym + "; formula → assumption → result for every number)\n---\n## Risks\n| Risk | Likelihood | Impact | Mitigation |\n|------|------------|--------|------------|\n---\n## Opportunities\n(3-5 bullets with upside in " + cur.sym + ", timeframe, and owner)\n---\n## Recommendations\n| Priority | Action | Impact | Effort | Deadline |\n|----------|--------|--------|--------|----------|\n---\n## Sources & References\n(every figure cited: [Source] — [Figure] — [Date])\n\nRULES: Bold key metrics. Use tables for numbers. Never write unbroken paragraphs. Every number must have a unit (" + cur.sym + " or %). Scannable in 90 seconds by a C-suite executive."
+    (liveRates&&FINANCE_ROLES.includes(role.id)?"\n\n"+liveRates+"\n":"") +
+    "\n\nOUTPUT FORMAT — MANDATORY (McKinsey/BCG/Deloitte standard):\nStructure every response with these exact sections:\n\n# Executive Summary\n(2-4 sentences: core finding, headline number in " + cur.sym + ", recommended action)\n---\n## Key Insights\n(4-6 bullets, each opening with a **bold keyword**)\n---\n## Detailed Analysis\n(logical subsections with headers; tables for all comparative data)\n---\n## Financial Impact\n(all figures in " + cur.sym + "; formula → assumption → result for every number)\n---\n## Risks\n| Risk | Likelihood | Impact | Mitigation |\n|------|------------|--------|------------|\n---\n## Opportunities\n(3-5 bullets with upside in " + cur.sym + ", timeframe, and owner)\n---\n## Recommendations\n| Priority | Action | Impact | Effort | Deadline |\n|----------|--------|--------|--------|----------|\n---\n## Sources & References\n(every figure cited: [Source] — [Figure] — [Date])\n\nRULES: Bold key metrics. Use tables for numbers. Never write unbroken paragraphs. Every number must have a unit (" + cur.sym + " or %). Scannable in 90 seconds by a C-suite executive."
   );
 }
 
