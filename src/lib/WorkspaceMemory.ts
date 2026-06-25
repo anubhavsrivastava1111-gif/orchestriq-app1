@@ -42,4 +42,46 @@ export const WorkspaceMemory = {
   getAllKeys(): string[] {
     return [...ALL_KEYS];
   },
+
+  // Business State — single source of truth for org context.
+  // Read by Intelligence Engine (Session 2) as its starting point.
+  // Updated incrementally — never overwrites, always merges.
+  buildBusinessState(data: {
+    company: Record<string, string>;
+    companyData: Record<string, string>;
+    ledgerEntries: unknown[];
+    boardroomSessions: unknown[];
+    workflows: unknown[];
+    taskQueue: unknown[];
+    timeMachineResult: string;
+    autopilotResult: string;
+  }): Record<string, unknown> {
+    return {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      company: data.company,
+      companyData: data.companyData,
+      financials: {
+        ledgerEntryCount: data.ledgerEntries.length,
+        hasLedgerData: data.ledgerEntries.length > 0,
+      },
+      decisions: {
+        boardroomSessionCount: data.boardroomSessions.length,
+        recentBoardroomTopics: (data.boardroomSessions as Array<{q?: string}>)
+          .slice(-3)
+          .map(s => s.q || "")
+          .filter(Boolean),
+      },
+      execution: {
+        workflowCount: data.workflows.length,
+        taskQueueCount: data.taskQueue.length,
+        approvedWorkflows: (data.workflows as Array<{status?: string}>)
+          .filter(w => w.status === "approved").length,
+      },
+      intelligence: {
+        hasTimeMachineResult: !!data.timeMachineResult,
+        hasAutopilotResult: !!data.autopilotResult,
+      },
+    };
+  },
 };
