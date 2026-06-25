@@ -909,7 +909,7 @@
 }
 
 /* The boardroom question card and response cards */
-#oiq-main > div > div[style*="padding:"12px 16px""],
+#oiq-main > div > div[style*="padding:12px 16px"],
 #oiq-main > div > div[style*="flex:1"][style*="overflowY"] {
   padding-left: 24px !important;
   padding-right: 24px !important;
