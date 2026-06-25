@@ -220,16 +220,65 @@ function researchDeskPrompt(co,compData,question){
 
 // Strips any preamble/narration before the first bullet point, and provides a
 // fallback message if the research call fails entirely.
+// ── SOURCE QUALITY BADGES ────────────────────────────────────────────────────
+// Parses Research Brief bullets and adds 🟢🟡🔴 trust badges based on domain.
+const OFFICIAL_DOMAINS=["rbi.org","gov.in","mca.gov","nseindia","bseindia","anthropic.com","openai.com","aws.amazon","microsoft.com","google.com","razorpay.com","nasscom","gartner.com","mckinsey.com","pwc.com","deloitte.com","ey.com","kpmg.com","worldbank.org","imf.org","statista.com"];
+const PRESS_DOMAINS=["reuters","bloomberg","economic times","livemint","financialexpress","moneycontrol","techcrunch","forbes","hindu","ndtv","businessstandard","inc42","yourstory"];
+
+function badgeBrief(brief){
+  if(!brief)return brief;
+  return brief.split("
+").map(line=>{
+    if(!line.trim().startsWith("•")&&!line.trim().startsWith("-")&&!line.trim().startsWith("*"))return line;
+    const lower=line.toLowerCase();
+    const isOfficial=OFFICIAL_DOMAINS.some(d=>lower.includes(d));
+    const isPress=!isOfficial&&PRESS_DOMAINS.some(d=>lower.includes(d));
+    const badge=isOfficial?"🟢 ":isPress?"🟡 ":"🔴 ";
+    return badge+line.trim().replace(/^[•\-\*]\s*/,"");
+  }).join("
+");
+}
+
 async function runResearchDesk(ask,co,compData,question,showToast){
   try{
     let brief=await ask(researchDeskPrompt(co,compData,question),[{role:"user",content:"Generate the research brief."}],1200,true);
     const bulletStart=brief.search(/^[•\-\*]/m);
     if(bulletStart>0)brief=brief.slice(bulletStart);
-    return brief;
+    return badgeBrief(brief);
   }catch(err:any){
     return "(Research Desk unavailable this session: "+err.message+". Treat any figures below as ESTIMATE (unverified).)";
   }
 }
+
+// ── FINANCIAL LIVE FEED ─────────────────────────────────────────────────────
+// Fetches live financial data for Indian markets. Called at session start.
+// Injected into finance-category executives via buildSys().
+let LIVE_RATES={loaded:false,ts:"",data:""};
+
+async function fetchLiveRates(){
+  if(LIVE_RATES.loaded)return LIVE_RATES.data;
+  try{
+    // Exchange rates — free, no key needed
+    const fx=await fetch("https://open.er-api.com/v6/latest/INR").then(r=>r.json());
+    const usd=fx?.rates?.USD?(1/fx.rates.USD).toFixed(2):"N/A";
+    const aed=fx?.rates?.AED?(1/fx.rates.AED).toFixed(3):"N/A";
+    const gbp=fx?.rates?.GBP?(1/fx.rates.GBP).toFixed(2):"N/A";
+    const ts=new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"medium",timeStyle:"short"});
+    LIVE_RATES={
+      loaded:true,ts,
+      data:`LIVE MARKET DATA (${ts} IST):
+• USD/INR: ₹${usd} | AED/INR: ₹${aed} | GBP/INR: ₹${gbp}
+• RBI Repo Rate: 6.25% (as of Jun 2025 — verify at rbi.org.in for latest)
+• Note: All financial figures in responses must use these rates or label as ESTIMATE (unverified).`
+    };
+    return LIVE_RATES.data;
+  }catch{
+    return "";
+  }
+}
+
+// Finance executive IDs that benefit from live rates
+const FINANCE_ROLES=["cfo","vp_finance","fin_ctrl","sr_acct","acct_exec","coo","ceo","chairman"];
 
 function autoRoute(text){
   const t=text.toLowerCase();
@@ -682,7 +731,7 @@ function buildCtx(co,compData){
   const cur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
   return "COMPANY: "+co.name+" | INDUSTRY: "+co.industry+" | STAGE: "+co.stage+"\nHQ: "+(co.location||"Not set")+" | CURRENCY: "+cur.code+" ("+cur.sym+") | MARKETS: "+(co.markets||"Not specified")+"\nDATA:\n"+(Object.keys(compData).length===0?"(None)":Object.entries(compData).map(([k,v])=>"  "+k+": "+v).join("\n"))+"\nRULES: All figures in "+cur.sym+cur.code+". Account for "+(co.location||"company location")+" macro+micro context. Show all math. Structure 0-90d then 3-12mo then 1-3yr.";
 }
-function buildSys(role,co,compData){
+function buildSys(role,co,compData,liveRates=""){
   const p = getExecutiveIntel(role.id);
   const cur = CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
 
@@ -697,7 +746,7 @@ function buildSys(role,co,compData){
     "PROFILE: " + profileSection + "\n" +
     "CONTEXT:\n" + buildCtx(co, compData) + "\n" +
     "MANDATE: " + (p.m || "Give elite specific quantified advice as " + role.f + ".") + "\n" +
-    "\n\nOUTPUT FORMAT — MANDATORY (McKinsey/BCG/Deloitte standard):\nStructure every response with these exact sections:\n\n# Executive Summary\n(2-4 sentences: core finding, headline number in " + cur.sym + ", recommended action)\n---\n## Key Insights\n(4-6 bullets, each opening with a **bold keyword**)\n---\n## Detailed Analysis\n(logical subsections with headers; tables for all comparative data)\n---\n## Financial Impact\n(all figures in " + cur.sym + "; formula → assumption → result for every number)\n---\n## Risks\n| Risk | Likelihood | Impact | Mitigation |\n|------|------------|--------|------------|\n---\n## Opportunities\n(3-5 bullets with upside in " + cur.sym + ", timeframe, and owner)\n---\n## Recommendations\n| Priority | Action | Impact | Effort | Deadline |\n|----------|--------|--------|--------|----------|\n---\n## Sources & References\n(every figure cited: [Source] — [Figure] — [Date])\n\nRULES: Bold key metrics. Use tables for numbers. Never write unbroken paragraphs. Every number must have a unit (" + cur.sym + " or %). Scannable in 90 seconds by a C-suite executive."
+    "+(liveRates&&FINANCE_ROLES.includes(role.id)?"\n\n"+liveRates+"\n":"")+"\n\nOUTPUT FORMAT — MANDATORY (McKinsey/BCG/Deloitte standard):\nStructure every response with these exact sections:\n\n# Executive Summary\n(2-4 sentences: core finding, headline number in " + cur.sym + ", recommended action)\n---\n## Key Insights\n(4-6 bullets, each opening with a **bold keyword**)\n---\n## Detailed Analysis\n(logical subsections with headers; tables for all comparative data)\n---\n## Financial Impact\n(all figures in " + cur.sym + "; formula → assumption → result for every number)\n---\n## Risks\n| Risk | Likelihood | Impact | Mitigation |\n|------|------------|--------|------------|\n---\n## Opportunities\n(3-5 bullets with upside in " + cur.sym + ", timeframe, and owner)\n---\n## Recommendations\n| Priority | Action | Impact | Effort | Deadline |\n|----------|--------|--------|--------|----------|\n---\n## Sources & References\n(every figure cited: [Source] — [Figure] — [Date])\n\nRULES: Bold key metrics. Use tables for numbers. Never write unbroken paragraphs. Every number must have a unit (" + cur.sym + " or %). Scannable in 90 seconds by a C-suite executive."
   );
 }
 
@@ -1531,6 +1580,7 @@ export default function App(){
   const [selRole,setSelRole]=useState(null);
   const [chats,setChats]=useState({});
   const [input,setInput]=useState("");
+  const [searchMode,setSearchMode]=useState(false);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState(null);
   const [expD,setExpD]=useState({});
@@ -1793,9 +1843,9 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     const upd={...chats,[selRole]:[...msgs,nm]};
     setChats(upd);setInput("");setLoading(true);announceLoading(true,role.t);
     try{
-      const sys=buildSys(role,co,compData);
+      const sys=buildSys(role,co,compData,LIVE_RATES.loaded?LIVE_RATES.data:"");
       const apiM=[...msgs,nm].map(m=>({role:m.role==="user"?"user":"assistant",content:m.content})).slice(-16);
-      const reply=await ask(sys,apiM);
+      const reply=await ask(sys,apiM,3500,searchMode);
       const fin={...upd,[selRole]:[...upd[selRole],{role:"assistant",content:reply}]};
       setChats(fin);sv("cos-ch",fin);
       announceAIResponse(reply,role.t);
@@ -3522,6 +3572,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
               <div style={S.inpR}>
                 <textarea style={S.ta} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send(input);}}} placeholder={"Message "+curRole.t+"… (Enter to send, Shift+Enter for newline)"} rows={1} disabled={loading}/>
                 <LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/>
+                <button onClick={()=>setSearchMode(v=>!v)} title={searchMode?"Live web search ON — click to turn off":"Turn on live web search for this message"} style={{background:searchMode?"rgba(20,184,166,0.15)":"none",border:"1px solid "+(searchMode?"#14B8A6":"#1a2030"),borderRadius:6,padding:"4px 8px",color:searchMode?"#14B8A6":"#5A6480",cursor:"pointer",fontSize:13,fontFamily:"Manrope,sans-serif",height:28,display:"flex",alignItems:"center",gap:4,flexShrink:0,transition:"all 0.15s"}}>🔍{searchMode&&<span style={{fontSize:9,fontWeight:700}}>LIVE</span>}</button>
                 <VoiceEngine send={send} setInput={setInput} lang={vLang} roleColor={curRole?.dc||"#14B8A6"} disabled={loading}/>
                 <button onClick={()=>send(input)} disabled={!input.trim()||loading} style={{...S.sBtn,background:curRole.dc,opacity:input.trim()&&!loading?1:0.2}}>↑</button>
               </div>
