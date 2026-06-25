@@ -1522,6 +1522,7 @@ function renderStructuredDeck(pptx,slides,A,pal=QE_PAL){
 export default function App(){
   const [page,setPage]=useState("landing");
   const [sbOpen,setSbOpen]=useState(false);
+  const [showModules,setShowModules]=useState(false);
   const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return localStorage.getItem("oiq-sb-col")==="1";}catch{return false;}});
   const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:""});
   const [defP,setDefP]=useState("groq");
@@ -2784,18 +2785,26 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
           <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{!cfgP.length?"No key — add in Settings":cfgP.length===1?MODELS[cfgP[0]]?.name:MODELS[defP]?.name+" · "+cfgP.length+" keys"}</span>
           <span style={{marginLeft:"auto",flexShrink:0}}>{cur.sym}{co.currency}</span>
         </div>
-        <div style={{display:"flex",gap:1,padding:"3px 6px"}}>
-          {STAGES.map(st=>(
-            <button key={st.id} onClick={()=>{const n={...co,stage:st.id};setCo(n);sv("cos-co",n);}} title={st.l}
-              style={{...S.pill,...(co.stage===st.id?{borderColor:"#14B8A6",color:"#14B8A6",background:"rgba(20,184,166,0.08)"}:{})}}>{st.ic}</button>
-          ))}
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat("+([true,true,true,true,true,adminConfig.ledgerEnabled,adminConfig.dispatchEnabled,adminConfig.actionsEnabled,true].filter(Boolean).length)+",1fr)",gap:1,padding:"2px 6px 4px"}}>
-          {[["nerve","🧠","Nerve"],["workflow","⚡","Flow"],["p3","🤖","Auto"],["chat","💬","Chat"],["data","🗄️","Data"],["ledger","📒","Ledger"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
-            <button key={v} onClick={()=>setView(v)} style={{...S.nTab,...(view===v?{background:"rgba(20,184,166,0.08)",color:"#14B8A6",borderColor:"rgba(20,184,166,0.18)"}:{})}}>
-              <span style={{fontSize:10}}>{ic}</span><span style={{fontSize:6,fontWeight:600}}>{lb}</span>
-            </button>
-          ))}
+        {/* ── MODULE DROPDOWN TRIGGER ── */}
+        <div style={{position:"relative",padding:"6px 8px",borderBottom:"1px solid #1a2030"}}>
+          <button onClick={()=>setShowModules(v=>!v)}
+            style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"9px 12px",background:"rgba(20,184,166,0.06)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:8,cursor:"pointer",fontFamily:"Manrope,sans-serif",transition:"all 0.15s"}}>
+            <span style={{fontSize:16}}>{[["nerve","🧠"],["workflow","⚡"],["p3","🤖"],["chat","💬"],["data","🗄️"],["ledger","📒"],["dispatch","📡"],["actions","✅"],["studio","🎨"],["funding","💰"],["tokens","🔢"]].find(([v])=>v===view)?.[1]||"🧠"}</span>
+            <span style={{flex:1,fontSize:12,fontWeight:700,color:"#F1F5F9",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.04em"}}>{[["nerve","Nerve Center"],["workflow","Workflow"],["p3","Autopilot"],["chat","Chat"],["data","Data Hub"],["ledger","Ledger"],["dispatch","Pulse"],["actions","Tasks"],["studio","Studio"],["funding","Funding"],["tokens","Tokens"]].find(([v])=>v===view)?.[1]||"Nerve Center"}</span>
+            <span style={{fontSize:10,color:"#5A6480",transition:"transform 0.2s",transform:showModules?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
+          </button>
+          {showModules&&(
+            <div style={{position:"absolute",top:"calc(100% - 6px)",left:8,right:8,background:"#131825",border:"1px solid #1e2433",borderRadius:10,zIndex:200,padding:8,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
+              {[["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["ledger","📒","Ledger"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
+                <button key={v} onClick={()=>{setView(v);setShowModules(false);}}
+                  style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:view===v?"rgba(20,184,166,0.10)":"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"Manrope,sans-serif",marginBottom:2,transition:"background 0.12s"}}>
+                  <span style={{fontSize:16,width:24,textAlign:"center"}}>{ic}</span>
+                  <span style={{fontSize:12,fontWeight:600,color:view===v?"#14B8A6":"#A0AAC0"}}>{lb}</span>
+                  {view===v&&<span style={{marginLeft:"auto",width:6,height:6,borderRadius:"50%",background:"#14B8A6",flexShrink:0}}/>}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div style={{flex:1,overflowY:"auto",padding:"0 4px"}}>
           {DEPTS.map(dept=>(
