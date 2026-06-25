@@ -909,7 +909,7 @@
 }
 
 /* The boardroom question card and response cards */
-#oiq-main > div > div[style*="padding:12px 16px"],
+#oiq-main > div > div[style*="padding:"12px 16px""],
 #oiq-main > div > div[style*="flex:1"][style*="overflowY"] {
   padding-left: 24px !important;
   padding-right: 24px !important;
@@ -970,4 +970,79 @@
 /* Executive cards max-width for readability */
 #oiq-main div[style*="background:#131825"][style*="borderLeft"] {
   max-width: 100% !important;
+}
+
+/* ════════════════════════════════════════════════════════
+   FULL WIDTH — remove all unused side space
+   ════════════════════════════════════════════════════════ */
+
+/* Main content uses ALL remaining width */
+#oiq-main {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* All direct children of main fill width */
+#oiq-main > div {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* Executive pills row — wrap with proper gap */
+#oiq-main div[style*="flexWrap:wrap"][style*="gap:3"] {
+  gap: 8px !important;
+  padding: 0 0 16px 0 !important;
+}
+#oiq-main div[style*="flexWrap"] {
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+}
+
+/* Boardroom question textarea */
+#oiq-main textarea[placeholder*="strategic"],
+#oiq-main textarea[placeholder*="question"],
+#oiq-main textarea[placeholder*="Should"] {
+  width: 100% !important;
+  font-size: 15px !important;
+  line-height: 1.6 !important;
+  padding: 14px 18px !important;
+  min-height: 90px !important;
+}
+
+/* Content scroll areas — generous padding */
+#oiq-main > div > div[style*="overflowY"] {
+  padding-left: 24px !important;
+  padding-right: 24px !important;
+}
+
+/* Nerve tabs full width */
+.oiq-nerve-tabs {
+  padding: 12px 24px !important;
+}
+
+/* Executive cards full width */
+#oiq-main div[style*="background:#131825"][style*="borderLeft"] {
+  max-width: 100% !important;
+}
+
+/* Module dropdown trigger button */
+.oiq-sidebar div[style*="relative"] > button[style*="width:100%"] {
+  min-height: 40px !important;
+  border-radius: 8px !important;
+}
+
+/* Dropdown menu */
+.oiq-sidebar div[style*="absolute"][style*="zIndex:200"] button {
+  min-height: 36px !important;
+  border-radius: 6px !important;
+  width: 100% !important;
+  text-align: left !important;
+}
+.oiq-sidebar div[style*="absolute"][style*="zIndex:200"] button:hover {
+  background: rgba(255,255,255,0.06) !important;
+}
+
+/* Stage pills row — hide, space used by dropdown now */
+.oiq-sidebar > div[style*="gap:1"][style*="padding:"] {
+  display: none !important;
 }
