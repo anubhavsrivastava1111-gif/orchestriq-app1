@@ -2725,7 +2725,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
   }
 
   return(
-    <div id="oiq-root" style={{display:"flex",height:"100vh",background:"#0a0e1a",fontFamily:"Manrope,sans-serif",color:"#A0AAC0"}}>
+    <div id="oiq-root" style={{display:"flex",flexDirection:"column",width:"100vw",height:"100vh",background:"#0a0e1a",fontFamily:"Manrope,sans-serif",color:"#A0AAC0",overflow:"hidden"}}>
       <a href="#oiq-main" className="skip-link">Skip to main content</a>
       <div id="oiq-live" aria-live="polite" aria-atomic="false" className="sr-only"/>
       <header id="oiq-header" role="banner" aria-label="OrchestrIQ navigation">
