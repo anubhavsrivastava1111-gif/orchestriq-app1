@@ -2806,6 +2806,13 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
             </div>
           )}
         </div>
+        {/* ── STAGE PILLS — restored ── */}
+        <div style={{display:"flex",gap:3,padding:"5px 8px",borderBottom:"1px solid #1a2030",flexWrap:"wrap"}}>
+          {STAGES.map(st=>(
+            <button key={st.id} onClick={()=>{const n={...co,stage:st.id};setCo(n);sv("cos-co",n);}} title={st.l}
+              style={{...S.pill,...(co.stage===st.id?{borderColor:"#14B8A6",color:"#14B8A6",background:"rgba(20,184,166,0.08)"}:{})}}>{st.ic} <span style={{fontSize:9}}>{st.l}</span></button>
+          ))}
+        </div>
         <div style={{flex:1,overflowY:"auto",padding:"0 4px"}}>
           {DEPTS.map(dept=>(
             <div key={dept.id}>
