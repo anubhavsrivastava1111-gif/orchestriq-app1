@@ -10,6 +10,7 @@ import TokenBadge from "./components/TokenBadge";
 import { getExecutivesCached } from "./lib/executives";
 import { supabase } from "./lib/supabase";
 import { WorkspaceMemory } from "./lib/WorkspaceMemory";
+import { ENGINE_ENABLED, runPipeline } from "./lib/IntelligenceEngine";
 
 // ─── SESSION GATE ────────────────────────────────────────────────────────────
 async function checkSessionGate(): Promise<{allowed:boolean;reason?:string;plan?:string;used?:number;limit?:number}> {
