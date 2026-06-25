@@ -9,6 +9,7 @@ import PulseGovernance from "./Pulse";
 import TokenBadge from "./components/TokenBadge";
 import { getExecutivesCached } from "./lib/executives";
 import { supabase } from "./lib/supabase";
+import { WorkspaceMemory } from "./lib/WorkspaceMemory";
 
 // ─── SESSION GATE ────────────────────────────────────────────────────────────
 async function checkSessionGate(): Promise<{allowed:boolean;reason?:string;plan?:string;used?:number;limit?:number}> {
@@ -2553,10 +2554,9 @@ const processTask=useCallback(async(task:any)=>{
     showToast("All data reset","warning");
   };
   const fullReset=async()=>{
-    for(const k of["cos-keys","cos-co","cos-ch","cos-dp","cos-cd","cos-br","cos-dn","cos-wf","cos-tq"]){try{localStorage.removeItem(k);}catch{}}
-    setPage("landing");setKeys({claude:"",openai:"",gemini:""});setCo({name:"",industry:"",stage:"idea",location:"",markets:"",currency:"INR"});
-    setSelRole(null);setChats({});setCompData({});setBrSessions([]);setShowSettings(false);
-    setWorkflows([]);tQRef.current=[];setTQueue([]);setConfirmReset(null);
+    WorkspaceMemory.clearAll();
+    try{await supabase.auth.signOut();}catch(e){console.warn("[OIQ] Sign out error:",e);}
+    window.location.href="/";
   };
   const exportAll=()=>dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",{version:VERSION,exported:new Date().toISOString(),company:co,companyData:compData,ledgerEntries,customAccounts,dispatchTemplates,adminConfig,actionItems,chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue});
   const handleSignOut=useCallback(async(saveFirst:boolean)=>{
