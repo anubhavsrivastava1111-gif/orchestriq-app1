@@ -280,6 +280,41 @@ async function fetchLiveRates(){
 // Finance executive IDs that benefit from live rates
 const FINANCE_ROLES=["cfo","vp_finance","fin_ctrl","sr_acct","acct_exec","coo","ceo","chairman"];
 
+// ─── DECISION THREAD HELPERS ──────────────────────────────────────────────────
+function extractDecisionStatus(synthesis){
+  const order=["Do Not Proceed","Proceed with Conditions","Needs More Information","No Consensus","Proceed"];
+  for(const s of order){if(synthesis&&synthesis.includes("DECISION STATUS: "+s))return s;}
+  // fallback scan without prefix
+  for(const s of order){if(synthesis&&synthesis.includes(s))return s;}
+  return "No Consensus";
+}
+
+const DOMAIN_EXEC_MAP={
+  finance:[{id:"cfo",reason:"Financial strategy & modelling"},{id:"fin_ctrl",reason:"Controls & reporting"},{id:"vp_fin",reason:"FP&A & budgeting"}],
+  audit:[{id:"cia",reason:"Internal audit strategy"},{id:"risk_mgr",reason:"Enterprise risk"}],
+  hr:[{id:"chro",reason:"People strategy"},{id:"vp_hr",reason:"HR operations"}],
+  legal:[{id:"clo",reason:"Legal & regulatory"},{id:"comp_mgr",reason:"Compliance programme"}],
+  marketing:[{id:"cmo",reason:"GTM & brand strategy"},{id:"dir_growth",reason:"Growth & performance"}],
+  sales:[{id:"sl",reason:"Revenue strategy"},{id:"vp_sales",reason:"Sales execution"}],
+  technology:[{id:"cto",reason:"Technology architecture"},{id:"dir_prod",reason:"Product roadmap"}],
+  operations:[{id:"coo",reason:"Operational execution"},{id:"proj_mgr",reason:"Delivery & planning"}],
+  strategy:[{id:"cso",reason:"Corporate strategy"},{id:"strat_mgr",reason:"Strategic analysis"}],
+  customer_success:[{id:"vp_cx",reason:"Customer retention"},{id:"csm",reason:"Account success"}],
+  executive:[{id:"ceo",reason:"Final decision authority"},{id:"board",reason:"Governance & fiduciary"}],
+  general:[{id:"ceo",reason:"Executive decision authority"},{id:"coo",reason:"Operational oversight"}],
+};
+
+function suggestFollowUpExecs(question,previousExecIds){
+  // Use IE classifyDomain (pure logic — no LLM call)
+  const domain=classifyDomain(question);
+  const candidates=DOMAIN_EXEC_MAP[domain]||DOMAIN_EXEC_MAP.general;
+  // Return only execs NOT already in the previous stage selection
+  return candidates
+    .filter(c=>!previousExecIds.includes(c.id))
+    .filter(c=>AR.find(r=>r.id===c.id))
+    .slice(0,3);
+}
+
 function autoRoute(text){
   const t=text.toLowerCase();
   const kw={
@@ -1599,13 +1634,15 @@ export default function App(){
   const [brQ,setBrQ]=useState("");
   const [brAg,setBrAg]=useState(["ceo","cfo","cto","cmo"]);
   const [brSessions,setBrSessions]=useState([]);
-  const [brCur,setBrCur]=useState({q:"",debate:[],synthesis:"",drilldown:{},researchBrief:""}); 
+  const [brCur,setBrCur]=useState({q:"",researchBrief:"",format:"threaded",stages:[]}); 
   const [brResearching,setBrResearching]=useState(false);
   const [brRun,setBrRun]=useState(false);
   const [brPh,setBrPh]=useState("");
   const [drillRole,setDrillRole]=useState(null);
   const [brShowHistory,setBrShowHistory]=useState(false);
   const [brFollowUp,setBrFollowUp]=useState("");
+  const [followUpExecIds,setFollowUpExecIds]=useState([]);
+  const [followUpSuggestions,setFollowUpSuggestions]=useState([]);
   const [drillQ,setDrillQ]=useState("");
   const [drillRun,setDrillRun]=useState(false);
   const [tmDec,setTmDec]=useState("");
@@ -2026,10 +2063,15 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       if(!cancelRef.current.br&&res.length>0){
         setBrPh("Synthesizing consensus…");
         const allPos=res.map(r=>r.ag.t+":\n"+r.text).join("\n\n---\n\n");
-        const synSys="You are Chief of Staff at "+JSON.stringify(co.name)+". "+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN CLASSIFIED: "+domain+"\nRECOMMENDED FRAMEWORKS (for reference — apply where relevant to strengthen the synthesis): "+frameworks.map(f=>f.name).join(", ")+"\n\nSynthesize the boardroom debate into a board-ready executive report. Use this EXACT format with all sections present:\n\n"+"# Executive Summary\n"+"(3-4 sentences: the single decision, headline number in "+synCur.sym+", recommended action)\n\n"+"## Business Domain\n"+"Domain: "+domain+" | Frameworks referenced: "+frameworks.map(f=>f.name).join(" · ")+"\n\n"+"## Key Insights\n"+"(4-6 bullet points, each opening with a bold keyword. New synthesis only — do not restate individual exec arguments.)\n\n"+"## Points of Conflict\n"+"| Leader | Position | Why It Matters |\n|--------|----------|----------------|\n"+"(one row per genuine disagreement found in the debate — if executives agreed, note that)\n\n"+"## Evidence Quality Review\n"+"(Review the evidence labels used in the debate. List any [Assumption] or [Estimate] that materially affects the recommendation and note what validation is needed.)\n\n"+"## Quantified Recommendation\n"+"(Single recommended path. Show: formula, assumption, result for every figure in "+synCur.sym+")\n\n"+"## Financial Impact\n"+"| Phase | Actions | Investment "+synCur.sym+" | Expected Return | Owner |\n|-------|---------|--------------------------|-----------------|-------|\n"+"(30-60-90 day plan, one row per phase)\n\n"+"## Risk Register\n"+"| Risk | Likelihood | Impact | Mitigation | Owner |\n|------|------------|--------|------------|-------|\n"+"(max 5 rows)\n\n"+"## Opportunities\n"+"(3-5 bullets, each with upside in "+synCur.sym+", timeframe, and owner)\n\n"+"## This Week's Decision\n"+"(Single action required now. Cost of inaction: "+synCur.sym+" per week. Owner and deadline.)\n\n"+"## Recommendations\n"+"| Priority | Action | Impact | Effort | Deadline |\n|----------|--------|--------|--------|----------|\n"+"(ranked by priority)\n\n"+"## Sources and References\n"+"(every figure cited: Source name, figure, URL or evidence label)\n\n"+"FORMATTING RULES: Bold all key metrics. Use tables for all numbers. Never write unbroken paragraph blocks. Every number must have a unit ("+synCur.sym+" or %). Under 2600 words. All sections must be present and complete. Figures from VERIFIED RESEARCH BRIEF: cite source and URL. All others: label [Assumption] or [Estimate (unverified)]."
+        const synSys="You are Chief of Staff at "+JSON.stringify(co.name)+". "+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN CLASSIFIED: "+domain+"\nRECOMMENDED FRAMEWORKS (for reference — apply where relevant to strengthen the synthesis): "+frameworks.map(f=>f.name).join(", ")+"\n\nSynthesize the boardroom debate into a board-ready executive report. Use this EXACT format with all sections present:\n\n"+"# Executive Summary\n"+"(3-4 sentences: the single decision, headline number in "+synCur.sym+", recommended action)\n\n"+"## Business Domain\n"+"Domain: "+domain+" | Frameworks referenced: "+frameworks.map(f=>f.name).join(" · ")+"\n\n"+"## Key Insights\n"+"(4-6 bullet points, each opening with a bold keyword. New synthesis only — do not restate individual exec arguments.)\n\n"+"## Points of Conflict\n"+"| Leader | Position | Why It Matters |\n|--------|----------|----------------|\n"+"(one row per genuine disagreement found in the debate — if executives agreed, note that)\n\n"+"## Evidence Quality Review\n"+"(Review the evidence labels used in the debate. List any [Assumption] or [Estimate] that materially affects the recommendation and note what validation is needed.)\n\n"+"## Quantified Recommendation\n"+"(Single recommended path. Show: formula, assumption, result for every figure in "+synCur.sym+")\n\n"+"## Financial Impact\n"+"| Phase | Actions | Investment "+synCur.sym+" | Expected Return | Owner |\n|-------|---------|--------------------------|-----------------|-------|\n"+"(30-60-90 day plan, one row per phase)\n\n"+"## Risk Register\n"+"| Risk | Likelihood | Impact | Mitigation | Owner |\n|------|------------|--------|------------|-------|\n"+"(max 5 rows)\n\n"+"## Opportunities\n"+"(3-5 bullets, each with upside in "+synCur.sym+", timeframe, and owner)\n\n"+"## This Week's Decision\n"+"(Single action required now. Cost of inaction: "+synCur.sym+" per week. Owner and deadline.)\n\n"+"## Recommendations\n"+"| Priority | Action | Impact | Effort | Deadline |\n|----------|--------|--------|--------|----------|\n"+"(ranked by priority)\n\n"+"## Sources and References\n"+"(every figure cited: Source name, figure, URL or evidence label)\n\n"+"FORMATTING RULES: Bold all key metrics. Use tables for all numbers. Never write unbroken paragraph blocks. Every number must have a unit ("+synCur.sym+" or %). Under 2600 words. All sections must be present and complete. Figures from VERIFIED RESEARCH BRIEF: cite source and URL. All others: label [Assumption] or [Estimate (unverified)].\n\nDECISION STATUS (mandatory final line): After your synthesis write exactly:\nDECISION STATUS: [choose one: Proceed | Proceed with Conditions | Needs More Information | Do Not Proceed | No Consensus]\nReason: [one sentence explaining this status based on the debate evidence]"
         const syn=await ask(synSys,[{role:"user",content:"Question: \""+brQ+"\"\nDebate:\n"+allPos}],6000);
-        const finalSession={id:Date.now(),q:brQ,agents:brAg,debate:res,synthesis:syn,researchBrief,ts:new Date().toISOString()};
-        const finalCur={q:brQ,debate:res,synthesis:syn,drilldown:{},researchBrief};
+        const decisionStatus=extractDecisionStatus(syn);
+        const stage1={stageNumber:1,type:"original",question:brQ,
+          executiveIds:brAg,debate:res,synthesis:syn,
+          decisionStatus,completedAt:new Date().toISOString(),frozen:true};
+        const finalSession={id:Date.now(),q:brQ,agents:brAg,
+          format:"threaded",stages:[stage1],researchBrief,ts:new Date().toISOString()};
+        const finalCur={q:brQ,researchBrief,format:"threaded",stages:[stage1]};
         setBrCur(finalCur);
         sv("cos-br-live",finalCur);
         const ns=[finalSession,...brSessions].slice(0,20);setBrSessions(ns);sv("cos-br",ns);
@@ -2045,67 +2087,114 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     if(!brFollowUp.trim()||brRun)return;
     cancelRef.current.br=false;
     setBrRun(true);setError(null);
-    const priorContext=brCur.debate.map(d=>d.ag.t+": "+d.text).join("\n\n")+(brCur.synthesis?"\n\nPRIOR SYNTHESIS:\n"+brCur.synthesis:"");
-    const agents=brAg.map(id=>AR.find(r=>r.id===id)).filter(Boolean);
-    const res=[...brCur.debate];
-    const synCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
+
+    // Determine which execs respond — use followUpExecIds if set, else previous stage execs
+    const prevStages=brCur.stages||[];
+    const prevExecIds=followUpExecIds.length>0
+      ?followUpExecIds
+      :(prevStages.length>0?prevStages[prevStages.length-1].executiveIds:brAg);
+    const agents=prevExecIds.map(id=>AR.find(r=>r.id===id)).filter(Boolean);
+
+    // Build full prior context from ALL previous stages
+    const priorStagesContext=prevStages.map((st,si)=>{
+      const debateText=st.debate.map(d=>d.ag.t+": "+d.text).join("\n\n---\n\n");
+      return "=== STAGE "+(si+1)+" QUESTION: \""+st.question+"\"\n"+debateText+(st.synthesis?"\n\nSTAGE "+(si+1)+" SYNTHESIS:\n"+st.synthesis:"");
+    }).join("\n\n"+"=".repeat(60)+"\n\n");
+
+    const followUpResponses=[];
     const failedAgents=[];
+
     try{
       for(let i=0;i<agents.length;i++){
         if(cancelRef.current.br){showToast("Cancelled","warning");break;}
         const ag=agents[i];const p=EP[ag.id]||{};
-        setBrPh(ag.ic+" "+ag.t+" is responding to your follow-up…");
-        const sys="You are "+ag.f+" at \""+co.name+"\".\nPROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+"\nThis is a CONTINUING boardroom debate. Prior debate so far:\n"+priorContext+"\n\nThe user now asks a FOLLOW-UP. Respond ONLY to the new follow-up, in your "+ag.dl+" capacity, building on (not repeating) what was already said. 200-350 words MAX.";
-        // PER-AGENT ERROR ISOLATION: a single agent failing (timeout, rate limit, network)
-        // must not kill the whole follow-up round. We catch here, attempt one retry, and if
-        // both attempts fail we record a visible placeholder for that agent and move on.
-        let replyFull=null;
-        let lastErr=null;
+        setBrPh(ag.ic+" "+ag.t+" is responding…");
+
+        const sys="You are "+ag.f+' at \\"'+co.name+'\\".\n'
+          +"PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"
+          +buildCtx(co,compData)
+          +"\n\nDECISION THREAD CONTEXT (all previous stages — do not repeat, only reference):\n"+priorStagesContext
+          +"\n\n"+"=".repeat(60)+"\n\n"
+          +"CURRENT FOLLOW-UP QUESTION: \""+brFollowUp+"\"\n"
+          +"YOUR TURN as "+ag.f+". Respond ONLY to the follow-up question above.\n"
+          +"Step 1: Reference any relevant conclusion from a prior stage if it informs your answer.\n"
+          +"Step 2: Add your "+ag.dl+" perspective on the follow-up — be specific and new.\n"
+          +"Step 3: Label every key statement: [Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"
+          +"200-350 words MAX.";
+
+        let replyFull=null;let lastErr=null;
         for(let attempt=0;attempt<2;attempt++){
           if(cancelRef.current.br)break;
-          try{
-            replyFull=await askFull(sys,[{role:"user",content:"FOLLOW-UP QUESTION: "+brFollowUp}],4000);
-            lastErr=null;
-            break;
-          }catch(agentErr){
-            lastErr=agentErr;
-            // Brief pause before retry to let any transient provider issue clear
-            if(attempt===0)await new Promise(r=>setTimeout(r,1500));
-          }
+          try{replyFull=await askFull(sys,[{role:"user",content:"FOLLOW-UP: "+brFollowUp}],4000);lastErr=null;break;}
+          catch(agentErr){lastErr=agentErr;if(attempt===0)await new Promise(res=>setTimeout(res,1500));}
         }
         if(cancelRef.current.br)break;
-        if(replyFull){
-          res.push({ag,text:replyFull.primary,truncated:!!replyFull.truncated});
-        }else if(lastErr){
-          failedAgents.push(ag.t);
-          res.push({ag,text:"_"+ag.t+" could not respond to this follow-up ("+lastErr.message+"). You can re-ask by sending the follow-up again._",truncated:false});
-        }
-        const updatedCur={...brCur,debate:[...res]};
-        setBrCur(updatedCur);sv("cos-br-live",updatedCur);
+        if(replyFull){followUpResponses.push({ag,text:replyFull.primary,truncated:!!replyFull.truncated});}
+        else if(lastErr){failedAgents.push(ag.t);followUpResponses.push({ag,text:"_"+ag.t+" could not respond ("+lastErr.message+")_",truncated:false});}
+      }
+
+      // Chairman synthesis for this stage
+      let stageSyn="";
+      if(!cancelRef.current.br&&followUpResponses.length>0){
+        setBrPh("🏛️ Chairman synthesising stage "+( prevStages.length+1)+"…");
+        const synCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
+        const allPos=followUpResponses.map(r=>r.ag.t+":\n"+r.text).join("\n\n---\n\n");
+        const stageSynSys="You are Chief of Staff at "+JSON.stringify(co.name)+". "+buildCtx(co,compData)
+          +"\n\nDECISION THREAD — PRIOR STAGES (context only — do not re-analyse):\n"+priorStagesContext
+          +"\n\n"+"=".repeat(60)+"\n\n"
+          +"CURRENT FOLLOW-UP QUESTION: \""+brFollowUp+"\"\n"
+          +"Synthesise ONLY this follow-up round into a concise board-ready summary.\n"
+          +"Sections: # Summary | ## Key Findings | ## Evidence Quality | ## Decision Status\n"
+          +"All figures in "+synCur.sym+". Reference prior stages briefly where relevant.\n"
+          +"DECISION STATUS (mandatory final line):\n"
+          +"DECISION STATUS: [Proceed | Proceed with Conditions | Needs More Information | Do Not Proceed | No Consensus]\n"
+          +"Reason: [one sentence]";
+        try{stageSyn=await ask(stageSynSys,[{role:"user",content:"Follow-up: \""+brFollowUp+"\"\nResponses:\n"+allPos}],3000);}
+        catch(e){stageSyn="(Synthesis unavailable for this stage: "+e.message+")";}
+      }
+
+      if(!cancelRef.current.br){
+        const newStage={
+          stageNumber:prevStages.length+1,
+          type:"followup",
+          question:brFollowUp,
+          executiveIds:prevExecIds,
+          aiSuggestions:followUpSuggestions,
+          debate:followUpResponses,
+          synthesis:stageSyn,
+          decisionStatus:extractDecisionStatus(stageSyn),
+          completedAt:new Date().toISOString(),
+          frozen:true,
+        };
+        const updatedStages=[...prevStages,newStage];
+        const updatedCur={...brCur,stages:updatedStages};
+        setBrCur(updatedCur);
+        sv("cos-br-live",updatedCur);
+        // Update most recent archive entry with new stage
         setBrSessions(prev=>{
           if(!prev.length)return prev;
           const updated=[...prev];
-          updated[0]={...updated[0],debate:[...res]};
+          updated[0]={...updated[0],stages:updatedStages};
           sv("cos-br",updated);
           return updated;
         });
+        setBrFollowUp("");
+        setFollowUpExecIds([]);
+        setFollowUpSuggestions([]);
       }
-      setBrFollowUp("");
-      if(failedAgents.length){
-        showToast(failedAgents.length+" executive(s) couldn't respond: "+failedAgents.join(", ")+". The rest of the round completed.","warning");
-      }
+      if(failedAgents.length){showToast(failedAgents.length+" executive(s) couldn't respond: "+failedAgents.join(", ")+".","warning");}
     }catch(err){
-      // Only reached for non-agent errors (e.g. setup failure). Per-agent failures
-      // are now isolated above and never reach this catch.
       if(!cancelRef.current.br){setError(err.message);showToast("Continue error: "+err.message,"error");}
     }finally{setBrRun(false);setBrPh("");cancelRef.current.br=false;}
-  },[brFollowUp,brRun,brCur,brAg,co,compData,keys,defP,showToast]);
+  },[brFollowUp,brRun,brCur,brAg,co,compData,keys,defP,showToast,followUpExecIds,followUpSuggestions]);
   
   const runDrill=useCallback(async()=>{
     if(!drillRole||!drillQ.trim()||drillRun)return;
     setDrillRun(true);setError(null);
     const ag=AR.find(r=>r.id===drillRole);
-    const prevTake=brCur.debate.find(d=>d.ag.id===drillRole)?.text||"";
+    const prevTake=(brCur.stages
+      ?brCur.stages.flatMap(s=>s.debate||[]).find(d=>d.ag?.id===drillRole)?.text
+      :(brCur.debate||[]).find(d=>d.ag?.id===drillRole)?.text)||"";
     try{
       const sys=buildSys(ag,co,compData)+"\n\nYour boardroom take:\n"+prevTake+"\n\nCEO is drilling deeper.";
       const reply=await ask(sys,[{role:"user",content:drillQ}]);
@@ -2917,6 +3006,9 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
     drillRun={drillRun} brEnd={brEnd}
     runBR={runBR} runBRContinue={runBRContinue} runDrill={runDrill}
     cancelBR={()=>{cancelRef.current.br=true;}}
+    followUpExecIds={followUpExecIds} setFollowUpExecIds={setFollowUpExecIds}
+    followUpSuggestions={followUpSuggestions} setFollowUpSuggestions={setFollowUpSuggestions}
+    suggestFollowUpExecs={suggestFollowUpExecs}
     dlFile={dlFile} cp={cp}
     quickExport={quickExport}
     extractActionItems={extractActionItems}
