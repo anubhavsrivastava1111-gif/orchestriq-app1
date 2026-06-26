@@ -1925,7 +1925,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       const researchContext="\nVERIFIED RESEARCH BRIEF (current data for this scan - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n";
       const sys="You are the Decision Intelligence Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nIdentify 6 CRITICAL decisions the founder should make RIGHT NOW. ALL figures in "+apCur.sym+apCur.code+".\nFor each: Title, Urgency, Owner, Decide By, Cost of delay/week (with calculation), Options 1/2/3 with outcomes, Recommendation, "+co.location+" Context, Data Needed. End with: THE ONE DECISION THAT MATTERS MOST THIS WEEK. Then a final section: Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled 'ESTIMATE (unverified)'. Do not present invented numbers as fact.";
       const res=await ask(sys,[{role:"user",content:"Run complete decision scan."}],4500);
-      if(!cancelRef.current.ap)setApRes(res);
+      if(!cancelRef.current.ap){setApRes(res);sv("cos-ap-live",{res,brief:researchBrief});}
     }catch(err){
       if(!cancelRef.current.ap){setError(err.message);showToast("Autopilot: "+err.message,"error");}
     }finally{
@@ -2082,6 +2082,13 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         }
         const updatedCur={...brCur,debate:[...res]};
         setBrCur(updatedCur);sv("cos-br-live",updatedCur);
+        setBrSessions(prev=>{
+          if(!prev.length)return prev;
+          const updated=[...prev];
+          updated[0]={...updated[0],debate:[...res]};
+          sv("cos-br",updated);
+          return updated;
+        });
       }
       setBrFollowUp("");
       if(failedAgents.length){
@@ -2962,7 +2969,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                       <div style={{fontSize:9,color:"#5A6480",marginTop:6,fontStyle:"italic"}}>Click source links to verify independently. AI-generated — please confirm critical figures before external use.</div>
                     </div>
                   )}
-                  {tmRes&&<div style={{animation:"fadeIn 0.3s"}}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4,gap:4,flexWrap:"wrap"}}><button onClick={()=>cp(tmRes)} style={S.hBtn}>Copy</button><button onClick={()=>quickExport("pdf","detailed","Time Machine — "+tmDec.slice(0,40),tmRes)} style={S.hBtn}>📄 PDF</button><button onClick={()=>quickExport("pptx","strategy","Time Machine Simulation",tmRes)} style={S.hBtn}>📊 PPT</button><button onClick={()=>dlFile("TimeMachine-"+Date.now()+".md",tmDec+"\n\n"+tmRes,"text/markdown")} style={S.hBtn}>MD</button><button onClick={()=>extractActionItems("timemachine","Time Machine — \""+tmDec.slice(0,40)+"\"",tmRes)} disabled={extracting==="timemachine"} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>{extracting==="timemachine"?"Extracting...":"✅ Extract Action Items"}</button></div><div style={{background:"#131825",borderRadius:8,padding:"14px 16px",border:"1px solid rgba(139,92,246,0.18)"}}><div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={tmRes} ac="#8B5CF6"/></div></div></div>}
+                  {tmRes&&<div style={{animation:"fadeIn 0.3s"}}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4,gap:4,flexWrap:"wrap"}}><button onClick={()=>cp(tmRes)} style={S.hBtn}>Copy</button><button onClick={()=>quickExport("pdf","detailed","Time Machine — "+tmDec,tmRes)} style={S.hBtn}>📄 PDF</button><button onClick={()=>quickExport("pptx","strategy","Time Machine Simulation",tmRes)} style={S.hBtn}>📊 PPT</button><button onClick={()=>dlFile("TimeMachine-"+Date.now()+".md",tmDec+"\n\n"+tmRes,"text/markdown")} style={S.hBtn}>MD</button><button onClick={()=>extractActionItems("timemachine","Time Machine — \""+tmDec.slice(0,40)+"\"",tmRes)} disabled={extracting==="timemachine"} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>{extracting==="timemachine"?"Extracting...":"✅ Extract Action Items"}</button></div><div style={{background:"#131825",borderRadius:8,padding:"14px 16px",border:"1px solid rgba(139,92,246,0.18)"}}><div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={tmRes} ac="#8B5CF6"/></div></div></div>}
                   {error&&nTab==="timemachine"&&<div style={S.errB}>⚠️ {error}<div style={{display:"flex",gap:4}}><button onClick={runTM} style={S.retBtn}>Retry</button><button onClick={()=>setError(null)} style={{...S.retBtn,background:"#3A4060"}}>Dismiss</button></div></div>}
                 </div>
               )}
