@@ -92,6 +92,8 @@ const MODELS = {
   openai:{name:"ChatGPT",company:"OpenAI",model:"gpt-4o",placeholder:"sk-...",color:"#10A37F",keyUrl:"https://platform.openai.com/api-keys"},
   gemini:{name:"Gemini",company:"Google",model:"gemini-1.5-flash",placeholder:"AIza...",color:"#4285F4",keyUrl:"https://aistudio.google.com/app/apikey"},
   groq:{name:"Groq",company:"Groq",model:"llama-3.3-70b-versatile",placeholder:"gsk_...",color:"#F97316",keyUrl:"https://console.groq.com/keys"},
+  deepseek:{name:"DeepSeek",company:"DeepSeek AI",model:"deepseek-chat",placeholder:"sk-...",color:"#2563EB",keyUrl:"https://platform.deepseek.com/api_keys",note:"Low cost · Strong reasoning · Available in India"},
+  kimi:{name:"Kimi",company:"Moonshot AI",model:"moonshot-v1-8k",placeholder:"sk-...",color:"#8B5CF6",keyUrl:"https://platform.moonshot.cn/console/api-keys",note:"Fast · Affordable · Strong multilingual"},
 };
 // ─── DONATION QR ────────────────────────────────────────────────────────────
 // Paste your QR code as a base64 data URI between the quotes below to hard-code it,
@@ -673,6 +675,16 @@ async function callGemini(key,sys,msgs,maxT){
 }
 
 // FIX BUG 2,3,5: universal 60s timeout on every AI call
+async function callDeepSeek(key,sys,msgs,maxT){
+  const r=await fetch("https://api.deepseek.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.deepseek.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
+  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("DeepSeek: Invalid API key.");if(r.status===429)throw new Error("DeepSeek: Rate limit. Wait a moment.");throw new Error("DeepSeek "+r.status+": "+(m||r.statusText));}
+  const d=await r.json();return d.choices?.[0]?.message?.content||"";
+}
+async function callKimi(key,sys,msgs,maxT){
+  const r=await fetch("https://api.moonshot.cn/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.kimi.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
+  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("Kimi: Invalid API key.");if(r.status===429)throw new Error("Kimi: Rate limit. Wait a moment.");throw new Error("Kimi "+r.status+": "+(m||r.statusText));}
+  const d=await r.json();return d.choices?.[0]?.message?.content||"";
+}
 async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false){
   if(!key?.trim())throw new Error("No API key for "+(MODELS[provider]?.name||provider)+". Add it in Settings.");
   const msgs=rawMsgs.map(m=>({role:m.role==="user"?"user":"assistant",content:m.content}));
@@ -685,7 +697,7 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false){
     timerId=setTimeout(()=>rej(new Error("Request timed out after "+(timeoutMs/1000)+"s. The AI provider may be busy — try switching to Gemini (free tier).")),timeoutMs);
   });
   const callP=(async()=>{
-    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT):provider==="groq"?await callGroq(key,sys,msgs,maxT):Promise.reject(new Error("Unknown provider: "+provider));
+    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT):provider==="kimi"?await callKimi(key,sys,msgs,maxT):Promise.reject(new Error("Unknown provider: "+provider));
     if(raw&&typeof raw==="object"&&"text" in raw)return raw as {text:string;truncated:boolean};
     return {text:raw as string,truncated:false};
   })();
@@ -1609,7 +1621,7 @@ export default function App(){
   const [sbOpen,setSbOpen]=useState(false);
   const [showModules,setShowModules]=useState(false);
   const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return localStorage.getItem("oiq-sb-col")==="1";}catch{return false;}});
-  const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:""});
+  const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:""});
   const [defP,setDefP]=useState("groq");
   const [multiAI,setMultiAI]=useState(false);
   const [co,setCo]=useState({name:"",industry:"",stage:"idea",location:"",markets:"",currency:"INR"});
@@ -1744,7 +1756,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{const c=localStorage.getItem("cos-co");if(c)setCo(p=>({...p,...JSON.parse(c)}));}catch{}
     try{const k=localStorage.getItem("cos-keys");if(k){
       const p=JSON.parse(k);
-      const loadedKeys=p.keys||{claude:"",openai:"",gemini:"",groq:""};
+      const loadedKeys={claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",...(p.keys||{})};
       setKeys(loadedKeys);setDefP(p.defaultProvider||"claude");setMultiAI(p.multiAI||false);
       if(Object.values(loadedKeys).some(v=>v?.trim()))setPage("app");
       const active=Object.keys(loadedKeys).filter(pid=>loadedKeys[pid]?.trim());
@@ -2846,7 +2858,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
               <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}>
                 <div style={{width:6,height:6,borderRadius:"50%",background:keys[id]?.trim()?m.color:"#3A4060"}}/>
                 <span style={{fontSize:11,fontWeight:700,color:"#F1F5F9"}}>{m.name}</span>
-                {id==="gemini"&&<span style={{fontSize:8,color:"#10B981",fontWeight:700}}>FREE</span>}
+                {id==="gemini"&&<span style={{fontSize:8,color:"#10B981",fontWeight:700}}>FREE</span>}{m.note&&<span style={{fontSize:9,color:"#5A6480",marginLeft:4}}>{m.note}</span>}
                 <a href={m.keyUrl} target="_blank" rel="noopener noreferrer" style={{marginLeft:"auto",fontSize:9,color:m.color,textDecoration:"none"}}>Get key</a>
                 {keys[id]?.trim()&&<button onClick={()=>testKey(id)} style={{...S.iBtn,fontSize:9,padding:"1px 6px"}}>{testSt[id]==="testing"?"…":testSt[id]==="ok"?"✓ OK":testSt[id]?.startsWith("fail:")?"✗ Fail":"Test"}</button>}
               </div>
