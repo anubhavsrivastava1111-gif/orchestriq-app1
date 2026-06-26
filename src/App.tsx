@@ -2445,8 +2445,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
 
     // Helper: build the system prompt for a deliverable
     const buildDelSys=(ctx,mod,del,priorDepContent)=>{
-      const nl="
-";
+      const nl="\n";
       return "You are an expert "+mod.capabilityType+" specialist working for "+ctx.company.name+"."+nl+
         "COMPANY: "+ctx.company.name+" | "+ctx.company.industry+" | "+ctx.company.stage+" | "+ctx.company.location+" | "+ctx.company.currencySymbol+ctx.company.currency+nl+
         (Object.keys(ctx.dataHub||{}).length?"DATA HUB:"+nl+Object.entries(ctx.dataHub).map(([k,v])=>k+": "+v).join(nl)+nl:"")+
