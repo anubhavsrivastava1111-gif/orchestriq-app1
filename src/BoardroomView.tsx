@@ -575,8 +575,10 @@ function HistoryPanel({ sessions, onReopen, onDelete, tok }: { sessions: any[]; 
           <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", borderBottom: i < sessions.length - 1 ? `1px solid ${tok.border}` : "none" }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 500, color: tok.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.q}</div>
-              <div style={{ fontSize: 12, color: tok.muted, marginTop: 3 }}>
-                {new Date(s.ts).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })} · {s.debate?.length || 0} executives
+              <div style={{ fontSize: 12, color: tok.muted, marginTop: 4, display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
+                <span>{(s.agents?.length || s.debate?.length || 0)} executives</span>
+                {(()=>{ const fu = s.agents?.length ? Math.floor((s.debate?.length - s.agents.length) / s.agents.length) : 0; return fu > 0 ? <span style={{ color: tok.accent }}>· ↻ {fu} follow-up{fu > 1 ? "s" : ""}</span> : null; })()}
+                <span>· {new Date(s.ts).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
               </div>
             </div>
             <button onClick={() => onReopen(s)}
