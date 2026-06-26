@@ -1685,6 +1685,10 @@ export default function App(){
   const [projectPlanning,setProjectPlanning]=useState(false);
   const [projectPlan,setProjectPlan]=useState(null); // pending approval
   const [projectObjective,setProjectObjective]=useState("");
+  const [projectExecution,setProjectExecution]=useState(null); // active execution project
+  const [projectExecuting,setProjectExecuting]=useState(false);
+  const [projectExecPhase,setProjectExecPhase]=useState(""); // live status message
+  const [projectExecCancel,setProjectExecCancel]=useState(false);
   const [wfCustomChain,setWfCustomChain]=useState([]);
   const [wfShowExtra,setWfShowExtra]=useState(false);
   const [wfPreflight,setWfPreflight]=useState<{questions:{persona:string;personaIc:string;q:string;placeholder:string}[];answers:string[];contextSummary:string}|null>(null);
@@ -2399,9 +2403,281 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     setActiveProject(approved);
     setProjectPlan(null);
     setProjectObjective("");
-    showToast("Execution Plan approved. Phase 2 execution engine coming in next build.","success");
-    // Phase 2 will call runProjectExecution(approved) here
+    showToast("Execution Plan approved — starting execution now.","success");
+    runProjectExecution(approved);
   },[projectPlan,projects,showToast,sv]);
+
+  // ─── PROJECT ENGINE — Phase 2: Execution Engine ────────────────────────────
+  const runProjectExecution=useCallback(async(project)=>{
+    if(projectExecuting)return;
+    setProjectExecuting(true);
+    setProjectExecCancel(false);
+    setProjectExecution({...project,status:"executing"});
+
+    // Helper: update a single deliverable across the execution state
+    const updateDel=(projState,modId,delId,patch)=>{
+      const mods=(projState.modules||[]).map(m=>{
+        if(m.id!==modId)return m;
+        return {...m,deliverables:(m.deliverables||[]).map(d=>d.id===delId?{...d,...patch}:d)};
+      });
+      const updated={...projState,modules:mods};
+      setProjectExecution(updated);
+      setProjects(prev=>{const ns=prev.map(p=>p.id===updated.id?updated:p);sv("cos-projects",ns);return ns;});
+      return updated;
+    };
+
+    // Helper: check if all dependsOn deliverables are complete
+    const allDepsComplete=(projState,del)=>{
+      if(!del.dependsOn||del.dependsOn.length===0)return true;
+      const allDels=(projState.modules||[]).flatMap(m=>m.deliverables||[]);
+      return del.dependsOn.every(depId=>{
+        const dep=allDels.find(d=>d.id===depId);
+        return dep&&dep.status==="complete";
+      });
+    };
+
+    // Helper: get rawContent of a dependency
+    const getDepContent=(projState,depId)=>{
+      const allDels=(projState.modules||[]).flatMap(m=>m.deliverables||[]);
+      const dep=allDels.find(d=>d.id===depId);
+      return dep?.rawContent?stripMd(dep.rawContent).slice(0,400):"";
+    };
+
+    // Helper: build the system prompt for a deliverable
+    const buildDelSys=(ctx,mod,del,priorDepContent)=>{
+      const nl="
+";
+      return "You are an expert "+mod.capabilityType+" specialist working for "+ctx.company.name+"."+nl+
+        "COMPANY: "+ctx.company.name+" | "+ctx.company.industry+" | "+ctx.company.stage+" | "+ctx.company.location+" | "+ctx.company.currencySymbol+ctx.company.currency+nl+
+        (Object.keys(ctx.dataHub||{}).length?"DATA HUB:"+nl+Object.entries(ctx.dataHub).map(([k,v])=>k+": "+v).join(nl)+nl:"")+
+        (ctx.timeMachineForecasts?"FORECASTS: "+ctx.timeMachineForecasts+nl:"")+
+        ((ctx.boardroomDecisions||[]).length?"DECISIONS: "+ctx.boardroomDecisions.map(d=>"Q:"+d.question+" → "+d.decisionStatus).join(" | ")+nl:"")+
+        (priorDepContent?"DEPENDENCY OUTPUT (use this as input):"+nl+priorDepContent+nl:"")+nl+
+        "YOUR TASK: Produce the deliverable below. Output the COMPLETE deliverable only — no preamble, no meta-commentary, no section headers about what you are doing. Start directly with the content."+nl+
+        "DELIVERABLE: "+del.name+nl+
+        "DESCRIPTION: "+del.description+nl+
+        "FORMAT: "+del.outputFormat+nl+
+        "VERIFICATION: Label any unverified figure as [ASSUMPTION] or [ESTIMATE]. Label verified data as [VERIFIED]."+nl+
+        "CURRENCY: "+ctx.company.currencySymbol;
+    };
+
+    // Helper: call AI with retry + failover + waiting
+    const callDelAI=async(sys,userMsg,maxT,delLabel)=>{
+      const providerOrder=[];
+      const allKeys={...keys};
+      if(EFF_GROQ?.trim())allKeys.groq=EFF_GROQ;
+      if(EFF_GEMINI?.trim())allKeys.gemini=EFF_GEMINI;
+      if(EFF_CLAUDE?.trim())allKeys.claude=EFF_CLAUDE;
+      // Build ordered list: deepseek first (paid), then others
+      const preferred=["deepseek","claude","openai","gemini","groq","kimi"];
+      preferred.forEach(p=>{if(allKeys[p]?.trim())providerOrder.push(p);});
+      if(!providerOrder.length)throw new Error("No API keys configured.");
+
+      let lastErr=null;
+      for(let attempt=0;attempt<2;attempt++){
+        for(const prov of providerOrder){
+          if(projectExecCancel)throw new Error("CANCELLED");
+          const key=allKeys[prov]?.trim();
+          if(!key)continue;
+          try{
+            setProjectExecPhase("Generating: "+delLabel+" ("+prov+")...");
+            const r=await callAI(prov,key,sys,[{role:"user",content:userMsg}],maxT);
+            return r.text||r;
+          }catch(e){
+            lastErr=e;
+            if(e.message==="CANCELLED")throw e;
+            if(isRateLimit(e.message)){
+              markProviderExhausted(prov);
+              continue; // try next provider
+            }
+            continue; // try next provider on any error
+          }
+        }
+        // All providers tried — wait before retry
+        if(attempt===0){
+          setProjectExecPhase("All providers at limit — waiting 65s before retry for: "+delLabel);
+          await waitWithCountdown(65,(s)=>setProjectExecPhase("Retry in "+s+"s — "+delLabel));
+        }
+      }
+      throw lastErr||new Error("All providers exhausted for: "+delLabel);
+    };
+
+    // Helper: generate deliverable (with chunking for large deliverables)
+    const generateDeliverable=async(projState,mod,del)=>{
+      const ctx=projState.context||buildProjectContext();
+      const priorDepContent=(del.dependsOn||[]).map(id=>getDepContent(projState,id)).filter(Boolean).join("
+
+");
+      const sys=buildDelSys(ctx,mod,del,priorDepContent);
+      const userMsg="Generate the complete deliverable now: "+del.name;
+
+      // Estimate if chunking is needed based on description length
+      const needsChunking=del.description.length>300||["blog","landing page","press release","terms","privacy","contract","roadmap","forecast"].some(k=>del.name.toLowerCase().includes(k));
+
+      if(!needsChunking){
+        return await callDelAI(sys,userMsg,2500,del.name);
+      }
+
+      // Chunked generation — split into logical sections
+      setProjectExecPhase("Planning sections for: "+del.name);
+      const planSys=sys+"
+
+First, list the logical sections for this deliverable as a JSON array of strings. Output ONLY the JSON array, no other text. Maximum 4 sections.";
+      let sections=[];
+      try{
+        const planRaw=await callDelAI(planSys,"List sections for: "+del.name,400,del.name+" (planning)");
+        const cleaned=planRaw.trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/```\s*$/,"");
+        sections=JSON.parse(cleaned);
+        if(!Array.isArray(sections)||sections.length===0)throw new Error("No sections");
+      }catch{
+        // If planning fails, generate as single chunk
+        return await callDelAI(sys,userMsg,2500,del.name);
+      }
+
+      const chunks=[];
+      for(let si=0;si<sections.length;si++){
+        if(projectExecCancel)throw new Error("CANCELLED");
+        const section=sections[si];
+        setProjectExecPhase("Generating section "+(si+1)+"/"+sections.length+": "+section);
+        const chunkSys=sys+"
+
+You are generating SECTION "+(si+1)+" of "+sections.length+" of this deliverable."+
+          (chunks.length?"
+
+COMPLETED SECTIONS SO FAR:
+"+chunks.join("
+
+"):"");
+        const chunkContent=await callDelAI(chunkSys,"Generate section: "+section,1800,del.name+" §"+(si+1));
+        chunks.push("## "+section+"
+
+"+chunkContent);
+      }
+      return chunks.join("
+
+");
+    };
+
+    // ── MAIN EXECUTION LOOP ──────────────────────────────────────────────────
+    let currentProj={...project,status:"executing"};
+
+    // Build flat list of all deliverables for dependency tracking
+    const getAllDels=()=>(currentProj.modules||[]).flatMap(m=>(m.deliverables||[]).map(d=>({...d,_modId:m.id,_modName:m.name})));
+
+    // Queue all deliverables
+    currentProj.modules=(currentProj.modules||[]).map(m=>({
+      ...m,
+      status:"running",
+      deliverables:(m.deliverables||[]).map(d=>({...d,status:"queued"}))
+    }));
+    setProjectExecution({...currentProj});
+
+    let totalDels=getAllDels().length;
+    let completedCount=0;
+    let failedCount=0;
+
+    // Process in waves — each wave processes all deliverables whose deps are met
+    const MAX_WAVES=20;
+    for(let wave=0;wave<MAX_WAVES;wave++){
+      if(projectExecCancel){
+        currentProj={...currentProj,status:"cancelled"};
+        break;
+      }
+
+      const pending=getAllDels().filter(d=>d.status==="queued"||d.status==="waiting");
+      if(pending.length===0)break;
+
+      const ready=pending.filter(d=>allDepsComplete(currentProj,d));
+      const blocked=pending.filter(d=>!allDepsComplete(currentProj,d));
+
+      if(ready.length===0&&blocked.length>0){
+        // All remaining are blocked — check if any blocker is failed
+        const blockerIds=blocked.flatMap(d=>d.dependsOn||[]);
+        const allDels=getAllDels();
+        const failedBlockers=blockerIds.filter(id=>{
+          const dep=allDels.find(d=>d.id===id);
+          return dep&&dep.status==="failed";
+        });
+        if(failedBlockers.length===blockerIds.length){
+          // All blockers failed — mark blocked as failed too
+          for(const bd of blocked){
+            const mod=currentProj.modules.find(m=>m.id===bd._modId);
+            if(mod){currentProj=updateDel(currentProj,bd._modId,bd.id,{status:"failed",rawContent:"Blocked by failed dependency."});}
+            failedCount++;
+          }
+        }
+        break;
+      }
+
+      // Process all ready deliverables (sequentially to avoid rate limits)
+      for(const del of ready){
+        if(projectExecCancel)break;
+        const mod=currentProj.modules.find(m=>m.id===del._modId);
+        if(!mod)continue;
+
+        // Mark as generating
+        currentProj=updateDel(currentProj,del._modId,del.id,{
+          status:"generating",startedAt:new Date().toISOString()
+        });
+
+        let rawContent=null;
+        let genFailed=false;
+
+        try{
+          rawContent=await generateDeliverable(currentProj,mod,del);
+        }catch(e){
+          if(e.message==="CANCELLED")break;
+          genFailed=true;
+          currentProj=updateDel(currentProj,del._modId,del.id,{
+            status:"failed",
+            rawContent:"Generation failed: "+e.message,
+            completedAt:new Date().toISOString(),
+            confidenceScore:0,
+            verificationStatus:"Failed"
+          });
+          failedCount++;
+          showToast("⚠ "+del.name+" failed: "+e.message.slice(0,60),"warning");
+          continue;
+        }
+
+        if(!genFailed&&rawContent){
+          // Quick QA: detect placeholders
+          const hasPlaceholders=/\[INSERT\]|\[TBD\]|PLACEHOLDER|Lorem ipsum/i.test(rawContent);
+          const hasAssumptions=/\[ASSUMPTION\]|\[ESTIMATE\]/i.test(rawContent);
+          const confidenceScore=hasPlaceholders?30:hasAssumptions?65:85;
+          const verificationStatus=hasPlaceholders?"Requires User Input":hasAssumptions?"AI Generated":"AI Generated";
+
+          currentProj=updateDel(currentProj,del._modId,del.id,{
+            status:"complete",
+            rawContent,
+            completedAt:new Date().toISOString(),
+            confidenceScore,
+            verificationStatus,
+            qaResult:{
+              passed:!hasPlaceholders,
+              checkedAt:new Date().toISOString(),
+              flags:hasPlaceholders?[{type:"placeholder",location:"content",original:"[placeholder detected]",suggestion:"Fill in with real data"}]:[],
+              score:confidenceScore
+            }
+          });
+          completedCount++;
+          setProjectExecPhase("✓ "+del.name+" complete ("+completedCount+"/"+totalDels+")");
+        }
+      }
+    }
+
+    // Finalize project status
+    const finalStatus=completedCount===totalDels?"complete":failedCount>0?"partial":"executing";
+    currentProj={...currentProj,status:finalStatus,completedAt:new Date().toISOString()};
+    setProjectExecution(currentProj);
+    setProjects(prev=>{const ns=prev.map(p=>p.id===currentProj.id?currentProj:p);sv("cos-projects",ns);return ns;});
+    setProjectExecuting(false);
+    setProjectExecPhase("");
+
+    if(finalStatus==="complete")showToast("✅ Project complete — "+completedCount+" deliverables generated","success");
+    else if(finalStatus==="partial")showToast("⚠ Project partial — "+completedCount+" complete, "+failedCount+" failed","warning");
+
+  },[projectExecuting,keys,buildProjectContext,showToast,sv,isRateLimit,markProviderExhausted,waitWithCountdown,stripMd,callAI,buildProjectContext]);
 
 const runWorkflow=useCallback(async(customChainOverride?:string[],preflightAnswers?:{questions:{persona:string;q:string}[];answers:string[]}|null)=>{
   const taskText=wfTask.trim();
@@ -3404,6 +3680,91 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                 <div>
                   <div style={{fontSize:13,fontWeight:800,color:"#F1F5F9",marginBottom:2}}>⚡ Project Engine</div>
                   <p style={{fontSize:10,color:"#8892B0",marginBottom:14,lineHeight:1.6}}>Describe a complex business objective. The engine decomposes it into an Execution Plan with modules and deliverables — you approve before anything runs.</p>
+
+                  {/* ── EXECUTION DASHBOARD ── */}
+                  {(projectExecuting||projectExecution?.status==="complete"||projectExecution?.status==="partial"||projectExecution?.status==="executing")&&projectExecution&&(
+                    <div style={{animation:"fadeIn 0.3s"}}>
+                      {/* Header */}
+                      <div style={{background:"#131825",border:"1px solid #1a2030",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                          <span style={{fontSize:16}}>⚡</span>
+                          <div style={{flex:1}}><div style={{fontSize:12,fontWeight:800,color:"#F1F5F9"}}>{projectExecution.name}</div><div style={{fontSize:9,color:"#5A6480"}}>{projectExecution.modules?.length||0} modules · {(projectExecution.modules||[]).reduce((a,m)=>a+(m.deliverables?.length||0),0)} deliverables</div></div>
+                          <span style={{fontSize:8,padding:"3px 8px",borderRadius:8,fontWeight:700,background:projectExecution.status==="complete"?"rgba(16,185,129,0.12)":projectExecution.status==="partial"?"rgba(245,158,11,0.1)":"rgba(20,184,166,0.08)",color:projectExecution.status==="complete"?"#10B981":projectExecution.status==="partial"?"#F59E0B":"#14B8A6"}}>{projectExecution.status?.toUpperCase()}</span>
+                        </div>
+                        {/* Progress bar */}
+                        {(()=>{
+                          const allD=(projectExecution.modules||[]).flatMap(m=>m.deliverables||[]);
+                          const done=allD.filter(d=>d.status==="complete").length;
+                          const total=allD.length||1;
+                          const pct=Math.round(done/total*100);
+                          return(
+                            <div>
+                              <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:"#5A6480",marginBottom:3}}><span>{done}/{total} deliverables</span><span>{pct}%</span></div>
+                              <div style={{background:"#1a2030",borderRadius:20,height:4}}><div style={{background:"linear-gradient(90deg,#14B8A6,#6366F1)",height:"100%",borderRadius:20,width:pct+"%",transition:"width 0.5s"}}/></div>
+                            </div>
+                          );
+                        })()}
+                        {projectExecPhase&&<div style={{fontSize:9,color:"#14B8A6",marginTop:6,display:"flex",alignItems:"center",gap:4}}><span style={{width:5,height:5,borderRadius:"50%",background:"#14B8A6",display:"inline-block",animation:"pulse 1s infinite",flexShrink:0}}/>{projectExecPhase}</div>}
+                        {projectExecuting&&<button onClick={()=>setProjectExecCancel(true)} style={{...S.cancelBtn,marginTop:8,fontSize:9}}>Cancel Execution</button>}
+                      </div>
+                      {/* Module cards */}
+                      <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
+                        {(projectExecution.modules||[]).map((mod,mi)=>{
+                          const modDels=mod.deliverables||[];
+                          const modDone=modDels.filter(d=>d.status==="complete").length;
+                          const modFailed=modDels.filter(d=>d.status==="failed").length;
+                          const statusColor=modDone===modDels.length?"#10B981":modFailed>0?"#EF4444":"#14B8A6";
+                          return(
+                            <div key={mi} style={{background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:7,padding:"10px 12px"}}>
+                              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                                <span style={{fontSize:14}}>{mod.icon||"⚙️"}</span>
+                                <div style={{flex:1}}><div style={{fontSize:10,fontWeight:700,color:"#F1F5F9"}}>{mod.name}</div><div style={{fontSize:8,color:"#5A6480"}}>{modDone}/{modDels.length} complete</div></div>
+                                <span style={{fontSize:8,color:statusColor,fontWeight:700}}>{modDone===modDels.length?"✓ Done":modFailed>0?modFailed+" failed":"Running"}</span>
+                              </div>
+                              <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                                {modDels.map((del,di)=>{
+                                  const sc={queued:"#3A4060",generating:"#14B8A6",waiting:"#F59E0B",retrying:"#8B5CF6",qa:"#3B82F6",complete:"#10B981",failed:"#EF4444"}[del.status]||"#3A4060";
+                                  return(
+                                    <div key={di} style={{background:sc+"15",border:"1px solid "+sc+"44",borderRadius:4,padding:"3px 7px",fontSize:8}}>
+                                      <div style={{color:sc,fontWeight:700,marginBottom:1}}>{del.status==="generating"?"⟳ ":del.status==="complete"?"✓ ":del.status==="failed"?"✗ ":""}{del.name}</div>
+                                      {del.status==="complete"&&<div style={{color:"#5A6480"}}>{del.outputFormat} · {del.confidenceScore}%</div>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {/* Completed deliverables — view content */}
+                      {(()=>{
+                        const completed=(projectExecution.modules||[]).flatMap(m=>(m.deliverables||[]).filter(d=>d.status==="complete").map(d=>({...d,_mod:m.name})));
+                        if(!completed.length)return null;
+                        return(
+                          <div style={{marginBottom:10}}>
+                            <div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:0.8,marginBottom:6}}>Completed Deliverables</div>
+                            {completed.map((del,ci)=>(
+                              <div key={ci} style={{background:"#131825",border:"1px solid #1a2030",borderRadius:6,padding:"9px 11px",marginBottom:5}}>
+                                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:del.rawContent?4:0}}>
+                                  <span style={{fontSize:9,fontWeight:700,color:"#10B981"}}>✓</span>
+                                  <div style={{flex:1}}><div style={{fontSize:10,fontWeight:600,color:"#F1F5F9"}}>{del.name}</div><div style={{fontSize:8,color:"#5A6480"}}>{del._mod} · {del.outputFormat} · {del.confidenceScore}% confidence · {del.verificationStatus}</div></div>
+                                  <button onClick={()=>cp(del.rawContent||"")} style={{...S.hBtn,fontSize:8}}>Copy</button>
+                                  <button onClick={()=>dlFile(del.name.replace(/\s+/g,"-")+"."+del.outputFormat,del.rawContent||"","text/plain")} style={{...S.hBtn,fontSize:8}}>↓</button>
+                                </div>
+                                {del.qaResult?.flags?.length>0&&<div style={{fontSize:8,color:"#F59E0B",marginTop:3}}>⚠ {del.qaResult.flags[0].suggestion}</div>}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                      {/* New project button */}
+                      {!projectExecuting&&<button onClick={()=>{setProjectExecution(null);setProjectExecPhase("");}} style={{...S.hBtn,width:"100%",textAlign:"center",marginTop:4}}>Start New Project</button>}
+                    </div>
+                  )}
+
+                  {/* ── PLANNING / INPUT UI — only show when not executing ── */}
+                  {!projectExecuting&&!projectExecution&&(
+                  <div>
                   {!projectPlan&&!projectPlanning&&(
                     <div>
                       <label style={S.lbl}>Business Objective</label>
@@ -3467,10 +3828,12 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                             <div style={{fontSize:11,fontWeight:600,color:"#F1F5F9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
                             <div style={{fontSize:8,color:"#5A6480",marginTop:1}}>{p.modules?.length||0} modules · {new Date(p.createdAt).toLocaleDateString()} · {p.status}</div>
                           </div>
-                          <span style={{fontSize:8,padding:"2px 7px",borderRadius:8,fontWeight:700,background:p.status==="complete"?"rgba(16,185,129,0.12)":"rgba(20,184,166,0.08)",color:p.status==="complete"?"#10B981":"#14B8A6"}}>{p.status}</span>
+                          <span style={{cursor:"pointer",fontSize:8,padding:"2px 7px",borderRadius:8,fontWeight:700,background:p.status==="complete"?"rgba(16,185,129,0.12)":p.status==="partial"?"rgba(245,158,11,0.08)":"rgba(20,184,166,0.08)",color:p.status==="complete"?"#10B981":p.status==="partial"?"#F59E0B":"#14B8A6"}} onClick={()=>setProjectExecution(p)}>{p.status}</span>
                         </div>
                       ))}
                     </div>
+                  )}
+                  </div>
                   )}
                 </div>
               )}
