@@ -1980,7 +1980,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       return;
     }
     setBrRun(true);setError(null);
-    setBrCur({q:brQ,debate:[],synthesis:"",drilldown:{},researchBrief:""});
+    setBrCur({q:brQ,researchBrief:"",format:"threaded",stages:[]});
     const agents=brAg.map(id=>AR.find(r=>r.id===id)).filter(Boolean);
     const res=[];
     const synCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
@@ -2056,7 +2056,11 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
           }
         }
         res.push({ag,text:agText,truncated:agTruncated});
-        const updatedCur={q:brQ,debate:[...res],synthesis:"",drilldown:{},researchBrief};
+        // Update threaded format during debate so cards render as they arrive
+        const runningStage={stageNumber:1,type:"original",question:brQ,
+          executiveIds:brAg,debate:[...res],synthesis:"",
+          decisionStatus:null,completedAt:null,frozen:false};
+        const updatedCur={q:brQ,researchBrief,format:"threaded",stages:[runningStage]};
         setBrCur(updatedCur);
         sv("cos-br-live",updatedCur);
       }
