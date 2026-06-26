@@ -2504,9 +2504,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     // Helper: generate deliverable (with chunking for large deliverables)
     const generateDeliverable=async(projState,mod,del)=>{
       const ctx=projState.context||buildProjectContext();
-      const priorDepContent=(del.dependsOn||[]).map(id=>getDepContent(projState,id)).filter(Boolean).join("
-
-");
+      const priorDepContent=(del.dependsOn||[]).map(id=>getDepContent(projState,id)).filter(Boolean).join("\n\n");
       const sys=buildDelSys(ctx,mod,del,priorDepContent);
       const userMsg="Generate the complete deliverable now: "+del.name;
 
@@ -2519,9 +2517,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
 
       // Chunked generation — split into logical sections
       setProjectExecPhase("Planning sections for: "+del.name);
-      const planSys=sys+"
-
-First, list the logical sections for this deliverable as a JSON array of strings. Output ONLY the JSON array, no other text. Maximum 4 sections.";
+      const planSys=sys+"\n\nFirst, list the logical sections for this deliverable as a JSON array of strings. Output ONLY the JSON array, no other text. Maximum 4 sections.";
       let sections=[];
       try{
         const planRaw=await callDelAI(planSys,"List sections for: "+del.name,400,del.name+" (planning)");
