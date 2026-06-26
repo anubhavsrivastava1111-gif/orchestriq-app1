@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BOARDROOM VIEW — Enterprise Redesign
@@ -622,7 +622,7 @@ function FollowUpInput({
   followUpExecIds, setFollowUpExecIds,
   onAcceptSuggestions,
 }: any) {
-  const [showExecPanel, setShowExecPanel] = React.useState(false);
+  const [showExecPanel, setShowExecPanel] = useState(false);
   const currentIds: string[] = followUpExecIds.length > 0 ? followUpExecIds : [...prevExecIds];
 
   const toggle = (id: string) => {
