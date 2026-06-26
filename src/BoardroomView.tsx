@@ -1037,6 +1037,25 @@ export default function BoardroomView(props: BoardroomViewProps) {
           </div>
         )}
 
+        {/* ── THREAD SUMMARY ── */}
+        {isThreaded && brCur.stages.length > 0 && !brRun && (
+          <div style={{ padding: "12px 18px", background: tok.surface2,
+            borderRadius: 10, marginBottom: 16,
+            border: `1px solid ${tok.border}`, fontSize: 12, color: tok.text3,
+            display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
+            <span style={{ fontWeight: 600, color: tok.text2 }}>THREAD SUMMARY</span>
+            <span>{brCur.stages.length} stage{brCur.stages.length !== 1 ? "s" : ""}</span>
+            <span>·</span>
+            <span>{[...new Set(brCur.stages.flatMap((s: any) => s.executiveIds || []))].length} executives</span>
+            {latestDecisionStatus && (
+              <>
+                <span>· Latest status:</span>
+                <DecisionStatus status={latestDecisionStatus} tok={tok} />
+              </>
+            )}
+          </div>
+        )}
+
         {/* ── FOLLOW-UP INPUT ── */}
         {hasSession && !brRun && (
           <FollowUpInput
