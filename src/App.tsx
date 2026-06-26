@@ -1680,6 +1680,11 @@ export default function App(){
   const [isAdmin,setIsAdmin]=useState(false);
   const [showSignOutConfirm,setShowSignOutConfirm]=useState(false);
   const [wfView,setWfView]=useState("new");
+  const [projects,setProjects]=useState([]);
+  const [activeProject,setActiveProject]=useState(null);
+  const [projectPlanning,setProjectPlanning]=useState(false);
+  const [projectPlan,setProjectPlan]=useState(null); // pending approval
+  const [projectObjective,setProjectObjective]=useState("");
   const [wfCustomChain,setWfCustomChain]=useState([]);
   const [wfShowExtra,setWfShowExtra]=useState(false);
   const [wfPreflight,setWfPreflight]=useState<{questions:{persona:string;personaIc:string;q:string;placeholder:string}[];answers:string[];contextSummary:string}|null>(null);
@@ -1778,6 +1783,8 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{const acts=localStorage.getItem("cos-actions");if(acts)setActionItems(JSON.parse(acts));}catch{}
     try{const ac=localStorage.getItem("cos-admin-config");if(ac)setAdminConfig({...adminConfig,...JSON.parse(ac)});}catch{}
     try{const br=localStorage.getItem("cos-br");if(br)setBrSessions(JSON.parse(br));}catch{}
+    try{const projs=localStorage.getItem("cos-projects");if(projs)setProjects(JSON.parse(projs));}catch{}
+    try{const pplan=localStorage.getItem("cos-project-plan");if(pplan)setProjectPlan(JSON.parse(pplan));}catch{}
     try{const brLive=localStorage.getItem("cos-br-live");if(brLive){const parsed=JSON.parse(brLive);if(parsed?.q)setBrCur(parsed);}}catch{}
     try{const tm=localStorage.getItem("cos-tm");if(tm)setTmSessions(JSON.parse(tm));}catch{}
     try{const tmLive=localStorage.getItem("cos-tm-live");if(tmLive){const p=JSON.parse(tmLive);if(p?.dec){setTmDec(p.dec);setTmRes(p.res||"");setTmResearchBrief(p.brief||"");}}}catch{}
@@ -2296,6 +2303,205 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     setWfPreflightLoading(false);
   }
 },[wfTask,wfCat,wfCustomChain,co,compData,ledgerEntries,ask,showToast]);
+// ─── PROJECT ENGINE — Phase 1: Planning ──────────────────────────────────────
+  // Assembles ProjectContext from all platform state and calls the Project
+  // Architect AI to decompose the objective into an Execution Plan.
+
+  const buildProjectContext=useCallback(()=>{
+    const projCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
+    const boardroomDecisions=(brSessions||[]).slice(0,5).map(s=>({
+      question:s.q,
+      synthesis:s.synthesis?stripMd(s.synthesis).slice(0,600):"",
+      decisionStatus:s.stages?.[0]?.decisionStatus||"",
+      ts:s.ts,
+    }));
+    const priorOutputs=(workflows||[]).filter(w=>w.status==="approved").slice(0,4).map(w=>({
+      task:w.task,category:w.chainLabel,
+      output:stripMd(w.steps?.[w.steps.length-1]?.output||"").slice(0,400),
+    }));
+    return {
+      company:{name:co.name,industry:co.industry,stage:co.stage,
+        location:co.location,currency:projCur.code,
+        currencySymbol:projCur.sym,markets:co.markets||""},
+      brand:{name:co.name,tagline:"",tone:"professional, direct, founder-voice",
+        verifiedClaims:[],prohibitedClaims:[]},
+      dataHub:compData,
+      boardroomDecisions,
+      timeMachineForecasts:tmRes?stripMd(tmRes).slice(0,600):"",
+      priorWorkflowOutputs:priorOutputs,
+      requiredFormats:["docx","xlsx","pdf","md","pptx"],
+      mediaGeneration:{
+        imageEnabled:!!(keys.openai?.trim()),
+        videoEnabled:false,
+        promptsOnly:true,
+      },
+    };
+  },[co,compData,brSessions,tmRes,workflows,keys]);
+
+  const runProjectPlanning=useCallback(async()=>{
+    if(!projectObjective.trim()||projectPlanning)return;
+    setProjectPlanning(true);
+    setProjectPlan(null);
+    try{
+      const ctx=buildProjectContext();
+      const architectSys=
+        "You are the Project Architect for ""+co.name+"". Your role is to decompose a business objective into a structured Execution Plan.
+
+"+
+        "COMPANY CONTEXT:
+"+
+        "Company: "+ctx.company.name+" | Industry: "+ctx.company.industry+" | Stage: "+ctx.company.stage+"
+"+
+        "Location: "+ctx.company.location+" | Currency: "+ctx.company.currencySymbol+ctx.company.currency+"
+
+"+
+        (Object.keys(ctx.dataHub).length?"DATA HUB:
+"+Object.entries(ctx.dataHub).map(([k,v])=>k+": "+v).join("
+")+"
+
+":"")+
+        (ctx.boardroomDecisions.length?"BOARDROOM DECISIONS:
+"+ctx.boardroomDecisions.map(d=>"Q: "+d.question+"
+Decision: "+d.decisionStatus).join("
+")+"
+
+":"")+
+        "OUTPUT RULES:
+"+
+        "Return ONLY a valid JSON object. No preamble, no markdown fences, no commentary.
+"+
+        "Schema:
+"+
+        "{
+"+
+        "  "name": "Project name (short, specific)",
+"+
+        "  "objective": "Restated objective in one sentence",
+"+
+        "  "complexity": "simple|moderate|complex",
+"+
+        "  "estimatedDuration": "e.g. 2-3 hours of AI execution",
+"+
+        "  "modules": [
+"+
+        "    {
+"+
+        "      "id": "module_id_lowercase",
+"+
+        "      "name": "Module Name",
+"+
+        "      "icon": "single emoji",
+"+
+        "      "capabilityType": "marketing|design|content|finance|legal|management|engineering|research|compliance",
+"+
+        "      "primaryPersona": "role_id from the executive roster e.g. cmo, cfo, cto, clo",
+"+
+        "      "rationale": "one sentence why this module is needed",
+"+
+        "      "deliverables": [
+"+
+        "        {
+"+
+        "          "id": "del_moduleid_001",
+"+
+        "          "name": "Deliverable Name",
+"+
+        "          "description": "Exactly what this deliverable must contain",
+"+
+        "          "outputFormat": "docx|xlsx|pdf|pptx|md|txt|image_prompt|video_prompt",
+"+
+        "          "dependsOn": [],
+"+
+        "          "verificationStatus": "AI Generated",
+"+
+        "          "confidenceScore": 0,
+"+
+        "          "sourceReferences": []
+"+
+        "        }
+"+
+        "      ]
+"+
+        "    }
+"+
+        "  ]
+"+
+        "}
+
+"+
+        "RULES:
+"+
+        "1. Every module must produce real files, not analysis.
+"+
+        "2. Include only modules genuinely required for this objective.
+"+
+        "3. Minimum 2 modules, maximum 8 modules.
+"+
+        "4. Each module must have 1-5 deliverables.
+"+
+        "5. dependsOn must reference actual deliverable IDs from earlier modules.
+"+
+        "6. Set verificationStatus to AI Generated for all planned deliverables.
+"+
+        "7. Use the company currency "+ctx.company.currencySymbol+" for any financial deliverables.";
+
+      const raw=await ask(architectSys,[{role:"user",content:"Objective: ""+projectObjective+"""}],2500);
+      let plan=null;
+      try{
+        const cleaned=raw.trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/```\s*$/,"");
+        plan=JSON.parse(cleaned);
+        if(!plan.modules||!Array.isArray(plan.modules))throw new Error("Invalid plan structure");
+      }catch(parseErr){
+        showToast("Project Architect returned an invalid plan. Please try again.","error");
+        setProjectPlanning(false);
+        return;
+      }
+      // Enrich plan with metadata
+      plan.id="proj_"+Date.now();
+      plan.objective=projectObjective;
+      plan.status="planning";
+      plan.createdAt=new Date().toISOString();
+      plan.context=ctx;
+      // Initialise all deliverable lifecycle fields
+      (plan.modules||[]).forEach(mod=>{
+        (mod.deliverables||[]).forEach(del=>{
+          del.status="planned";
+          del.moduleId=mod.id;
+          del.moduleOwner=mod.name;
+          del.aiPersona=mod.primaryPersona||"ceo";
+          del.plannedAt=new Date().toISOString();
+          del.startedAt=null;
+          del.completedAt=null;
+          del.rawContent=null;
+          del.renderedFile=null;
+          del.qaResult=null;
+          del.verificationStatus=del.verificationStatus||"AI Generated";
+          del.confidenceScore=del.confidenceScore||0;
+          del.sourceReferences=del.sourceReferences||[];
+        });
+      });
+      setProjectPlan(plan);
+      sv("cos-project-plan",plan);
+    }catch(err:any){
+      showToast("Project planning failed: "+err.message,"error");
+    }finally{
+      setProjectPlanning(false);
+    }
+  },[projectObjective,projectPlanning,buildProjectContext,co,ask,showToast,sv]);
+
+  const approveProjectPlan=useCallback(()=>{
+    if(!projectPlan)return;
+    const approved={...projectPlan,status:"approved",approvedAt:new Date().toISOString()};
+    const updated=[approved,...projects].slice(0,20);
+    setProjects(updated);
+    sv("cos-projects",updated);
+    setActiveProject(approved);
+    setProjectPlan(null);
+    setProjectObjective("");
+    showToast("Execution Plan approved. Phase 2 execution engine coming in next build.","success");
+    // Phase 2 will call runProjectExecution(approved) here
+  },[projectPlan,projects,showToast,sv]);
+
 const runWorkflow=useCallback(async(customChainOverride?:string[],preflightAnswers?:{questions:{persona:string;q:string}[];answers:string[]}|null)=>{
   const taskText=wfTask.trim();
   const taskCat=wfCat;
@@ -3149,10 +3355,10 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
         {view==="workflow"&&(
           <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}>
             <div style={{display:"flex",gap:3,padding:"8px 14px",borderBottom:"1px solid #14192a",background:"#0c1120",alignItems:"center",flexWrap:"wrap"}}>
-              {[["new","New Task"],["active","Active"+(wfActive?" ●":"")],["history","History ("+workflows.length+")"]].map(([id,lb])=>(
+              {[["new","New Task"],["project","⚡ Project Engine"+(projectPlanning?" ●":"")],["active","Active"+(wfActive?" ●":"")],["history","History ("+workflows.length+")"]].map(([id,lb])=>(
                 <button key={id} onClick={()=>setWfView(id)} style={{padding:"5px 12px",borderRadius:5,fontSize:10,fontWeight:600,border:"1px solid "+(wfView===id?"#14B8A6":"#1a2030"),background:wfView===id?"rgba(20,184,166,0.08)":"transparent",color:wfView===id?"#14B8A6":"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{lb}</button>
               ))}
-              <div style={{marginLeft:"auto",fontSize:9,color:"#3A4060"}}>Phase 2 · 60s/level timeout</div>
+              <div style={{marginLeft:"auto",fontSize:9,color:"#3A4060"}}>Flow · v2 · 60s/level</div>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
               {wfView==="new"&&(
@@ -3290,6 +3496,81 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
   </div>
 )}
                   {error&&<div style={{...S.errB,marginTop:8}}>⚠️ {error}<button onClick={()=>setError(null)} style={{...S.retBtn,background:"#3A4060"}}>Dismiss</button></div>}
+                </div>
+              )}
+              
+              {wfView==="project"&&(
+                <div>
+                  <div style={{fontSize:13,fontWeight:800,color:"#F1F5F9",marginBottom:2}}>⚡ Project Engine</div>
+                  <p style={{fontSize:10,color:"#8892B0",marginBottom:14,lineHeight:1.6}}>Describe a complex business objective. The engine decomposes it into an Execution Plan with modules and deliverables — you approve before anything runs.</p>
+                  {!projectPlan&&!projectPlanning&&(
+                    <div>
+                      <label style={S.lbl}>Business Objective</label>
+                      <div style={{display:"flex",gap:4,alignItems:"flex-start",marginBottom:10}}>
+                        <textarea style={{...S.inp,flex:1,minHeight:80,resize:"vertical"}} value={projectObjective} onChange={e=>setProjectObjective(e.target.value)} placeholder="e.g. Launch Orchestriq to market. Or: Build a complete compliance audit programme for our EMEA operations."/>
+                        <div style={{display:"flex",flexDirection:"column",gap:4}}><LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/><MicButton lang={vLang} onResult={t=>setProjectObjective(prev=>(prev?prev+" ":"")+t)}/></div>
+                      </div>
+                      <div style={{background:"rgba(20,184,166,0.04)",border:"1px solid rgba(20,184,166,0.15)",borderRadius:7,padding:"10px 12px",marginBottom:12,fontSize:10,color:"#A0AAC0",lineHeight:1.7}}>
+                        <strong style={{color:"#14B8A6"}}>What happens next:</strong> The Project Architect analyses your objective and builds an Execution Plan listing every module and deliverable. You review and approve the plan before any AI execution begins.
+                      </div>
+                      <button onClick={runProjectPlanning} disabled={!projectObjective.trim()} style={{...S.pBtn,marginTop:0,background:"linear-gradient(135deg,#14B8A6,#6366F1)",opacity:projectObjective.trim()?1:0.3}}>Generate Execution Plan</button>
+                    </div>
+                  )}
+                  {projectPlanning&&(
+                    <div style={{display:"flex",alignItems:"center",gap:10,padding:"20px",background:"#131825",borderRadius:8,border:"1px solid #1a2030"}}>
+                      <span style={{width:8,height:8,borderRadius:"50%",background:"#14B8A6",display:"inline-block",animation:"pulse 1s infinite",flexShrink:0}}/>
+                      <div><div style={{fontSize:12,fontWeight:700,color:"#14B8A6"}}>Project Architect is analysing your objective…</div><div style={{fontSize:10,color:"#5A6480",marginTop:3}}>Decomposing into modules and deliverables. This takes 15-30 seconds.</div></div>
+                    </div>
+                  )}
+                  {projectPlan&&!projectPlanning&&(
+                    <div style={{animation:"fadeIn 0.3s"}}>
+                      <div style={{background:"#131825",border:"1px solid #1a2030",borderRadius:8,padding:"14px 16px",marginBottom:12}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                          <span style={{fontSize:18}}>📋</span>
+                          <div><div style={{fontSize:13,fontWeight:800,color:"#F1F5F9"}}>{projectPlan.name}</div><div style={{fontSize:9,color:"#5A6480",marginTop:1}}>{projectPlan.modules?.length||0} execution modules · {(projectPlan.modules||[]).reduce((a,m)=>a+(m.deliverables?.length||0),0)} deliverables planned</div></div>
+                          <span style={{marginLeft:"auto",fontSize:8,padding:"3px 8px",borderRadius:8,background:"rgba(245,158,11,0.1)",color:"#F59E0B",fontWeight:700}}>AWAITING APPROVAL</span>
+                        </div>
+                        <div style={{fontSize:10,color:"#8892B0",lineHeight:1.6,marginBottom:10,fontStyle:"italic"}}>Objective: "{projectPlan.objective}"</div>
+                        {(projectPlan.modules||[]).map((mod,mi)=>(
+                          <div key={mi} style={{marginBottom:8,background:"#0a0e1a",borderRadius:6,padding:"10px 12px",border:"1px solid #1a2030"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                              <span style={{fontSize:14}}>{mod.icon||"⚙️"}</span>
+                              <div style={{flex:1}}><div style={{fontSize:11,fontWeight:700,color:"#14B8A6"}}>{mod.name}</div><div style={{fontSize:9,color:"#5A6480"}}>{mod.capabilityType} · {mod.deliverables?.length||0} deliverables</div></div>
+                            </div>
+                            <div style={{display:"flex",flexWrap:"wrap",gap:4"}}>
+                              {(mod.deliverables||[]).map((del,di)=>(
+                                <div key={di} style={{background:"#131825",border:"1px solid #1a2030",borderRadius:4,padding:"4px 8px",fontSize:9}}>
+                                  <span style={{color:"#A0AAC0"}}>{del.name}</span>
+                                  <span style={{marginLeft:4,color:"#3A4060",fontSize:8}}>{del.outputFormat}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{background:"rgba(20,184,166,0.04)",border:"1px solid rgba(20,184,166,0.15)",borderRadius:7,padding:"10px 12px",marginBottom:12,fontSize:10,color:"#8892B0",lineHeight:1.7}}>
+                        Approving this plan saves it as a reusable Execution Plan template. Future similar objectives will be matched to this plan automatically.
+                      </div>
+                      <div style={{display:"flex",gap:6}}>
+                        <button onClick={approveProjectPlan} style={{flex:1,...S.pBtn,marginTop:0,background:"#10B981"}}>Approve Plan and Begin Execution</button>
+                        <button onClick={()=>{setProjectPlan(null);setProjectObjective("");}} style={{...S.hBtn,padding:"10px 14px",fontSize:11}}>Revise Objective</button>
+                      </div>
+                    </div>
+                  )}
+                  {projects.length>0&&!projectPlan&&!projectPlanning&&(
+                    <div style={{marginTop:16}}>
+                      <div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:0.8,marginBottom:8}}>Recent Projects</div>
+                      {projects.slice(0,5).map(p=>(
+                        <div key={p.id} style={{background:"#131825",border:"1px solid #1a2030",borderRadius:6,padding:"10px 12px",marginBottom:5,display:"flex",alignItems:"center",gap:8}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:11,fontWeight:600,color:"#F1F5F9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
+                            <div style={{fontSize:8,color:"#5A6480",marginTop:1}}>{p.modules?.length||0} modules · {new Date(p.createdAt).toLocaleDateString()} · {p.status}</div>
+                          </div>
+                          <span style={{fontSize:8,padding:"2px 7px",borderRadius:8,fontWeight:700,background:p.status==="complete"?"rgba(16,185,129,0.12)":"rgba(20,184,166,0.08)",color:p.status==="complete"?"#10B981":"#14B8A6"}}>{p.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               {wfView==="active"&&(
