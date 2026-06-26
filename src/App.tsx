@@ -2534,23 +2534,11 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         if(projectExecCancel)throw new Error("CANCELLED");
         const section=sections[si];
         setProjectExecPhase("Generating section "+(si+1)+"/"+sections.length+": "+section);
-        const chunkSys=sys+"
-
-You are generating SECTION "+(si+1)+" of "+sections.length+" of this deliverable."+
-          (chunks.length?"
-
-COMPLETED SECTIONS SO FAR:
-"+chunks.join("
-
-"):"");
+        const chunkSys=sys+"\n\nYou are generating SECTION "+(si+1)+" of "+sections.length+" of this deliverable."+(chunks.length?"\n\nCOMPLETED SECTIONS SO FAR:\n"+chunks.join("\n\n"):"");
         const chunkContent=await callDelAI(chunkSys,"Generate section: "+section,1800,del.name+" §"+(si+1));
-        chunks.push("## "+section+"
-
-"+chunkContent);
+        chunks.push("## "+section+"\n\n"+chunkContent);
       }
-      return chunks.join("
-
-");
+      return chunks.join("\n\n");
     };
 
     // ── MAIN EXECUTION LOOP ──────────────────────────────────────────────────
