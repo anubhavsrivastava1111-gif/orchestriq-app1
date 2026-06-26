@@ -2114,7 +2114,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         const ag=agents[i];const p=EP[ag.id]||{};
         setBrPh(ag.ic+" "+ag.t+" is responding…");
 
-        const sys="You are "+ag.f+' at \\"'+co.name+'\\".\n'
+        const sys="You are "+ag.f+" at \""+co.name+"\".\n"
           +"PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"
           +buildCtx(co,compData)
           +"\n\nDECISION THREAD CONTEXT (all previous stages — do not repeat, only reference):\n"+priorStagesContext
