@@ -3438,7 +3438,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                               <span style={{fontSize:14}}>{mod.icon||"⚙️"}</span>
                               <div style={{flex:1}}><div style={{fontSize:11,fontWeight:700,color:"#14B8A6"}}>{mod.name}</div><div style={{fontSize:9,color:"#5A6480"}}>{mod.capabilityType} · {mod.deliverables?.length||0} deliverables</div></div>
                             </div>
-                            <div style={{display:"flex",flexWrap:"wrap",gap:4"}}>
+                            <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
                               {(mod.deliverables||[]).map((del,di)=>(
                                 <div key={di} style={{background:"#131825",border:"1px solid #1a2030",borderRadius:4,padding:"4px 8px",fontSize:9}}>
                                   <span style={{color:"#A0AAC0"}}>{del.name}</span>
