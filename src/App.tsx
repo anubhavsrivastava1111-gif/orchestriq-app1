@@ -2652,7 +2652,7 @@ const processTask=useCallback(async(task:any)=>{
 
   const resetData=async()=>{
     for(const k of["cos-ch","cos-cd","cos-br","cos-wf","cos-tq"]){try{localStorage.removeItem(k);}catch{}}
-    setChats({});setCompData({});setBrSessions([]);setBrCur({q:"",debate:[],synthesis:"",drilldown:{}});
+    setChats({});setCompData({});setBrSessions([]);setBrCur({q:"",researchBrief:"",format:"threaded",stages:[]});
     setWorkflows([]);setWfActive(null);tQRef.current=[];setTQueue([]);setSelRole(null);setConfirmReset(null);
     showToast("All data reset","warning");
   };
