@@ -2046,7 +2046,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     cancelRef.current.br=false;
     setBrRun(true);setError(null);
     const priorContext=brCur.debate.map(d=>d.ag.t+": "+d.text).join("\n\n")+(brCur.synthesis?"\n\nPRIOR SYNTHESIS:\n"+brCur.synthesis:"");
-    const agents=(brCur.debate.length?brCur.debate.map(d=>d.ag):brAg.map(id=>AR.find(r=>r.id===id))).filter(Boolean);
+    const agents=brAg.map(id=>AR.find(r=>r.id===id)).filter(Boolean);
     const res=[...brCur.debate];
     const synCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
     const failedAgents=[];
