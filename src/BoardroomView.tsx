@@ -597,31 +597,150 @@ function HistoryPanel({ sessions, onReopen, onDelete, tok }: { sessions: any[]; 
 }
 
 // ─── CONTINUE DEBATE ──────────────────────────────────────────────────────────
-function ContinueDebate({ value, onChange, onSubmit, disabled, tok }: any) {
+function DecisionStatus({ status, tok }: { status: string; tok: typeof T.light }) {
+  const colors: Record<string, string> = {
+    "Proceed": "#10B981",
+    "Proceed with Conditions": "#F97316",
+    "Needs More Information": "#F59E0B",
+    "Do Not Proceed": "#EF4444",
+    "No Consensus": "#8B5CF6",
+  };
+  const color = colors[status] || tok.muted;
   return (
-    <div style={{ borderRadius: 12, border: `1px solid ${tok.border}`, overflow: "hidden", background: tok.surface, marginBottom: 24 }}>
-      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${tok.border}`, background: tok.surface2 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: tok.text2 }}>↻ Continue this debate</div>
-        <div style={{ fontSize: 12, color: tok.muted, marginTop: 2 }}>The same executives respond with the full debate as context</div>
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "4px 12px", borderRadius: 20,
+      background: color + "18", border: `1px solid ${color}44` }}>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }} />
+      <span style={{ fontSize: 11, fontWeight: 700, color }}>{status}</span>
+    </div>
+  );
+}
+
+function FollowUpInput({
+  value, onChange, onSubmit, disabled, tok,
+  prevExecIds, CS, suggestions,
+  followUpExecIds, setFollowUpExecIds,
+  onAcceptSuggestions,
+}: any) {
+  const [showExecPanel, setShowExecPanel] = React.useState(false);
+  const currentIds: string[] = followUpExecIds.length > 0 ? followUpExecIds : [...prevExecIds];
+
+  const toggle = (id: string) => {
+    const next = currentIds.includes(id)
+      ? currentIds.filter((x: string) => x !== id)
+      : [...currentIds, id];
+    setFollowUpExecIds(next.length ? next : currentIds);
+  };
+
+  const newSuggestions = suggestions.filter((s: any) => !currentIds.includes(s.id));
+
+  return (
+    <div style={{ borderRadius: 12, border: `1px solid ${tok.accent}44`,
+      overflow: "hidden", background: tok.surface, marginBottom: 24 }}>
+      {/* Header */}
+      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${tok.border}`,
+        background: tok.surface2, display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 16 }}>↻</span>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: tok.text }}>Continue this Decision Thread</div>
+          <div style={{ fontSize: 11, color: tok.muted, marginTop: 1 }}>
+            Add a follow-up question. All prior stages are automatically included as context.
+          </div>
+        </div>
       </div>
-      <div style={{ padding: "16px 18px", display: "flex", gap: 10 }}>
+
+      {/* Question input */}
+      <div style={{ padding: "14px 18px 10px" }}>
         <textarea
           value={value}
           onChange={e => onChange(e.target.value)}
-          placeholder="e.g. What changes if our budget is halved?"
+          placeholder="e.g. What is the realistic setup cost and can we verify independently?"
           disabled={disabled}
           rows={2}
-          style={{ flex: 1, padding: "10px 14px", borderRadius: 9, border: `1px solid ${tok.border}`, background: tok.inputBg, color: tok.text, fontSize: 14, resize: "none", fontFamily: "Inter, sans-serif", outline: "none" }} />
+          style={{ width: "100%", padding: "10px 14px", borderRadius: 9,
+            border: `1px solid ${tok.border}`, background: tok.inputBg,
+            color: tok.text, fontSize: 14, resize: "none",
+            fontFamily: "Inter, sans-serif", outline: "none", boxSizing: "border-box" as const }} />
+      </div>
+
+      {/* AI suggestions */}
+      {newSuggestions.length > 0 && (
+        <div style={{ padding: "0 18px 12px" }}>
+          <div style={{ fontSize: 11, color: tok.muted, marginBottom: 6, fontWeight: 600 }}>
+            💡 AI suggests for this question:
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 6 }}>
+            {newSuggestions.map((s: any) => {
+              const exec = CS.find((e: any) => e.id === s.id);
+              if (!exec) return null;
+              return (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 5,
+                  padding: "5px 10px", borderRadius: 8, fontSize: 11,
+                  background: tok.accent + "10", border: `1px solid ${tok.accent}33`, color: tok.text2 }}>
+                  <span>{exec.ic}</span>
+                  <span style={{ fontWeight: 600 }}>{exec.t}</span>
+                  <span style={{ color: tok.muted }}>— {s.reason}</span>
+                </div>
+              );
+            })}
+            <button onClick={onAcceptSuggestions}
+              style={{ padding: "5px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700,
+                background: tok.accent, color: "#fff", border: "none", cursor: "pointer" }}>
+              ✓ Add suggested
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Executive selector */}
+      <div style={{ padding: "0 18px 12px" }}>
+        <button onClick={() => setShowExecPanel(!showExecPanel)}
+          style={{ fontSize: 11, color: tok.accent, background: "none", border: "none",
+            cursor: "pointer", fontFamily: "Inter, sans-serif", padding: 0, marginBottom: 8, fontWeight: 600 }}>
+          {showExecPanel ? "▲ Hide" : "▼ Choose"} executives for this question
+          ({currentIds.length} selected)
+        </button>
+        {showExecPanel && (
+          <div style={{ border: `1px solid ${tok.border}`, borderRadius: 9, padding: 12, background: tok.surface2 }}>
+            <div style={{ fontSize: 11, color: tok.muted, marginBottom: 8 }}>
+              Pre-selected from previous stage. Add or remove as needed.
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 6 }}>
+              {CS.map((exec: any) => {
+                const sel = currentIds.includes(exec.id);
+                return (
+                  <button key={exec.id} onClick={() => toggle(exec.id)} disabled={disabled}
+                    style={{ display: "flex", alignItems: "center", gap: 5,
+                      padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                      border: `1px solid ${sel ? exec.dc + "66" : tok.border}`,
+                      background: sel ? exec.dc + "14" : tok.surface,
+                      color: sel ? exec.dc : tok.text3,
+                      cursor: disabled ? "not-allowed" : "pointer", transition: "all 0.12s" }}>
+                    <span>{exec.ic}</span>
+                    <span>{exec.t}</span>
+                    {sel && <span style={{ fontSize: 9, color: exec.dc }}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Send button */}
+      <div style={{ padding: "0 18px 14px", display: "flex", justifyContent: "flex-end" }}>
         <button onClick={onSubmit} disabled={disabled || !value.trim()}
-          style={{ padding: "10px 18px", borderRadius: 9, background: tok.accent, color: "#fff", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", alignSelf: "flex-end", opacity: disabled || !value.trim() ? 0.4 : 1 }}>
-          Continue →
+          style={{ padding: "10px 22px", borderRadius: 9, background: tok.accent,
+            color: "#fff", border: "none", fontWeight: 700, fontSize: 13,
+            cursor: "pointer", opacity: disabled || !value.trim() ? 0.4 : 1 }}>
+          Send to {currentIds.length} executive{currentIds.length !== 1 ? "s" : ""} →
         </button>
       </div>
     </div>
   );
 }
 
-// ─── HELPER STYLE FACTORIES ───────────────────────────────────────────────────
+
 function btnBase(tok: typeof T.light, active = false, activeColor?: string): React.CSSProperties {
   return {
     background: active && activeColor ? activeColor + "12" : tok.surface2,
@@ -673,6 +792,10 @@ interface BoardroomViewProps {
   co: any; cur: any;
   isDark: boolean;
   MicButton?: any; vLang?: string;
+  // Decision Thread props
+  followUpExecIds: string[]; setFollowUpExecIds: (v: string[]) => void;
+  followUpSuggestions: any[]; setFollowUpSuggestions: (v: any[]) => void;
+  suggestFollowUpExecs: (q: string, prevIds: string[]) => any[];
 }
 
 export default function BoardroomView(props: BoardroomViewProps) {
@@ -685,11 +808,20 @@ export default function BoardroomView(props: BoardroomViewProps) {
     dlFile, cp, quickExport, extractActionItems, extracting,
     showToast, sv, setBrCur,
     CS, co, cur, isDark, MicButton, vLang = "en-IN",
+    followUpExecIds, setFollowUpExecIds,
+    followUpSuggestions, setFollowUpSuggestions,
+    suggestFollowUpExecs,
   } = props;
 
   const tok = isDark ? T.dark : T.light;
 
-  const hasSession = brCur.debate.length > 0 || brCur.synthesis;
+  // Support both threaded (new) and legacy (flat) format
+  const isThreaded = brCur.format === "threaded" && Array.isArray(brCur.stages);
+  const isLegacy = !isThreaded && (brCur.debate?.length > 0 || brCur.synthesis);
+  const hasSession = isThreaded ? brCur.stages.length > 0 : isLegacy;
+  const latestStage = isThreaded && brCur.stages.length > 0
+    ? brCur.stages[brCur.stages.length - 1] : null;
+  const latestDecisionStatus = latestStage?.decisionStatus || null;
 
   return (
     <div style={{ height: "100%", overflowY: "auto", background: tok.bg, fontFamily: "Inter, system-ui, sans-serif" }}>
@@ -773,16 +905,85 @@ export default function BoardroomView(props: BoardroomViewProps) {
           <ResearchBriefPanel text={brCur.researchBrief} tok={tok} />
         )}
 
-        {/* ── SESSION QUESTION HEADER ── */}
-        {hasSession && brCur.q && (
+        {/* ══ THREADED: Decision Thread Stages ══ */}
+        {isThreaded && brCur.stages.map((stage: any, si: number) => (
+          <div key={si} style={{ marginBottom: 8 }}>
+            {/* Stage header */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10,
+              padding: "10px 16px", marginBottom: 16,
+              background: tok.surface2, borderRadius: 10,
+              border: `1px solid ${tok.border}` }}>
+              <div style={{ width: 28, height: 28, borderRadius: 8,
+                background: tok.accent + "18", display: "flex", alignItems: "center",
+                justifyContent: "center", fontSize: 12, fontWeight: 800, color: tok.accent,
+                flexShrink: 0 }}>{si + 1}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: tok.muted,
+                  textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>
+                  {si === 0 ? "Original Question" : `Follow-up · Stage ${si + 1}`}
+                  {stage.completedAt && (
+                    <span style={{ fontWeight: 400, marginLeft: 6 }}>
+                      · {new Date(stage.completedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: tok.text,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  "{stage.question}"
+                </div>
+              </div>
+              {stage.decisionStatus && (
+                <DecisionStatus status={stage.decisionStatus} tok={tok} />
+              )}
+            </div>
+            {/* Executive cards for this stage */}
+            {(stage.debate || []).map((e: any, ei: number) => (
+              <ExecutiveCard
+                key={ei} entry={e} index={ei} question={stage.question}
+                isDark={isDark} tok={tok}
+                drillRole={drillRole}
+                drillQ={drillQ} setDrillQ={setDrillQ}
+                drillRun={drillRun} runDrill={runDrill}
+                onDrill={() => setDrillRole(drillRole === e.ag.id ? null : e.ag.id)}
+                showDrillClose={() => { setDrillRole(null); setDrillQ(""); }}
+                onCopy={() => cp(e.text)}
+                onContinue={async () => showToast("Use the follow-up box below to continue.", "info")}
+              />
+            ))}
+            {/* Stage synthesis */}
+            {stage.synthesis && (
+              <SynthesisCard
+                synthesis={stage.synthesis} question={stage.question}
+                tok={tok} isDark={isDark}
+                onCopy={() => cp(stage.synthesis)}
+                onExportPDF={() => quickExport("pdf", "executive",
+                  `Boardroom Stage ${si + 1} — ${stage.question}`, stage.synthesis)}
+                onExportPPT={() => quickExport("pptx", "strategy",
+                  `Boardroom Stage ${si + 1}`, stage.synthesis)}
+                onExportMD={() => dlFile(`Synthesis-Stage${si+1}-${Date.now()}.md`,
+                  `# ${stage.question}\n\n${stage.synthesis}`, "text/markdown")}
+                onExtractActions={() => extractActionItems("boardroom",
+                  `Boardroom Stage ${si + 1} — "${stage.question}"`, stage.synthesis)}
+                extracting={extracting === "boardroom"}
+              />
+            )}
+            {/* Stage divider (not after last stage) */}
+            {si < brCur.stages.length - 1 && (
+              <div style={{ height: 1, background:
+                `linear-gradient(90deg, transparent, ${tok.accent}44, transparent)`,
+                margin: "24px 0" }} />
+            )}
+          </div>
+        ))}
+
+        {/* ══ LEGACY: flat debate rendering ══ */}
+        {isLegacy && brCur.q && (
           <div style={{ marginBottom: 24, padding: "16px 20px", background: tok.surface2, borderRadius: 12, border: `1px solid ${tok.border}` }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: tok.muted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Question</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: tok.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Strategic Question</div>
             <div style={{ fontSize: 16, color: tok.text, lineHeight: 1.5, fontWeight: 500 }}>"{brCur.q}"</div>
           </div>
         )}
-
-        {/* ── EXECUTIVE DEBATE CARDS ── */}
-        {brCur.debate.map((e: any, i: number) => (
+        {isLegacy && brCur.debate?.map((e: any, i: number) => (
           <ExecutiveCard
             key={i} entry={e} index={i} question={brCur.q}
             isDark={isDark} tok={tok}
@@ -792,15 +993,10 @@ export default function BoardroomView(props: BoardroomViewProps) {
             onDrill={() => setDrillRole(drillRole === e.ag.id ? null : e.ag.id)}
             showDrillClose={() => { setDrillRole(null); setDrillQ(""); }}
             onCopy={() => cp(e.text)}
-            onContinue={async () => {
-              // handled in parent via truncated expansion
-              showToast("Continuing response…", "info");
-            }}
+            onContinue={async () => showToast("Continuing response…", "info")}
           />
         ))}
-
-        {/* ── SYNTHESIS ── */}
-        {brCur.synthesis && (
+        {isLegacy && brCur.synthesis && (
           <SynthesisCard
             synthesis={brCur.synthesis} question={brCur.q}
             tok={tok} isDark={isDark}
@@ -808,33 +1004,74 @@ export default function BoardroomView(props: BoardroomViewProps) {
             onExportPDF={() => quickExport("pdf", "executive", "Boardroom — " + brCur.q, brCur.synthesis)}
             onExportPPT={() => quickExport("pptx", "strategy", "Boardroom — " + brCur.q, brCur.synthesis)}
             onExportMD={() => dlFile("Synthesis-" + Date.now() + ".md", "# " + brCur.q + "\n\n" + brCur.synthesis, "text/markdown")}
-            onExtractActions={() => extractActionItems("boardroom", 'Boardroom — "' + brCur.q + '"', brCur.synthesis)}
+            onExtractActions={() => extractActionItems("boardroom", 'Boardroom — "' + brCur.q + '"'  , brCur.synthesis)}
             extracting={extracting === "boardroom"}
           />
         )}
 
         {/* ── FULL EXPORT BAR ── */}
         {hasSession && !brRun && (
-          <div style={{ display: "flex", gap: 8, padding: "14px 18px", background: tok.surface2, borderRadius: 12, border: `1px solid ${tok.border}`, marginBottom: 24, flexWrap: "wrap" }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: tok.text3, marginRight: 4, alignSelf: "center" }}>Full Session:</div>
-            <button onClick={() => quickExport("pdf", "detailed", "Boardroom Discussion — " + brCur.q, (brCur.researchBrief ? "## Research Brief\n" + brCur.researchBrief + "\n\n" : "") + brCur.debate.map((d: any) => "## " + d.ag.t + "\n" + d.text).join("\n\n") + (brCur.synthesis ? "\n\n## Boardroom Synthesis\n" + brCur.synthesis : ""))}
-              style={actionBtn(tok)}>📄 Full PDF</button>
-            <button onClick={() => quickExport("pptx", "strategy", "Boardroom Discussion — " + brCur.q, brCur.debate.map((d: any) => "## " + d.ag.t + "\n" + d.text).join("\n\n"))}
-              style={actionBtn(tok)}>📊 Full PPT</button>
-            <button onClick={() => dlFile("Boardroom-Full-" + Date.now() + ".md", "# " + brCur.q + "\n\n" + brCur.debate.map((d: any) => "## " + d.ag.t + "\n" + d.text).join("\n\n") + (brCur.synthesis ? "\n\n## Synthesis\n" + brCur.synthesis : ""), "text/markdown")}
-              style={actionBtn(tok)}>Full MD</button>
+          <div style={{ display: "flex", gap: 8, padding: "14px 18px", background: tok.surface2, borderRadius: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: tok.text3, marginRight: 4, alignSelf: "center" }}>Full Thread:</div>
+            <button onClick={() => {
+              const fullText = isThreaded
+                ? brCur.stages.map((s: any, i: number) => `## Stage ${i+1}: "${s.question}"\n\n${s.debate?.map((d: any) => `**${d.ag.t}:**\n${d.text}`).join("\n\n")}${s.synthesis ? "\n\n**Chairman Synthesis:**\n"+s.synthesis : ""}`).join("\n\n---\n\n")
+                : brCur.debate?.map((d: any) => `**${d.ag.t}:**\n${d.text}`).join("\n\n") + (brCur.synthesis ? "\n\n**Synthesis:**\n"+brCur.synthesis : "");
+              quickExport("pdf", "detailed", "Decision Thread — " + brCur.q, fullText || "");
+            }} style={actionBtn(tok)}>📄 Full PDF</button>
+            <button onClick={() => {
+              const fullText = isThreaded
+                ? brCur.stages.map((s: any, i: number) => `## Stage ${i+1}: "${s.question}"\n\n${s.synthesis || ""}`).join("\n\n---\n\n")
+                : brCur.synthesis || "";
+              quickExport("pptx", "strategy", "Decision Thread — " + brCur.q, fullText);
+            }} style={actionBtn(tok)}>📊 Full PPT</button>
+            <button onClick={() => {
+              const fullText = isThreaded
+                ? brCur.stages.map((s: any, i: number) => `## Stage ${i+1}: "${s.question}"\n\n${s.debate?.map((d: any) => `**${d.ag.t}:**\n${d.text}`).join("\n\n")}${s.synthesis ? "\n\n**Chairman Synthesis:**\n"+s.synthesis : ""}`).join("\n\n---\n\n")
+                : brCur.debate?.map((d: any) => d.ag.t+": "+d.text).join("\n\n") + "\n\n"+brCur.synthesis;
+              dlFile("Boardroom-Thread-" + Date.now() + ".md", "# " + brCur.q + "\n\n" + fullText, "text/markdown");
+            }} style={actionBtn(tok)}>Full MD</button>
+            {isThreaded && latestDecisionStatus && (
+              <div style={{ marginLeft: "auto" }}><DecisionStatus status={latestDecisionStatus} tok={tok} /></div>
+            )}
           </div>
         )}
 
-        {/* ── CONTINUE DEBATE ── */}
+        {/* ── FOLLOW-UP INPUT ── */}
         {hasSession && !brRun && (
-          <ContinueDebate
+          <FollowUpInput
             value={brFollowUp} onChange={setBrFollowUp}
             onSubmit={runBRContinue}
-            disabled={brRun} tok={tok} />
+            disabled={brRun} tok={tok}
+            prevExecIds={isThreaded && brCur.stages.length > 0
+              ? brCur.stages[brCur.stages.length-1].executiveIds
+              : brAg}
+            CS={CS}
+            suggestions={isThreaded
+              ? (suggestFollowUpExecs ? suggestFollowUpExecs(
+                  brFollowUp,
+                  brCur.stages.length > 0 ? brCur.stages[brCur.stages.length-1].executiveIds : brAg
+                ) : [])
+              : []}
+            followUpExecIds={followUpExecIds}
+            setFollowUpExecIds={setFollowUpExecIds}
+            onAcceptSuggestions={() => {
+              const prevIds = isThreaded && brCur.stages.length > 0
+                ? brCur.stages[brCur.stages.length-1].executiveIds
+                : brAg;
+              const currentIds = followUpExecIds.length > 0 ? followUpExecIds : [...prevIds];
+              const sugs = suggestFollowUpExecs
+                ? suggestFollowUpExecs(brFollowUp, prevIds)
+                : [];
+              const newIds = [...new Set([...currentIds, ...sugs.map((s: any) => s.id)])];
+              setFollowUpExecIds(newIds);
+              if(setFollowUpSuggestions) setFollowUpSuggestions(sugs);
+            }}
+          />
         )}
 
         {/* ── EMPTY STATE ── */}
+{/* ── EMPTY STATE ── */}
         {!hasSession && !brRun && (
           <div style={{ textAlign: "center", padding: "60px 20px", color: tok.muted }}>
             <div style={{ fontSize: 56, marginBottom: 16, opacity: 0.6 }}>🏛️</div>
