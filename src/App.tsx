@@ -2022,28 +2022,66 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         let agText="";
         let agTruncated=false;
         let gotResponse=false;
-        for(let attempt=1;attempt<=3&&!cancelRef.current.br&&!gotResponse;attempt++){
-          try{
-            setBrPh(ag.ic+" "+ag.t+(attempt>1?" — retrying (attempt "+attempt+"/3)…":" is analyzing…"));
-            const replyFull=await askFull(sys,[{role:"user",content:brQ}],5000);
-            agText=replyFull.primary;
-            agTruncated=!!replyFull.truncated;
-            gotResponse=true;
-          }catch(mainErr:any){
-            if(isRateLimit(mainErr.message)&&attempt<3){
-              setBrPh(ag.ic+" "+ag.t+" — API limit hit. Switching provider & waiting 20s…");
-              await new Promise(r=>setTimeout(r,20000));
-            }else if(attempt===3){
-              // All attempts failed — record partial and continue to next executive
-              agText="_("+ag.t+" could not respond due to API limits. Use Drill to ask "+ag.t+" directly.)_";
-              agTruncated=false;
+        // ── SMART RETRY: provider failover + pause-and-resume ──────────────
+        // Cycle 1: try primary. On limit → try alternates → wait 65s → retry.
+        // Accumulates partial text so responses never break mid-sentence.
+        const isContextOrRateErr=(msg:string)=>isRateLimit(msg)||
+          msg.toLowerCase().includes("context")|
+          msg.toLowerCase().includes("reduce")||
+          msg.toLowerCase().includes("maximum")||
+          msg.toLowerCase().includes("413");
+        let cyclesDone=0;
+        while(!gotResponse&&!cancelRef.current.br&&cyclesDone<3){
+          cyclesDone++;
+          // Build prompt: first attempt uses original question;
+          // subsequent attempts ask to continue from partial text.
+          const userMsg=agText.trim()
+            ?("You are mid-response. You have said so far:\n\n"+agText
+              +"\n\nContinue EXACTLY from where you stopped. Do not repeat anything above. Continue seamlessly.")
+            :brQ;
+          // Build list of providers to try this cycle
+          const allProviders=Object.keys(keys).filter(p=>{
+            const k=(p==="groq"?keys.groq||EFF_GROQ:p==="gemini"?keys.gemini||EFF_GEMINI:p==="claude"?keys.claude||EFF_CLAUDE:keys[p]);
+            return k?.trim();
+          });
+          let cycleSuccess=false;
+          for(const prov of allProviders){
+            if(cancelRef.current.br)break;
+            const pKey=(prov==="groq"?(keys.groq||EFF_GROQ):prov==="gemini"?(keys.gemini||EFF_GEMINI):prov==="claude"?(keys.claude||EFF_CLAUDE):keys[prov])||"";
+            if(!pKey.trim())continue;
+            try{
+              setBrPh(ag.ic+" "+ag.t+(agText?" — resuming via "+prov+"…":" is analyzing… ("+prov+")"));
+              const replyFull=await callAI(prov,pKey,sys,[{role:"user",content:userMsg}],5000);
+              agText=agText+replyFull.text;
+              agTruncated=!!replyFull.truncated;
               gotResponse=true;
-              showToast(ag.t+" skipped — API limit. Use Drill to get their view.","warning");
-            }else{
-              agText="_("+ag.t+" encountered an error: "+mainErr.message+")_";
-              gotResponse=true;
+              cycleSuccess=true;
+              break;
+            }catch(provErr:any){
+              if(isContextOrRateErr(provErr.message)){
+                markProviderExhausted(prov);
+                continue; // try next provider
+              }
+              // Non-rate error — record and stop trying this provider
+              continue;
             }
           }
+          if(cycleSuccess||cancelRef.current.br)break;
+          // All providers exhausted this cycle — wait 65s then reset and retry
+          if(cyclesDone<3){
+            await waitWithCountdown(65,(s)=>{
+              setBrPh(ag.ic+" "+ag.t+" — all providers at limit. Resuming in "+s+"s…");
+            });
+            // ProviderManager auto-resets after 60s; 65s guarantees reset
+          }
+        }
+        // If all 3 cycles failed, record placeholder
+        if(!gotResponse){
+          agText=(agText?"[Response incomplete — API limit reached]\n\n"+agText
+            :"_("+ag.t+" could not respond — all providers at limit. Try again in 1 min or add another API key in Settings.)_");
+          agTruncated=false;
+          gotResponse=true;
+          showToast(ag.t+" paused — API limit. Adding a second provider key in Settings prevents this.","warning");
         }
         if(cancelRef.current.br)break;
         let contAttempts=0;
