@@ -1144,6 +1144,12 @@ async function ensureJSZip(){
   if(!window.JSZip)throw new Error("JSZip unavailable");
   return window.JSZip;
 }
+async function ensureXLSX(){
+  if(window.XLSX)return window.XLSX;
+  await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+  if(!window.XLSX)throw new Error("SheetJS unavailable");
+  return window.XLSX;
+}
 function findByLocalName(root,name){
   const all=root.getElementsByTagName("*");
   for(let i=0;i<all.length;i++)if(all[i].localName===name)return all[i];
@@ -1690,6 +1696,7 @@ export default function App(){
   const [projectExecPhase,setProjectExecPhase]=useState(""); // live status message
   const [projectExecCancel,setProjectExecCancel]=useState(false);
   const [projectQARunning,setProjectQARunning]=useState(false);
+  const [projectPackaging,setProjectPackaging]=useState(false);
   const [wfCustomChain,setWfCustomChain]=useState([]);
   const [wfShowExtra,setWfShowExtra]=useState(false);
   const [wfPreflight,setWfPreflight]=useState<{questions:{persona:string;personaIc:string;q:string;placeholder:string}[];answers:string[];contextSummary:string}|null>(null);
@@ -2731,6 +2738,105 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     setProjectExecPhase("");
     showToast("✅ QA complete — "+completedDels.length+" deliverables reviewed","success");
   },[projectQARunning,keys,showToast,sv,callAI]);
+
+  const runProjectPackage=useCallback(async(proj)=>{
+    if(projectPackaging||!proj)return;
+    setProjectPackaging(true);
+    setProjectExecPhase("📦 Packaging files...");
+    try{
+      const JSZip=await ensureJSZip();
+      const zip=new JSZip();
+      const allDels=(proj.modules||[]).flatMap(m=>(m.deliverables||[]).map(d=>({...d,_modName:m.name})));
+      const done=allDels.filter(d=>d.rawContent&&d.status!=="failed");
+      for(const del of done){
+        const folder=del._modName.replace(/[^a-zA-Z0-9]/g,"-");
+        const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
+        const fmt=(del.outputFormat||"md").toLowerCase();
+        const content=del.rawContent||"";
+        if(fmt==="xlsx"){
+          try{
+            const XLSX=await ensureXLSX();
+            const wb=XLSX.utils.book_new();
+            const rows=content.split("\n").filter(Boolean).map(r=>r.split("|").filter((c,ii,a)=>ii>0&&ii<a.length-1).map(c=>c.trim())).filter(r=>r.length>0&&!r.every(c=>c.match(/^[-:]+$/)));
+            const ws=rows.length>0?XLSX.utils.aoa_to_sheet(rows):XLSX.utils.aoa_to_sheet([[del.name],[""],[ content]]);
+            XLSX.utils.book_append_sheet(wb,ws,del.name.slice(0,31));
+            const buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+            zip.folder(folder).file(fname+".xlsx",buf);
+          }catch{zip.folder(folder).file(fname+".md",content);}
+        } else if(fmt==="pptx"){
+          try{
+            const PptxGenJS=await ensurePptx();
+            const pptx=new PptxGenJS();
+            pptx.defineLayout({name:"WIDE",width:13.333,height:7.5});
+            pptx.layout="WIDE";
+            const secs=parseSections(content);
+            const s0=pptx.addSlide();
+            s0.background={color:"0A0E1A"};
+            s0.addText(del.name,{x:0.7,y:2.8,w:12,h:1.2,fontSize:32,bold:true,color:"F1F5F9"});
+            s0.addText(proj.context?.company?.name||"",{x:0.7,y:4.2,w:12,h:0.6,fontSize:16,color:"14B8A6"});
+            secs.slice(0,10).forEach(sec=>{
+              const s=pptx.addSlide();
+              s.background={color:"0A0E1A"};
+              s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:13.333,h:0.9,fill:{color:"131825"}});
+              s.addText(sec.title,{x:0.5,y:0.1,w:12,h:0.7,fontSize:20,bold:true,color:"F1F5F9",valign:"middle"});
+              const bullets=sec.lines.map(l=>stripMd(l)).filter(Boolean).slice(0,8);
+              if(bullets.length)s.addText(bullets.map(b=>({text:b.replace(/^[*-]\s*/,""),options:{bullet:{code:"2022"},color:"A0AAC0",fontSize:14,paraSpaceAfter:8}})),{x:0.7,y:1.2,w:12,h:5.8,valign:"top"});
+            });
+            const buf=await pptx.write({outputType:"arraybuffer"});
+            zip.folder(folder).file(fname+".pptx",buf);
+          }catch{zip.folder(folder).file(fname+".md",content);}
+        } else if(fmt==="pdf"){
+          try{
+            const jsPDF=await ensureJsPDF();
+            const doc=new jsPDF({unit:"pt",format:"a4"});
+            const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),M=48;
+            let y=M;
+            doc.setFillColor(20,184,166);doc.rect(0,0,W,72,"F");
+            doc.setTextColor(255,255,255);doc.setFont("helvetica","bold");doc.setFontSize(18);
+            doc.text(del.name,M,42,{maxWidth:W-2*M});
+            doc.setFontSize(10);doc.setFont("helvetica","normal");
+            doc.text((proj.context?.company?.name||"")+" · "+new Date().toLocaleDateString(),M,62);
+            y=96;
+            const secs=parseSections(content);
+            for(const sec of secs){
+              if(y>H-M){doc.addPage();y=M;}
+              doc.setFont("helvetica","bold");doc.setFontSize(13);doc.setTextColor(20,184,166);
+              const sh=doc.splitTextToSize(sec.title,W-2*M);
+              sh.forEach(l=>{if(y>H-M){doc.addPage();y=M;}doc.text(l,M,y);y+=18;});
+              doc.setFont("helvetica","normal");doc.setFontSize(10);doc.setTextColor(45,45,45);
+              for(const ln of sec.lines){
+                const txt=stripMd(ln).replace(/[\u2019\u2018]/g,"'").replace(/[\u201c\u201d]/g,'"');
+                if(!txt.trim())continue;
+                if(y>H-M){doc.addPage();y=M;}
+                const wl=doc.splitTextToSize(txt,W-2*M);
+                wl.forEach(w=>{if(y>H-M){doc.addPage();y=M;}doc.text(w,M,y);y+=14;});
+              }
+              y+=8;
+            }
+            const pages=doc.internal.getNumberOfPages();
+            for(let p=1;p<=pages;p++){doc.setPage(p);doc.setFontSize(7);doc.setTextColor(150,150,150);doc.text("Page "+p+" of "+pages,M,H-18);}
+            const buf=doc.output("arraybuffer");
+            zip.folder(folder).file(fname+".pdf",buf);
+          }catch{zip.folder(folder).file(fname+".md",content);}
+        } else {
+          zip.folder(folder).file(fname+"."+(fmt==="docx"?"md":fmt||"txt"),content);
+          if(fmt==="docx")zip.folder(folder).file(fname+"-note.txt","Open the .md file in Word or any editor. Full .docx binary available in Phase 5.");
+        }
+      }
+      const qaLines=["# QA Report — "+proj.name,"Generated: "+new Date().toLocaleString(),"","## Deliverables",...done.map(d=>"- **"+d.name+"** ("+d.outputFormat+") QA:"+(d.qaResult?.passed?"✓":"⚠")+" "+( d.qaResult?.score||0)+"% — "+(d.qaResult?.summary||""))];
+      zip.file("QA-Report.md",qaLines.join("\n"));
+      const sumLines=["# "+proj.name,"","Objective: "+proj.objective,"Generated: "+new Date().toLocaleString(),"Deliverables: "+done.length,"","## Modules",...(proj.modules||[]).map(m=>"- "+m.name+" ("+m.capabilityType+"): "+(m.deliverables||[]).length+" deliverables")];
+      zip.file("Project-Summary.md",sumLines.join("\n"));
+      const zipBlob=await zip.generateAsync({type:"blob",compression:"DEFLATE",compressionOptions:{level:6}});
+      const zipName=(proj.name||"Project").replace(/[^a-zA-Z0-9]/g,"-")+"-"+Date.now()+".zip";
+      const zipUrl=URL.createObjectURL(zipBlob);
+      const a=document.createElement("a");a.href=zipUrl;a.download=zipName;a.style.display="none";
+      document.body.appendChild(a);a.click();document.body.removeChild(a);
+      setTimeout(()=>URL.revokeObjectURL(zipUrl),200);
+      showToast("✅ ZIP downloaded — "+done.length+" files packaged","success");
+    }catch(e){showToast("Packaging failed: "+e.message,"error");}
+    finally{setProjectPackaging(false);setProjectExecPhase("");}
+  },[projectPackaging,showToast]);
 
 const runWorkflow=useCallback(async(customChainOverride?:string[],preflightAnswers?:{questions:{persona:string;q:string}[];answers:string[]}|null)=>{
   const taskText=wfTask.trim();
@@ -3823,7 +3929,16 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                         );
                       })()}
                       {/* New project button */}
-                      {!projectExecuting&&<button onClick={()=>{setProjectExecution(null);setProjectExecPhase("");}} style={{...S.hBtn,width:"100%",textAlign:"center",marginTop:4}}>Start New Project</button>}
+                      {!projectExecuting&&!projectQARunning&&(
+                        <div style={{display:"flex",gap:6,marginTop:8}}>
+                          <button onClick={()=>runProjectPackage(projectExecution)} disabled={projectPackaging}
+                            style={{...S.pBtn,marginTop:0,flex:2,fontSize:11,background:"linear-gradient(135deg,#14B8A6,#6366F1)",opacity:projectPackaging?0.5:1}}>
+                            {projectPackaging?"📦 Packaging...":"📦 Download All Files (ZIP)"}
+                          </button>
+                          <button onClick={()=>{setProjectExecution(null);setProjectExecPhase("");}}
+                            style={{...S.hBtn,flex:1,textAlign:"center",padding:"10px 8px",fontSize:10}}>New Project</button>
+                        </div>
+                      )}
                     </div>
                   )}
 
