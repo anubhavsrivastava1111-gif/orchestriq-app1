@@ -1511,6 +1511,31 @@ const secs=parseSections(bodyText);
 // ─── QUALITY ENGINE: archetype renderers (pptxgenjs) ────────────────────────
 const QE_PAL={bg:"0A0E1A",panel:"131825",border:"1A2030",text:"F1F5F9",textMuted:"A0AAC0",textDim:"5A6480",accent:"14B8A6",red:"EF4444",amber:"F59E0B",green:"10B981"};
 
+// ─── PROJECT ENGINE — Template Library ─────────────────────────────────────
+const PROJECT_TEMPLATES={
+  "Business Plan":{modules:["Executive Summary","Market Analysis","Product Strategy","Financial Model","Go-to-Market","Risk Assessment"],formats:{default:"docx",financial:"xlsx",presentation:"pptx"}},
+  "Pitch Deck":{modules:["Problem","Solution","Market Size","Product Demo","Business Model","Traction","Team","Financials","Ask"],formats:{default:"pptx",financial:"xlsx"}},
+  "Financial Model":{modules:["Assumptions","Revenue Forecast","Cost Structure","P&L","Cash Flow","Balance Sheet","KPI Dashboard"],formats:{default:"xlsx",presentation:"pptx"}},
+  "Marketing Plan":{modules:["Market Analysis","ICP & Segmentation","Campaign Strategy","Content Calendar","Budget Allocation","KPIs & Metrics"],formats:{default:"docx",calendar:"xlsx",deck:"pptx"}},
+  "SOP":{modules:["Purpose & Scope","Roles & Responsibilities","Process Steps","Quality Checks","Exception Handling","Review Schedule"],formats:{default:"docx"}},
+  "Consulting Report":{modules:["Executive Summary","Current State","Gap Analysis","Recommendations","Implementation Roadmap","Financial Impact"],formats:{default:"docx",model:"xlsx",deck:"pptx"}},
+  "Business Proposal":{modules:["Cover","Executive Summary","Problem Statement","Proposed Solution","Timeline","Pricing","Terms"],formats:{default:"docx",pricing:"xlsx",deck:"pptx"}},
+  "Launch Plan":{modules:["Launch Overview","Target Audience","Marketing Strategy","Content Plan","Channel Mix","Budget","Success Metrics"],formats:{default:"docx",budget:"xlsx",campaign:"pptx"}},
+};
+function detectTemplate(objective){
+  const o=(objective||"").toLowerCase();
+  if(o.includes("pitch")||o.includes("investor")||o.includes("deck"))return "Pitch Deck";
+  if(o.includes("financial model")||o.includes("forecast")||o.includes("p&l"))return "Financial Model";
+  if(o.includes("marketing plan")||o.includes("campaign plan"))return "Marketing Plan";
+  if(o.includes("sop")||o.includes("standard operating"))return "SOP";
+  if(o.includes("consulting")||o.includes("assessment")||o.includes("audit"))return "Consulting Report";
+  if(o.includes("proposal")||o.includes("rfp")||o.includes("bid"))return "Business Proposal";
+  if(o.includes("launch")||o.includes("go-to-market")||o.includes("gtm"))return "Launch Plan";
+  if(o.includes("business plan")||o.includes("business case"))return "Business Plan";
+  return null;
+}
+
+
 // Turns an extractPptxStyle() result into a render-ready palette. Returns null if no
 // style was captured (callers then use QE_PAL exactly as before — no behavior change).
 // Keeps our proven dark theme if the sample is dark; builds a readable light palette
@@ -1698,6 +1723,7 @@ export default function App(){
   const [projectExecuting,setProjectExecuting]=useState(false);
   const [projectExecPhase,setProjectExecPhase]=useState(""); // live status message
   const [projectExecCancel,setProjectExecCancel]=useState(false);
+  const rawContentStore=useRef({}); // full content stored outside React state to prevent memory/render overload
   const [projectQARunning,setProjectQARunning]=useState(false);
   const [projectPackaging,setProjectPackaging]=useState(false);
   const [wfCustomChain,setWfCustomChain]=useState([]);
@@ -2358,9 +2384,11 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     setProjectPlanning(true);
     setProjectPlan(null);
     try{
+      const detectedTemplate=detectTemplate(projectObjective);
+      const templateHint=detectedTemplate?'\nDETECTED TEMPLATE: This objective matches the "'+detectedTemplate+'" template. Structure modules accordingly: '+( PROJECT_TEMPLATES[detectedTemplate]?.modules||[]).join(', ')+'.':'';
       const ctx=buildProjectContext();
       const nl="\n";
-      const architectSys="You are the Project Architect for "+co.name+". Decompose the objective into a structured Execution Plan."+nl+nl+"COMPANY: "+ctx.company.name+" | "+ctx.company.industry+" | "+ctx.company.stage+" | "+ctx.company.location+" | "+ctx.company.currencySymbol+ctx.company.currency+nl+(Object.keys(ctx.dataHub).length>0?"DATA HUB:"+nl+Object.entries(ctx.dataHub).map(function(e){return e[0]+": "+e[1];}).join(nl)+nl:"")+( ctx.boardroomDecisions.length>0?"RECENT DECISIONS:"+nl+ctx.boardroomDecisions.map(function(d){return "Q: "+d.question+" -> "+d.decisionStatus;}).join(nl)+nl:"")+nl+"OUTPUT: Return ONLY valid JSON (no markdown fences) matching this exact schema:"+nl+'{"name":"short project name","objective":"one sentence","complexity":"simple|moderate|complex","estimatedDuration":"e.g. 2-3 hours","modules":[{"id":"module_id","name":"Module Name","icon":"emoji","capabilityType":"marketing|design|content|finance|legal|management|engineering|research|compliance","primaryPersona":"cmo","rationale":"why needed","deliverables":[{"id":"del_moduleid_001","name":"Deliverable Name","description":"what it must contain","outputFormat":"docx|xlsx|pdf|pptx|md|txt|image_prompt|video_prompt","dependsOn":[],"verificationStatus":"AI Generated","confidenceScore":0,"sourceReferences":[]}]}]}'+nl+nl+"RULES:"+nl+"1. Every deliverable must be a real file not a discussion."+nl+"2. Use only modules genuinely required."+nl+"3. Min 2 max 8 modules. Min 1 max 5 deliverables each."+nl+"4. dependsOn IDs must reference earlier deliverable ids."+nl+"5. Currency symbol: "+ctx.company.currencySymbol;
+      const architectSys="You are the Project Architect for "+co.name+". Decompose the objective into a structured Execution Plan."+nl+nl+"COMPANY: "+ctx.company.name+" | "+ctx.company.industry+" | "+ctx.company.stage+" | "+ctx.company.location+" | "+ctx.company.currencySymbol+ctx.company.currency+nl+(Object.keys(ctx.dataHub).length>0?"DATA HUB:"+nl+Object.entries(ctx.dataHub).map(function(e){return e[0]+": "+e[1];}).join(nl)+nl:"")+( ctx.boardroomDecisions.length>0?"RECENT DECISIONS:"+nl+ctx.boardroomDecisions.map(function(d){return "Q: "+d.question+" -> "+d.decisionStatus;}).join(nl)+nl:"")+nl+"OUTPUT: Return ONLY valid JSON (no markdown fences) matching this exact schema:"+nl+'{"name":"short project name","objective":"one sentence","complexity":"simple|moderate|complex","estimatedDuration":"e.g. 2-3 hours","modules":[{"id":"module_id","name":"Module Name","icon":"emoji","capabilityType":"marketing|design|content|finance|legal|management|engineering|research|compliance","primaryPersona":"cmo","rationale":"why needed","deliverables":[{"id":"del_moduleid_001","name":"Deliverable Name","description":"what it must contain","outputFormat":"docx|xlsx|pdf|pptx|md|txt|image_prompt|video_prompt","dependsOn":[],"verificationStatus":"AI Generated","confidenceScore":0,"sourceReferences":[]}]}]}'+nl+nl+templateHint+nl+nl+"RULES:"+nl+"1. Every deliverable must be a real file not a discussion."+nl+"2. Use only modules genuinely required."+nl+"3. Min 2 max 8 modules. Min 1 max 5 deliverables each."+nl+"4. dependsOn IDs must reference earlier deliverable ids."+nl+"5. Currency symbol: "+ctx.company.currencySymbol;
       const raw=await ask(architectSys,[{role:"user",content:"Objective: "+projectObjective}],2500);
       let plan=null;
       try{
@@ -2641,9 +2669,12 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
           const confidenceScore=hasPlaceholders?30:hasAssumptions?65:85;
           const verificationStatus=hasPlaceholders?"Requires User Input":hasAssumptions?"AI Generated":"AI Generated";
 
+          // Store full content in ref (no re-render) — preview only in state
+          rawContentStore.current[del.id]=rawContent;
+          const rawPreview=rawContent.slice(0,800)+(rawContent.length>800?"\n\n[...content stored, available in ZIP...]":"");
           currentProj=updateDel(currentProj,del._modId,del.id,{
             status:"complete",
-            rawContent,
+            rawContent:rawPreview,
             completedAt:new Date().toISOString(),
             confidenceScore,
             verificationStatus,
@@ -2707,7 +2738,8 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
           "Rules: passed=true if score>=70 and no placeholders. "+
           "Check: placeholders ([INSERT],[TBD],Lorem ipsum), unverified stats, incomplete sections, brand name ("+brandName+"), currency ("+currency+"). "+
           "Score: 90+=excellent, 70-89=good, 50-69=needs revision, <50=major issues.";
-        const qaMsg="DELIVERABLE: "+del.name+"\nFORMAT: "+del.outputFormat+"\n\nCONTENT:\n"+del.rawContent.slice(0,3000);
+        const fullContent=rawContentStore.current[del.id]||del.rawContent||"";
+        const qaMsg="DELIVERABLE: "+del.name+"\nFORMAT: "+del.outputFormat+"\n\nCONTENT:\n"+fullContent.slice(0,3000);
         const qaRaw=await callAI(qaProv,qaKey,qaSys,[{role:"user",content:qaMsg}],800);
         let qaResult={passed:true,score:80,checkedAt:new Date().toISOString(),flags:[],summary:"QA passed"};
         try{
@@ -2721,10 +2753,13 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
           setProjectExecPhase("♻ Regenerating: "+del.name);
           try{
             const fixSys="Rewrite this deliverable fixing all QA issues. Output corrected deliverable only.";
-            const fixMsg="DELIVERABLE: "+del.name+"\nORIGINAL:\n"+del.rawContent.slice(0,2000)+"\n\nFIX THESE:\n"+qaResult.flags.map(f=>f.type+": "+f.suggestion).join("\n");
+            const fixFullContent=rawContentStore.current[del.id]||del.rawContent||"";
+            const fixMsg="DELIVERABLE: "+del.name+"\nORIGINAL:\n"+fixFullContent.slice(0,2000)+"\n\nFIX THESE:\n"+qaResult.flags.map(f=>f.type+": "+f.suggestion).join("\n");
             const fixRaw=await callAI(qaProv,qaKey,fixSys,[{role:"user",content:fixMsg}],2000);
             const fixedContent=fixRaw.text||del.rawContent;
-            qaProj={...qaProj,modules:(qaProj.modules||[]).map(m=>m.id!==del._modId?m:{...m,deliverables:(m.deliverables||[]).map(d=>d.id!==del.id?d:{...d,rawContent:fixedContent,status:"complete",confidenceScore:75,qaResult:{...qaResult,passed:true,score:75,summary:"Auto-regenerated after QA failure"}})})};
+            rawContentStore.current[del.id]=fixedContent;
+            const fixedPreview=fixedContent.slice(0,800)+(fixedContent.length>800?"\n\n[...content stored, available in ZIP...]":"");
+            qaProj={...qaProj,modules:(qaProj.modules||[]).map(m=>m.id!==del._modId?m:{...m,deliverables:(m.deliverables||[]).map(d=>d.id!==del.id?d:{...d,rawContent:fixedPreview,status:"complete",confidenceScore:75,qaResult:{...qaResult,passed:true,score:75,summary:"Auto-regenerated after QA failure"}})})};
             setProjectExecution({...qaProj});
           }catch{}
         }
@@ -2812,82 +2847,200 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       const JSZip=await ensureJSZip();
       const zip=new JSZip();
       const allDels=(proj.modules||[]).flatMap(m=>(m.deliverables||[]).map(d=>({...d,_modName:m.name})));
-      const done=allDels.filter(d=>d.rawContent&&d.status!=="failed");
+      const excluded=proj._excluded||{};
+      const done=allDels.filter(d=>d.rawContent&&d.status!=="failed"&&!excluded[d.id]);
       for(const del of done){
         const folder=del._modName.replace(/[^a-zA-Z0-9]/g,"-");
         const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
         const fmt=(del.outputFormat||"md").toLowerCase();
-        const content=del.rawContent||"";
-        if(fmt==="xlsx"){
+        const content=rawContentStore.current[del.id]||del.rawContent||""; // use full content from ref if available
+        // ── IMPROVED 1: Native DOCX via Word HTML (opens natively in Word) ──
+        if(fmt==="docx"){
+          try{
+            const secs=parseSections(content);
+            const coName=proj.context?.company?.name||"";
+            let html="<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:w=\"urn:schemas-microsoft-com:office:word\" xmlns=\"http://www.w3.org/TR/REC-html40\">"
+              +"<head><meta charset=\"UTF-8\"><style>"
+              +"body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1a1a1a;margin:72pt 72pt 72pt 72pt;}"
+              +"h1{font-size:20pt;color:#0D6EFD;border-bottom:2pt solid #0D6EFD;padding-bottom:4pt;margin-top:18pt;}"
+              +"h2{font-size:14pt;color:#14B8A6;margin-top:14pt;}"
+              +"h3{font-size:12pt;color:#333;margin-top:10pt;}"
+              +"p{line-height:1.5;margin:4pt 0;}"
+              +"table{border-collapse:collapse;width:100%;margin:8pt 0;}"
+              +"th{background:#14B8A6;color:#fff;padding:5pt 8pt;font-weight:bold;text-align:left;}"
+              +"td{padding:4pt 8pt;border-bottom:1pt solid #e2e2e2;}"
+              +"tr:nth-child(even) td{background:#f6f8fb;}"
+              +"</style></head><body>"
+              +"<h1>"+del.name+"</h1>"
+              +(coName?"<p><em>"+coName+" &middot; "+new Date().toLocaleDateString()+"</em></p>":"");
+            for(const sec of secs){
+              html+="<h2>"+sec.title+"</h2>";
+              let inTable=false;let tableRows=[];
+              for(const ln of sec.lines){
+                if(ln.includes("|")&&ln.trim().startsWith("|")){
+                  if(!inTable){inTable=true;tableRows=[];}
+                  const cells=ln.split("|").filter((c,ii,a)=>ii>0&&ii<a.length-1).map(c=>c.trim());
+                  if(!cells.every(c=>c.match(/^[-:]+$/)))tableRows.push(cells);
+                } else {
+                  if(inTable&&tableRows.length){
+                    html+="<table><thead><tr>"+tableRows[0].map(c=>"<th>"+c+"</th>").join("")+"</tr></thead><tbody>";
+                    tableRows.slice(1).forEach(r=>{html+="<tr>"+r.map(c=>"<td>"+c+"</td>").join("")+"</tr>";});
+                    html+="</tbody></table>";inTable=false;tableRows=[];
+                  }
+                  const t=stripMd(ln).trim();
+                  if(t)html+="<p>"+t+"</p>";
+                }
+              }
+              if(inTable&&tableRows.length){
+                html+="<table><thead><tr>"+tableRows[0].map(c=>"<th>"+c+"</th>").join("")+"</tr></thead><tbody>";
+                tableRows.slice(1).forEach(r=>{html+="<tr>"+r.map(c=>"<td>"+c+"</td>").join("")+"</tr>";});
+                html+="</tbody></table>";
+              }
+            }
+            html+="</body></html>";
+            // Word HTML saved as .doc opens natively in Microsoft Word
+            zip.folder(folder).file(fname+".doc",html);
+          }catch{zip.folder(folder).file(fname+".md",content);}
+        // ── IMPROVED 2: Enterprise multi-sheet XLSX ──
+        } else if(fmt==="xlsx"){
           try{
             const XLSX=await ensureXLSX();
             const wb=XLSX.utils.book_new();
-            const rows=content.split("\n").filter(Boolean).map(r=>r.split("|").filter((c,ii,a)=>ii>0&&ii<a.length-1).map(c=>c.trim())).filter(r=>r.length>0&&!r.every(c=>c.match(/^[-:]+$/)));
-            const ws=rows.length>0?XLSX.utils.aoa_to_sheet(rows):XLSX.utils.aoa_to_sheet([[del.name],[""],[ content]]);
-            XLSX.utils.book_append_sheet(wb,ws,del.name.slice(0,31));
+            const secs=parseSections(content);
+            // Main data sheet — extract all tables
+            const allRows=[];
+            secs.forEach(sec=>{
+              allRows.push([sec.title]); allRows.push([]);
+              const tRows=sec.lines.filter(l=>l.includes("|")&&l.trim().startsWith("|")&&!l.trim().match(/^\|[\s|:-]+\|$/)).map(r=>r.split("|").filter((c,ii,a)=>ii>0&&ii<a.length-1).map(c=>c.trim()));
+              if(tRows.length>0){tRows.forEach(r=>allRows.push(r));allRows.push([]);}
+              else{sec.lines.filter(l=>l.trim()).forEach(l=>allRows.push([stripMd(l)]));}
+              allRows.push([]);
+            });
+            const wsMain=XLSX.utils.aoa_to_sheet(allRows.length>2?allRows:[[del.name],[""],[ content]]);
+            XLSX.utils.book_append_sheet(wb,wsMain,del.name.slice(0,31)||"Data");
+            // Summary sheet
+            const wsSummary=XLSX.utils.aoa_to_sheet([[del.name],["Generated",new Date().toLocaleDateString()],["Company",proj.context?.company?.name||""],["Industry",proj.context?.company?.industry||""],["Stage",proj.context?.company?.stage||""],["Currency",proj.context?.company?.currencySymbol||""],["QA Score",(del.qaResult?.score||0)+"%"],["QA Status",del.qaResult?.passed?"Passed":"Review"]]);
+            XLSX.utils.book_append_sheet(wb,wsSummary,"Summary");
+            // Assumptions sheet — extract [ASSUMPTION] and [ESTIMATE] lines
+            const assumptions=content.split("\n").filter(l=>/\[ASSUMPTION\]|\[ESTIMATE\]/i.test(l)).map(l=>[stripMd(l)]);
+            if(assumptions.length){const wsA=XLSX.utils.aoa_to_sheet([["Assumption/Estimate"],...assumptions]);XLSX.utils.book_append_sheet(wb,wsA,"Assumptions");}
             const buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
             zip.folder(folder).file(fname+".xlsx",buf);
           }catch{zip.folder(folder).file(fname+".md",content);}
+        // ── IMPROVED 3: Enterprise PPTX — reuse Quality Engine ──
         } else if(fmt==="pptx"){
           try{
             const PptxGenJS=await ensurePptx();
             const pptx=new PptxGenJS();
-            pptx.defineLayout({name:"WIDE",width:13.333,height:7.5});
-            pptx.layout="WIDE";
-            const secs=parseSections(content);
-            const s0=pptx.addSlide();
-            s0.background={color:"0A0E1A"};
-            s0.addText(del.name,{x:0.7,y:2.8,w:12,h:1.2,fontSize:32,bold:true,color:"F1F5F9"});
-            s0.addText(proj.context?.company?.name||"",{x:0.7,y:4.2,w:12,h:0.6,fontSize:16,color:"14B8A6"});
-            secs.slice(0,10).forEach(sec=>{
-              const s=pptx.addSlide();
-              s.background={color:"0A0E1A"};
-              s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:13.333,h:0.9,fill:{color:"131825"}});
-              s.addText(sec.title,{x:0.5,y:0.1,w:12,h:0.7,fontSize:20,bold:true,color:"F1F5F9",valign:"middle"});
-              const bullets=sec.lines.map(l=>stripMd(l)).filter(Boolean).slice(0,8);
-              if(bullets.length)s.addText(bullets.map(b=>({text:b.replace(/^[*-]\s*/,""),options:{bullet:{code:"2022"},color:"A0AAC0",fontSize:14,paraSpaceAfter:8}})),{x:0.7,y:1.2,w:12,h:5.8,valign:"top"});
-            });
+            pptx.defineLayout({name:"WIDE",width:13.333,height:7.5});pptx.layout="WIDE";
+            const coN=proj.context?.company?.name||"";
+            const deckType=del.capabilityType||"briefing";
+            const tLabel=del.name;
+            // Try Quality Engine structured deck first
+            let usedQE=false;
+            try{
+              const allKeys={...keys};
+              if(EFF_CLAUDE?.trim())allKeys.claude=EFF_CLAUDE;
+              const provs=["deepseek","claude","openai","gemini","groq","kimi"].filter(p=>allKeys[p]?.trim());
+              if(provs.length){
+                const qeSys=buildStructuredDeckPrompt(tLabel,"Consulting Presentation");
+                const qeCtx="COMPANY: "+coN+"\nCONTENT:\n"+content.slice(0,2000);
+                const qeRaw=await callAI(provs[0],allKeys[provs[0]],qeSys,[{role:"user",content:qeCtx}],2000);
+                const slides=parseStructuredDeck(qeRaw.text||qeRaw);
+                if(slides&&slides.length>1){
+                  slides.forEach(s=>{if(s.type==="title"){s.companyName=coN;s.deckTitle=s.deckTitle||tLabel;}});
+                  const PAL={briefing:"14B8A6",strategy:"6366F1",investor:"A855F7",research:"06B6D4",management:"F59E0B",marketing:"EF4444",finance:"3B82F6"};
+                  const A=PAL[deckType]||"14B8A6";
+                  renderStructuredDeck(pptx,slides,A,QE_PAL);
+                  usedQE=true;
+                }
+              }
+            }catch{}
+            // Fallback: section-based slides
+            if(!usedQE){
+              const secs=parseSections(content);
+              const s0=pptx.addSlide();s0.background={color:"0A0E1A"};
+              s0.addShape(pptx.ShapeType.rect,{x:0,y:3.0,w:0.35,h:1.5,fill:{color:"14B8A6"}});
+              s0.addText(del.name,{x:0.7,y:2.8,w:12,h:1.2,fontSize:30,bold:true,color:"F1F5F9"});
+              s0.addText(coN,{x:0.7,y:4.2,w:12,h:0.6,fontSize:16,color:"14B8A6"});
+              s0.addText("Generated "+new Date().toLocaleDateString()+" · Confidential",{x:0.7,y:6.8,w:12,h:0.3,fontSize:9,color:"5A6480"});
+              secs.slice(0,10).forEach((sec,idx)=>{
+                const s=pptx.addSlide();s.background={color:"0A0E1A"};
+                s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:13.333,h:0.9,fill:{color:"131825"}});
+                s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:0.25,h:0.9,fill:{color:"14B8A6"}});
+                s.addText(sec.title,{x:0.5,y:0.1,w:11.5,h:0.7,fontSize:20,bold:true,color:"F1F5F9",valign:"middle"});
+                s.addText(String(idx+1).padStart(2,"0"),{x:12.3,y:0.1,w:0.9,h:0.7,fontSize:16,color:"14B8A6",align:"right",valign:"middle"});
+                const tRows=sec.lines.filter(l=>l.includes("|")&&l.trim().startsWith("|")&&!l.trim().match(/^\|[\s|:-]+\|$/)).map(r=>r.split("|").filter((c,ii,a)=>ii>0&&ii<a.length-1).map(c=>c.trim()));
+                if(tRows.length>=2){
+                  const hdr=[{text:"",options:{fill:{color:"14B8A6"},color:"0A0E1A",bold:true,fontSize:11}},...tRows[0].map(c=>({text:c,options:{fill:{color:"14B8A6"},color:"0A0E1A",bold:true,fontSize:11}}))].slice(0,tRows[0].length);
+                  const body=tRows.slice(1).map(r=>r.map(c=>({text:c,options:{fill:{color:"131825"},color:"A0AAC0",fontSize:10}})));
+                  s.addTable([tRows[0].map(c=>({text:c,options:{fill:{color:"14B8A6"},color:"0A0E1A",bold:true,fontSize:10}})),...tRows.slice(1).map(r=>r.map(c=>({text:c,options:{fill:{color:"131825"},color:"A0AAC0",fontSize:10}})))],{x:0.5,y:1.2,w:12.3,border:{type:"solid",color:"1a2030",pt:1},autoPage:false});
+                } else {
+                  const bullets=sec.lines.map(l=>stripMd(l)).filter(Boolean).slice(0,8);
+                  if(bullets.length)s.addText(bullets.map(b=>({text:b.replace(/^[*\-]\s*/,""),options:{bullet:{code:"2022"},color:"A0AAC0",fontSize:14,paraSpaceAfter:8}})),{x:0.7,y:1.2,w:12,h:5.8,valign:"top"});
+                }
+                s.addText(coN+" · Confidential",{x:0.5,y:7.1,w:12,h:0.3,fontSize:8,color:"3A4060"});
+              });
+            }
             const buf=await pptx.write({outputType:"arraybuffer"});
             zip.folder(folder).file(fname+".pptx",buf);
           }catch{zip.folder(folder).file(fname+".md",content);}
         } else if(fmt==="pdf"){
           try{
-            const jsPDF=await ensureJsPDF();
-            const doc=new jsPDF({unit:"pt",format:"a4"});
-            const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),M=48;
-            let y=M;
-            doc.setFillColor(20,184,166);doc.rect(0,0,W,72,"F");
-            doc.setTextColor(255,255,255);doc.setFont("helvetica","bold");doc.setFontSize(18);
-            doc.text(del.name,M,42,{maxWidth:W-2*M});
-            doc.setFontSize(10);doc.setFont("helvetica","normal");
-            doc.text((proj.context?.company?.name||"")+" · "+new Date().toLocaleDateString(),M,62);
-            y=96;
-            const secs=parseSections(content);
-            for(const sec of secs){
-              if(y>H-M){doc.addPage();y=M;}
-              doc.setFont("helvetica","bold");doc.setFontSize(13);doc.setTextColor(20,184,166);
-              const sh=doc.splitTextToSize(sec.title,W-2*M);
-              sh.forEach(l=>{if(y>H-M){doc.addPage();y=M;}doc.text(l,M,y);y+=18;});
-              doc.setFont("helvetica","normal");doc.setFontSize(10);doc.setTextColor(45,45,45);
-              for(const ln of sec.lines){
-                const txt=stripMd(ln).replace(/[\u2019\u2018]/g,"'").replace(/[\u201c\u201d]/g,'"');
-                if(!txt.trim())continue;
+            const buf=await (async()=>{
+              const jsPDF=await ensureJsPDF();
+              const doc=new jsPDF({unit:"pt",format:"a4"});
+              const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),M=48;
+              let y=M;
+              const AC=[20,184,166];
+              doc.setFillColor(...AC);doc.rect(0,0,W,72,"F");
+              doc.setTextColor(255,255,255);doc.setFont("helvetica","bold");doc.setFontSize(18);
+              doc.text(del.name,M,42,{maxWidth:W-2*M});
+              doc.setFontSize(10);doc.setFont("helvetica","normal");
+              doc.text((proj.context?.company?.name||"")+" \u00b7 "+new Date().toLocaleDateString(),M,62);
+              y=96;
+              const secs=parseSections(content);
+              for(const sec of secs){
                 if(y>H-M){doc.addPage();y=M;}
-                const wl=doc.splitTextToSize(txt,W-2*M);
-                wl.forEach(w=>{if(y>H-M){doc.addPage();y=M;}doc.text(w,M,y);y+=14;});
+                doc.setFont("helvetica","bold");doc.setFontSize(13);doc.setTextColor(...AC);
+                doc.splitTextToSize(sec.title,W-2*M).forEach(l=>{if(y>H-M){doc.addPage();y=M;}doc.text(l,M,y);y+=18;});
+                doc.setFont("helvetica","normal");doc.setFontSize(10);doc.setTextColor(45,45,45);
+                // Detect and render tables
+                const tRows=sec.lines.filter(l=>l.includes("|")&&l.trim().startsWith("|")&&!l.trim().match(/^\|[\s|:-]+\|$/)).map(r=>r.split("|").filter((c,ii,a)=>ii>0&&ii<a.length-1).map(c=>c.trim()));
+                if(tRows.length>=2){
+                  const colW=(W-2*M)/Math.max(tRows[0].length,1);
+                  if(y+20>H-M){doc.addPage();y=M;}
+                  doc.setFillColor(...AC);doc.rect(M,y,W-2*M,16,"F");
+                  doc.setTextColor(255,255,255);doc.setFontSize(9);doc.setFont("helvetica","bold");
+                  tRows[0].forEach((h,ci)=>doc.text(h.slice(0,20),M+ci*colW+3,y+11));
+                  y+=18;doc.setTextColor(45,45,45);doc.setFont("helvetica","normal");
+                  tRows.slice(1).forEach((row,ri)=>{
+                    if(y>H-M){doc.addPage();y=M;}
+                    if(ri%2===1){doc.setFillColor(246,248,251);doc.rect(M,y,W-2*M,14,"F");}
+                    doc.setTextColor(45,45,45);doc.setFontSize(9);
+                    row.forEach((c,ci)=>doc.text(c.slice(0,25),M+ci*colW+3,y+10));
+                    y+=14;
+                  });
+                  y+=8;
+                } else {
+                  for(const ln of sec.lines){
+                    const txt=stripMd(ln).replace(/[\u2019\u2018]/g,"'").replace(/[\u201c\u201d]/g,'"');
+                    if(!txt.trim())continue;
+                    if(y>H-M){doc.addPage();y=M;}
+                    doc.splitTextToSize(txt,W-2*M).forEach(w=>{if(y>H-M){doc.addPage();y=M;}doc.text(w,M,y);y+=14;});
+                  }
+                }
+                y+=8;
               }
-              y+=8;
-            }
-            const pages=doc.internal.getNumberOfPages();
-            for(let p=1;p<=pages;p++){doc.setPage(p);doc.setFontSize(7);doc.setTextColor(150,150,150);doc.text("Page "+p+" of "+pages,M,H-18);}
-            const buf=doc.output("arraybuffer");
+              const pages=doc.internal.getNumberOfPages();
+              for(let p=1;p<=pages;p++){doc.setPage(p);doc.setFontSize(7);doc.setTextColor(150,150,150);doc.text("Page "+p+" of "+pages,M,H-18);}
+              return doc.output("arraybuffer");
+            })();
             zip.folder(folder).file(fname+".pdf",buf);
           }catch{zip.folder(folder).file(fname+".md",content);}
         } else {
-          zip.folder(folder).file(fname+"."+(fmt==="docx"?"md":fmt||"txt"),content);
-          if(fmt==="docx")zip.folder(folder).file(fname+"-note.txt","Open the .md file in Word or any editor. Full .docx binary available in Phase 5.");
+          zip.folder(folder).file(fname+"."+(fmt||"txt"),content);
         }
-      }
       // Phase 5: Media generation
       const mediaDels=done.filter(d=>d.outputFormat==="image_prompt"||d.outputFormat==="video_prompt"||["image_prompt","video_prompt"].some(k=>d.name.toLowerCase().includes("image")||d.name.toLowerCase().includes("video")||d.name.toLowerCase().includes("design")||d.name.toLowerCase().includes("banner")));
       const mediaPromptLines=["# Media Generation Prompts","Generated: "+new Date().toLocaleString(),"","These prompts are ready to paste into your chosen tool.",""];
@@ -4039,6 +4192,36 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                         );
                       })()}
                       {/* New project button */}
+                      {/* ── REVIEW PANEL ── */}
+                      {projectReviewMode&&projectExecution&&!projectExecuting&&!projectQARunning&&(
+                        <div style={{background:"#131825",border:"1px solid #1a2030",borderRadius:8,padding:"12px 14px",marginTop:8,marginBottom:8}}>
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                            <div style={{fontSize:11,fontWeight:700,color:"#F1F5F9"}}>Review Deliverables Before Packaging</div>
+                            <button onClick={()=>setProjectReviewMode(false)} style={{...S.hBtn,fontSize:9}}>Done Reviewing</button>
+                          </div>
+                          {(projectExecution.modules||[]).flatMap(m=>(m.deliverables||[]).filter(d=>d.rawContent).map(d=>({...d,_mod:m.name}))).map((del,di)=>(
+                            <div key={di} style={{background:"#0a0e1a",borderRadius:6,padding:"8px 10px",marginBottom:6,border:"1px solid "+(projectExcluded[del.id]?"#EF444433":"#1a2030")}}>
+                              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                                <input type="checkbox" checked={!projectExcluded[del.id]} onChange={()=>setProjectExcluded(prev=>({...prev,[del.id]:!prev[del.id]}))} style={{accentColor:"#14B8A6",flexShrink:0}}/>
+                                <div style={{flex:1}}>
+                                  <div style={{fontSize:10,fontWeight:600,color:projectExcluded[del.id]?"#5A6480":"#F1F5F9"}}>{del.name}</div>
+                                  <div style={{fontSize:8,color:"#5A6480"}}>{del._mod} · {del.outputFormat} · QA {del.qaResult?.score||0}%</div>
+                                </div>
+                                {del.qaResult?.passed===false&&<span style={{fontSize:8,padding:"1px 6px",borderRadius:4,background:"rgba(245,158,11,0.1)",color:"#F59E0B"}}>⚠ Review</span>}
+                                <button onClick={()=>cp(del.rawContent||"")} style={{...S.hBtn,fontSize:8}}>Copy</button>
+                              </div>
+                              {!projectExcluded[del.id]&&del.rawContent&&(
+                                <div style={{background:"#131825",borderRadius:4,padding:"6px 8px",maxHeight:120,overflowY:"auto",fontSize:9,color:"#8892B0",lineHeight:1.5}}>
+                                  {del.rawContent.slice(0,400)}{del.rawContent.length>400?"...":""}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                          <div style={{fontSize:9,color:"#5A6480",marginTop:6}}>
+                            {Object.keys(projectExcluded).filter(k=>projectExcluded[k]).length} excluded · {(projectExecution.modules||[]).flatMap(m=>m.deliverables||[]).filter(d=>d.rawContent&&!projectExcluded[d.id]).length} will be packaged
+                          </div>
+                        </div>
+                      )}
                       {!projectExecuting&&!projectQARunning&&(
                         <div style={{marginTop:8}}>
                           {/* Media picker */}
@@ -4072,12 +4255,14 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                             </div>
                           </div>
                           <div style={{display:"flex",gap:6}}>
-                            <button onClick={()=>runProjectPackage(projectExecution)} disabled={projectPackaging}
+                            <button onClick={()=>runProjectPackage({...projectExecution,_excluded:projectExcluded})} disabled={projectPackaging}
                               style={{...S.pBtn,marginTop:0,flex:2,fontSize:11,background:"linear-gradient(135deg,#14B8A6,#6366F1)",opacity:projectPackaging?0.5:1}}>
                               {projectPackaging?"📦 Packaging...":"📦 Download All Files (ZIP)"}
                             </button>
-                            <button onClick={()=>{setProjectExecution(null);setProjectExecPhase("");}}
-                              style={{...S.hBtn,flex:1,textAlign:"center",padding:"10px 8px",fontSize:10}}>New Project</button>
+                            <button onClick={()=>{setProjectReviewMode(r=>!r);setProjectExcluded({});}}
+                              style={{...S.hBtn,flex:1,textAlign:"center",padding:"10px 8px",fontSize:10,color:projectReviewMode?"#14B8A6":"#A0AAC0",borderColor:projectReviewMode?"#14B8A633":"#1a2030"}}>Review</button>
+                            <button onClick={()=>{setProjectExecution(null);setProjectExecPhase("");setProjectReviewMode(false);setProjectExcluded({});rawContentStore.current={};}}
+                              style={{...S.hBtn,textAlign:"center",padding:"10px 8px",fontSize:10}}>New</button>
                           </div>
                         </div>
                       )}
