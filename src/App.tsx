@@ -1723,6 +1723,7 @@ export default function App(){
   const [projectExecuting,setProjectExecuting]=useState(false);
   const [projectExecPhase,setProjectExecPhase]=useState(""); // live status message
   const [projectExecCancel,setProjectExecCancel]=useState(false);
+  const runProjectExecutionRef=useRef(null); // ref to avoid TDZ with useCallback ordering
   const rawContentStore=useRef({}); // full content stored outside React state to prevent memory/render overload
   const [projectQARunning,setProjectQARunning]=useState(false);
   const [projectPackaging,setProjectPackaging]=useState(false);
@@ -2443,8 +2444,8 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     setProjectPlan(null);
     setProjectObjective("");
     showToast("Execution Plan approved — starting execution now.","success");
-    runProjectExecution(approved);
-  },[projectPlan,projects,showToast,sv,runProjectExecution]);
+    runProjectExecutionRef.current&&runProjectExecutionRef.current(approved);
+  },[projectPlan,projects,showToast,sv]);
 
   // ─── PROJECT ENGINE — Phase 2: Execution Engine ────────────────────────────
   const runProjectExecution=useCallback(async(project)=>{
@@ -2701,7 +2702,9 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     if(completedCount>0)setTimeout(()=>runProjectQA(currentProj),500);
     else showToast("⚠ No deliverables completed","warning");
 
-  },[projectExecuting,keys,buildProjectContext,showToast,sv,isRateLimit,markProviderExhausted,waitWithCountdown,stripMd,callAI,runProjectQA]);
+  },[projectExecuting,keys,buildProjectContext,showToast,sv,isRateLimit,markProviderExhausted,waitWithCountdown,stripMd,callAI]);
+  // Keep ref current so approveProjectPlan can call it without dep ordering issues
+  runProjectExecutionRef.current=runProjectExecution;
 
   const runProjectQA=useCallback(async(proj)=>{
     if(projectQARunning||!proj)return;
