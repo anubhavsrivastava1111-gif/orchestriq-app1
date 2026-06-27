@@ -1648,6 +1648,34 @@ function renderStructuredDeck(pptx,slides,A,pal=QE_PAL){
 
 // ─── MAIN APP ────────────────────────────────────────────────────────────────
 
+function DraggableTokenWidget({children}){
+  const POS_KEY="oiq-tok-pos";
+  const initPos=()=>{try{const s=localStorage.getItem(POS_KEY);if(s)return JSON.parse(s);}catch{}return{x:Math.max(0,window.innerWidth-180),y:Math.max(0,window.innerHeight-56)};}
+  const [pos,setPos]=useState(initPos);
+  const [dragging,setDragging]=useState(false);
+  const off=useRef({x:0,y:0});
+  const onMD=useCallback((e)=>{
+    if(e.target.tagName==="BUTTON"||e.target.tagName==="SELECT"||e.target.tagName==="INPUT")return;
+    off.current={x:e.clientX-pos.x,y:e.clientY-pos.y};
+    setDragging(true);e.preventDefault();
+  },[pos]);
+  const onMM=useCallback((e)=>{
+    if(!dragging)return;
+    setPos({x:Math.max(0,Math.min(window.innerWidth-160,e.clientX-off.current.x)),y:Math.max(0,Math.min(window.innerHeight-40,e.clientY-off.current.y))});
+  },[dragging]);
+  const onMU=useCallback(()=>{
+    if(!dragging)return;
+    setDragging(false);
+    setPos(p=>{try{localStorage.setItem(POS_KEY,JSON.stringify(p));}catch{}return p;});
+  },[dragging]);
+  useEffect(()=>{
+    window.addEventListener("mousemove",onMM);
+    window.addEventListener("mouseup",onMU);
+    return()=>{window.removeEventListener("mousemove",onMM);window.removeEventListener("mouseup",onMU);};
+  },[onMM,onMU]);
+  return <div onMouseDown={onMD} style={{position:"fixed",left:pos.x,top:pos.y,zIndex:9990,cursor:dragging?"grabbing":"grab",userSelect:"none"}}>{children}</div>;
+}
+
 export default function App(){
   const [page,setPage]=useState("landing");
   const [sbOpen,setSbOpen]=useState(false);
@@ -1831,7 +1859,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{const ac=localStorage.getItem("cos-admin-config");if(ac)setAdminConfig({...adminConfig,...JSON.parse(ac)});}catch{}
     try{const br=localStorage.getItem("cos-br");if(br)setBrSessions(JSON.parse(br));}catch{}
     try{const projs=localStorage.getItem("cos-projects");if(projs){const parsed=JSON.parse(projs);const cleaned=parsed.map(p=>p.status==="executing"||p.status==="qa"?{...p,status:"partial"}:p);setProjects(cleaned);localStorage.setItem("cos-projects",JSON.stringify(cleaned));}}catch{}
-    try{const pplan=localStorage.getItem("cos-project-plan");if(pplan)setProjectPlan(JSON.parse(pplan));}catch{}
+    try{localStorage.removeItem("cos-project-plan");}catch{} // always start fresh
     try{const brLive=localStorage.getItem("cos-br-live");if(brLive){const parsed=JSON.parse(brLive);if(parsed?.q)setBrCur(parsed);}}catch{}
     try{const tm=localStorage.getItem("cos-tm");if(tm)setTmSessions(JSON.parse(tm));}catch{}
     try{const tmLive=localStorage.getItem("cos-tm-live");if(tmLive){const p=JSON.parse(tmLive);if(p?.dec){setTmDec(p.dec);setTmRes(p.res||"");setTmResearchBrief(p.brief||"");}}}catch{}
@@ -2029,7 +2057,11 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       const researchContext="\nVERIFIED RESEARCH BRIEF (current data for this scan - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n";
       const sys="You are the Decision Intelligence Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nIdentify 6 CRITICAL decisions the founder should make RIGHT NOW. ALL figures in "+apCur.sym+apCur.code+".\nFor each: Title, Urgency, Owner, Decide By, Cost of delay/week (with calculation), Options 1/2/3 with outcomes, Recommendation, "+co.location+" Context, Data Needed. End with: THE ONE DECISION THAT MATTERS MOST THIS WEEK. Then a final section: Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled 'ESTIMATE (unverified)'. Do not present invented numbers as fact.";
       const res=await ask(sys,[{role:"user",content:"Run complete decision scan."}],4500);
-      if(!cancelRef.current.ap){setApRes(res);sv("cos-ap-live",{res,brief:researchBrief});}
+      if(!cancelRef.current.ap){
+        setApRes(res);sv("cos-ap-live",{res,brief:researchBrief});
+        try{const apI=estimateTokens(co.name);const apO=estimateTokens(res);
+        saveRecord({feature:"Decision Autopilot",provider:defP,model:MODELS[defP]?.model||defP,inputTokens:apI,outputTokens:apO,cost:estimateCost(defP,apI,apO)||0});}catch{}
+      }
     }catch(err){
       if(!cancelRef.current.ap){setError(err.message);showToast("Autopilot: "+err.message,"error");}
     }finally{
@@ -2183,7 +2215,10 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         const finalCur={q:brQ,researchBrief,format:"threaded",stages:[stage1]};
         setBrCur(finalCur);
         sv("cos-br-live",finalCur);
-        try{saveRecord({feature:"AI Boardroom",provider:defP,model:MODELS[defP]?.model||defP,inputTokens:estimateTokens(brQ),outputTokens:estimateTokens(syn),cost:estimateCost(defP,estimateTokens(brQ),estimateTokens(syn))||0});}catch{}
+        try{
+          const bI=estimateTokens(brQ);const bO=estimateTokens(syn+(res||[]).map(r=>r.text||"").join(""));
+          saveRecord({feature:"AI Boardroom — "+brQ.slice(0,35),provider:defP,model:MODELS[defP]?.model||defP,inputTokens:bI,outputTokens:bO,cost:estimateCost(defP,bI,bO)||0});
+        }catch{}
         const ns=[finalSession,...brSessions].slice(0,20);setBrSessions(ns);sv("cos-br",ns);
       }
     }catch(err){
@@ -4120,6 +4155,9 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                   {projectDashboardOpen&&projectExecution&&(
                     <div style={{animation:"fadeIn 0.3s"}}>
                       {/* Header */}
+                      <div style={{marginBottom:6}}>
+                        <button onClick={()=>{setProjectDashboardOpen(false);setProjectExecution(null);setProjectReviewMode(false);setProjectExcluded({});}} style={{...S.hBtn,fontSize:9,color:"#14B8A6",borderColor:"#14B8A633"}}>← Back to Projects</button>
+                      </div>
                       <div style={{background:"#131825",border:"1px solid #1a2030",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
                           <span style={{fontSize:16}}>⚡</span>
@@ -4188,7 +4226,63 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                                   <span style={{fontSize:9,fontWeight:700,color:"#10B981"}}>✓</span>
                                   <div style={{flex:1}}><div style={{fontSize:10,fontWeight:600,color:"#F1F5F9"}}>{del.name}</div><div style={{fontSize:8,color:"#5A6480"}}>{del._mod} · {del.outputFormat} · {del.confidenceScore}% confidence · {del.verificationStatus}</div></div>
                                   <button onClick={()=>cp(del.rawContent||"")} style={{...S.hBtn,fontSize:8}}>Copy</button>
-                                  <button onClick={()=>dlFile(del.name.replace(/\s+/g,"-")+"."+del.outputFormat,del.rawContent||"","text/plain")} style={{...S.hBtn,fontSize:8}}>↓</button>
+                                  <button onClick={async()=>{
+                                    const nm=del.name.replace(/\s+/g,"-");
+                                    const lsC=(()=>{try{return localStorage.getItem("cos-rc-"+del.id)||"";}catch{return "";}})();
+                                    const cnt=rawContentStore.current[del.id]||lsC||del.rawContent||"";
+                                    const fmt=(del.outputFormat||"md").toLowerCase();
+                                    if(fmt==="pdf"){try{
+                                      const jsPDF=await ensureJsPDF();const doc=new jsPDF({unit:"pt",format:"a4"});
+                                      const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),M=48;let y=M;
+                                      doc.setFillColor(20,184,166);doc.rect(0,0,W,72,"F");
+                                      doc.setTextColor(255,255,255);doc.setFont("helvetica","bold");doc.setFontSize(15);
+                                      doc.text(del.name,M,44,{maxWidth:W-2*M});
+                                      doc.setFontSize(9);doc.setFont("helvetica","normal");
+                                      doc.text((projectExecution?.context?.company?.name||"")+" · "+new Date().toLocaleDateString(),M,62);
+                                      y=90;parseSections(cnt).forEach(sec=>{
+                                        if(y>H-M){doc.addPage();y=M;}
+                                        doc.setFont("helvetica","bold");doc.setFontSize(12);doc.setTextColor(20,184,166);
+                                        doc.splitTextToSize(sec.title,W-2*M).forEach(l=>{if(y>H-M){doc.addPage();y=M;}doc.text(l,M,y);y+=15;});
+                                        doc.setFont("helvetica","normal");doc.setFontSize(10);doc.setTextColor(45,45,45);
+                                        sec.lines.forEach(ln=>{const t=stripMd(ln);if(!t.trim())return;if(y>H-M){doc.addPage();y=M;}
+                                          doc.splitTextToSize(t,W-2*M).forEach(w=>{if(y>H-M){doc.addPage();y=M;}doc.text(w,M,y);y+=13;});});
+                                        y+=5;});
+                                      const pg=doc.internal.getNumberOfPages();
+                                      for(let p=1;p<=pg;p++){doc.setPage(p);doc.setFontSize(7);doc.setTextColor(150,150,150);doc.text("Page "+p+" of "+pg,M,H-18);}
+                                      doc.save(nm+".pdf");
+                                    }catch(e){showToast("PDF: "+e.message,"error");}}
+                                    else if(fmt==="xlsx"){try{
+                                      const XLSX=await ensureXLSX();const wb=XLSX.utils.book_new();
+                                      const rows=cnt.split("\n").filter(Boolean).map(r=>r.split("|").filter((c,ii,a)=>ii>0&&ii<a.length-1).map(c=>c.trim())).filter(r=>r.length>1&&!r.every(c=>c.match(/^[-:]+$/)));
+                                      const ws=rows.length>0?XLSX.utils.aoa_to_sheet(rows):XLSX.utils.aoa_to_sheet([[del.name],[""],[ cnt.slice(0,500)]]);
+                                      XLSX.utils.book_append_sheet(wb,ws,del.name.slice(0,31)||"Data");
+                                      const buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+                                      const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+                                      const u=URL.createObjectURL(blob);
+                                      const a=document.createElement("a");a.href=u;a.download=nm+".xlsx";a.style.display="none";
+                                      document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(u),200);
+                                    }catch(e){showToast("Excel: "+e.message,"error");}}
+                                    else if(fmt==="docx"){
+                                      const secs=parseSections(cnt);
+                                      let html="<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:w=\"urn:schemas-microsoft-com:office:word\" xmlns=\"http://www.w3.org/TR/REC-html40\"><head><meta charset=\"UTF-8\"><style>body{font-family:Calibri,sans-serif;font-size:11pt;margin:72pt;}h1{font-size:18pt;color:#14B8A6;}h2{font-size:13pt;}p{line-height:1.5;}table{border-collapse:collapse;width:100%;}th{background:#14B8A6;color:#fff;padding:5pt 8pt;}td{padding:4pt 8pt;border-bottom:1pt solid #ddd;}</style></head><body><h1>"+del.name+"</h1>";
+                                      for(const sec of secs){html+="<h2>"+sec.title+"</h2>";sec.lines.forEach(ln=>{const t=stripMd(ln).trim();if(t)html+="<p>"+t+"</p>";});}
+                                      html+="</body></html>";dlFile(nm+".doc",html,"application/msword");
+                                    } else if(fmt==="pptx"){try{
+                                      const PptxGenJS=await ensurePptx();const pptx=new PptxGenJS();
+                                      pptx.defineLayout({name:"WIDE",width:13.333,height:7.5});pptx.layout="WIDE";
+                                      const s0=pptx.addSlide();s0.background={color:"0A0E1A"};
+                                      s0.addText(del.name,{x:0.7,y:2.8,w:12,h:1.2,fontSize:26,bold:true,color:"F1F5F9"});
+                                      parseSections(cnt).slice(0,10).forEach(sec=>{
+                                        const s=pptx.addSlide();s.background={color:"0A0E1A"};
+                                        s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:13.333,h:0.9,fill:{color:"131825"}});
+                                        s.addText(sec.title,{x:0.5,y:0.1,w:12,h:0.7,fontSize:18,bold:true,color:"F1F5F9",valign:"middle"});
+                                        const b=sec.lines.map(l=>stripMd(l)).filter(Boolean).slice(0,8);
+                                        if(b.length)s.addText(b.map(t=>({text:t.replace(/^[*-]\s*/,""),options:{bullet:{code:"2022"},color:"A0AAC0",fontSize:13,paraSpaceAfter:6}})),{x:0.7,y:1.2,w:12,h:5.8,valign:"top"});
+                                      });
+                                      await pptx.writeFile({fileName:nm+".pptx"});
+                                    }catch(e){showToast("PPT: "+e.message,"error");}}
+                                    else{dlFile(nm+"."+(fmt||"txt"),cnt,"text/plain");}
+                                  }} style={{...S.hBtn,fontSize:8}}>↓</button>
                                 </div>
                                 {del.qaResult&&(
                                   <div style={{display:"flex",alignItems:"center",gap:5,marginTop:3,flexWrap:"wrap"}}>
@@ -4247,7 +4341,9 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                                   <input type="radio" name="imgMode" checked={mediaMode.image===val} onChange={()=>setMediaMode(m=>({...m,image:val}))} disabled={!!reqKey&&!keys[reqKey]?.trim()} style={{accentColor:"#14B8A6"}}/>
                                   <span style={{fontSize:9,color:"#A0AAC0"}}>{lb}</span>
                                   <span style={{fontSize:8,padding:"1px 5px",borderRadius:4,background:val==="prompts"?"rgba(16,185,129,0.1)":"rgba(245,158,11,0.08)",color:val==="prompts"?"#10B981":"#F59E0B"}}>{cost}</span>
-                                  {reqKey&&!keys[reqKey]?.trim()&&<span style={{fontSize:7,color:"#EF4444"}}>add key in Settings</span>}
+                                  {reqKey&&!keys[reqKey]?.trim()&&(
+                                  <span style={{fontSize:7,color:"#EF4444",display:"block",marginTop:2}}>⚠ Add {reqKey==="openai"?"OpenAI":reqKey==="stability"?"Stability AI":reqKey} key in Settings → API Keys</span>
+                                )}
                                 </label>
                               ))}
                             </div>
@@ -4335,7 +4431,8 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                       </div>
                       <div style={{display:"flex",gap:6}}>
                         <button onClick={approveProjectPlan} style={{flex:1,...S.pBtn,marginTop:0,background:"#10B981"}}>Approve Plan and Begin Execution</button>
-                        <button onClick={()=>{setProjectPlan(null);setProjectObjective("");}} style={{...S.hBtn,padding:"10px 14px",fontSize:11}}>Revise Objective</button>
+                        <button onClick={()=>{setProjectPlan(null);setProjectObjective("");}} style={{...S.hBtn,padding:"10px 14px",fontSize:11}}>Revise</button>
+                        <button onClick={()=>{setProjectPlan(null);setProjectObjective("");try{localStorage.removeItem("cos-project-plan");}catch{}}} style={{...S.hBtn,padding:"10px 14px",fontSize:11,color:"#EF4444",borderColor:"#EF444433"}}>✕ Cancel</button>
                       </div>
                     </div>
                   )}
@@ -5114,7 +5211,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
       )}
       {extractModal&&<ExtractReviewModal extracted={extractModal.items} sourceType={extractModal.sourceType} sourceLabel={extractModal.sourceLabel} onConfirm={confirmExtractedItems} onCancel={()=>setExtractModal(null)} AR={AR} S={S}/>}
       {showDonate&&<DonateModal cfg={dnCfg} presets={DONATION_PRESETS} onClose={()=>setShowDonate(false)} cur={cur} amt={dnAmt} setAmt={setDnAmt} custom={dnCustom} setCustom={setDnCustom} S={S}/>}
-      <TokenBadge defP={defP} setDefP={p=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} keys={keys} onOpen={()=>{setView("tokens");}} />
+      <DraggableTokenWidget><TokenBadge defP={defP} setDefP={p=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} keys={keys} onOpen={()=>{setView("tokens");}} /></DraggableTokenWidget>
       <Toaster toasts={toasts} onDismiss={id=>setToasts(prev=>prev.filter(t=>t.id!==id))}/>
       <style>{CSS}</style>
       </div>{/* end oiq-body-row */}
