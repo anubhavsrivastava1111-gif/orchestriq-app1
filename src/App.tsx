@@ -1648,34 +1648,6 @@ function renderStructuredDeck(pptx,slides,A,pal=QE_PAL){
 
 // ─── MAIN APP ────────────────────────────────────────────────────────────────
 
-function DraggableTokenWidget({children}){
-  const POS_KEY="oiq-tok-pos";
-  const initPos=()=>{try{const s=localStorage.getItem(POS_KEY);if(s)return JSON.parse(s);}catch{}return{x:Math.max(0,window.innerWidth-180),y:Math.max(0,window.innerHeight-56)};}
-  const [pos,setPos]=useState(initPos);
-  const [dragging,setDragging]=useState(false);
-  const off=useRef({x:0,y:0});
-  const onMD=useCallback((e)=>{
-    if(e.target.tagName==="BUTTON"||e.target.tagName==="SELECT"||e.target.tagName==="INPUT")return;
-    off.current={x:e.clientX-pos.x,y:e.clientY-pos.y};
-    setDragging(true);e.preventDefault();
-  },[pos]);
-  const onMM=useCallback((e)=>{
-    if(!dragging)return;
-    setPos({x:Math.max(0,Math.min(window.innerWidth-160,e.clientX-off.current.x)),y:Math.max(0,Math.min(window.innerHeight-40,e.clientY-off.current.y))});
-  },[dragging]);
-  const onMU=useCallback(()=>{
-    if(!dragging)return;
-    setDragging(false);
-    setPos(p=>{try{localStorage.setItem(POS_KEY,JSON.stringify(p));}catch{}return p;});
-  },[dragging]);
-  useEffect(()=>{
-    window.addEventListener("mousemove",onMM);
-    window.addEventListener("mouseup",onMU);
-    return()=>{window.removeEventListener("mousemove",onMM);window.removeEventListener("mouseup",onMU);};
-  },[onMM,onMU]);
-  return <div onMouseDown={onMD} style={{position:"fixed",left:pos.x,top:pos.y,zIndex:9990,cursor:dragging?"grabbing":"grab",userSelect:"none"}}>{children}</div>;
-}
-
 export default function App(){
   const [page,setPage]=useState("landing");
   const [sbOpen,setSbOpen]=useState(false);
@@ -5211,7 +5183,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
       )}
       {extractModal&&<ExtractReviewModal extracted={extractModal.items} sourceType={extractModal.sourceType} sourceLabel={extractModal.sourceLabel} onConfirm={confirmExtractedItems} onCancel={()=>setExtractModal(null)} AR={AR} S={S}/>}
       {showDonate&&<DonateModal cfg={dnCfg} presets={DONATION_PRESETS} onClose={()=>setShowDonate(false)} cur={cur} amt={dnAmt} setAmt={setDnAmt} custom={dnCustom} setCustom={setDnCustom} S={S}/>}
-      <DraggableTokenWidget><TokenBadge defP={defP} setDefP={p=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} keys={keys} onOpen={()=>{setView("tokens");}} /></DraggableTokenWidget>
+      <TokenBadge defP={defP} setDefP={p=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} keys={keys} onOpen={()=>{setView("tokens");}} />
       <Toaster toasts={toasts} onDismiss={id=>setToasts(prev=>prev.filter(t=>t.id!==id))}/>
       <style>{CSS}</style>
       </div>{/* end oiq-body-row */}
