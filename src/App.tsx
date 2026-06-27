@@ -2686,8 +2686,15 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
           const verificationStatus=hasPlaceholders?"Requires User Input":hasAssumptions?"AI Generated":"AI Generated";
 
           rawContentStore.current[del.id]=rawContent;
-          try{localStorage.setItem("cos-rc-"+del.id,rawContent.slice(0,8000));}catch{}
-          const rawPreview=rawContent.slice(0,800)+(rawContent.length>800?"\n\n[...full content in ZIP...]":"");
+          // Store full content — no artificial cap. Try/catch handles storage quota.
+          try{
+            localStorage.setItem("cos-rc-"+del.id,rawContent);
+          }catch(e){
+            // Storage quota reached — try with truncated version
+            try{localStorage.setItem("cos-rc-"+del.id,rawContent.slice(0,20000));}catch{}
+            console.warn("[OIQ] localStorage quota reached for deliverable",del.id);
+          }
+          const rawPreview=rawContent.slice(0,800)+(rawContent.length>800?"\n\n[...full content in export backup...]":"");
           currentProj=updateDel(currentProj,del._modId,del.id,{
             status:"complete",
             rawContent:rawPreview,
@@ -3573,7 +3580,35 @@ const processTask=useCallback(async(task:any)=>{
     try{await supabase.auth.signOut();}catch(e){console.warn("[OIQ] Sign out error:",e);}
     window.location.href="/";
   };
-  const exportAll=()=>dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",{version:VERSION,exported:new Date().toISOString(),company:co,companyData:compData,ledgerEntries,customAccounts,dispatchTemplates,adminConfig,actionItems,chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue,projects,timeMachineSessions:tmSessions,timeMachineLive:{dec:tmDec,res:tmRes,brief:tmResearchBrief},autopilotSessions:apSessions,autopilotLive:{res:apRes,brief:apResearchBrief}});
+  const exportAll=()=>{
+    // Enrich projects with full deliverable content from ref/localStorage
+    // The JSON download is a Blob with no size limit — include complete content
+    const enrichedProjects=(projects||[]).map(proj=>({
+      ...proj,
+      modules:(proj.modules||[]).map(mod=>({
+        ...mod,
+        deliverables:(mod.deliverables||[]).map(del=>{
+          // Priority: memory ref (full) > localStorage (full) > state (preview)
+          const fullContent=
+            rawContentStore.current[del.id]||
+            (()=>{try{return localStorage.getItem("cos-rc-"+del.id)||"";}catch{return "";}})();
+          return fullContent
+            ?{...del,rawContent:fullContent,_contentSource:"full"}
+            :{...del,_contentSource:"preview"};
+        })
+      }))
+    }));
+    const payload={version:VERSION,exported:new Date().toISOString(),
+      company:co,companyData:compData,
+      ledgerEntries,customAccounts,dispatchTemplates,adminConfig,actionItems,
+      chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue,
+      projects:enrichedProjects,
+      timeMachineSessions:tmSessions,
+      timeMachineLive:{dec:tmDec,res:tmRes,brief:tmResearchBrief},
+      autopilotSessions:apSessions,
+      autopilotLive:{res:apRes,brief:apResearchBrief}};
+    dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",payload);
+  };
   const handleSignOut=useCallback(async(saveFirst:boolean)=>{
     if(saveFirst){
       try{exportAll();}catch(e){showToast("Save failed: "+(e as Error).message+" — signing out anyway","warning");}
@@ -3586,7 +3621,21 @@ const processTask=useCallback(async(task:any)=>{
 
   const importData=file=>{const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.company)setCo(d.company);sv("cos-co",d.company);
 if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admin-config",d.adminConfig);}
-if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);}if(d.chats){setChats(d.chats);sv("cos-ch",d.chats);}if(d.boardroomSessions){setBrSessions(d.boardroomSessions);sv("cos-br",d.boardroomSessions);}if(d.workflows){setWorkflows(d.workflows);sv("cos-wf",d.workflows);}if(d.taskQueue){tQRef.current=d.taskQueue;setTQueue(d.taskQueue);sv("cos-tq",d.taskQueue);}if(d.projects){const cp=(d.projects||[]).map(p=>p.status==="executing"||p.status==="qa"?{...p,status:"partial"}:p);setProjects(cp);sv("cos-projects",cp);}
+if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);}if(d.chats){setChats(d.chats);sv("cos-ch",d.chats);}if(d.boardroomSessions){setBrSessions(d.boardroomSessions);sv("cos-br",d.boardroomSessions);}if(d.workflows){setWorkflows(d.workflows);sv("cos-wf",d.workflows);}if(d.taskQueue){tQRef.current=d.taskQueue;setTQueue(d.taskQueue);sv("cos-tq",d.taskQueue);}if(d.projects){
+  const cp=(d.projects||[]).map(p=>p.status==="executing"||p.status==="qa"?{...p,status:"partial"}:p);
+  setProjects(cp);sv("cos-projects",cp);
+  // Restore full deliverable content to ref and localStorage
+  cp.forEach(proj=>{
+    (proj.modules||[]).forEach(mod=>{
+      (mod.deliverables||[]).forEach(del=>{
+        if(del.rawContent&&del._contentSource==="full"){
+          rawContentStore.current[del.id]=del.rawContent;
+          try{localStorage.setItem("cos-rc-"+del.id,del.rawContent);}catch{}
+        }
+      });
+    });
+  });
+}
 if(d.companyData){setCompData(d.companyData);sv("cos-cd",d.companyData);}
 if(d.ledgerEntries){setLedgerEntries(d.ledgerEntries);sv("cos-ledger",d.ledgerEntries);}
 if(d.customAccounts){setCustomAccounts(d.customAccounts);sv("cos-accounts",d.customAccounts);}
