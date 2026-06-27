@@ -1727,6 +1727,11 @@ export default function App(){
   const rawContentStore=useRef({}); // full content stored outside React state to prevent memory/render overload
   const [projectQARunning,setProjectQARunning]=useState(false);
   const [projectPackaging,setProjectPackaging]=useState(false);
+  const [projectReviewMode,setProjectReviewMode]=useState(false);
+  const [projectExcluded,setProjectExcluded]=useState({});
+  const [projectDashboardOpen,setProjectDashboardOpen]=useState(false);
+  const [projectArchiveView,setProjectArchiveView]=useState("recent");
+  const [projectSearchQ,setProjectSearchQ]=useState("");
   const [wfCustomChain,setWfCustomChain]=useState([]);
   const [wfShowExtra,setWfShowExtra]=useState(false);
   const [wfPreflight,setWfPreflight]=useState<{questions:{persona:string;personaIc:string;q:string;placeholder:string}[];answers:string[];contextSummary:string}|null>(null);
@@ -1991,6 +1996,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       if(!cancelRef.current.tm){
         setTmRes(res);
         sv("cos-tm-live",{dec:tmDec,res,brief:researchBrief});
+        try{saveRecord({feature:"Time Machine",provider:defP,model:MODELS[defP]?.model||defP,inputTokens:estimateTokens(tmDec),outputTokens:estimateTokens(res),cost:estimateCost(defP,estimateTokens(tmDec),estimateTokens(res))||0});}catch{}
         const session={id:Date.now(),dec:tmDec,res,brief:researchBrief,ts:new Date().toISOString()};
         setTmSessions(prev=>{const ns=[session,...prev].slice(0,20);sv("cos-tm",ns);return ns;});
       }
@@ -2177,6 +2183,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         const finalCur={q:brQ,researchBrief,format:"threaded",stages:[stage1]};
         setBrCur(finalCur);
         sv("cos-br-live",finalCur);
+        try{saveRecord({feature:"AI Boardroom",provider:defP,model:MODELS[defP]?.model||defP,inputTokens:estimateTokens(brQ),outputTokens:estimateTokens(syn),cost:estimateCost(defP,estimateTokens(brQ),estimateTokens(syn))||0});}catch{}
         const ns=[finalSession,...brSessions].slice(0,20);setBrSessions(ns);sv("cos-br",ns);
       }
     }catch(err){
@@ -2444,6 +2451,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     setProjectPlan(null);
     setProjectObjective("");
     showToast("Execution Plan approved — starting execution now.","success");
+    setProjectDashboardOpen(true);
     runProjectExecutionRef.current&&runProjectExecutionRef.current(approved);
   },[projectPlan,projects,showToast,sv]);
 
@@ -2670,9 +2678,9 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
           const confidenceScore=hasPlaceholders?30:hasAssumptions?65:85;
           const verificationStatus=hasPlaceholders?"Requires User Input":hasAssumptions?"AI Generated":"AI Generated";
 
-          // Store full content in ref (no re-render) — preview only in state
           rawContentStore.current[del.id]=rawContent;
-          const rawPreview=rawContent.slice(0,800)+(rawContent.length>800?"\n\n[...content stored, available in ZIP...]":"");
+          try{localStorage.setItem("cos-rc-"+del.id,rawContent.slice(0,8000));}catch{}
+          const rawPreview=rawContent.slice(0,800)+(rawContent.length>800?"\n\n[...full content in ZIP...]":"");
           currentProj=updateDel(currentProj,del._modId,del.id,{
             status:"complete",
             rawContent:rawPreview,
@@ -2856,7 +2864,8 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         const folder=del._modName.replace(/[^a-zA-Z0-9]/g,"-");
         const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
         const fmt=(del.outputFormat||"md").toLowerCase();
-        const content=rawContentStore.current[del.id]||del.rawContent||""; // use full content from ref if available
+        const lsContent=(()=>{try{return localStorage.getItem("cos-rc-"+del.id)||"";}catch{return "";}})();
+        const content=rawContentStore.current[del.id]||lsContent||del.rawContent||"";
         // ── IMPROVED 1: Native DOCX via Word HTML (opens natively in Word) ──
         if(fmt==="docx"){
           try{
@@ -3186,7 +3195,7 @@ if(!role){
       const usedModel=MODELS[usedProv]?.model||usedProv;
       const inputTok=estimateTokens(sys);
       const outputTok=estimateTokens(reply);
-      saveRecord({feature:"Flow: "+ch.label+" L"+(i+1)+" — "+role.t,provider:usedProv,model:usedModel,inputTokens:inputTok,outputTokens:outputTok,cost:estimateCost(usedProv,inputTok,outputTok)});
+      saveRecord({feature:"Flow: "+ch.label+" L"+(i+1)+" — "+role.t,provider:usedProv,model:usedModel,inputTokens:inputTok,outputTokens:outputTok,cost:estimateCost(usedProv,inputTok,outputTok)||0});
     }catch(err:any){
       stepFailed=true;
       failMsg=err.message||"Unknown error";
@@ -3520,7 +3529,7 @@ const processTask=useCallback(async(task:any)=>{
     try{await supabase.auth.signOut();}catch(e){console.warn("[OIQ] Sign out error:",e);}
     window.location.href="/";
   };
-  const exportAll=()=>dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",{version:VERSION,exported:new Date().toISOString(),company:co,companyData:compData,ledgerEntries,customAccounts,dispatchTemplates,adminConfig,actionItems,chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue});
+  const exportAll=()=>dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",{version:VERSION,exported:new Date().toISOString(),company:co,companyData:compData,ledgerEntries,customAccounts,dispatchTemplates,adminConfig,actionItems,chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue,projects});
   const handleSignOut=useCallback(async(saveFirst:boolean)=>{
     if(saveFirst){
       try{exportAll();}catch(e){showToast("Save failed: "+(e as Error).message+" — signing out anyway","warning");}
@@ -3533,7 +3542,7 @@ const processTask=useCallback(async(task:any)=>{
 
   const importData=file=>{const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.company)setCo(d.company);sv("cos-co",d.company);
 if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admin-config",d.adminConfig);}
-if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);}if(d.chats){setChats(d.chats);sv("cos-ch",d.chats);}if(d.boardroomSessions){setBrSessions(d.boardroomSessions);sv("cos-br",d.boardroomSessions);}if(d.workflows){setWorkflows(d.workflows);sv("cos-wf",d.workflows);}if(d.taskQueue){tQRef.current=d.taskQueue;setTQueue(d.taskQueue);sv("cos-tq",d.taskQueue);}setResumeInfo(null);showToast("Workspace loaded — continue where you left off","success");}catch{showToast("Invalid workspace file","error");}};r.readAsText(file);};
+if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);}if(d.chats){setChats(d.chats);sv("cos-ch",d.chats);}if(d.boardroomSessions){setBrSessions(d.boardroomSessions);sv("cos-br",d.boardroomSessions);}if(d.workflows){setWorkflows(d.workflows);sv("cos-wf",d.workflows);}if(d.taskQueue){tQRef.current=d.taskQueue;setTQueue(d.taskQueue);sv("cos-tq",d.taskQueue);}if(d.projects){const cp=(d.projects||[]).map(p=>p.status==="executing"||p.status==="qa"?{...p,status:"partial"}:p);setProjects(cp);sv("cos-projects",cp);}setResumeInfo(null);showToast("Workspace loaded — continue where you left off","success");}catch{showToast("Invalid workspace file","error");}};r.readAsText(file);};
 
   // FEATURE 4 & 5: Export Studio generation
   const runExport=useCallback(async()=>{
@@ -4108,7 +4117,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                   <p style={{fontSize:10,color:"#8892B0",marginBottom:14,lineHeight:1.6}}>Describe a complex business objective. The engine decomposes it into an Execution Plan with modules and deliverables — you approve before anything runs.</p>
 
                   {/* ── EXECUTION DASHBOARD ── */}
-                  {(projectExecuting||projectExecution?.status==="complete"||projectExecution?.status==="partial"||projectExecution?.status==="executing")&&projectExecution&&(
+                  {projectDashboardOpen&&projectExecution&&(
                     <div style={{animation:"fadeIn 0.3s"}}>
                       {/* Header */}
                       <div style={{background:"#131825",border:"1px solid #1a2030",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
@@ -4265,7 +4274,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                             </button>
                             <button onClick={()=>{setProjectReviewMode(r=>!r);setProjectExcluded({});}}
                               style={{...S.hBtn,flex:1,textAlign:"center",padding:"10px 8px",fontSize:10,color:projectReviewMode?"#14B8A6":"#A0AAC0",borderColor:projectReviewMode?"#14B8A633":"#1a2030"}}>Review</button>
-                            <button onClick={()=>{setProjectExecution(null);setProjectExecPhase("");setProjectReviewMode(false);setProjectExcluded({});rawContentStore.current={};}}
+                            <button onClick={()=>{setProjectExecution(null);setProjectExecPhase("");setProjectReviewMode(false);setProjectExcluded({});setProjectDashboardOpen(false);rawContentStore.current={};}}
                               style={{...S.hBtn,textAlign:"center",padding:"10px 8px",fontSize:10}}>New</button>
                           </div>
                         </div>
@@ -4273,8 +4282,8 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                     </div>
                   )}
 
-                  {/* ── PLANNING / INPUT UI — only show when not executing ── */}
-                  {!projectExecuting&&!projectExecution&&(
+                  {/* ── PLANNING / INPUT UI ── */}
+                  {!projectDashboardOpen&&(
                   <div>
                   {!projectPlan&&!projectPlanning&&(
                     <div>
@@ -4330,18 +4339,41 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                       </div>
                     </div>
                   )}
-                  {projects.length>0&&!projectPlan&&!projectPlanning&&(
-                    <div style={{marginTop:16}}>
-                      <div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:0.8,marginBottom:8}}>Recent Projects</div>
-                      {projects.slice(0,5).map(p=>(
-                        <div key={p.id} style={{background:"#131825",border:"1px solid #1a2030",borderRadius:6,padding:"10px 12px",marginBottom:5,display:"flex",alignItems:"center",gap:8}}>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:11,fontWeight:600,color:"#F1F5F9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
-                            <div style={{fontSize:8,color:"#5A6480",marginTop:1}}>{p.modules?.length||0} modules · {new Date(p.createdAt).toLocaleDateString()} · {p.status}</div>
+                  {projects.length>0&&!projectPlan&&!projectPlanning&&!projectDashboardOpen&&(
+                    <div style={{marginTop:14}}>
+                      <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:8,flexWrap:"wrap"}}>
+                        {[["recent","Recent"],["complete","Completed"],["partial","Partial"],["archived","Archived"]].map(([v,lb])=>(
+                          <button key={v} onClick={()=>setProjectArchiveView(v)} style={{padding:"3px 9px",borderRadius:5,fontSize:9,fontWeight:600,border:"1px solid "+(projectArchiveView===v?"#14B8A6":"#1a2030"),background:projectArchiveView===v?"rgba(20,184,166,0.08)":"transparent",color:projectArchiveView===v?"#14B8A6":"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{lb}</button>
+                        ))}
+                        <input value={projectSearchQ} onChange={e=>setProjectSearchQ(e.target.value)} placeholder="Search..." style={{...S.inp,flex:1,minWidth:70,fontSize:9,padding:"3px 7px",marginLeft:"auto"}}/>
+                      </div>
+                      {(()=>{
+                        const q=projectSearchQ.toLowerCase();
+                        return projects.filter(p=>{
+                          if(q&&!p.name.toLowerCase().includes(q)&&!(p.objective||"").toLowerCase().includes(q))return false;
+                          if(projectArchiveView==="recent")return !p.archived;
+                          if(projectArchiveView==="complete")return p.status==="complete"&&!p.archived;
+                          if(projectArchiveView==="partial")return p.status==="partial"&&!p.archived;
+                          if(projectArchiveView==="archived")return !!p.archived;
+                          return !p.archived;
+                        }).slice(0,10).map(p=>(
+                          <div key={p.id} style={{background:"#131825",border:"1px solid #1a2030",borderRadius:6,padding:"9px 11px",marginBottom:5}}>
+                            <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5}}>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:10,fontWeight:600,color:"#F1F5F9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
+                                <div style={{fontSize:8,color:"#5A6480",marginTop:1}}>{p.modules?.length||0} modules · {new Date(p.createdAt).toLocaleDateString()}</div>
+                              </div>
+                              <span style={{fontSize:8,padding:"2px 7px",borderRadius:8,fontWeight:700,flexShrink:0,background:p.status==="complete"?"rgba(16,185,129,0.12)":p.status==="partial"?"rgba(245,158,11,0.08)":"rgba(20,184,166,0.08)",color:p.status==="complete"?"#10B981":p.status==="partial"?"#F59E0B":"#14B8A6"}}>{p.status}</span>
+                            </div>
+                            <div style={{display:"flex",gap:4}}>
+                              <button onClick={()=>{setProjectExecution(p);setProjectReviewMode(false);setProjectExcluded({});setProjectDashboardOpen(true);}} style={{...S.hBtn,flex:2,textAlign:"center",fontSize:8,color:"#14B8A6",borderColor:"#14B8A633"}}>📂 Open</button>
+                              {p.status==="complete"&&<button onClick={()=>runProjectPackage({...p,_excluded:{}})} style={{...S.hBtn,flex:2,textAlign:"center",fontSize:8}}>📦 ZIP</button>}
+                              <button onClick={()=>{const u=projects.map(x=>x.id===p.id?{...x,archived:!x.archived}:x);setProjects(u);sv("cos-projects",u);}} style={{...S.hBtn,flex:1,textAlign:"center",fontSize:8}}>{p.archived?"↩":"📁"}</button>
+                              <button onClick={()=>{if(window.confirm("Delete \""+p.name+"\"? This cannot be undone.")){const u=projects.filter(x=>x.id!==p.id);setProjects(u);sv("cos-projects",u);}}} style={{...S.hBtn,flex:1,textAlign:"center",fontSize:8,color:"#EF4444",borderColor:"#EF444433"}}>🗑</button>
+                            </div>
                           </div>
-                          <span style={{cursor:"pointer",fontSize:8,padding:"2px 7px",borderRadius:8,fontWeight:700,background:p.status==="complete"?"rgba(16,185,129,0.12)":p.status==="partial"?"rgba(245,158,11,0.08)":"rgba(20,184,166,0.08)",color:p.status==="complete"?"#10B981":p.status==="partial"?"#F59E0B":"#14B8A6"}} onClick={()=>setProjectExecution(p)}>{p.status}</span>
-                        </div>
-                      ))}
+                        ));
+                      })()}
                     </div>
                   )}
                   </div>
@@ -5082,7 +5114,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
       )}
       {extractModal&&<ExtractReviewModal extracted={extractModal.items} sourceType={extractModal.sourceType} sourceLabel={extractModal.sourceLabel} onConfirm={confirmExtractedItems} onCancel={()=>setExtractModal(null)} AR={AR} S={S}/>}
       {showDonate&&<DonateModal cfg={dnCfg} presets={DONATION_PRESETS} onClose={()=>setShowDonate(false)} cur={cur} amt={dnAmt} setAmt={setDnAmt} custom={dnCustom} setCustom={setDnCustom} S={S}/>}
-      <TokenBadge defP={defP} setDefP={p=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} keys={keys}/>
+      <TokenBadge defP={defP} setDefP={p=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} keys={keys} onOpen={()=>{setView("tokens");}} />
       <Toaster toasts={toasts} onDismiss={id=>setToasts(prev=>prev.filter(t=>t.id!==id))}/>
       <style>{CSS}</style>
       </div>{/* end oiq-body-row */}
@@ -5152,4 +5184,7 @@ textarea:focus,input:focus,select:focus{outline:none;border-color:var(--accent)!
 button:hover{filter:brightness(1.1)}select{appearance:auto}html,body{background:var(--bg)}a{color:var(--accent)}
 /* THEME BRIDGE: map legacy hex inline-styles onto theme variables, non-destructively */
 [style*="#0a0e1a"]{}
-.oiq-themed{transition:background-color .25s,color .25s,border-color .25s}`;
+.oiq-themed{transition:background-color .25s,color .25s,border-color .25s}
+/* P6: Reduce ticker height */
+#oiq-root .global-ticker,#oiq-root [class*="ticker"]{transform:scaleY(0.88);transform-origin:top;}
+#oiq-root header+*{margin-top:-3px;}`;
