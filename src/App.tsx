@@ -3526,17 +3526,54 @@ const processTask=useCallback(async(task:any)=>{
   const saveDn=cfg=>{setDnCfg(cfg);setLocalDn(cfg);sv("cos-dn",cfg);showToast("Donation settings saved","success");};
 
   const resetData=async()=>{
-    for(const k of["cos-ch","cos-cd","cos-br","cos-wf","cos-tq"]){try{localStorage.removeItem(k);}catch{}}
-    setChats({});setCompData({});setBrSessions([]);setBrCur({q:"",researchBrief:"",format:"threaded",stages:[]});
-    setWorkflows([]);setWfActive(null);tQRef.current=[];setTQueue([]);setSelRole(null);setConfirmReset(null);
-    showToast("All data reset","warning");
+    // Clear all user-generated data from every module
+    const dataKeys=[
+      "cos-ch","cos-cd","cos-br","cos-br-live","cos-wf","cos-tq",
+      "cos-tm","cos-tm-live","cos-ap","cos-ap-live",
+      "cos-ledger","cos-accounts","cos-actions","cos-dispatch-templates",
+      "cos-projects","cos-project-plan","cos-dp","oiq-token-records",
+    ];
+    for(const k of dataKeys){try{localStorage.removeItem(k);}catch{}}
+    // Also remove all deliverable content keys (cos-rc-*)
+    try{
+      const toRemove=Object.keys(localStorage).filter(k=>k.startsWith("cos-rc-"));
+      toRemove.forEach(k=>localStorage.removeItem(k));
+    }catch{}
+    // Reset all module state
+    setChats({});
+    setCompData({});
+    setBrSessions([]);
+    setBrCur({q:"",researchBrief:"",format:"threaded",stages:[]});
+    setWorkflows([]);
+    setWfActive(null);
+    tQRef.current=[];
+    setTQueue([]);
+    setSelRole(null);
+    setTmSessions([]);
+    setTmRes("");
+    setTmDec("");
+    setTmResearchBrief("");
+    setApSessions([]);
+    setApRes("");
+    setApResearchBrief("");
+    setLedgerEntries([]);
+    setCustomAccounts([]);
+    setDispatchTemplates([]);
+    setActionItems([]);
+    setProjects([]);
+    setProjectPlan(null);
+    setProjectExecution(null);
+    setProjectDashboardOpen(false);
+    rawContentStore.current={};
+    setConfirmReset(null);
+    showToast("All data reset — API keys preserved","warning");
   };
   const fullReset=async()=>{
     WorkspaceMemory.clearAll();
     try{await supabase.auth.signOut();}catch(e){console.warn("[OIQ] Sign out error:",e);}
     window.location.href="/";
   };
-  const exportAll=()=>dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",{version:VERSION,exported:new Date().toISOString(),company:co,companyData:compData,ledgerEntries,customAccounts,dispatchTemplates,adminConfig,actionItems,chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue,projects});
+  const exportAll=()=>dlFile("OrchestrIQ-"+co.name.replace(/\s+/g,"-")+"-"+Date.now()+".json",{version:VERSION,exported:new Date().toISOString(),company:co,companyData:compData,ledgerEntries,customAccounts,dispatchTemplates,adminConfig,actionItems,chats,boardroomSessions:brSessions,workflows,taskQueue:tQueue,projects,timeMachineSessions:tmSessions,timeMachineLive:{dec:tmDec,res:tmRes,brief:tmResearchBrief},autopilotSessions:apSessions,autopilotLive:{res:apRes,brief:apResearchBrief}});
   const handleSignOut=useCallback(async(saveFirst:boolean)=>{
     if(saveFirst){
       try{exportAll();}catch(e){showToast("Save failed: "+(e as Error).message+" — signing out anyway","warning");}
@@ -3549,7 +3586,17 @@ const processTask=useCallback(async(task:any)=>{
 
   const importData=file=>{const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.company)setCo(d.company);sv("cos-co",d.company);
 if(d.adminConfig){setAdminConfig({...adminConfig,...d.adminConfig});sv("cos-admin-config",d.adminConfig);}
-if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);}if(d.chats){setChats(d.chats);sv("cos-ch",d.chats);}if(d.boardroomSessions){setBrSessions(d.boardroomSessions);sv("cos-br",d.boardroomSessions);}if(d.workflows){setWorkflows(d.workflows);sv("cos-wf",d.workflows);}if(d.taskQueue){tQRef.current=d.taskQueue;setTQueue(d.taskQueue);sv("cos-tq",d.taskQueue);}if(d.projects){const cp=(d.projects||[]).map(p=>p.status==="executing"||p.status==="qa"?{...p,status:"partial"}:p);setProjects(cp);sv("cos-projects",cp);}setResumeInfo(null);showToast("Workspace loaded — continue where you left off","success");}catch{showToast("Invalid workspace file","error");}};r.readAsText(file);};
+if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);}if(d.chats){setChats(d.chats);sv("cos-ch",d.chats);}if(d.boardroomSessions){setBrSessions(d.boardroomSessions);sv("cos-br",d.boardroomSessions);}if(d.workflows){setWorkflows(d.workflows);sv("cos-wf",d.workflows);}if(d.taskQueue){tQRef.current=d.taskQueue;setTQueue(d.taskQueue);sv("cos-tq",d.taskQueue);}if(d.projects){const cp=(d.projects||[]).map(p=>p.status==="executing"||p.status==="qa"?{...p,status:"partial"}:p);setProjects(cp);sv("cos-projects",cp);}
+if(d.companyData){setCompData(d.companyData);sv("cos-cd",d.companyData);}
+if(d.ledgerEntries){setLedgerEntries(d.ledgerEntries);sv("cos-ledger",d.ledgerEntries);}
+if(d.customAccounts){setCustomAccounts(d.customAccounts);sv("cos-accounts",d.customAccounts);}
+if(d.dispatchTemplates){setDispatchTemplates(d.dispatchTemplates);sv("cos-dispatch-templates",d.dispatchTemplates);}
+if(d.timeMachineSessions){setTmSessions(d.timeMachineSessions);sv("cos-tm",d.timeMachineSessions);}
+if(d.timeMachineLive?.dec){setTmDec(d.timeMachineLive.dec);setTmRes(d.timeMachineLive.res||"");setTmResearchBrief(d.timeMachineLive.brief||"");sv("cos-tm-live",{dec:d.timeMachineLive.dec,res:d.timeMachineLive.res,brief:d.timeMachineLive.brief});}
+if(d.autopilotSessions){setApSessions(d.autopilotSessions);sv("cos-ap",d.autopilotSessions);}
+if(d.autopilotLive?.res){setApRes(d.autopilotLive.res);setApResearchBrief(d.autopilotLive.brief||"");sv("cos-ap-live",{res:d.autopilotLive.res,brief:d.autopilotLive.brief});}
+setResumeInfo(null);
+showToast("Workspace loaded — all modules restored","success");}catch{showToast("Invalid workspace file","error");}};r.readAsText(file);};
 
   // FEATURE 4 & 5: Export Studio generation
   const runExport=useCallback(async()=>{
