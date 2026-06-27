@@ -3041,6 +3041,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         } else {
           zip.folder(folder).file(fname+"."+(fmt||"txt"),content);
         }
+      } // end for(const del of done)
       // Phase 5: Media generation
       const mediaDels=done.filter(d=>d.outputFormat==="image_prompt"||d.outputFormat==="video_prompt"||["image_prompt","video_prompt"].some(k=>d.name.toLowerCase().includes("image")||d.name.toLowerCase().includes("video")||d.name.toLowerCase().includes("design")||d.name.toLowerCase().includes("banner")));
       const mediaPromptLines=["# Media Generation Prompts","Generated: "+new Date().toLocaleString(),"","These prompts are ready to paste into your chosen tool.",""];
