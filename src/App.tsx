@@ -1824,7 +1824,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{const acts=localStorage.getItem("cos-actions");if(acts)setActionItems(JSON.parse(acts));}catch{}
     try{const ac=localStorage.getItem("cos-admin-config");if(ac)setAdminConfig({...adminConfig,...JSON.parse(ac)});}catch{}
     try{const br=localStorage.getItem("cos-br");if(br)setBrSessions(JSON.parse(br));}catch{}
-    try{const projs=localStorage.getItem("cos-projects");if(projs)setProjects(JSON.parse(projs));}catch{}
+    try{const projs=localStorage.getItem("cos-projects");if(projs){const parsed=JSON.parse(projs);const cleaned=parsed.map(p=>p.status==="executing"||p.status==="qa"?{...p,status:"partial"}:p);setProjects(cleaned);localStorage.setItem("cos-projects",JSON.stringify(cleaned));}}catch{}
     try{const pplan=localStorage.getItem("cos-project-plan");if(pplan)setProjectPlan(JSON.parse(pplan));}catch{}
     try{const brLive=localStorage.getItem("cos-br-live");if(brLive){const parsed=JSON.parse(brLive);if(parsed?.q)setBrCur(parsed);}}catch{}
     try{const tm=localStorage.getItem("cos-tm");if(tm)setTmSessions(JSON.parse(tm));}catch{}
@@ -2444,7 +2444,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     setProjectObjective("");
     showToast("Execution Plan approved — starting execution now.","success");
     runProjectExecution(approved);
-  },[projectPlan,projects,showToast,sv]);
+  },[projectPlan,projects,showToast,sv,runProjectExecution]);
 
   // ─── PROJECT ENGINE — Phase 2: Execution Engine ────────────────────────────
   const runProjectExecution=useCallback(async(project)=>{
@@ -2701,7 +2701,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     if(completedCount>0)setTimeout(()=>runProjectQA(currentProj),500);
     else showToast("⚠ No deliverables completed","warning");
 
-  },[projectExecuting,keys,buildProjectContext,showToast,sv,isRateLimit,markProviderExhausted,waitWithCountdown,stripMd,callAI,buildProjectContext]);
+  },[projectExecuting,keys,buildProjectContext,showToast,sv,isRateLimit,markProviderExhausted,waitWithCountdown,stripMd,callAI,runProjectQA]);
 
   const runProjectQA=useCallback(async(proj)=>{
     if(projectQARunning||!proj)return;
