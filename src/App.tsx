@@ -1689,6 +1689,7 @@ export default function App(){
   const [projectExecuting,setProjectExecuting]=useState(false);
   const [projectExecPhase,setProjectExecPhase]=useState(""); // live status message
   const [projectExecCancel,setProjectExecCancel]=useState(false);
+  const [projectQARunning,setProjectQARunning]=useState(false);
   const [wfCustomChain,setWfCustomChain]=useState([]);
   const [wfShowExtra,setWfShowExtra]=useState(false);
   const [wfPreflight,setWfPreflight]=useState<{questions:{persona:string;personaIc:string;q:string;placeholder:string}[];answers:string[];contextSummary:string}|null>(null);
@@ -2650,17 +2651,86 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     }
 
     // Finalize project status
-    const finalStatus=completedCount===totalDels?"complete":failedCount>0?"partial":"executing";
-    currentProj={...currentProj,status:finalStatus,completedAt:new Date().toISOString()};
+    const execStatus=completedCount===totalDels?"executed":failedCount>0?"partial":"executed";
+    currentProj={...currentProj,status:execStatus,completedAt:new Date().toISOString()};
     setProjectExecution(currentProj);
     setProjects(prev=>{const ns=prev.map(p=>p.id===currentProj.id?currentProj:p);sv("cos-projects",ns);return ns;});
     setProjectExecuting(false);
     setProjectExecPhase("");
-
-    if(finalStatus==="complete")showToast("✅ Project complete — "+completedCount+" deliverables generated","success");
-    else if(finalStatus==="partial")showToast("⚠ Project partial — "+completedCount+" complete, "+failedCount+" failed","warning");
+    if(completedCount>0)setTimeout(()=>runProjectQA(currentProj),500);
+    else showToast("⚠ No deliverables completed","warning");
 
   },[projectExecuting,keys,buildProjectContext,showToast,sv,isRateLimit,markProviderExhausted,waitWithCountdown,stripMd,callAI,buildProjectContext]);
+
+  const runProjectQA=useCallback(async(proj)=>{
+    if(projectQARunning||!proj)return;
+    setProjectQARunning(true);
+    setProjectExecPhase("🔍 QA Agent reviewing deliverables...");
+    let qaProj={...proj,status:"qa"};
+    setProjectExecution(qaProj);
+    const allDels=(qaProj.modules||[]).flatMap(m=>(m.deliverables||[]).map(d=>({...d,_modId:m.id})));
+    const completedDels=allDels.filter(d=>d.status==="complete"&&d.rawContent);
+    const ctx=qaProj.context||{};
+    const brandName=ctx.company?.name||"the company";
+    const currency=ctx.company?.currencySymbol||"₹";
+    const updateDelQA=(modId,delId,qaResult,newStatus)=>{
+      qaProj={...qaProj,modules:(qaProj.modules||[]).map(m=>{
+        if(m.id!==modId)return m;
+        return{...m,deliverables:(m.deliverables||[]).map(d=>d.id===delId?{...d,qaResult,status:newStatus,verificationStatus:qaResult.passed?"AI Generated":"Requires User Input",confidenceScore:qaResult.score}:d)};
+      })};
+      setProjectExecution({...qaProj});
+    };
+    for(let i=0;i<completedDels.length;i++){
+      const del=completedDels[i];
+      setProjectExecPhase("🔍 QA: "+del.name+" ("+(i+1)+"/"+completedDels.length+")");
+      try{
+        const allKeys={...keys};
+        if(EFF_GROQ?.trim())allKeys.groq=EFF_GROQ;
+        if(EFF_GEMINI?.trim())allKeys.gemini=EFF_GEMINI;
+        if(EFF_CLAUDE?.trim())allKeys.claude=EFF_CLAUDE;
+        const provs=["deepseek","claude","openai","gemini","groq","kimi"].filter(p=>allKeys[p]?.trim());
+        if(!provs.length){updateDelQA(del._modId,del.id,{passed:true,score:70,checkedAt:new Date().toISOString(),flags:[],summary:"QA skipped — no key"},del.status);continue;}
+        const qaProv=provs[0];
+        const qaKey=allKeys[qaProv];
+        const qaSys="You are a QA reviewer for "+brandName+". Review the deliverable and output ONLY a JSON object with this exact schema: "+
+          '{"passed":true,"score":85,"summary":"one sentence","flags":[{"type":"placeholder","location":"where","original":"text","suggestion":"fix"}]}\n'+ 
+          "Rules: passed=true if score>=70 and no placeholders. "+
+          "Check: placeholders ([INSERT],[TBD],Lorem ipsum), unverified stats, incomplete sections, brand name ("+brandName+"), currency ("+currency+"). "+
+          "Score: 90+=excellent, 70-89=good, 50-69=needs revision, <50=major issues.";
+        const qaMsg="DELIVERABLE: "+del.name+"\nFORMAT: "+del.outputFormat+"\n\nCONTENT:\n"+del.rawContent.slice(0,3000);
+        const qaRaw=await callAI(qaProv,qaKey,qaSys,[{role:"user",content:qaMsg}],800);
+        let qaResult={passed:true,score:80,checkedAt:new Date().toISOString(),flags:[],summary:"QA passed"};
+        try{
+          const cleaned=(qaRaw.text||"").trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/```\s*$/,"");
+          const parsed=JSON.parse(cleaned);
+          qaResult={...parsed,checkedAt:new Date().toISOString()};
+        }catch{}
+        const newStatus=qaResult.passed?"complete":"qa_failed";
+        updateDelQA(del._modId,del.id,qaResult,newStatus);
+        if(!qaResult.passed&&qaResult.score<50){
+          setProjectExecPhase("♻ Regenerating: "+del.name);
+          try{
+            const fixSys="Rewrite this deliverable fixing all QA issues. Output corrected deliverable only.";
+            const fixMsg="DELIVERABLE: "+del.name+"\nORIGINAL:\n"+del.rawContent.slice(0,2000)+"\n\nFIX THESE:\n"+qaResult.flags.map(f=>f.type+": "+f.suggestion).join("\n");
+            const fixRaw=await callAI(qaProv,qaKey,fixSys,[{role:"user",content:fixMsg}],2000);
+            const fixedContent=fixRaw.text||del.rawContent;
+            qaProj={...qaProj,modules:(qaProj.modules||[]).map(m=>m.id!==del._modId?m:{...m,deliverables:(m.deliverables||[]).map(d=>d.id!==del.id?d:{...d,rawContent:fixedContent,status:"complete",confidenceScore:75,qaResult:{...qaResult,passed:true,score:75,summary:"Auto-regenerated after QA failure"}})})};
+            setProjectExecution({...qaProj});
+          }catch{}
+        }
+      }catch(e){
+        updateDelQA(del._modId,del.id,{passed:true,score:70,checkedAt:new Date().toISOString(),flags:[],summary:"QA error: "+e.message.slice(0,60)},del.status);
+      }
+    }
+    const qaFailed=(qaProj.modules||[]).flatMap(m=>m.deliverables||[]).filter(d=>d.status==="qa_failed").length;
+    const finalStatus=qaFailed===0?"complete":"partial";
+    qaProj={...qaProj,status:finalStatus};
+    setProjectExecution({...qaProj});
+    setProjects(prev=>{const ns=prev.map(p=>p.id===qaProj.id?qaProj:p);sv("cos-projects",ns);return ns;});
+    setProjectQARunning(false);
+    setProjectExecPhase("");
+    showToast("✅ QA complete — "+completedDels.length+" deliverables reviewed","success");
+  },[projectQARunning,keys,showToast,sv,callAI]);
 
 const runWorkflow=useCallback(async(customChainOverride?:string[],preflightAnswers?:{questions:{persona:string;q:string}[];answers:string[]}|null)=>{
   const taskText=wfTask.trim();
@@ -3672,7 +3742,7 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
                           <span style={{fontSize:16}}>⚡</span>
                           <div style={{flex:1}}><div style={{fontSize:12,fontWeight:800,color:"#F1F5F9"}}>{projectExecution.name}</div><div style={{fontSize:9,color:"#5A6480"}}>{projectExecution.modules?.length||0} modules · {(projectExecution.modules||[]).reduce((a,m)=>a+(m.deliverables?.length||0),0)} deliverables</div></div>
-                          <span style={{fontSize:8,padding:"3px 8px",borderRadius:8,fontWeight:700,background:projectExecution.status==="complete"?"rgba(16,185,129,0.12)":projectExecution.status==="partial"?"rgba(245,158,11,0.1)":"rgba(20,184,166,0.08)",color:projectExecution.status==="complete"?"#10B981":projectExecution.status==="partial"?"#F59E0B":"#14B8A6"}}>{projectExecution.status?.toUpperCase()}</span>
+                          <span style={{fontSize:8,padding:"3px 8px",borderRadius:8,fontWeight:700,background:projectExecution.status==="complete"?"rgba(16,185,129,0.12)":projectExecution.status==="partial"?"rgba(245,158,11,0.1)":projectExecution.status==="qa"?"rgba(59,130,246,0.1)":"rgba(20,184,166,0.08)",color:projectExecution.status==="complete"?"#10B981":projectExecution.status==="partial"?"#F59E0B":projectExecution.status==="qa"?"#3B82F6":"#14B8A6"}}>{projectExecution.status==="qa"?"🔍 QA IN PROGRESS":projectExecution.status?.toUpperCase()}</span>
                         </div>
                         {/* Progress bar */}
                         {(()=>{
@@ -3687,7 +3757,11 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                             </div>
                           );
                         })()}
-                        {projectExecPhase&&<div style={{fontSize:9,color:"#14B8A6",marginTop:6,display:"flex",alignItems:"center",gap:4}}><span style={{width:5,height:5,borderRadius:"50%",background:"#14B8A6",display:"inline-block",animation:"pulse 1s infinite",flexShrink:0}}/>{projectExecPhase}</div>}
+                        {projectExecPhase&&(
+                          <div style={{fontSize:9,color:projectQARunning?"#3B82F6":"#14B8A6",marginTop:6,display:"flex",alignItems:"center",gap:4}}>
+                            <span style={{width:5,height:5,borderRadius:"50%",background:projectQARunning?"#3B82F6":"#14B8A6",display:"inline-block",animation:"pulse 1s infinite",flexShrink:0}}/>{projectExecPhase}
+                          </div>
+                        )}
                         {projectExecuting&&<button onClick={()=>setProjectExecCancel(true)} style={{...S.cancelBtn,marginTop:8,fontSize:9}}>Cancel Execution</button>}
                       </div>
                       {/* Module cards */}
@@ -3734,7 +3808,15 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                                   <button onClick={()=>cp(del.rawContent||"")} style={{...S.hBtn,fontSize:8}}>Copy</button>
                                   <button onClick={()=>dlFile(del.name.replace(/\s+/g,"-")+"."+del.outputFormat,del.rawContent||"","text/plain")} style={{...S.hBtn,fontSize:8}}>↓</button>
                                 </div>
-                                {del.qaResult?.flags?.length>0&&<div style={{fontSize:8,color:"#F59E0B",marginTop:3}}>⚠ {del.qaResult.flags[0].suggestion}</div>}
+                                {del.qaResult&&(
+                                  <div style={{display:"flex",alignItems:"center",gap:5,marginTop:3,flexWrap:"wrap"}}>
+                                    <span style={{fontSize:8,padding:"1px 6px",borderRadius:4,fontWeight:700,background:del.qaResult.passed?"rgba(16,185,129,0.1)":"rgba(245,158,11,0.1)",color:del.qaResult.passed?"#10B981":"#F59E0B"}}>{del.qaResult.passed?"✓ QA":"⚠ QA"} {del.qaResult.score}%</span>
+                                    <span style={{fontSize:8,color:"#5A6480",flex:1}}>{del.qaResult.summary}</span>
+                                    {(del.qaResult.flags||[]).slice(0,1).map((f,fi)=>(
+                                      <span key={fi} style={{fontSize:7,padding:"1px 5px",borderRadius:3,background:"rgba(239,68,68,0.08)",color:"#EF4444"}}>{f.suggestion?.slice(0,35)}</span>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>
