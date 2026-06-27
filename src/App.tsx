@@ -94,6 +94,7 @@ const MODELS = {
   groq:{name:"Groq",company:"Groq",model:"llama-3.3-70b-versatile",placeholder:"gsk_...",color:"#F97316",keyUrl:"https://console.groq.com/keys"},
   deepseek:{name:"DeepSeek",company:"DeepSeek AI",model:"deepseek-chat",placeholder:"sk-...",color:"#2563EB",keyUrl:"https://platform.deepseek.com/api_keys",note:"Low cost · Strong reasoning · Available in India"},
   kimi:{name:"Kimi",company:"Moonshot AI",model:"moonshot-v1-8k",placeholder:"sk-...",color:"#8B5CF6",keyUrl:"https://platform.moonshot.cn/console/api-keys",note:"Fast · Affordable · Strong multilingual"},
+  stability:{name:"Stability AI",company:"Stability AI",model:"stable-diffusion-xl-1024-v1-0",placeholder:"sk-...",color:"#EC4899",keyUrl:"https://platform.stability.ai/account/credits",note:"Image generation · ~₹3/image · Optional"},
 };
 // ─── DONATION QR ────────────────────────────────────────────────────────────
 // Paste your QR code as a base64 data URI between the quotes below to hard-code it,
@@ -1627,7 +1628,9 @@ export default function App(){
   const [sbOpen,setSbOpen]=useState(false);
   const [showModules,setShowModules]=useState(false);
   const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return localStorage.getItem("oiq-sb-col")==="1";}catch{return false;}});
-  const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:""});
+  const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:""});
+  const [mediaMode,setMediaMode]=useState({image:"prompts",video:"veo"});
+  const [showMediaPicker,setShowMediaPicker]=useState(false);
   const [defP,setDefP]=useState("groq");
   const [multiAI,setMultiAI]=useState(false);
   const [co,setCo]=useState({name:"",industry:"",stage:"idea",location:"",markets:"",currency:"INR"});
@@ -2739,6 +2742,68 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     showToast("✅ QA complete — "+completedDels.length+" deliverables reviewed","success");
   },[projectQARunning,keys,showToast,sv,callAI]);
 
+  // ─── PROJECT ENGINE — Phase 5: Media Generation ─────────────────────────
+  const buildMediaPrompt=useCallback((del,ctx)=>{
+    const company=ctx?.company?.name||"the company";
+    const industry=ctx?.company?.industry||"business";
+    const isImage=["image_prompt","design","banner","logo","creative","mockup","infographic"].some(k=>del.name.toLowerCase().includes(k)||del.outputFormat==="image_prompt");
+    const isVideo=["video","animation","storyboard","veo","film"].some(k=>del.name.toLowerCase().includes(k)||del.outputFormat==="video_prompt");
+    if(isVideo){
+      return {
+        type:"video",
+        veo:"Scene: "+del.name+" for "+company+" in "+industry+". Professional corporate style. "+
+          "Motion: smooth cinematic camera movement. Duration: 15-30 seconds. "+
+          "Style: modern, clean, minimal. 4K resolution. No text overlays. "+
+          "Context: "+(del.rawContent||del.description||"").slice(0,200),
+        runway:"Create a "+del.name+" video for "+company+". "+
+          "Style: corporate, professional. Duration: 10-15s. "+
+          (del.rawContent||del.description||"").slice(0,150),
+        kling:"Generate video: "+del.name+". Brand: "+company+". "+
+          "Mood: professional. Style: modern corporate. "+
+          (del.rawContent||del.description||"").slice(0,150),
+      };
+    }
+    return {
+      type:"image",
+      dalle:"Professional "+del.name+" for "+company+" ("+industry+"). "+
+        "Style: modern, clean, corporate. High quality. No text. "+
+        (del.rawContent||del.description||"").slice(0,200)+
+        " --ar 16:9 --style corporate",
+      stability:"Professional "+del.name+" for "+company+". "+
+        "Corporate style, clean design, modern aesthetic. "+
+        (del.rawContent||del.description||"").slice(0,150),
+      midjourney:"/imagine "+del.name+" for "+company+" "+industry+", professional corporate photography, "+
+        "clean minimal design, modern, high quality --ar 16:9 --v 6",
+    };
+  },[]);
+
+  const callDallE=useCallback(async(prompt,openaiKey)=>{
+    const r=await fetch("https://api.openai.com/v1/images/generations",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+openaiKey.trim()},
+      body:JSON.stringify({model:"dall-e-3",prompt:prompt.slice(0,3900),n:1,size:"1792x1024",quality:"standard"})
+    });
+    if(!r.ok){const t=await r.text().catch(()=>"");throw new Error("DALL-E: "+r.status+" "+t.slice(0,100));}
+    const d=await r.json();
+    return d.data?.[0]?.url||null;
+  },[]);
+
+  const callStabilityAI=useCallback(async(prompt,stabilityKey)=>{
+    const r=await fetch("https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+stabilityKey.trim(),"Accept":"application/json"},
+      body:JSON.stringify({text_prompts:[{text:prompt.slice(0,2000),weight:1}],cfg_scale:7,height:1024,width:1024,samples:1,steps:30})
+    });
+    if(!r.ok){const t=await r.text().catch(()=>"");throw new Error("Stability: "+r.status+" "+t.slice(0,100));}
+    const d=await r.json();
+    const b64=d.artifacts?.[0]?.base64;
+    if(!b64)return null;
+    const bytes=atob(b64);
+    const arr=new Uint8Array(bytes.length);
+    for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);
+    return URL.createObjectURL(new Blob([arr],{type:"image/png"}));
+  },[]);
+
   const runProjectPackage=useCallback(async(proj)=>{
     if(projectPackaging||!proj)return;
     setProjectPackaging(true);
@@ -2823,6 +2888,51 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
           if(fmt==="docx")zip.folder(folder).file(fname+"-note.txt","Open the .md file in Word or any editor. Full .docx binary available in Phase 5.");
         }
       }
+      // Phase 5: Media generation
+      const mediaDels=done.filter(d=>d.outputFormat==="image_prompt"||d.outputFormat==="video_prompt"||["image_prompt","video_prompt"].some(k=>d.name.toLowerCase().includes("image")||d.name.toLowerCase().includes("video")||d.name.toLowerCase().includes("design")||d.name.toLowerCase().includes("banner")));
+      const mediaPromptLines=["# Media Generation Prompts","Generated: "+new Date().toLocaleString(),"","These prompts are ready to paste into your chosen tool.",""];
+      for(const del of mediaDels){
+        const ctx=proj.context||{};
+        const prompts=buildMediaPrompt(del,ctx);
+        mediaPromptLines.push("## "+del.name);
+        if(prompts.type==="video"){
+          mediaPromptLines.push("","### Google Veo Prompt","```",prompts.veo,"```","","### Runway ML Prompt","```",prompts.runway,"```","","### Kling AI Prompt","```",prompts.kling,"```","");
+        } else {
+          mediaPromptLines.push("","### DALL-E 3 Prompt","```",prompts.dalle,"```","","### Midjourney Prompt","```",prompts.midjourney,"```","","### Stability AI Prompt","```",prompts.stability,"```","");
+          // Generate real image if paid mode selected
+          if(mediaMode.image==="dalle"&&keys.openai?.trim()){
+            try{
+              setProjectExecPhase("🖼 Generating image: "+del.name);
+              const imgUrl=await callDallE(prompts.dalle,keys.openai);
+              if(imgUrl){
+                const imgR=await fetch(imgUrl);
+                const imgBlob=await imgR.blob();
+                const imgBuf=await imgBlob.arrayBuffer();
+                const folder=del._modName.replace(/[^a-zA-Z0-9]/g,"-");
+                const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
+                zip.folder(folder).file(fname+".png",imgBuf);
+                mediaPromptLines.push("**Generated image saved as: "+fname+".png**","");
+              }
+            }catch(e){mediaPromptLines.push("*Image generation failed: "+e.message.slice(0,60)+"*","");}
+          } else if(mediaMode.image==="stability"&&keys.stability?.trim()){
+            try{
+              setProjectExecPhase("🖼 Generating image: "+del.name);
+              const imgUrl=await callStabilityAI(prompts.stability,keys.stability);
+              if(imgUrl){
+                const imgR=await fetch(imgUrl);
+                const imgBlob=await imgR.blob();
+                const imgBuf=await imgBlob.arrayBuffer();
+                const folder=del._modName.replace(/[^a-zA-Z0-9]/g,"-");
+                const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
+                zip.folder(folder).file(fname+".png",imgBuf);
+                mediaPromptLines.push("**Generated image saved as: "+fname+".png**","");
+              }
+            }catch(e){mediaPromptLines.push("*Image generation failed: "+e.message.slice(0,60)+"*","");}
+          }
+        }
+      }
+      if(mediaDels.length>0)zip.file("Media-Prompts.md",mediaPromptLines.join("\n"));
+
       const qaLines=["# QA Report — "+proj.name,"Generated: "+new Date().toLocaleString(),"","## Deliverables",...done.map(d=>"- **"+d.name+"** ("+d.outputFormat+") QA:"+(d.qaResult?.passed?"✓":"⚠")+" "+( d.qaResult?.score||0)+"% — "+(d.qaResult?.summary||""))];
       zip.file("QA-Report.md",qaLines.join("\n"));
       const sumLines=["# "+proj.name,"","Objective: "+proj.objective,"Generated: "+new Date().toLocaleString(),"Deliverables: "+done.length,"","## Modules",...(proj.modules||[]).map(m=>"- "+m.name+" ("+m.capabilityType+"): "+(m.deliverables||[]).length+" deliverables")];
@@ -3930,13 +4040,45 @@ if(d.actionItems){setActionItems(d.actionItems);sv("cos-actions",d.actionItems);
                       })()}
                       {/* New project button */}
                       {!projectExecuting&&!projectQARunning&&(
-                        <div style={{display:"flex",gap:6,marginTop:8}}>
-                          <button onClick={()=>runProjectPackage(projectExecution)} disabled={projectPackaging}
-                            style={{...S.pBtn,marginTop:0,flex:2,fontSize:11,background:"linear-gradient(135deg,#14B8A6,#6366F1)",opacity:projectPackaging?0.5:1}}>
-                            {projectPackaging?"📦 Packaging...":"📦 Download All Files (ZIP)"}
-                          </button>
-                          <button onClick={()=>{setProjectExecution(null);setProjectExecPhase("");}}
-                            style={{...S.hBtn,flex:1,textAlign:"center",padding:"10px 8px",fontSize:10}}>New Project</button>
+                        <div style={{marginTop:8}}>
+                          {/* Media picker */}
+                          <div style={{background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:7,padding:"10px 12px",marginBottom:8}}>
+                            <div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:0.8,marginBottom:8}}>Media Generation</div>
+                            <div style={{marginBottom:8}}>
+                              <div style={{fontSize:9,fontWeight:600,color:"#A0AAC0",marginBottom:4}}>🖼 Images</div>
+                              {[["prompts","Export prompts only","free",""],["dalle","Generate with DALL-E 3","~₹8/image","openai"],["stability","Generate with Stability AI","~₹3/image","stability"]].map(([val,lb,cost,reqKey])=>(
+                                <label key={val} style={{display:"flex",alignItems:"center",gap:6,marginBottom:3,cursor:"pointer",opacity:reqKey&&!keys[reqKey]?.trim()?0.4:1}}>
+                                  <input type="radio" name="imgMode" checked={mediaMode.image===val} onChange={()=>setMediaMode(m=>({...m,image:val}))} disabled={!!reqKey&&!keys[reqKey]?.trim()} style={{accentColor:"#14B8A6"}}/>
+                                  <span style={{fontSize:9,color:"#A0AAC0"}}>{lb}</span>
+                                  <span style={{fontSize:8,padding:"1px 5px",borderRadius:4,background:val==="prompts"?"rgba(16,185,129,0.1)":"rgba(245,158,11,0.08)",color:val==="prompts"?"#10B981":"#F59E0B"}}>{cost}</span>
+                                  {reqKey&&!keys[reqKey]?.trim()&&<span style={{fontSize:7,color:"#EF4444"}}>add key in Settings</span>}
+                                </label>
+                              ))}
+                            </div>
+                            <div>
+                              <div style={{fontSize:9,fontWeight:600,color:"#A0AAC0",marginBottom:4}}>🎬 Video</div>
+                              {[["veo","Google Veo prompts","free"],["runway","Runway ML prompts","free"],["kling","Kling AI prompts","free"]].map(([val,lb,cost])=>(
+                                <label key={val} style={{display:"flex",alignItems:"center",gap:6,marginBottom:3,cursor:"pointer"}}>
+                                  <input type="radio" name="vidMode" checked={mediaMode.video===val} onChange={()=>setMediaMode(m=>({...m,video:val}))} style={{accentColor:"#14B8A6"}}/>
+                                  <span style={{fontSize:9,color:"#A0AAC0"}}>{lb}</span>
+                                  <span style={{fontSize:8,padding:"1px 5px",borderRadius:4,background:"rgba(16,185,129,0.1)",color:"#10B981"}}>{cost}</span>
+                                </label>
+                              ))}
+                              <div style={{fontSize:8,color:"#5A6480",marginTop:4,lineHeight:1.5}}>Video prompts are included in the ZIP — paste into your chosen tool to generate.</div>
+                            </div>
+                            <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #1a2030",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                              <span style={{fontSize:9,color:"#5A6480"}}>Estimated cost:</span>
+                              <span style={{fontSize:10,fontWeight:700,color:mediaMode.image==="prompts"?"#10B981":"#F59E0B"}}>{mediaMode.image==="prompts"?"₹0 — Free":"Paid — check key balance"}</span>
+                            </div>
+                          </div>
+                          <div style={{display:"flex",gap:6}}>
+                            <button onClick={()=>runProjectPackage(projectExecution)} disabled={projectPackaging}
+                              style={{...S.pBtn,marginTop:0,flex:2,fontSize:11,background:"linear-gradient(135deg,#14B8A6,#6366F1)",opacity:projectPackaging?0.5:1}}>
+                              {projectPackaging?"📦 Packaging...":"📦 Download All Files (ZIP)"}
+                            </button>
+                            <button onClick={()=>{setProjectExecution(null);setProjectExecPhase("");}}
+                              style={{...S.hBtn,flex:1,textAlign:"center",padding:"10px 8px",fontSize:10}}>New Project</button>
+                          </div>
                         </div>
                       )}
                     </div>
