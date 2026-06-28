@@ -220,9 +220,7 @@ export class WorkflowStepExecutor {
       // Run AI prompt if defined
       if (step.aiPrompt) {
         const sys = step.aiPrompt(ctx);
-        const inputText = Object.values(ctx.inputData).join("
-
-");
+        const inputText = Object.values(ctx.inputData).join("\n");
         const raw = await this.ask(sys, [{ role: "user", content: inputText || "Proceed with available data." }], 3000);
         result.output = typeof raw === "string" ? raw : raw?.text || raw?.content?.[0]?.text || "";
         onProgress(`✓ ${step.name} complete`);
@@ -401,8 +399,7 @@ ${ctx.inputData.raw_tickets||ctx.previousOutputs.ingest||""}`,
 
 `+
           `SLA DEFINITIONS:
-${ctx.config.slaDefs.map(s=>`${s.priority}: ${s.hours} hours`).join("
-")}
+${ctx.config.slaDefs.map(s=>`${s.priority}: ${s.hours} hours`).join("\n")}
 
 `+
           `Today: ${new Date().toLocaleDateString()}
