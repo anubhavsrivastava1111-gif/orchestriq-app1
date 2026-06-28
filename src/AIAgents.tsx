@@ -1229,3 +1229,19 @@ export default function AIAgents({
             <div key={run.id} style={S.card}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
                 <span style={{fontSize:16}}>{agent?.icon||"🤖"}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#F0F4FF"}}>{run.agentName}</div>
+                  <div style={{fontSize:9,color:"#4D6A8A"}}>{new Date(run.ts).toLocaleString()} · {run.mode} mode · Confidence: {run.output.confidence}%</div>
+                </div>
+                <button onClick={()=>{setResult(run);setEditedOutput(run.output.mainReport);setActiveTab("output");setView("result");}} style={{...S.hBtn,fontSize:9,color:"#14B8A6"}}>Open</button>
+              </div>
+              <div style={{fontSize:10,color:"#4D6A8A"}}>{run.input.slice(0,80)}...</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  return null;
+}
