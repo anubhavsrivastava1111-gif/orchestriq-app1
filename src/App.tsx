@@ -7,6 +7,7 @@ import ServiceDesk from "./ServiceDesk";
 import TokenAnalytics, { saveRecord, estimateCost } from "./TokenAnalytics";
 import PulseGovernance from "./Pulse";
 import TokenBadge from "./components/TokenBadge";
+import AIAgents from "./AIAgents";
 import { getExecutivesCached } from "./lib/executives";
 import { supabase } from "./lib/supabase";
 import { WorkspaceMemory } from "./lib/WorkspaceMemory";
@@ -3918,7 +3919,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           </button>
           {showModules&&(
             <div style={{position:"absolute",top:"calc(100% - 6px)",left:8,right:8,background:"#131825",border:"1px solid #1e2433",borderRadius:10,zIndex:200,padding:8,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["ledger","📒","Ledger"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
+              {[["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["ledger","📒","Ledger"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["agents","🤖","AI Agents"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
                 <button key={v} onClick={()=>{setView(v);setShowModules(false);}}
                   style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:view===v?"rgba(20,184,166,0.10)":"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"Manrope,sans-serif",marginBottom:2,transition:"background 0.12s"}}>
                   <span style={{fontSize:16,width:24,textAlign:"center"}}>{ic}</span>
@@ -4859,6 +4860,25 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 
         {view==="funding"&&<FundingIntelligence co={co} compData={compData} ask={ask}/>}
         {view==="tokens"&&<TokenAnalytics defP={defP} keys={keys}/>}
+        {view==="agents"&&(
+          <AIAgents
+            co={co}
+            compData={compData}
+            keys={keys}
+            defP={defP}
+            ask={ask}
+            showToast={showToast}
+            dlFile={dlFile}
+            ensureJsPDF={ensureJsPDF}
+            ensureXLSX={ensureXLSX}
+            ensurePptx={ensurePptx}
+            parseSections={parseSections}
+            stripMd={stripMd}
+            brSessions={brSessions}
+            setBrSessions={setBrSessions}
+            sv={sv}
+          />
+        )}
         {view==="servicedesk"&&<ServiceDesk co={co} compData={compData} ask={ask} supabase={supabase}/>}
         {view==="studio"&&(
           <div style={{flex:1,padding:"14px 18px",overflowY:"auto"}}>
