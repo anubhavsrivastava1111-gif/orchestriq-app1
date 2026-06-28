@@ -364,9 +364,7 @@ ${csv}
           </div>
           <div style={{ marginTop: 10 }}>
             <label style={{ fontSize: 9, fontWeight: 700, color: "#4D6A8A", textTransform: "uppercase" as const, display: "block", marginBottom: 4 }}>Custom Rules (one per line)</label>
-            <textarea value={config.customRules.join("
-")} onChange={e => setConfig(c => c ? { ...c, customRules: e.target.value.split("
-").filter(Boolean) } : c)} rows={3} style={{ ...S.inp, resize: "vertical" as const }} placeholder="e.g. Meal cap: ₹500 per person" />
+            <textarea value={config.customRules.join("\n")} onChange={e => setConfig(c => c ? { ...c, customRules: e.target.value.split("\n").filter(Boolean) } : c)} rows={3} style={{ ...S.inp, resize: "vertical" as const }} placeholder="e.g. Meal cap: &#8377;500 per person" />
           </div>
           <button onClick={() => { if (config) memoryManager.saveConfig(selectedWF.id, config); showToast("Configuration saved — will be remembered for future runs", "success"); }} style={{ ...S.hBtn, marginTop: 8, color: "#14B8A6", borderColor: "#14B8A633" }}>💾 Save Configuration</button>
         </div>
