@@ -1303,9 +1303,7 @@ Rules:
           messages: [
             { role: "user", content: [
               { type: "image_url", image_url: { url: `data:${mediaType};base64,${b64}` } },
-              { type: "text", text: VISION_SYS + "
-
-" + VISION_PROMPT }
+              { type: "text", text: VISION_SYS + "\n\n" + VISION_PROMPT }
             ]}
           ]
         })
@@ -1319,12 +1317,10 @@ Rules:
 
     // ── No vision provider available ──────────────────────────────────────────
     throw new Error(
-      "No vision-capable API key found.
-" +
-      "DeepSeek does not support image analysis.
-" +
-      "Add a Gemini key (free at aistudio.google.com) or Claude key in Settings to enable photo extraction."
-    );
+  "No vision-capable API key found.\n\n" +
+  "DeepSeek does not support image analysis.\n\n" +
+  "Add a Gemini key (free at aistudio.google.com) or a Claude key in Settings to enable photo extraction."
+);
   }, [keys, showToast]);
 
   const handleFile = useCallback(async (file: File, inputId: string) => {
