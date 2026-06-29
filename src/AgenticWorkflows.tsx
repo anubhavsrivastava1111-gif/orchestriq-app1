@@ -1544,9 +1544,19 @@ ${csv}
               <div style={{ fontSize: 13, fontWeight: 800, color: "#F0F4FF" }}>{wf.name}</div>
               <div style={{ fontSize: 9, color: "#4D6A8A" }}>{mode} mode · {new Date(currentRun.startedAt).toLocaleTimeString()}</div>
             </div>
-            <span style={S.badge(currentRun.status === "complete" ? "#10B981" : currentRun.status === "waiting_input" ? "#F59E0B" : currentRun.status === "blocked" ? "#EF4444" : "#14B8A6")}>{currentRun.status.replace("_", "
-
-")}</span>
+            <span
+  style={S.badge(
+    currentRun.status === "complete"
+      ? "#10B981"
+      : currentRun.status === "waiting_input"
+      ? "#F59E0B"
+      : currentRun.status === "blocked"
+      ? "#EF4444"
+      : "#14B8A6"
+  )}
+>
+  {currentRun.status.replace("_", " ")}
+</span>
           </div>
           {/* Step progress bar */}
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" as const }}>
