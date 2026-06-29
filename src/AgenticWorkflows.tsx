@@ -1267,9 +1267,7 @@ Rules:
       );
       if (r.ok) {
         const d = await r.json();
-        const text = d?.candidates?.[0]?.content?.parts?.map((p:any)=>p.text||"").join("
-")("
-") || "";
+        const text = d?.candidates?.[0]?.content?.parts?.map((p:any)=>p.text || "").join("\n") || "";
         if (text) { showToast("📸 Extracted via Gemini (free)", "success"); return text; }
       }
     }
