@@ -1195,13 +1195,138 @@ export default function AgenticWorkflows({
   }, [selectedWF, currentRun, config, stepInputs, mode, activeStepId, co, compData, autoAdvance, log, showToast]);
 
   // ─── FILE UPLOAD ────────────────────────────────────────────────────────────
+  const [photoExtracting, setPhotoExtracting] = useState<Record<string,boolean>>({});
+
+  // ── Smart multi-provider vision call ─────────────────────────────────────────
+  // Tries vision-capable providers in order using whichever key is configured.
+  // DeepSeek / Kimi have no vision — skipped automatically.
+  // Gemini 2.0 Flash is free and vision-capable — recommended fallback.
+  const callVision = useCallback(async (b64: string, mediaType: string, filename: string): Promise<string> => {
+    const VISION_SYS = `You are a data extraction specialist. Extract ALL visible data from this ${mediaType.startsWith("image") ? "image/screenshot" : "PDF"}.
+Rules:
+- Reconstruct every table in CSV format with headers on row 1, labelled: ### Table Name
+- Extract all key metrics and totals: ### Key Metrics
+- Preserve all numbers, currency symbols, dates, codes exactly as shown.
+- Flag unclear values: [UNCLEAR: description]
+- Do NOT summarise — extract actual values.
+- If multiple sections exist, label each clearly.`;
+
+    const VISION_PROMPT = `Extract all data from this file "${filename}". Reconstruct every table as CSV. Include all numbers, dates, and text fields exactly as shown.`;
+
+    // Priority order: Claude → Gemini → OpenAI → Groq (vision model)
+    // DeepSeek and Kimi have no vision support — excluded.
+    const claudeKey  = keys?.claude?.trim();
+    const geminiKey  = keys?.gemini?.trim();
+    const openaiKey  = keys?.openai?.trim();
+    const groqKey    = keys?.groq?.trim();
+
+    // ── Try Claude ────────────────────────────────────────────────────────────
+    if (claudeKey) {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": claudeKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 4000, system: VISION_SYS,
+          messages: [{ role: "user", content: [
+            { type: "image", source: { type: "base64", media_type: mediaType, data: b64 } },
+            { type: "text", text: VISION_PROMPT }
+          ]}]
+        })
+      });
+      if (r.ok) {
+        const d = await r.json();
+        const text = d?.content?.filter((b:any)=>b.type==="text").map((b:any)=>b.text||"").join("
+") || "";
+        if (text) { showToast("📸 Extracted via Claude", "success"); return text; }
+      }
+    }
+
+    // ── Try Gemini 2.0 Flash (free tier, vision capable) ─────────────────────
+    if (geminiKey) {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts: [
+            { inline_data: { mime_type: mediaType, data: b64 } },
+            { text: VISION_SYS + "
+
+" + VISION_PROMPT }
+          ]}]})
+        }
+      );
+      if (r.ok) {
+        const d = await r.json();
+        const text = d?.candidates?.[0]?.content?.parts?.map((p:any)=>p.text||"").join("
+") || "";
+        if (text) { showToast("📸 Extracted via Gemini (free)", "success"); return text; }
+      }
+    }
+
+    // ── Try OpenAI GPT-4o ─────────────────────────────────────────────────────
+    if (openaiKey) {
+      const r = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${openaiKey}` },
+        body: JSON.stringify({ model: "gpt-4o", max_tokens: 4000,
+          messages: [
+            { role: "system", content: VISION_SYS },
+            { role: "user", content: [
+              { type: "image_url", image_url: { url: `data:${mediaType};base64,${b64}` } },
+              { type: "text", text: VISION_PROMPT }
+            ]}
+          ]
+        })
+      });
+      if (r.ok) {
+        const d = await r.json();
+        const text = d?.choices?.[0]?.message?.content || "";
+        if (text) { showToast("📸 Extracted via GPT-4o", "success"); return text; }
+      }
+    }
+
+    // ── Try Groq LLaMA Vision ─────────────────────────────────────────────────
+    if (groqKey) {
+      const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${groqKey}` },
+        body: JSON.stringify({ model: "meta-llama/llama-4-scout-17b-16e-instruct", max_tokens: 4000,
+          messages: [
+            { role: "user", content: [
+              { type: "image_url", image_url: { url: `data:${mediaType};base64,${b64}` } },
+              { type: "text", text: VISION_SYS + "
+
+" + VISION_PROMPT }
+            ]}
+          ]
+        })
+      });
+      if (r.ok) {
+        const d = await r.json();
+        const text = d?.choices?.[0]?.message?.content || "";
+        if (text) { showToast("📸 Extracted via Groq Vision (free)", "success"); return text; }
+      }
+    }
+
+    // ── No vision provider available ──────────────────────────────────────────
+    throw new Error(
+      "No vision-capable API key found.
+" +
+      "DeepSeek does not support image analysis.
+" +
+      "Add a Gemini key (free at aistudio.google.com) or Claude key in Settings to enable photo extraction."
+    );
+  }, [keys, showToast]);
+
   const handleFile = useCallback(async (file: File, inputId: string) => {
-    const ext = file.name.split(".").pop()?.toLowerCase();
-    if (["txt","md","csv"].includes(ext||"")) {
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    const isImage = ["jpg","jpeg","png","gif","webp","bmp","tiff"].includes(ext);
+    const isPDF   = ext === "pdf";
+
+    if (["txt","md","csv"].includes(ext)) {
       const t = await file.text();
       setStepInputs(p => ({ ...p, [inputId]: t }));
       showToast(`✅ ${file.name} loaded`, "success");
-    } else if (["xlsx","xls"].includes(ext||"")) {
+
+    } else if (["xlsx","xls"].includes(ext)) {
       try {
         const XLSX = await ensureXLSX();
         const buf = await file.arrayBuffer();
@@ -1214,8 +1339,33 @@ ${csv}
         setStepInputs(p => ({ ...p, [inputId]: text }));
         showToast(`✅ Excel loaded (${wb.SheetNames.length} sheets)`, "success");
       } catch (e: any) { showToast("Excel parse error: " + e.message, "error"); }
-    } else { showToast("Use CSV, Excel, or text files.", "warning"); }
-  }, [ensureXLSX, showToast]);
+
+    } else if (isImage || isPDF) {
+      setPhotoExtracting(p => ({ ...p, [inputId]: true }));
+      showToast(`🔍 Reading ${file.name}...`, "info");
+      try {
+        const buf = await file.arrayBuffer();
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+        const mediaType = isPDF ? "application/pdf"
+          : ext === "png" ? "image/png"
+          : ext === "gif" ? "image/gif"
+          : ext === "webp" ? "image/webp"
+          : "image/jpeg";
+        const extracted = await callVision(b64, mediaType, file.name);
+        if (extracted) {
+          setStepInputs(p => ({ ...p, [inputId]: extracted }));
+          showToast(`✅ Data extracted — review highlighted values before running.`, "success");
+        }
+      } catch (e: any) {
+        showToast(e.message || "Extraction failed.", "warning");
+      } finally {
+        setPhotoExtracting(p => ({ ...p, [inputId]: false }));
+      }
+
+    } else {
+      showToast("Supported: CSV, Excel, TXT, JPG, PNG, PDF, WEBP.", "warning");
+    }
+  }, [ensureXLSX, showToast, callVision]);
 
   // ─── STYLES ─────────────────────────────────────────────────────────────────
   const S = {
@@ -1441,10 +1591,39 @@ ${csv}
                     </div>
                     <div style={{ fontSize: 9, color: "#4D6A8A", marginBottom: 4 }}>{inp.description}</div>
                     <textarea value={stepInputs[inp.id] || (hasMemory ? mem.uploadedData[inp.memoryKey!] : "")} onChange={e => setStepInputs(p => ({ ...p, [inp.id]: e.target.value }))} placeholder={`Paste ${inp.label} data here, or upload a file below...`} rows={5} style={{ ...S.inp, resize: "vertical" as const, minHeight: 100 }} />
-                    {inp.accepts.some(a => a.startsWith(".")) && (
-                      <div style={{ marginTop: 4 }}>
-                        <input type="file" id={`file-${inp.id}`} style={{ display: "none" }} accept={inp.accepts.join(",")} onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f, inp.id); e.target.value = ""; }} />
-                        <button onClick={() => document.getElementById(`file-${inp.id}`)?.click()} style={{ ...S.hBtn, fontSize: 9, color: "#3B82F6", borderColor: "#3B82F644" }}>📎 Upload {inp.accepts.join("/")}</button>
+                    <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" as const, alignItems: "center" }}>
+                      {/* Any file type — CSV, Excel, JPG, PNG, PDF */}
+                      <input type="file" id={`file-${inp.id}`} style={{ display: "none" }}
+                        accept={[...inp.accepts, ".jpg",".jpeg",".png",".gif",".webp",".pdf"].join(",")}
+                        onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f, inp.id); e.target.value = ""; }} />
+                      <button onClick={() => document.getElementById(`file-${inp.id}`)?.click()}
+                        style={{ ...S.hBtn, fontSize: 9, color: "#3B82F6", borderColor: "#3B82F644" }}>
+                        📎 Upload File
+                      </button>
+
+                      {/* Photo / screenshot picker */}
+                      <input type="file" id={`photo-${inp.id}`} style={{ display: "none" }}
+                        accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f, inp.id); e.target.value = ""; }} />
+                      <button onClick={() => document.getElementById(`photo-${inp.id}`)?.click()}
+                        disabled={photoExtracting[inp.id]}
+                        style={{ ...S.hBtn, fontSize: 9, color: "#14B8A6", borderColor: "#14B8A644", opacity: photoExtracting[inp.id] ? 0.6 : 1 }}>
+                        {photoExtracting[inp.id] ? "⏳ Extracting..." : "📸 Photo / Screenshot"}
+                      </button>
+
+                      {/* Camera — opens device camera on mobile */}
+                      <input type="file" id={`cam-${inp.id}`} style={{ display: "none" }}
+                        accept="image/*" capture="environment"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f, inp.id); e.target.value = ""; }} />
+                      <button onClick={() => document.getElementById(`cam-${inp.id}`)?.click()}
+                        disabled={photoExtracting[inp.id]}
+                        style={{ ...S.hBtn, fontSize: 9, color: "#A855F7", borderColor: "#A855F744", opacity: photoExtracting[inp.id] ? 0.6 : 1 }}>
+                        📷 Camera
+                      </button>
+                    </div>
+                    {photoExtracting[inp.id] && (
+                      <div style={{ marginTop: 5, fontSize: 9, color: "#14B8A6", background: "rgba(20,184,166,0.06)", border: "1px solid rgba(20,184,166,0.15)", borderRadius: 5, padding: "6px 10px", lineHeight: 1.5 }}>
+                        🔍 Extracting data with AI vision — tables, numbers, and text will appear in the box above for your review.
                       </div>
                     )}
                   </div>
