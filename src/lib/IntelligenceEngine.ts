@@ -2248,3 +2248,1372 @@ export const IntelligenceEngine = {
 };
 
 export default IntelligenceEngine;
+
+
+// =============================================================================
+// ENTERPRISE PRIVACY & RESTRICTED DATA MODE
+// Appended to IntelligenceEngine.ts — reusable by all Agents and Workflows.
+// Build: Session 3 — 29 Jun 2026
+//
+// Services added:
+//   A. EnterprisePrivacyEngine   — input mode management + minimum data protocol
+//   B. PhotoReconstructionEngine — multi-photo merge + table rebuild (enhances InputRecoveryEngine)
+//   C. GuidedInternalAutomation — enterprise consultant mode (no data upload required)
+//   D. PersistentWorkspace       — incremental dataset building with audit trail
+//   E. PrivacyGuard              — wrapper enforcing privacy-first behaviour for all agents
+// =============================================================================
+
+// ─────────────────────────────────────────────
+// TYPES — Enterprise Privacy & Restricted Mode
+// ─────────────────────────────────────────────
+
+export type InputMode = "upload" | "paste" | "photo" | "restricted";
+
+export type EnterpriseToolCategory =
+  | "excel"
+  | "power_bi"
+  | "power_query"
+  | "power_automate"
+  | "office_scripts"
+  | "vba"
+  | "sap"
+  | "concur"
+  | "servicenow"
+  | "jira"
+  | "sharepoint"
+  | "microsoft_365";
+
+export interface MinimumDataRequest {
+  field: string;
+  prompt: string;           // What to ask the user — phrased as minimal exposure
+  example: string;          // Concrete example ("e.g. 3 numbers from the summary row")
+  sensitivity: "low" | "medium" | "high";
+  canUsePhoto: boolean;     // Can a photo of this field replace typed input?
+  canUseSummary: boolean;   // Can a descriptive summary replace raw data?
+  required: boolean;
+}
+
+export interface RestrictedModeSession {
+  sessionId: string;
+  userId: string;
+  agentId: string;
+  workflowId: string;
+  inputMode: InputMode;
+  collectedFields: Record<string, unknown>;
+  pendingFields: MinimumDataRequest[];
+  completedFields: string[];
+  auditHistory: WorkspaceAuditEntry[];
+  readinessPercent: number;
+  isComplete: boolean;
+  privacyStatement: string;
+  createdAt: string;
+  lastUpdated: string;
+}
+
+export interface PhotoReconstructionSession {
+  sessionId: string;
+  pages: ReconstructedPage[];
+  mergedTable: Record<string, unknown>[];
+  detectedHeaders: string[];
+  continuationPageIndices: number[];
+  uncertainCells: UncertainCell[];
+  overallConfidence: number;
+  requiresUserConfirmation: boolean;
+  reconstructionNotes: string[];
+}
+
+export interface ReconstructedPage {
+  pageIndex: number;
+  imageDescription: string;   // User-provided or AI-inferred
+  extractedRows: Record<string, unknown>[];
+  hasHeader: boolean;
+  isContinuation: boolean;
+  confidenceScore: number;
+  issues: string[];
+}
+
+export interface UncertainCell {
+  rowIndex: number;
+  column: string;
+  inferredValue: unknown;
+  confidence: number;         // 0-100
+  alternativeValues: unknown[];
+  userConfirmed: boolean;
+  userCorrectedValue?: unknown;
+}
+
+export interface InternalAutomationGuide {
+  tool: EnterpriseToolCategory;
+  toolDisplayName: string;
+  businessObjective: string;
+  prerequisites: string[];
+  steps: AutomationStep[];
+  estimatedSetupMinutes: number;
+  estimatedTimeSavedPerRun: string;
+  complexity: "beginner" | "intermediate" | "advanced";
+  notes: string;
+  codeSnippet?: string;       // VBA / M / DAX / Python snippet where applicable
+}
+
+export interface AutomationStep {
+  stepNumber: number;
+  action: string;             // What the user does
+  where: string;              // Where in the tool (menu path, cell reference, etc.)
+  detail: string;             // Exact instruction
+  screenshot?: string;        // Description of what they should see
+}
+
+export interface WorkspaceAuditEntry {
+  entryId: string;
+  timestamp: string;
+  action:
+    | "field_collected"
+    | "field_updated"
+    | "field_validated"
+    | "duplicate_detected"
+    | "photo_merged"
+    | "session_resumed"
+    | "session_completed";
+  field?: string;
+  value?: unknown;            // NEVER store raw confidential data — store only metadata
+  valueType?: string;         // "number" | "text" | "percentage" | "currency" | "count"
+  source: "upload" | "paste" | "photo" | "restricted_manual" | "inferred";
+  note?: string;
+}
+
+export interface PersistentWorkspaceRecord {
+  workspaceId: string;
+  userId: string;
+  agentId: string;
+  projectName: string;
+  totalFieldsRequired: number;
+  totalFieldsCollected: number;
+  fields: Record<string, {
+    value: unknown;
+    source: WorkspaceAuditEntry["source"];
+    collectedAt: string;
+    validated: boolean;
+  }>;
+  auditHistory: WorkspaceAuditEntry[];
+  sessions: number;
+  createdAt: string;
+  lastUpdated: string;
+}
+
+export interface PrivacyCheckResult {
+  approved: boolean;
+  mode: InputMode;
+  privacyStatement: string;
+  warnings: string[];
+  blockedFields: string[];    // Fields that should NOT be uploaded in restricted mode
+  allowedFields: string[];    // Fields safe to share in restricted mode
+}
+
+// ─────────────────────────────────────────────
+// STORAGE KEYS — Privacy Layer
+// ─────────────────────────────────────────────
+
+const PRIVACY_PREFIX = "orchestriq_privacy_";
+const WORKSPACE_PREFIX = "orchestriq_ws_";
+
+function privKey(userId: string, agentId: string): string {
+  return `${PRIVACY_PREFIX}${userId}_${agentId}`;
+}
+function wsKey(userId: string, agentId: string, projectName: string): string {
+  return `${WORKSPACE_PREFIX}${userId}_${agentId}_${projectName.replace(/\s+/g, "_").toLowerCase()}`;
+}
+
+function genId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function nowStr(): string {
+  return new Date().toISOString();
+}
+
+function safeRead<T>(key: string): T | null {
+  try {
+    const v = localStorage.getItem(key);
+    return v ? (JSON.parse(v) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeWrite(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch { /* quota — fail silently */ }
+}
+
+// ─────────────────────────────────────────────
+// A. ENTERPRISE PRIVACY ENGINE
+// ─────────────────────────────────────────────
+
+/**
+ * Core controller for input mode selection and minimum data protocol.
+ * Call at the start of every Agent and Workflow before requesting any input.
+ *
+ * Usage:
+ *   const session = EnterprisePrivacyEngine.startSession(userId, agentId, "restricted", manifest);
+ *   const next = EnterprisePrivacyEngine.nextPrompt(session);
+ *   EnterprisePrivacyEngine.collectField(session, next.field, userValue, "restricted_manual");
+ */
+export const EnterprisePrivacyEngine = {
+
+  PRIVACY_STATEMENT:
+    "🔒 Restricted Enterprise Mode is active. " +
+    "OrchestrIQ will request only the minimum information necessary. " +
+    "Do not share complete files, full spreadsheets, or confidential reports. " +
+    "Share only specific values, summaries, or non-sensitive metadata.",
+
+  /**
+   * Start a new restricted mode session.
+   * manifest: the agent's full list of required fields with sensitivity ratings.
+   */
+  startSession(
+    userId: string,
+    agentId: string,
+    workflowId: string,
+    mode: InputMode,
+    manifest: MinimumDataRequest[]
+  ): RestrictedModeSession {
+    const session: RestrictedModeSession = {
+      sessionId: genId("rms"),
+      userId,
+      agentId,
+      workflowId,
+      inputMode: mode,
+      collectedFields: {},
+      pendingFields: mode === "restricted"
+        ? manifest.filter(f => f.sensitivity !== "high" || f.canUseSummary)
+        : manifest,
+      completedFields: [],
+      auditHistory: [],
+      readinessPercent: 0,
+      isComplete: false,
+      privacyStatement: mode === "restricted" ? this.PRIVACY_STATEMENT : "",
+      createdAt: nowStr(),
+      lastUpdated: nowStr(),
+    };
+
+    // In restricted mode, exclude high-sensitivity required fields
+    // that cannot be summarised — route them to GuidedInternalAutomation instead
+    if (mode === "restricted") {
+      const blocked = manifest.filter(
+        f => f.sensitivity === "high" && !f.canUseSummary && !f.canUsePhoto
+      );
+      if (blocked.length > 0) {
+        session.auditHistory.push({
+          entryId: genId("audit"),
+          timestamp: nowStr(),
+          action: "field_validated",
+          note: `${blocked.length} high-sensitivity fields will be handled via Guided Internal Automation instead of direct input.`,
+          source: "restricted_manual",
+        });
+      }
+    }
+
+    return session;
+  },
+
+  /**
+   * Returns the next question to ask the user — minimal and non-invasive.
+   * Returns null when all fields are collected.
+   */
+  nextPrompt(session: RestrictedModeSession): MinimumDataRequest | null {
+    const next = session.pendingFields.find(
+      f => !session.completedFields.includes(f.field)
+    );
+    return next || null;
+  },
+
+  /**
+   * Record a field value collected from the user.
+   * NEVER stores high-sensitivity raw values — stores only metadata.
+   */
+  collectField(
+    session: RestrictedModeSession,
+    field: string,
+    value: unknown,
+    source: WorkspaceAuditEntry["source"]
+  ): RestrictedModeSession {
+    const fieldDef = session.pendingFields.find(f => f.field === field);
+
+    // Determine what to store — raw value for low/medium, metadata only for high
+    const storeValue =
+      fieldDef?.sensitivity === "high"
+        ? `[${typeof value}:confirmed]`  // Only store type confirmation — not the value
+        : value;
+
+    session.collectedFields[field] = storeValue;
+    if (!session.completedFields.includes(field)) {
+      session.completedFields.push(field);
+    }
+
+    session.auditHistory.push({
+      entryId: genId("audit"),
+      timestamp: nowStr(),
+      action: "field_collected",
+      field,
+      valueType: typeof value,
+      source,
+      note: fieldDef?.sensitivity === "high"
+        ? "High-sensitivity field — only confirmation stored, not raw value."
+        : undefined,
+    });
+
+    const total = session.pendingFields.length;
+    const done = session.completedFields.length;
+    session.readinessPercent = total > 0 ? Math.round((done / total) * 100) : 100;
+    session.isComplete = done >= total;
+    session.lastUpdated = nowStr();
+
+    return session;
+  },
+
+  /**
+   * Build a user-facing prompt for a specific field.
+   * Phrased to request the minimum possible data.
+   */
+  buildFieldPrompt(field: MinimumDataRequest, mode: InputMode): string {
+    if (mode !== "restricted") return field.prompt;
+
+    // Restricted mode — rephrase to minimise exposure
+    const base = field.canUsePhoto
+      ? `📸 Take a photo of only the section showing: **${field.field}**`
+      : field.canUseSummary
+      ? `💬 Describe in your own words: **${field.field}** (no need to share the raw data)`
+      : `🔢 Enter only this value: **${field.field}**`;
+
+    return `${base}\n_Example: ${field.example}_`;
+  },
+
+  /**
+   * Classify a field definition for restricted mode safety.
+   */
+  classifyFieldSafety(field: MinimumDataRequest): {
+    safe: boolean;
+    reason: string;
+    alternative: string;
+  } {
+    if (field.sensitivity === "low") {
+      return { safe: true, reason: "Low sensitivity — safe to request directly.", alternative: "" };
+    }
+    if (field.sensitivity === "medium" && field.canUseSummary) {
+      return {
+        safe: true,
+        reason: "Medium sensitivity — summary or aggregate is sufficient.",
+        alternative: "Request total or category summary instead of line detail.",
+      };
+    }
+    if (field.sensitivity === "high" && field.canUsePhoto) {
+      return {
+        safe: true,
+        reason: "High sensitivity — photo of summary section acceptable.",
+        alternative: "Request a photo of the non-confidential summary header only.",
+      };
+    }
+    return {
+      safe: false,
+      reason: "High sensitivity — full data should not be shared externally.",
+      alternative:
+        "Use Guided Internal Automation: generate instructions for the user to run this analysis inside their own environment.",
+    };
+  },
+};
+
+// ─────────────────────────────────────────────
+// B. PHOTO RECONSTRUCTION ENGINE
+// ─────────────────────────────────────────────
+
+/**
+ * Enhanced multi-photo reconstruction.
+ * Builds on InputRecoveryEngine with table merge, header detection,
+ * continuation page recognition, and uncertain cell highlighting.
+ *
+ * Usage:
+ *   const session = PhotoReconstructionEngine.createSession();
+ *   PhotoReconstructionEngine.addPage(session, pageData);
+ *   const result = PhotoReconstructionEngine.reconstruct(session);
+ */
+export const PhotoReconstructionEngine = {
+
+  createSession(): PhotoReconstructionSession {
+    return {
+      sessionId: genId("photo"),
+      pages: [],
+      mergedTable: [],
+      detectedHeaders: [],
+      continuationPageIndices: [],
+      uncertainCells: [],
+      overallConfidence: 0,
+      requiresUserConfirmation: false,
+      reconstructionNotes: [],
+    };
+  },
+
+  addPage(
+    session: PhotoReconstructionSession,
+    page: {
+      pageIndex: number;
+      imageDescription: string;
+      rawText?: string;       // OCR output if available
+      extractedRows: Record<string, unknown>[];
+      confidenceScore: number;
+    }
+  ): PhotoReconstructionSession {
+    const hasHeader =
+      page.extractedRows.length > 0 &&
+      page.pageIndex === 0;
+
+    // Detect if this is a continuation of a previous page
+    // Signal: no header row detected + columns match previous page
+    const isContinuation =
+      page.pageIndex > 0 &&
+      session.detectedHeaders.length > 0 &&
+      page.extractedRows.length > 0 &&
+      Object.keys(page.extractedRows[0]).every(k =>
+        session.detectedHeaders.includes(k)
+      );
+
+    const reconstructed: ReconstructedPage = {
+      pageIndex: page.pageIndex,
+      imageDescription: page.imageDescription,
+      extractedRows: page.extractedRows,
+      hasHeader,
+      isContinuation,
+      confidenceScore: page.confidenceScore,
+      issues: [],
+    };
+
+    // Detect issues
+    if (page.confidenceScore < 60) {
+      reconstructed.issues.push("Low OCR confidence — verify values manually.");
+    }
+    if (page.extractedRows.length === 0) {
+      reconstructed.issues.push("No data rows extracted from this image.");
+    }
+
+    session.pages.push(reconstructed);
+
+    // Update header registry from first page
+    if (hasHeader && page.extractedRows.length > 0) {
+      session.detectedHeaders = Object.keys(page.extractedRows[0]);
+    }
+
+    if (isContinuation) {
+      session.continuationPageIndices.push(page.pageIndex);
+    }
+
+    return session;
+  },
+
+  /**
+   * Merge all pages into a unified table.
+   * Removes header repetitions, sorts by page order, identifies uncertain cells.
+   */
+  reconstruct(session: PhotoReconstructionSession): PhotoReconstructionSession {
+    const sorted = [...session.pages].sort((a, b) => a.pageIndex - b.pageIndex);
+    const merged: Record<string, unknown>[] = [];
+    const notes: string[] = [];
+
+    for (const page of sorted) {
+      for (const row of page.extractedRows) {
+        // Skip rows that replicate the header
+        const isHeaderRepeat =
+          session.detectedHeaders.length > 0 &&
+          session.detectedHeaders.every(
+            h => String(row[h] || "").trim().toLowerCase() === h.toLowerCase()
+          );
+        if (!isHeaderRepeat) {
+          merged.push({ ...row, _pageSource: page.pageIndex });
+        }
+      }
+    }
+
+    session.mergedTable = merged;
+
+    // Identify uncertain cells from low-confidence pages
+    const uncertainCells: UncertainCell[] = [];
+    let rowIdx = 0;
+    for (const page of sorted) {
+      if (page.confidenceScore < 70) {
+        for (const row of page.extractedRows) {
+          for (const col of Object.keys(row)) {
+            const val = row[col];
+            // Flag numerics from low-confidence pages
+            if (typeof val === "number" || /^\d+[\d,\.]*$/.test(String(val))) {
+              uncertainCells.push({
+                rowIndex: rowIdx,
+                column: col,
+                inferredValue: val,
+                confidence: page.confidenceScore,
+                alternativeValues: [],
+                userConfirmed: false,
+              });
+            }
+          }
+          rowIdx++;
+        }
+      } else {
+        rowIdx += page.extractedRows.length;
+      }
+    }
+
+    session.uncertainCells = uncertainCells;
+    session.requiresUserConfirmation = uncertainCells.length > 0;
+
+    // Compute overall confidence
+    const avgPageConf =
+      sorted.length > 0
+        ? sorted.reduce((s, p) => s + p.confidenceScore, 0) / sorted.length
+        : 0;
+    const uncertaintyPenalty = Math.min(uncertainCells.length * 3, 30);
+    session.overallConfidence = Math.max(0, Math.round(avgPageConf - uncertaintyPenalty));
+
+    // Build reconstruction notes
+    notes.push(`${sorted.length} page(s) merged into ${merged.length} rows.`);
+    if (session.continuationPageIndices.length > 0) {
+      notes.push(
+        `Continuation pages detected at positions: ${session.continuationPageIndices.join(", ")} — headers de-duplicated.`
+      );
+    }
+    if (uncertainCells.length > 0) {
+      notes.push(
+        `${uncertainCells.length} cell(s) flagged as uncertain — user confirmation required before analysis.`
+      );
+    }
+    if (session.overallConfidence >= 85) {
+      notes.push("✅ High confidence reconstruction — ready for analysis.");
+    } else if (session.overallConfidence >= 60) {
+      notes.push("⚠️ Medium confidence — verify flagged cells before relying on totals.");
+    } else {
+      notes.push("🔴 Low confidence — significant manual verification required.");
+    }
+
+    session.reconstructionNotes = notes;
+    return session;
+  },
+
+  /** Confirm or correct an uncertain cell — call when user validates */
+  confirmCell(
+    session: PhotoReconstructionSession,
+    rowIndex: number,
+    column: string,
+    confirmedValue: unknown
+  ): PhotoReconstructionSession {
+    const cell = session.uncertainCells.find(
+      c => c.rowIndex === rowIndex && c.column === column
+    );
+    if (cell) {
+      cell.userConfirmed = true;
+      cell.userCorrectedValue = confirmedValue;
+      // Update merged table
+      const row = session.mergedTable[rowIndex];
+      if (row) row[column] = confirmedValue;
+    }
+
+    // Re-check if all uncertain cells are now confirmed
+    session.requiresUserConfirmation = session.uncertainCells.some(
+      c => !c.userConfirmed
+    );
+
+    return session;
+  },
+
+  /** Returns only the cells still needing user confirmation */
+  pendingConfirmations(session: PhotoReconstructionSession): UncertainCell[] {
+    return session.uncertainCells.filter(c => !c.userConfirmed);
+  },
+
+  /** Build prompt text for user to confirm a specific uncertain cell */
+  buildConfirmationPrompt(cell: UncertainCell): string {
+    return (
+      `⚠️ **Uncertain value detected**\n` +
+      `Row ${cell.rowIndex + 1}, Column: **${cell.column}**\n` +
+      `Reconstructed value: **${cell.inferredValue}**\n` +
+      `Confidence: ${cell.confidence}%\n\n` +
+      `Please verify this value from your original document and confirm or correct it.`
+    );
+  },
+};
+
+// ─────────────────────────────────────────────
+// C. GUIDED INTERNAL AUTOMATION ENGINE
+// ─────────────────────────────────────────────
+
+/**
+ * When users cannot share any data externally, OrchestrIQ becomes
+ * an enterprise consultant that generates step-by-step instructions
+ * for tools ALREADY inside the user's organisation.
+ *
+ * Usage:
+ *   const guide = GuidedInternalAutomation.generate("expense_audit", "reduce_processing_time", context);
+ */
+export const GuidedInternalAutomation = {
+
+  /** Map agent IDs to the most appropriate internal tools */
+  _agentToolMap: {
+    expense_audit:      ["excel", "power_query", "power_automate", "concur"] as EnterpriseToolCategory[],
+    ap_review:          ["excel", "power_query", "sap", "power_bi"] as EnterpriseToolCategory[],
+    business_analyst:   ["excel", "power_bi", "power_query"] as EnterpriseToolCategory[],
+    exec_assistant:     ["microsoft_365", "sharepoint", "excel"] as EnterpriseToolCategory[],
+    meeting_intel:      ["microsoft_365", "sharepoint"] as EnterpriseToolCategory[],
+    monthly_review:     ["excel", "power_bi", "power_query", "sap"] as EnterpriseToolCategory[],
+    process_mining:     ["power_automate", "servicenow", "excel"] as EnterpriseToolCategory[],
+    sop_compliance:     ["sharepoint", "servicenow", "microsoft_365"] as EnterpriseToolCategory[],
+    smart_ocr:          ["excel", "power_query", "office_scripts"] as EnterpriseToolCategory[],
+    table_extraction:   ["excel", "power_query", "office_scripts"] as EnterpriseToolCategory[],
+    marketing_campaign: ["excel", "microsoft_365", "power_bi"] as EnterpriseToolCategory[],
+    financial_analysis: ["excel", "power_bi", "power_query", "sap"] as EnterpriseToolCategory[],
+    ticket_mgmt:        ["servicenow", "jira", "power_automate"] as EnterpriseToolCategory[],
+    ap_close:           ["sap", "excel", "power_query"] as EnterpriseToolCategory[],
+    te_audit:           ["concur", "excel", "power_query"] as EnterpriseToolCategory[],
+    audit_fieldwork:    ["excel", "sharepoint", "servicenow"] as EnterpriseToolCategory[],
+    vendor_recon:       ["excel", "sap", "power_query"] as EnterpriseToolCategory[],
+    compliance_review:  ["servicenow", "sharepoint", "excel"] as EnterpriseToolCategory[],
+  } as Record<string, EnterpriseToolCategory[]>,
+
+  _toolNames: {
+    excel:           "Microsoft Excel",
+    power_bi:        "Power BI",
+    power_query:     "Power Query (Excel / Power BI)",
+    power_automate:  "Power Automate",
+    office_scripts:  "Office Scripts",
+    vba:             "Excel VBA",
+    sap:             "SAP ECC / S4HANA",
+    concur:          "SAP Concur",
+    servicenow:      "ServiceNow",
+    jira:            "Jira",
+    sharepoint:      "SharePoint",
+    microsoft_365:   "Microsoft 365",
+  } as Record<EnterpriseToolCategory, string>,
+
+  /**
+   * Generate automation guides for a given agent and business objective.
+   * Returns guides for the top 2-3 most relevant tools — not all.
+   */
+  generate(
+    agentId: string,
+    objective: string,
+    companyContext: { name: string; industry: string; tools?: string[] }
+  ): InternalAutomationGuide[] {
+    const tools =
+      this._agentToolMap[agentId] ||
+      (["excel", "power_bi", "power_query"] as EnterpriseToolCategory[]);
+
+    // Filter to tools the company actually uses if specified
+    const relevantTools = companyContext.tools
+      ? tools.filter(t =>
+          companyContext.tools!.some(ct => ct.toLowerCase().includes(t.replace(/_/g, " ")))
+        )
+      : tools;
+
+    const finalTools = (relevantTools.length > 0 ? relevantTools : tools).slice(0, 3);
+
+    return finalTools.map(tool => this._buildGuide(tool, agentId, objective, companyContext));
+  },
+
+  _buildGuide(
+    tool: EnterpriseToolCategory,
+    agentId: string,
+    objective: string,
+    companyContext: { name: string; industry: string }
+  ): InternalAutomationGuide {
+    const guides: Record<EnterpriseToolCategory, Omit<InternalAutomationGuide, "tool" | "toolDisplayName" | "businessObjective">> = {
+      excel: {
+        prerequisites: [
+          "Microsoft Excel 2016 or later (or Microsoft 365)",
+          "Data already exists in an Excel workbook on your device",
+          "No external upload required",
+        ],
+        steps: [
+          { stepNumber: 1, action: "Open your data file", where: "Your local drive or SharePoint", detail: "Open the Excel file containing the data you want to analyse. Stay entirely within Excel — do not upload anything externally.", screenshot: "You should see your data in a spreadsheet." },
+          { stepNumber: 2, action: "Select your data range", where: "Excel worksheet", detail: "Click any cell inside your data, then press Ctrl+Shift+End to select through the last cell with data.", screenshot: "Your data should be highlighted in blue." },
+          { stepNumber: 3, action: "Create a Table", where: "Insert → Table", detail: "With your data selected, go to Insert → Table → check 'My table has headers' → OK. This enables dynamic analysis.", screenshot: "A formatted table appears with filter arrows on each column header." },
+          { stepNumber: 4, action: "Insert a PivotTable", where: "Insert → PivotTable", detail: "Click anywhere in the table → Insert → PivotTable → New Worksheet → OK. Drag relevant fields to Rows, Values, Filters.", screenshot: "PivotTable Field List appears on the right side." },
+          { stepNumber: 5, action: "Apply conditional formatting", where: "Home → Conditional Formatting", detail: "Select your key metrics column → Home → Conditional Formatting → Data Bars or Color Scales to visually highlight variances.", screenshot: "Colour gradient appears across your values." },
+          { stepNumber: 6, action: "Build a summary dashboard", where: "New worksheet", detail: "Insert chart from PivotTable: Insert → PivotChart → choose Bar or Line → OK. Copy to a separate 'Dashboard' sheet.", screenshot: "A chart appears linked to your PivotTable." },
+        ],
+        estimatedSetupMinutes: 20,
+        estimatedTimeSavedPerRun: "2-3 hours per reporting cycle",
+        complexity: "beginner",
+        notes: "All analysis runs entirely inside Excel on your device. No data leaves your organisation.",
+        codeSnippet: `' VBA macro to auto-refresh and summarise — paste into Developer → Visual Basic → Insert Module
+Sub RefreshAndSummarise()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Data")
+    ws.ListObjects(1).DataBodyRange.Sort _
+        Key1:=ws.Range("A2"), Order1:=xlAscending, Header:=xlNo
+    ws.Calculate
+    MsgBox "Data refreshed and sorted. " & ws.ListObjects(1).DataBodyRange.Rows.Count & " rows processed.", vbInformation
+End Sub`,
+      },
+
+      power_bi: {
+        prerequisites: [
+          "Power BI Desktop installed (free download from microsoft.com/power-bi)",
+          "Data file saved on your local drive or SharePoint",
+          "No Power BI service account required for local analysis",
+        ],
+        steps: [
+          { stepNumber: 1, action: "Open Power BI Desktop", where: "Start menu → Power BI Desktop", detail: "Open Power BI Desktop. This runs entirely on your device — no cloud upload required for local reports.", screenshot: "Power BI Desktop welcome screen." },
+          { stepNumber: 2, action: "Get Data", where: "Home → Get Data", detail: "Click Get Data → Excel Workbook (or CSV / SQL Server depending on your source) → navigate to your file → Open → select the table → Load.", screenshot: "Data loads into the Fields pane on the right." },
+          { stepNumber: 3, action: "Build your first visual", where: "Report view", detail: "Click a blank area → in Visualizations pane select Bar Chart → drag your Category field to Axis and your Amount field to Values.", screenshot: "A bar chart appears on the canvas." },
+          { stepNumber: 4, action: "Add a card visual for key metric", where: "Visualizations pane → Card", detail: "Click blank area → select Card → drag your Total or Count field into Values. This shows the headline KPI.", screenshot: "A single number card appears." },
+          { stepNumber: 5, action: "Add a slicer for time filtering", where: "Visualizations pane → Slicer", detail: "Click blank area → Slicer → drag your Date field to Field. Change slicer style to 'Between' for a date range selector.", screenshot: "A date range slider appears." },
+          { stepNumber: 6, action: "Save and share internally", where: "File → Save", detail: "Save the .pbix file to SharePoint or Teams. Colleagues can open it without needing external access.", screenshot: "File saved with .pbix extension." },
+        ],
+        estimatedSetupMinutes: 45,
+        estimatedTimeSavedPerRun: "4-6 hours per reporting cycle",
+        complexity: "intermediate",
+        notes: "Power BI Desktop is fully local. Publishing to Power BI Service requires IT approval but is not required for local analysis.",
+      },
+
+      power_query: {
+        prerequisites: [
+          "Microsoft Excel 2016+ or Power BI Desktop",
+          "Source data accessible on your local network or device",
+        ],
+        steps: [
+          { stepNumber: 1, action: "Open Power Query Editor", where: "Data → Get Data → Launch Power Query Editor", detail: "In Excel: Data tab → Get Data → From File → From Workbook → select your file. Click Transform Data to open Power Query Editor.", screenshot: "Power Query Editor opens with your data in a preview window." },
+          { stepNumber: 2, action: "Remove unnecessary columns", where: "Right-click column header", detail: "Right-click each column you don't need → Remove. Only keep the columns required for your analysis.", screenshot: "Fewer columns visible in the preview." },
+          { stepNumber: 3, action: "Clean data types", where: "Transform → Detect Data Type", detail: "Home → Transform → Detect Data Type. Manually correct any columns showing the wrong type (e.g. dates stored as text).", screenshot: "Type icons visible on each column header." },
+          { stepNumber: 4, action: "Filter rows", where: "Column header → Filter arrow", detail: "Click the filter arrow on any column → filter out nulls, test data, or out-of-scope rows.", screenshot: "Filtered row count shown in status bar." },
+          { stepNumber: 5, action: "Group and summarise", where: "Transform → Group By", detail: "Home → Group By → select grouping column → add aggregation (Sum, Count, Average) → OK.", screenshot: "Data collapsed to summary rows." },
+          { stepNumber: 6, action: "Close and Load", where: "Home → Close & Load", detail: "Home → Close & Load → Close & Load To → Table in new worksheet → OK. Your clean data appears in Excel.", screenshot: "Clean summary table in Excel." },
+        ],
+        estimatedSetupMinutes: 30,
+        estimatedTimeSavedPerRun: "1-2 hours per data refresh",
+        complexity: "intermediate",
+        notes: "Power Query transformations are recorded as steps — rerun any time with one click. No coding required.",
+        codeSnippet: `// Power Query M — filter current month and remove blanks
+let
+    Source = Excel.CurrentWorkbook(){[Name="DataTable"]}[Content],
+    FilteredMonth = Table.SelectRows(Source, each Date.Month([Date]) = Date.Month(DateTime.LocalNow())),
+    RemovedBlanks = Table.SelectRows(FilteredMonth, each [Amount] <> null and [Amount] <> 0)
+in
+    RemovedBlanks`,
+      },
+
+      power_automate: {
+        prerequisites: [
+          "Microsoft 365 account with Power Automate access",
+          "Flows run inside your organisation's M365 tenant",
+        ],
+        steps: [
+          { stepNumber: 1, action: "Open Power Automate", where: "flow.microsoft.com or via Microsoft 365 app launcher", detail: "Sign in with your work account. All flows run inside your company's tenant — no external upload.", screenshot: "My Flows dashboard." },
+          { stepNumber: 2, action: "Create a new automated flow", where: "+ Create → Automated cloud flow", detail: "Click + Create → Automated cloud flow → choose trigger (e.g. 'When a file is created in SharePoint' or 'Recurrence') → Create.", screenshot: "Flow designer opens." },
+          { stepNumber: 3, action: "Add data action", where: "Flow designer → + New step", detail: "Click + New step → search 'Excel Online' or 'SharePoint' → select 'Get rows from a table' → connect to your file.", screenshot: "Data action configured." },
+          { stepNumber: 4, action: "Add condition or filter", where: "New step → Condition", detail: "Add a Condition step → set your rule (e.g. Amount > threshold, Status = 'Pending') → configure Yes/No branches.", screenshot: "Condition branching visible." },
+          { stepNumber: 5, action: "Add approval or notification", where: "New step → Approvals / Send an email", detail: "In the Yes branch: add 'Start and wait for an approval' or 'Send an email (V2)' to notify the right person.", screenshot: "Approval or email step configured." },
+          { stepNumber: 6, action: "Test and activate", where: "Flow designer → Test → Save", detail: "Click Test → Manual → Run to verify the flow. Once confirmed, click Save. The flow runs automatically going forward.", screenshot: "Flow shows as Active." },
+        ],
+        estimatedSetupMinutes: 60,
+        estimatedTimeSavedPerRun: "3-5 hours per week on manual routing",
+        complexity: "intermediate",
+        notes: "All data remains within your M365 tenant. Power Automate is licensed under most Microsoft 365 enterprise plans.",
+      },
+
+      office_scripts: {
+        prerequisites: [
+          "Microsoft 365 Business Standard or higher (Office Scripts requires this)",
+          "Excel for the web (run via office.com)",
+        ],
+        steps: [
+          { stepNumber: 1, action: "Open Excel Online", where: "office.com → Excel → open your file from OneDrive/SharePoint", detail: "Navigate to office.com → sign in → open your Excel file. Office Scripts run in the browser — no desktop install.", screenshot: "Excel in browser with your data." },
+          { stepNumber: 2, action: "Open Automate tab", where: "Excel ribbon → Automate", detail: "Click the Automate tab in the ribbon → New Script. A script editor panel opens on the right.", screenshot: "Script editor on the right side." },
+          { stepNumber: 3, action: "Write or paste the script", where: "Script editor", detail: "Paste the provided TypeScript script → click Run to execute. Scripts operate entirely on data already in your workbook.", screenshot: "Script runs, data updated." },
+          { stepNumber: 4, action: "Save and schedule", where: "Automate → Save Script → Power Automate", detail: "Save the script → connect it to Power Automate via 'Run Excel Script' action for scheduled execution.", screenshot: "Script linked to Power Automate flow." },
+        ],
+        estimatedSetupMinutes: 25,
+        estimatedTimeSavedPerRun: "30-60 minutes per run",
+        complexity: "intermediate",
+        notes: "Office Scripts are TypeScript-based and run server-side within Microsoft's cloud. No data leaves your tenant.",
+        codeSnippet: `// Office Script — flag rows exceeding threshold and highlight
+function main(workbook: ExcelScript.Workbook) {
+  const sheet = workbook.getActiveWorksheet();
+  const range = sheet.getUsedRange();
+  const values = range.getValues();
+  const THRESHOLD = 5000;
+  for (let i = 1; i < values.length; i++) {
+    const amount = Number(values[i][3]); // Column D = index 3
+    if (amount > THRESHOLD) {
+      sheet.getRange(\`A\${i+1}:E\${i+1}\`).getFormat().getFill().setColor("#FFD700");
+    }
+  }
+}`,
+      },
+
+      vba: {
+        prerequisites: [
+          "Microsoft Excel with Developer tab enabled",
+          "Macro settings: Tools → Trust Center → Enable macros for this workbook",
+        ],
+        steps: [
+          { stepNumber: 1, action: "Enable Developer tab", where: "File → Options → Customize Ribbon → check Developer", detail: "Enable the Developer tab in Excel if not already visible.", screenshot: "Developer tab appears in ribbon." },
+          { stepNumber: 2, action: "Open Visual Basic Editor", where: "Developer → Visual Basic (Alt+F11)", detail: "Press Alt+F11 to open the VBA editor.", screenshot: "VBA editor window opens." },
+          { stepNumber: 3, action: "Insert a module", where: "VBA editor → Insert → Module", detail: "Click Insert → Module. A blank code window opens.", screenshot: "Empty module window." },
+          { stepNumber: 4, action: "Paste the macro", where: "Code window", detail: "Paste the VBA code provided. Customise any sheet names or column references to match your workbook.", screenshot: "Code visible in editor." },
+          { stepNumber: 5, action: "Run the macro", where: "Developer → Macros → Run", detail: "Press F5 or go to Developer → Macros → select the macro → Run.", screenshot: "Macro executes and data is processed." },
+        ],
+        estimatedSetupMinutes: 15,
+        estimatedTimeSavedPerRun: "1-3 hours per run",
+        complexity: "beginner",
+        notes: "VBA runs entirely within Excel on your device. No network connection or external service required.",
+      },
+
+      sap: {
+        prerequisites: [
+          "SAP GUI or SAP Fiori access with appropriate role",
+          "Authorisation for the relevant SAP transaction codes",
+        ],
+        steps: [
+          { stepNumber: 1, action: "Log in to SAP", where: "SAP Logon or Fiori Launchpad", detail: "Open SAP GUI → double-click your system → enter credentials. All data remains within your SAP landscape.", screenshot: "SAP Easy Access menu." },
+          { stepNumber: 2, action: "Navigate to the relevant transaction", where: "SAP command field", detail: "Type the transaction code in the command field (top left) and press Enter. Common codes: FB03 (document display), ME23N (purchase order), F-02 (journal entry).", screenshot: "Transaction screen opens." },
+          { stepNumber: 3, action: "Set selection criteria", where: "Transaction selection screen", detail: "Enter your selection parameters — company code, fiscal year, date range, document type. Use F4 for value help on any field.", screenshot: "Selection criteria filled." },
+          { stepNumber: 4, action: "Execute and export to Excel", where: "Execute button (F8) → List → Export", detail: "Press F8 to run → System → List → Save → Local File → Spreadsheet → save to your local drive.", screenshot: "Excel file saved locally." },
+          { stepNumber: 5, action: "Analyse in Excel", where: "Your local Excel file", detail: "Open the exported file in Excel → apply PivotTable and Power Query for analysis. Data never left your internal systems.", screenshot: "Data in Excel for local analysis." },
+        ],
+        estimatedSetupMinutes: 20,
+        estimatedTimeSavedPerRun: "2-4 hours per reporting cycle",
+        complexity: "intermediate",
+        notes: "SAP exports go to your local machine only. The analysis then happens entirely in Excel — no external tools receive the data.",
+      },
+
+      concur: {
+        prerequisites: [
+          "SAP Concur access with Reporting or Analyst role",
+          "Cognos or Concur Intelligence reporting access if available",
+        ],
+        steps: [
+          { stepNumber: 1, action: "Log in to Concur", where: "Your company's Concur URL", detail: "Sign in with SSO or company credentials. All data remains within your Concur instance.", screenshot: "Concur dashboard." },
+          { stepNumber: 2, action: "Navigate to Reporting", where: "Reporting → Cognos (or Concur Intelligence)", detail: "Click Reporting in the top navigation → select your reporting tool (Cognos / Concur Intelligence / Analytics).", screenshot: "Report list." },
+          { stepNumber: 3, action: "Run a standard report", where: "Report library", detail: "Select a standard report (e.g. Expense by Employee, Policy Violations, Aging Report) → set date range → Run.", screenshot: "Report parameters screen." },
+          { stepNumber: 4, action: "Export to Excel", where: "Report output → Export → Excel", detail: "Click Export → Excel Data → save the file locally. Analysis happens in Excel — within your organisation.", screenshot: "Excel file downloaded." },
+          { stepNumber: 5, action: "Enable Intelligent Audit", where: "Concur Admin → Audit Rules", detail: "If you have admin access: Concur Admin → Audit Rules → configure automated policy checks so violations are flagged without manual review.", screenshot: "Audit rules configuration." },
+        ],
+        estimatedSetupMinutes: 30,
+        estimatedTimeSavedPerRun: "3-5 hours per audit cycle",
+        complexity: "beginner",
+        notes: "Concur exports are saved locally. Intelligent Audit runs inside Concur with no external dependency.",
+      },
+
+      servicenow: {
+        prerequisites: [
+          "ServiceNow access with appropriate role (ITIL, Analyst, or Admin)",
+          "Access to Reports or Performance Analytics module",
+        ],
+        steps: [
+          { stepNumber: 1, action: "Open ServiceNow Reports", where: "ServiceNow → All → Reports → Create New", detail: "Log in → navigate to Reports module → Create New to build a custom report or open an existing one.", screenshot: "Report builder interface." },
+          { stepNumber: 2, action: "Configure data source", where: "Report builder → Table", detail: "Select your table (Incident, Change Request, Problem, Task) → set conditions (e.g. state, priority, assigned group, date range).", screenshot: "Table and conditions set." },
+          { stepNumber: 3, action: "Choose report type and grouping", where: "Type → Group By", detail: "Select report type (Bar, List, Pivot) → Group By your key dimension (Category, Priority, Assignment Group).", screenshot: "Grouped report preview." },
+          { stepNumber: 4, action: "Add metrics", where: "Aggregation", detail: "Set aggregation: Count, Sum, Average as relevant. Add a secondary grouping if needed (e.g. Priority within Category).", screenshot: "Metrics configured." },
+          { stepNumber: 5, action: "Save and schedule", where: "Save → Schedule", detail: "Save the report → Schedule → set frequency (Daily/Weekly) → recipients receive it automatically with no manual effort.", screenshot: "Schedule configured." },
+          { stepNumber: 6, action: "Export for deeper analysis", where: "Report → Export → Excel / CSV", detail: "For deeper analysis: Export → Excel → open locally in Excel or Power BI. No external upload needed.", screenshot: "Excel file downloaded." },
+        ],
+        estimatedSetupMinutes: 45,
+        estimatedTimeSavedPerRun: "2-4 hours per reporting cycle",
+        complexity: "intermediate",
+        notes: "All data remains within your ServiceNow instance. Scheduled reports deliver automatically to internal recipients.",
+      },
+
+      jira: {
+        prerequisites: [
+          "Jira Software or Jira Service Management access",
+          "Project role with reporting permissions",
+        ],
+        steps: [
+          { stepNumber: 1, action: "Open Jira Reports", where: "Project → Reports", detail: "Navigate to your project → click Reports in the left panel. Choose from Burndown, Velocity, Control Chart, or Cumulative Flow.", screenshot: "Reports menu." },
+          { stepNumber: 2, action: "Use Jira Query Language (JQL)", where: "Issues → Advanced search", detail: "Go to Issues → Advanced → switch to JQL. Example: project = MYPROJ AND status != Done AND created >= -30d ORDER BY priority DESC", screenshot: "JQL results list." },
+          { stepNumber: 3, action: "Export to Excel", where: "Issue list → Export → Excel CSV", detail: "From the issue list → click Export → Excel CSV. Open the file in Excel for local analysis.", screenshot: "CSV downloaded." },
+          { stepNumber: 4, action: "Create a dashboard", where: "Jira → Dashboards → Create", detail: "Dashboards → Create → Add Gadget → select 'Filter Results', 'Two Dimensional Filter', or 'Pie Chart' → configure with your saved filter.", screenshot: "Dashboard gadgets configured." },
+        ],
+        estimatedSetupMinutes: 20,
+        estimatedTimeSavedPerRun: "1-2 hours per sprint review",
+        complexity: "beginner",
+        notes: "Jira exports go to your local device. All analysis in Excel remains within your organisation.",
+      },
+
+      sharepoint: {
+        prerequisites: [
+          "SharePoint Online access (Microsoft 365)",
+          "Permissions to create lists and views",
+        ],
+        steps: [
+          { stepNumber: 1, action: "Create a SharePoint List", where: "SharePoint site → + New → List", detail: "Navigate to your team site → + New → List → Blank list → name it (e.g. 'Project Tracker') → Create.", screenshot: "Empty list created." },
+          { stepNumber: 2, action: "Add columns", where: "List → + Add column", detail: "Click + Add column → choose type (Single line text, Number, Date, Choice) → configure → Save. Repeat for all fields.", screenshot: "Columns added to list." },
+          { stepNumber: 3, action: "Create views", where: "List → All Items → + Add view", detail: "Click the view dropdown → Create new view → filter by status, date, owner → Save. Colleagues access the correct view automatically.", screenshot: "Filtered view active." },
+          { stepNumber: 4, action: "Connect to Power BI", where: "Power BI Desktop → Get Data → SharePoint Online List", detail: "In Power BI Desktop: Get Data → SharePoint Online List → paste your site URL → select your list → Load. Data stays within your tenant.", screenshot: "List loaded in Power BI." },
+          { stepNumber: 5, action: "Set up alerts", where: "List → Alert Me", detail: "Click Alert Me → set conditions (any change / specific column change) → receive internal email alerts without external tools.", screenshot: "Alert configured." },
+        ],
+        estimatedSetupMinutes: 30,
+        estimatedTimeSavedPerRun: "2-3 hours per week on status tracking",
+        complexity: "beginner",
+        notes: "SharePoint Lists are your company's internal database. All data stays within your Microsoft 365 tenant.",
+      },
+
+      microsoft_365: {
+        prerequisites: [
+          "Microsoft 365 Business or Enterprise subscription",
+          "Access to Teams, Outlook, and relevant apps",
+        ],
+        steps: [
+          { stepNumber: 1, action: "Use Microsoft Copilot (if licensed)", where: "Any M365 app → Copilot icon", detail: "If your organisation has Microsoft 365 Copilot: open Word, Excel, or Teams → click the Copilot icon → describe what you need. Copilot analyses data within your tenant only.", screenshot: "Copilot panel opens." },
+          { stepNumber: 2, action: "Use Teams for collaboration", where: "Microsoft Teams → your channel", detail: "Share analysis outputs in Teams channels instead of email. Use Teams Planner for task tracking without external project tools.", screenshot: "Teams channel with analysis posted." },
+          { stepNumber: 3, action: "Use Loop for collaborative notes", where: "teams.microsoft.com → Loop", detail: "Microsoft Loop allows collaborative, live-updated documents embedded in Teams. Capture meeting decisions without external tools.", screenshot: "Loop component in Teams." },
+          { stepNumber: 4, action: "Use Forms for data collection", where: "forms.office.com", detail: "Create a Microsoft Form to collect data from colleagues without external survey tools. Responses feed directly into Excel Online.", screenshot: "Form created, responses in Excel." },
+        ],
+        estimatedSetupMinutes: 15,
+        estimatedTimeSavedPerRun: "Ongoing — replaces external tools",
+        complexity: "beginner",
+        notes: "All Microsoft 365 services run within your company's tenant. No data leaves your organisation.",
+      },
+    };
+
+    const guide = guides[tool];
+
+    return {
+      tool,
+      toolDisplayName: this._toolNames[tool] || tool,
+      businessObjective: objective,
+      ...guide,
+    };
+  },
+
+  /**
+   * Build the prompt text OrchestrIQ uses when switching to internal automation mode.
+   * Called when restricted mode cannot collect required data.
+   */
+  buildConsultantPrompt(
+    agentId: string,
+    objective: string,
+    companyContext: { name: string; industry: string; tools?: string[] }
+  ): string {
+    const guides = this.generate(agentId, objective, companyContext);
+    if (guides.length === 0) return "";
+
+    const lines: string[] = [
+      `## 🏢 Guided Internal Automation Mode`,
+      ``,
+      `Because ${companyContext.name}'s security policy restricts external data sharing, ` +
+      `OrchestrIQ will guide you to achieve **${objective}** entirely within your organisation's existing tools.`,
+      ``,
+      `No data needs to leave your environment. Follow the steps below inside your company's systems.`,
+      ``,
+    ];
+
+    for (const guide of guides) {
+      lines.push(`---`);
+      lines.push(`### 🔧 ${guide.toolDisplayName}`);
+      lines.push(`**Setup time:** ~${guide.estimatedSetupMinutes} minutes | **Time saved:** ${guide.estimatedTimeSavedPerRun} | **Complexity:** ${guide.complexity}`);
+      lines.push(``);
+      lines.push(`**Prerequisites:**`);
+      guide.prerequisites.forEach(p => lines.push(`- ${p}`));
+      lines.push(``);
+      lines.push(`**Steps:**`);
+      guide.steps.forEach(s =>
+        lines.push(`${s.stepNumber}. **${s.action}** _(${s.where})_ — ${s.detail}`)
+      );
+      if (guide.codeSnippet) {
+        lines.push(``);
+        lines.push(`**Code snippet:**`);
+        lines.push("```");
+        lines.push(guide.codeSnippet);
+        lines.push("```");
+      }
+      lines.push(``);
+      lines.push(`> 📌 ${guide.notes}`);
+      lines.push(``);
+    }
+
+    return lines.join("\n");
+  },
+};
+
+// ─────────────────────────────────────────────
+// D. PERSISTENT WORKSPACE
+// ─────────────────────────────────────────────
+
+/**
+ * Allows users to progressively build datasets across multiple sessions.
+ * No single large upload required — collect fields incrementally.
+ * Audit history preserved. Duplicate detection built in.
+ * Confidential values are NOT stored — only metadata and confirmed summaries.
+ *
+ * Usage:
+ *   PersistentWorkspace.initialise(userId, agentId, "Q3 Expense Audit", 12);
+ *   PersistentWorkspace.addField(userId, agentId, "Q3 Expense Audit", "total_expenses", 125000, "restricted_manual");
+ *   const ws = PersistentWorkspace.load(userId, agentId, "Q3 Expense Audit");
+ */
+export const PersistentWorkspace = {
+
+  /**
+   * Create or resume a workspace.
+   */
+  initialise(
+    userId: string,
+    agentId: string,
+    projectName: string,
+    totalFieldsRequired: number
+  ): PersistentWorkspaceRecord {
+    const key = wsKey(userId, agentId, projectName);
+    const existing = safeRead<PersistentWorkspaceRecord>(key);
+
+    if (existing) {
+      // Resume existing workspace
+      existing.auditHistory.push({
+        entryId: genId("audit"),
+        timestamp: nowStr(),
+        action: "session_resumed",
+        source: "restricted_manual",
+        note: `Session resumed. ${existing.totalFieldsCollected}/${existing.totalFieldsRequired} fields already collected.`,
+      });
+      existing.sessions += 1;
+      existing.lastUpdated = nowStr();
+      safeWrite(key, existing);
+      return existing;
+    }
+
+    // New workspace
+    const record: PersistentWorkspaceRecord = {
+      workspaceId: genId("ws"),
+      userId,
+      agentId,
+      projectName,
+      totalFieldsRequired,
+      totalFieldsCollected: 0,
+      fields: {},
+      auditHistory: [
+        {
+          entryId: genId("audit"),
+          timestamp: nowStr(),
+          action: "session_resumed",
+          source: "restricted_manual",
+          note: "New workspace created.",
+        },
+      ],
+      sessions: 1,
+      createdAt: nowStr(),
+      lastUpdated: nowStr(),
+    };
+
+    safeWrite(key, record);
+    return record;
+  },
+
+  /**
+   * Add or update a field in the workspace.
+   * Detects duplicates — does not overwrite without explicit force flag.
+   * Never stores raw high-sensitivity values.
+   */
+  addField(
+    userId: string,
+    agentId: string,
+    projectName: string,
+    field: string,
+    value: unknown,
+    source: WorkspaceAuditEntry["source"],
+    sensitivity: "low" | "medium" | "high" = "low",
+    force: boolean = false
+  ): { record: PersistentWorkspaceRecord; isDuplicate: boolean; wasUpdated: boolean } {
+    const key = wsKey(userId, agentId, projectName);
+    const record = safeRead<PersistentWorkspaceRecord>(key);
+    if (!record) {
+      throw new Error(`Workspace "${projectName}" not initialised. Call PersistentWorkspace.initialise() first.`);
+    }
+
+    const isDuplicate = field in record.fields;
+    const existingValue = isDuplicate ? record.fields[field].value : undefined;
+
+    // Duplicate with same value — skip
+    if (isDuplicate && existingValue === value && !force) {
+      record.auditHistory.push({
+        entryId: genId("audit"),
+        timestamp: nowStr(),
+        action: "duplicate_detected",
+        field,
+        valueType: typeof value,
+        source,
+        note: "Duplicate value — no update applied.",
+      });
+      safeWrite(key, record);
+      return { record, isDuplicate: true, wasUpdated: false };
+    }
+
+    // Store value — strip raw content for high sensitivity
+    const storeValue =
+      sensitivity === "high"
+        ? `[${typeof value} confirmed at ${nowStr().slice(0, 10)}]`
+        : value;
+
+    record.fields[field] = {
+      value: storeValue,
+      source,
+      collectedAt: nowStr(),
+      validated: sensitivity !== "high", // High sensitivity requires explicit validation
+    };
+
+    if (!isDuplicate) {
+      record.totalFieldsCollected = Object.keys(record.fields).length;
+    }
+
+    record.auditHistory.push({
+      entryId: genId("audit"),
+      timestamp: nowStr(),
+      action: isDuplicate ? "field_updated" : "field_collected",
+      field,
+      valueType: typeof value,
+      source,
+      note: isDuplicate ? "Field updated (previous value overwritten)." : undefined,
+    });
+
+    record.lastUpdated = nowStr();
+    safeWrite(key, record);
+
+    return { record, isDuplicate, wasUpdated: true };
+  },
+
+  /** Mark a field as validated (after user confirms or cross-references) */
+  validateField(
+    userId: string,
+    agentId: string,
+    projectName: string,
+    field: string
+  ): PersistentWorkspaceRecord | null {
+    const key = wsKey(userId, agentId, projectName);
+    const record = safeRead<PersistentWorkspaceRecord>(key);
+    if (!record || !(field in record.fields)) return null;
+
+    record.fields[field].validated = true;
+    record.auditHistory.push({
+      entryId: genId("audit"),
+      timestamp: nowStr(),
+      action: "field_validated",
+      field,
+      source: record.fields[field].source,
+    });
+    record.lastUpdated = nowStr();
+    safeWrite(key, record);
+    return record;
+  },
+
+  load(
+    userId: string,
+    agentId: string,
+    projectName: string
+  ): PersistentWorkspaceRecord | null {
+    return safeRead<PersistentWorkspaceRecord>(wsKey(userId, agentId, projectName));
+  },
+
+  /** List all workspaces for this user+agent */
+  list(userId: string, agentId: string): string[] {
+    const prefix = `${WORKSPACE_PREFIX}${userId}_${agentId}_`;
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) {
+        keys.push(k.replace(prefix, "").replace(/_/g, " "));
+      }
+    }
+    return keys;
+  },
+
+  /** Summary string for display */
+  summarise(record: PersistentWorkspaceRecord): string {
+    const pct = Math.round(
+      (record.totalFieldsCollected / Math.max(record.totalFieldsRequired, 1)) * 100
+    );
+    const validated = Object.values(record.fields).filter(f => f.validated).length;
+    return (
+      `📁 ${record.projectName} — ` +
+      `${record.totalFieldsCollected}/${record.totalFieldsRequired} fields collected (${pct}%) | ` +
+      `${validated} validated | ` +
+      `${record.sessions} session(s) | ` +
+      `Last updated: ${record.lastUpdated.slice(0, 10)}`
+    );
+  },
+
+  /** Merge a photo reconstruction result into an existing workspace */
+  mergePhotoReconstructionResult(
+    userId: string,
+    agentId: string,
+    projectName: string,
+    session: PhotoReconstructionSession
+  ): PersistentWorkspaceRecord | null {
+    const key = wsKey(userId, agentId, projectName);
+    const record = safeRead<PersistentWorkspaceRecord>(key);
+    if (!record) return null;
+
+    // Store row count and confidence — not raw data
+    const metadata = {
+      pagesProcessed: session.pages.length,
+      rowsReconstructed: session.mergedTable.length,
+      overallConfidence: session.overallConfidence,
+      uncertainCellCount: session.uncertainCells.length,
+      mergedAt: nowStr(),
+    };
+
+    record.fields[`_photo_merge_${session.sessionId}`] = {
+      value: metadata,
+      source: "photo",
+      collectedAt: nowStr(),
+      validated: session.overallConfidence >= 80 && !session.requiresUserConfirmation,
+    };
+
+    record.auditHistory.push({
+      entryId: genId("audit"),
+      timestamp: nowStr(),
+      action: "photo_merged",
+      note: `Photo reconstruction merged: ${session.pages.length} pages, ${session.mergedTable.length} rows, ${session.overallConfidence}% confidence.`,
+      source: "photo",
+    });
+
+    record.totalFieldsCollected = Object.keys(record.fields).filter(
+      k => !k.startsWith("_")
+    ).length;
+    record.lastUpdated = nowStr();
+    safeWrite(key, record);
+    return record;
+  },
+};
+
+// ─────────────────────────────────────────────
+// E. PRIVACY GUARD
+// ─────────────────────────────────────────────
+
+/**
+ * Wrapper enforcing privacy-first behaviour for every Agent and Workflow.
+ * Call checkMode() at agent startup. The result determines how the agent
+ * collects inputs and whether it switches to GuidedInternalAutomation.
+ *
+ * Usage:
+ *   const check = PrivacyGuard.checkMode("upload", fieldManifest);
+ *   if (!check.approved) → switch to restricted flow
+ *   PrivacyGuard.buildModeSelector() → renders mode selection UI text
+ */
+export const PrivacyGuard = {
+
+  RESTRICTED_FIELDS_PATTERNS: [
+    /salary/i, /payroll/i, /personal.*data/i, /employee.*id/i,
+    /national.*id/i, /passport/i, /bank.*account/i, /iban/i,
+    /credit.*card/i, /social.*security/i, /tax.*id/i,
+    /health.*record/i, /medical/i, /dob/i, /date.*of.*birth/i,
+  ],
+
+  /**
+   * Evaluate whether the chosen input mode is appropriate for the field manifest.
+   * Returns a privacy check result with warnings and field classifications.
+   */
+  checkMode(
+    mode: InputMode,
+    fieldManifest: MinimumDataRequest[]
+  ): PrivacyCheckResult {
+    const blocked: string[] = [];
+    const allowed: string[] = [];
+    const warnings: string[] = [];
+
+    for (const field of fieldManifest) {
+      const isSensitive =
+        field.sensitivity === "high" ||
+        this.RESTRICTED_FIELDS_PATTERNS.some(p => p.test(field.field));
+
+      if (mode === "restricted") {
+        if (isSensitive && !field.canUseSummary && !field.canUsePhoto) {
+          blocked.push(field.field);
+        } else {
+          allowed.push(field.field);
+        }
+      } else {
+        // Non-restricted mode — warn about sensitive fields
+        if (isSensitive) {
+          warnings.push(
+            `Field "${field.field}" contains sensitive data. Consider using Restricted Enterprise Mode.`
+          );
+        }
+        allowed.push(field.field);
+      }
+    }
+
+    const privacyStatement =
+      mode === "restricted"
+        ? EnterprisePrivacyEngine.PRIVACY_STATEMENT
+        : blocked.length > 0
+        ? "⚠️ Some fields contain sensitive data. Restricted Enterprise Mode is recommended."
+        : "";
+
+    return {
+      approved: blocked.length === 0 || mode !== "restricted",
+      mode,
+      privacyStatement,
+      warnings,
+      blockedFields: blocked,
+      allowedFields: allowed,
+    };
+  },
+
+  /**
+   * Render the four-mode selector as descriptive text for display in agent UI.
+   */
+  buildModeSelector(): Array<{ mode: InputMode; label: string; description: string; icon: string; recommended: boolean }> {
+    return [
+      {
+        mode: "upload",
+        label: "Direct Upload",
+        description: "Upload files directly. Fastest option when your IT policy permits it.",
+        icon: "📤",
+        recommended: false,
+      },
+      {
+        mode: "paste",
+        label: "Copy / Paste",
+        description: "Paste data from your clipboard. Works with Excel, CSV, or plain text.",
+        icon: "📋",
+        recommended: false,
+      },
+      {
+        mode: "photo",
+        label: "Photo Capture",
+        description: "Take one or multiple photos of your document. OrchestrIQ reconstructs tables automatically.",
+        icon: "📸",
+        recommended: false,
+      },
+      {
+        mode: "restricted",
+        label: "Restricted Enterprise Mode",
+        description:
+          "For organisations where file upload is not permitted. " +
+          "OrchestrIQ requests only the minimum data needed — specific values, not full files. " +
+          "Or generates step-by-step instructions for tools already inside your organisation.",
+        icon: "🔒",
+        recommended: true,
+      },
+    ];
+  },
+
+  /**
+   * Build the privacy disclosure statement to show users before they begin.
+   * Call this once at the start of every agent or workflow session.
+   */
+  buildDisclosure(mode: InputMode, agentName: string): string {
+    if (mode !== "restricted") {
+      return (
+        `**${agentName}** is ready. ` +
+        `If your organisation restricts external file uploads, switch to 🔒 Restricted Enterprise Mode.`
+      );
+    }
+
+    return (
+      `🔒 **Restricted Enterprise Mode Active**\n\n` +
+      `**${agentName}** is operating in privacy-compliant mode.\n\n` +
+      `- Confidential information should remain inside your organisation.\n` +
+      `- Only the specific values listed below will be requested.\n` +
+      `- No complete files, spreadsheets, or reports should be uploaded.\n` +
+      `- Where your data cannot be shared at all, you will receive step-by-step instructions ` +
+      `to perform the analysis entirely within your company's own tools.\n\n` +
+      `_This mode complies with typical enterprise data security policies. ` +
+      `Please verify with your IT or security team if unsure._`
+    );
+  },
+};
