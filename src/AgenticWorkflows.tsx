@@ -1118,8 +1118,19 @@ export default function AgenticWorkflows({
                 `${wf.name.replace(/\s+/g,"-")}-${step.id}-${Date.now()}.xlsx`
               );
               log(`✅ Excel downloaded: ${step.name}`);
-              saveRecord({ feature: `Agentic WF — ${wf.name}`, featureIcon: wf.icon, provider: defP, model: defP, inputTokens: estimateTokens(Object.values(inputData).join("
-")("")), outputTokens: estimateTokens(result.output), costUsd: estimateCost(defP, estimateTokens(Object.values(inputData).join("")), estimateTokens(result.output)) });
+              saveRecord({
+              feature: `Agentic WF — ${wf.name}`,
+              featureIcon: wf.icon,
+              provider: defP,
+              model: defP,
+             inputTokens: estimateTokens(Object.values(inputData).join("\n")),
+             outputTokens: estimateTokens(result.output),
+             costUsd: estimateCost(
+             defP,
+             estimateTokens(Object.values(inputData).join("\n")),
+             estimateTokens(result.output)
+             )
+             });
             } catch (e: any) { log(`⚠ Excel generation failed: ${e.message}`); }
           }
         }
