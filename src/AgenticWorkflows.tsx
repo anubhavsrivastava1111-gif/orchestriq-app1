@@ -1118,7 +1118,8 @@ export default function AgenticWorkflows({
                 `${wf.name.replace(/\s+/g,"-")}-${step.id}-${Date.now()}.xlsx`
               );
               log(`✅ Excel downloaded: ${step.name}`);
-              saveRecord({ feature: `Agentic WF — ${wf.name}`, featureIcon: wf.icon, provider: defP, model: defP, inputTokens: estimateTokens(Object.values(inputData).join("")), outputTokens: estimateTokens(result.output), costUsd: estimateCost(defP, estimateTokens(Object.values(inputData).join("")), estimateTokens(result.output)) });
+              saveRecord({ feature: `Agentic WF — ${wf.name}`, featureIcon: wf.icon, provider: defP, model: defP, inputTokens: estimateTokens(Object.values(inputData).join("
+")("")), outputTokens: estimateTokens(result.output), costUsd: estimateCost(defP, estimateTokens(Object.values(inputData).join("")), estimateTokens(result.output)) });
             } catch (e: any) { log(`⚠ Excel generation failed: ${e.message}`); }
           }
         }
@@ -1234,8 +1235,10 @@ Rules:
       });
       if (r.ok) {
         const d = await r.json();
-        const text = d?.content?.filter((b:any)=>b.type==="text").map((b:any)=>b.text||"").join("
-") || "";
+        const text = d?.content
+  ?.filter((b:any)=>b.type==="text")
+  .map((b:any)=>b.text || "")
+  .join("\n") || "";
         if (text) { showToast("📸 Extracted via Claude", "success"); return text; }
       }
     }
@@ -1247,15 +1250,14 @@ Rules:
         { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ contents: [{ parts: [
             { inline_data: { mime_type: mediaType, data: b64 } },
-            { text: VISION_SYS + "
-
-" + VISION_PROMPT }
+            { text: VISION_SYS + "\n\n" + VISION_PROMPT }
           ]}]})
         }
       );
       if (r.ok) {
         const d = await r.json();
         const text = d?.candidates?.[0]?.content?.parts?.map((p:any)=>p.text||"").join("
+")("
 ") || "";
         if (text) { showToast("📸 Extracted via Gemini (free)", "success"); return text; }
       }
@@ -1537,7 +1539,9 @@ ${csv}
               <div style={{ fontSize: 13, fontWeight: 800, color: "#F0F4FF" }}>{wf.name}</div>
               <div style={{ fontSize: 9, color: "#4D6A8A" }}>{mode} mode · {new Date(currentRun.startedAt).toLocaleTimeString()}</div>
             </div>
-            <span style={S.badge(currentRun.status === "complete" ? "#10B981" : currentRun.status === "waiting_input" ? "#F59E0B" : currentRun.status === "blocked" ? "#EF4444" : "#14B8A6")}>{currentRun.status.replace("_", " ")}</span>
+            <span style={S.badge(currentRun.status === "complete" ? "#10B981" : currentRun.status === "waiting_input" ? "#F59E0B" : currentRun.status === "blocked" ? "#EF4444" : "#14B8A6")}>{currentRun.status.replace("_", "
+
+")}</span>
           </div>
           {/* Step progress bar */}
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" as const }}>
