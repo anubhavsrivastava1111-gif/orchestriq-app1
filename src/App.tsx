@@ -83,6 +83,7 @@ const USE_SYS_KEY = import.meta.env.VITE_USE_SYSTEM_KEY === "true";
 const EFF_GEMINI = USE_SYS_KEY && SYS_GEMINI ? SYS_GEMINI : "";
 const EFF_GROQ = USE_SYS_KEY && SYS_GROQ ? SYS_GROQ : "";
 const EFF_CLAUDE = USE_SYS_KEY && SYS_CLAUDE ? SYS_CLAUDE : "";
+const EFF_FAL   = import.meta.env.VITE_FAL_API_KEY || ""; // fal.ai — image & video generation
 console.log("[OIQ-DIAG] USE_SYS_KEY:",USE_SYS_KEY,"| SYS_GEMINI present:",!!SYS_GEMINI,"| SYS_GROQ present:",!!SYS_GROQ,"| SYS_CLAUDE present:",!!SYS_CLAUDE,"| EFF_GEMINI:",!!EFF_GEMINI,"| EFF_GROQ:",!!EFF_GROQ,"| EFF_CLAUDE:",!!EFF_CLAUDE);
 const BRAND = "OrchestrIQ";
 const TAGLINE = "The orchestration layer of intelligent business.";
@@ -97,12 +98,66 @@ const MODELS = {
   deepseek:{name:"DeepSeek",company:"DeepSeek AI",model:"deepseek-chat",placeholder:"sk-...",color:"#2563EB",keyUrl:"https://platform.deepseek.com/api_keys",note:"Low cost · Strong reasoning · Available in India"},
   kimi:{name:"Kimi",company:"Moonshot AI",model:"moonshot-v1-8k",placeholder:"sk-...",color:"#8B5CF6",keyUrl:"https://platform.moonshot.cn/console/api-keys",note:"Fast · Affordable · Strong multilingual"},
   stability:{name:"Stability AI",company:"Stability AI",model:"stable-diffusion-xl-1024-v1-0",placeholder:"sk-...",color:"#EC4899",keyUrl:"https://platform.stability.ai/account/credits",note:"Image generation · ~₹3/image · Optional"},
+  fal:{name:"fal.ai",company:"fal.ai",placeholder:"key-...",color:"#7C3AED",keyUrl:"https://fal.ai/dashboard/keys"},
 };
 // ─── DONATION QR ────────────────────────────────────────────────────────────
 // Paste your QR code as a base64 data URI between the quotes below to hard-code it,
 // e.g. "data:image/png;base64,iVBORw0KGgo...". Until then, upload it once via
 // Settings › Donation (it saves to your device and persists across sessions).
 const DEFAULT_QR = "";
+// ─── TASK-BASED INTELLIGENT ROUTING ─────────────────────────────────────────
+// Maps task type → provider priority (first available key wins, fallback continues).
+// DeepSeek = default for general text (cheapest). Claude Sonnet = specialist tasks.
+// fal.ai = ALL image and video generation (500+ models, one key).
+// Add future providers here — routing inherits automatically.
+const TASK_ROUTING: Record<string,string[]> = {
+  // ── MEDIA (non-text — fal.ai is the exclusive gateway) ──────────────────
+  image_gen:      ["fal"],                                  // fal.ai: Flux, Seedream, Imagen, Ideogram
+  video_gen:      ["fal"],                                  // fal.ai: Kling, Seedance, Wan, Veo, Sora
+  diagram:        ["fal","openai"],                         // Ideogram v3 via fal for text-accurate diagrams
+  // ── SPECIALIST TEXT (Claude Sonnet = best quality) ───────────────────────
+  excel_advanced: ["claude","openai","deepseek","gemini","groq"],  // Complex formulas, VBA, multi-tab
+  powerpoint:     ["claude","openai","deepseek","gemini","groq"],  // Structured decks, slide content
+  research:       ["claude","gemini","openai","deepseek","groq"],  // Claude has built-in web search
+  financial:      ["claude","deepseek","openai","gemini","groq"],  // P&L, forecast, variance, audit
+  audit:          ["claude","deepseek","openai","gemini","groq"],  // Compliance, SOX, workpapers
+  vision:         ["claude","gemini","openai","groq"],              // Photo/image analysis — DeepSeek excluded
+  // ── CODE (DeepSeek = best value for code generation) ────────────────────
+  code:           ["deepseek","claude","groq","openai","gemini"],
+  // ── GENERAL TEXT (cheapest capable provider first) ───────────────────────
+  creative:       ["deepseek","groq","gemini","claude","openai"],
+  general:        ["deepseek","groq","gemini","claude","openai"],
+};
+
+// Models to use when a task routes to Claude (default = haiku, premium = sonnet)
+// Sonnet is used for tasks that require deep reasoning, long structured outputs.
+const CLAUDE_TASK_MODEL: Record<string,string> = {
+  excel_advanced: "claude-sonnet-4-6",
+  powerpoint:     "claude-sonnet-4-6",
+  financial:      "claude-sonnet-4-6",
+  audit:          "claude-sonnet-4-6",
+  research:       "claude-sonnet-4-6",
+};
+
+// Auto-classify the task type from prompt + system context.
+// Called automatically inside callMulti — no change needed at call sites.
+function detectTaskType(prompt: string, context = ""): string {
+  const t = (prompt + " " + context).toLowerCase();
+  if (/\b(image|photo|picture|screenshot|generate.*image|create.*image|design.*logo|advertisement.*image|product.*image)\b/.test(t)) return "image_gen";
+  if (/\b(video|animation|reel|clip|advertisement.*video|create.*video|generate.*video|explainer.*video)\b/.test(t)) return "video_gen";
+  if (/\b(diagram|flowchart|org.*chart|process.*map|architecture.*diagram)\b/.test(t)) return "diagram";
+  if (/\b(excel|spreadsheet|xlsx|xlsm|macro|vba|pivot|vlookup|hlookup|sumif|countif|index.*match|named.*range|data.*validation|conditional.*format|multi.*tab|workbook)\b/.test(t)) return "excel_advanced";
+  if (/\b(powerpoint|pptx|slide|presentation|deck|keynote|pitch.*deck)\b/.test(t)) return "powerpoint";
+  if (/\b(research|latest|current news|today|market.*data|competitor|pricing.*202[4-9]|live data|search.*web|recent development)\b/.test(t)) return "research";
+  if (/\b(p&l|profit.*loss|balance.*sheet|cash.*flow|forecast|budget.*model|ebitda|irr|npv|financial.*model|variance.*analysis|mis.*report|revenue.*projection)\b/.test(t)) return "financial";
+  if (/\b(audit|sox|itgc|compliance|risk.*register|internal.*control|workpaper|finding|assurance|concur|servicenow)\b/.test(t)) return "audit";
+  if (/\b(photo|ocr|scan.*document|extract.*from.*image|read.*image|visual.*analysis)\b/.test(t)) return "vision";
+  if (/\b(code|function|script|debug|python|javascript|typescript|sql|api.*endpoint|algorithm|unit.*test|refactor)\b/.test(t)) return "code";
+  if (/\b(write|draft|compose|email.*to|linkedin|blog.*post|marketing.*copy|press.*release|creative.*writing)\b/.test(t)) return "creative";
+  return "general";
+}
+
+
 
 const DONATION_PRESETS = [10,50,100,500,1000];
 
@@ -648,8 +703,8 @@ async function callGroq(key,sys,msgs,maxT){
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("Groq: Invalid API key.");if(r.status===429)throw new Error("Groq: Rate limit hit. Wait a moment.");throw new Error("Groq "+r.status+": "+(m||r.statusText));}
   const d=await r.json();return d.choices?.[0]?.message?.content||"";
 }
-  async function callClaude(key,sys,msgs,maxT,enableSearch){
-  const body:any={model:MODELS.claude.model,max_tokens:maxT,system:sys,messages:msgs};
+  async function callClaude(key,sys,msgs,maxT,enableSearch,modelOverride=""){
+  const body:any={model:(modelOverride||MODELS.claude.model),max_tokens:maxT,system:sys,messages:msgs};
   if(enableSearch)body.tools=[{type:"web_search_20250305",name:"web_search",max_uses:5}];
   const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body)});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}throw new Error("Claude "+r.status+": "+(m||r.statusText));}
@@ -688,7 +743,58 @@ async function callKimi(key,sys,msgs,maxT){
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("Kimi: Invalid API key.");if(r.status===429)throw new Error("Kimi: Rate limit. Wait a moment.");throw new Error("Kimi "+r.status+": "+(m||r.statusText));}
   const d=await r.json();return d.choices?.[0]?.message?.content||"";
 }
-async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false){
+
+// ─── fal.ai — Image & Video Generation ──────────────────────────────────────
+// One fal.ai API key unlocks 500+ models: Flux, Seedream, Imagen, Ideogram,
+// Kling, Seedance, Wan, Veo, Sora, and more. Pay per output, no subscription.
+// Sign up: https://fal.ai/dashboard/keys — $20 free credits on signup.
+
+async function callFalImage(key:string, prompt:string, model="fal-ai/flux-pro"):Promise<string>{
+  if(!key?.trim()) throw new Error("fal.ai key required for image generation. Add it in Settings → fal.ai.");
+  const r = await fetch(`https://fal.run/${model}`, {
+    method:"POST",
+    headers:{"Authorization":`Key ${key.trim()}`,"Content-Type":"application/json"},
+    body:JSON.stringify({prompt, image_size:"landscape_4_3", num_images:1, enable_safety_checker:true})
+  });
+  if(!r.ok){
+    const t = await r.text().catch(()=>"");
+    let m=""; try{m=JSON.parse(t).detail||JSON.parse(t).error||"";}catch{m=t.slice(0,200);}
+    throw new Error(`fal.ai image error: ${m||r.status}`);
+  }
+  const d = await r.json();
+  return d.images?.[0]?.url || d.image?.url || "";
+}
+
+async function callFalVideo(key:string, prompt:string, durationSec=5, model="fal-ai/kling-video/v1.6/standard/text-to-video"):Promise<string>{
+  if(!key?.trim()) throw new Error("fal.ai key required for video generation. Add it in Settings → fal.ai.");
+  // fal.ai uses a queue system for video — submit then poll
+  const submit = await fetch(`https://queue.fal.run/${model}`, {
+    method:"POST",
+    headers:{"Authorization":`Key ${key.trim()}`,"Content-Type":"application/json"},
+    body:JSON.stringify({prompt, duration:String(durationSec), aspect_ratio:"16:9"})
+  });
+  if(!submit.ok){
+    const t = await submit.text().catch(()=>"");
+    let m=""; try{m=JSON.parse(t).detail||"";}catch{m=t.slice(0,200);}
+    throw new Error(`fal.ai video submit error: ${m||submit.status}`);
+  }
+  const {request_id} = await submit.json();
+  if(!request_id) throw new Error("fal.ai: no request_id returned from queue submit.");
+
+  // Poll every 4 seconds, max 40 attempts (160 seconds total)
+  for(let i=0;i<40;i++){
+    await new Promise(res=>setTimeout(res,4000));
+    const poll = await fetch(`https://queue.fal.run/${model}/requests/${request_id}`,{
+      headers:{"Authorization":`Key ${key.trim()}`}
+    });
+    const pd = await poll.json();
+    if(pd.status==="COMPLETED") return pd.output?.video?.url || pd.output?.videos?.[0]?.url || "";
+    if(pd.status==="FAILED") throw new Error(`fal.ai video generation failed: ${pd.error||"unknown reason"}`);
+  }
+  throw new Error("fal.ai video generation timed out. Try a shorter duration or different model.");
+}
+
+async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,modelOverride=""){
   if(!key?.trim())throw new Error("No API key for "+(MODELS[provider]?.name||provider)+". Add it in Settings.");
   const msgs=rawMsgs.map(m=>({role:m.role==="user"?"user":"assistant",content:m.content}));
   let timerId;
@@ -700,7 +806,7 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false){
     timerId=setTimeout(()=>rej(new Error("Request timed out after "+(timeoutMs/1000)+"s. The AI provider may be busy — try switching to Gemini (free tier).")),timeoutMs);
   });
   const callP=(async()=>{
-    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT):provider==="kimi"?await callKimi(key,sys,msgs,maxT):Promise.reject(new Error("Unknown provider: "+provider));
+    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT):provider==="kimi"?await callKimi(key,sys,msgs,maxT):Promise.reject(new Error("Unknown provider: "+provider));
     if(raw&&typeof raw==="object"&&"text" in raw)return raw as {text:string;truncated:boolean};
     return {text:raw as string,truncated:false};
   })();
@@ -708,23 +814,40 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false){
   finally{clearTimeout(timerId);}
 }
 
-async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false){
+async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskType=""){
   const effectiveKeys={...keys};
   if(EFF_GEMINI?.trim())effectiveKeys.gemini=EFF_GEMINI;
   if(EFF_GROQ?.trim())effectiveKeys.groq=EFF_GROQ;
   if(EFF_CLAUDE?.trim())effectiveKeys.claude=EFF_CLAUDE;
+  if(EFF_FAL?.trim())effectiveKeys.fal=EFF_FAL;
 
-  // Prefer a paid system-level provider (Claude) over free-tier providers for reliability,
-  // unless the user explicitly configured and selected a different default with their own key.
+  // Auto-detect task type from prompt if not explicitly provided
+  const userPrompt=msgs?.find((m:any)=>m.role==="user")?.content||"";
+  const resolvedTask = taskType || detectTaskType(userPrompt, sys||"");
+
+  // Task routing: walk preference list, pick first provider with an available key
+  const routeOrder = TASK_ROUTING[resolvedTask] || TASK_ROUTING.general;
+  let taskRoutedProvider = "";
+  for(const p of routeOrder){
+    if(effectiveKeys[p]?.trim()){taskRoutedProvider=p;break;}
+  }
+
+  // Model upgrade: use Claude Sonnet instead of Haiku for premium reasoning tasks
+  const modelOverride = (taskRoutedProvider==="claude" && CLAUDE_TASK_MODEL[resolvedTask])
+    ? CLAUDE_TASK_MODEL[resolvedTask]
+    : "";
+
+  // Fall back to legacy provider selection logic if routing didn't find a key
   const paidConfigured=["claude","openai"].filter(p=>effectiveKeys[p]?.trim());
-  let active=getActiveProvider(defP,effectiveKeys,EFF_GROQ,EFF_GEMINI);
-  if(EFF_CLAUDE?.trim()&&!keys.claude?.trim()&&!keys.openai?.trim()){
-    // System Claude key present and user hasn't set their own paid key - use system Claude as primary
-    active="claude";
-  }else if(paidConfigured.length&&!paidConfigured.includes(defP)&&!effectiveKeys[active]?.trim()){
-    active=paidConfigured[0];
-  }else if(paidConfigured.includes(defP)&&effectiveKeys[defP]?.trim()){
-    active=defP;
+  let active=taskRoutedProvider||getActiveProvider(defP,effectiveKeys,EFF_GROQ,EFF_GEMINI);
+  if(!taskRoutedProvider){
+    if(EFF_CLAUDE?.trim()&&!keys.claude?.trim()&&!keys.openai?.trim()){
+      active="claude";
+    }else if(paidConfigured.length&&!paidConfigured.includes(defP)&&!effectiveKeys[active]?.trim()){
+      active=paidConfigured[0];
+    }else if(paidConfigured.includes(defP)&&effectiveKeys[defP]?.trim()){
+      active=defP;
+    }
   }
   const key=effectiveKeys[active]?.trim();
 
@@ -737,7 +860,7 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false){
   }
 
   try{
-    let r=await callAI(active,key,sys,msgs,maxT,enableSearch);
+    let r=await callAI(active,key,sys,msgs,maxT,enableSearch,modelOverride);
     let text=r.text;
     let stillTruncated=r.truncated;
     let continueAttempts=0;
@@ -1655,7 +1778,7 @@ export default function App(){
   const [sbOpen,setSbOpen]=useState(false);
   const [showModules,setShowModules]=useState(false);
   const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return localStorage.getItem("oiq-sb-col")==="1";}catch{return false;}});
-  const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:""});
+  const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:""});
   const [mediaMode,setMediaMode]=useState({image:"prompts",video:"veo"});
   const [showMediaPicker,setShowMediaPicker]=useState(false);
   const [defP,setDefP]=useState("groq");
@@ -1901,8 +2024,23 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     setPage("app");
   };
 
-  const ask=async(sys,msgs,maxT,enableSearch)=>(await callMulti(keys,defP,sys,msgs,maxT,enableSearch)).primary;
-  const askFull=async(sys,msgs,maxT,enableSearch)=>await callMulti(keys,defP,sys,msgs,maxT,enableSearch);
+  // taskType is optional — if omitted, auto-detected from prompt via detectTaskType()
+  // Examples: ask(sys,msgs,4000,false,"excel_advanced") → Claude Sonnet
+  //           ask(sys,msgs,3000,false,"general")        → DeepSeek (cheapest)
+  //           askImage(prompt,"landscape_4_3")          → fal.ai Flux Pro
+  const ask=async(sys,msgs,maxT,enableSearch,taskType="")=>(await callMulti(keys,defP,sys,msgs,maxT,enableSearch,taskType)).primary;
+  const askFull=async(sys,msgs,maxT,enableSearch,taskType="")=>await callMulti(keys,defP,sys,msgs,maxT,enableSearch,taskType);
+  // Media generation helpers — use keys.fal from the keys prop
+  const askImage=async(prompt:string,size="landscape_4_3",model="fal-ai/flux-pro"):Promise<string>=>{
+    const falKey=(keys.fal||EFF_FAL)?.trim();
+    if(!falKey)throw new Error("Add your fal.ai API key in Settings to generate images.");
+    return callFalImage(falKey,prompt,model);
+  };
+  const askVideo=async(prompt:string,durationSec=5,model="fal-ai/kling-video/v1.6/standard/text-to-video"):Promise<string>=>{
+    const falKey=(keys.fal||EFF_FAL)?.trim();
+    if(!falKey)throw new Error("Add your fal.ai API key in Settings to generate videos.");
+    return callFalVideo(falKey,prompt,durationSec,model);
+  };
 
   // Extracts candidate action items from a Boardroom/Autopilot/TimeMachine output and opens the review modal
   const extractActionItems=async(sourceType:ActionItem["source"],sourceLabel:string,content:string)=>{
