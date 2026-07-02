@@ -762,33 +762,56 @@ async function callFalImage(key:string, prompt:string, model="fal-ai/flux-pro"):
   return d.images?.[0]?.url || d.image?.url || "";
 }
 
-async function callFalVideo(key:string, prompt:string, durationSec=5, model="fal-ai/kling-video/v1.6/standard/text-to-video"):Promise<string>{
-  if(!key?.trim()) throw new Error("fal.ai key required for video generation. Add it in Settings → fal.ai.");
-  // fal.ai uses a queue system for video — submit then poll
-  const submit = await fetch(`https://queue.fal.run/${model}`, {
-    method:"POST",
-    headers:{"Authorization":`Key ${key.trim()}`,"Content-Type":"application/json"},
-    body:JSON.stringify({prompt, duration:String(durationSec), aspect_ratio:"16:9"})
-  });
-  if(!submit.ok){
-    const t = await submit.text().catch(()=>"");
-    let m=""; try{m=JSON.parse(t).detail||"";}catch{m=t.slice(0,200);}
-    throw new Error(`fal.ai video submit error: ${m||submit.status}`);
-  }
-  const {request_id} = await submit.json();
-  if(!request_id) throw new Error("fal.ai: no request_id returned from queue submit.");
-
-  // Poll every 4 seconds, max 40 attempts (160 seconds total)
-  for(let i=0;i<40;i++){
-    await new Promise(res=>setTimeout(res,4000));
-    const poll = await fetch(`https://queue.fal.run/${model}/requests/${request_id}`,{
-      headers:{"Authorization":`Key ${key.trim()}`}
+async function callFalVideo(key:string, prompt:string, durationSec=5, _model="fal-ai/kling-video/v1.6/standard/text-to-video"):Promise<string>{
+  if(!key?.trim()) throw new Error("fal.ai key required for video generation.");
+  // Try Wan-T2V first (fast, reliable text-to-video)
+  try {
+    const r = await fetch("https://fal.run/fal-ai/wan-t2v", {
+      method:"POST",
+      headers:{"Authorization":`Key ${key.trim()}`,"Content-Type":"application/json"},
+      body:JSON.stringify({prompt, num_frames:81, frames_per_second:16, resolution:"480p"}),
     });
-    const pd = await poll.json();
-    if(pd.status==="COMPLETED") return pd.output?.video?.url || pd.output?.videos?.[0]?.url || "";
-    if(pd.status==="FAILED") throw new Error(`fal.ai video generation failed: ${pd.error||"unknown reason"}`);
+    const t = await r.text();
+    if(!r.ok) throw new Error(`HTTP ${r.status}: ${t.slice(0,200)}`);
+    let d:any; try{d=JSON.parse(t);}catch{throw new Error(`Bad JSON: ${t.slice(0,200)}`);}
+    const u = d?.video?.url||d?.url||d?.output?.video?.url||"";
+    if(u) return u;
+    throw new Error("No URL");
+  } catch {
+    // Fallback: Luma Photon Flash (synchronous, very fast)
+    try {
+      const r2 = await fetch("https://fal.run/fal-ai/luma-photon-flash", {
+        method:"POST",
+        headers:{"Authorization":`Key ${key.trim()}`,"Content-Type":"application/json"},
+        body:JSON.stringify({prompt, duration:`${durationSec}s`, aspect_ratio:"16:9"}),
+      });
+      const t2 = await r2.text();
+      let d2:any; try{d2=JSON.parse(t2);}catch{throw new Error(`Fallback bad JSON`);}
+      const u2 = d2?.video?.url||d2?.url||"";
+      if(u2) return u2;
+    } catch {}
+    // Final: Kling queue with robust polling
+    const KLING = "fal-ai/kling-video/v1.6/standard/text-to-video";
+    const sr = await fetch(`https://queue.fal.run/${KLING}`, {
+      method:"POST",
+      headers:{"Authorization":`Key ${key.trim()}`,"Content-Type":"application/json"},
+      body:JSON.stringify({prompt, duration:"5", aspect_ratio:"16:9"}),
+    });
+    const srt = await sr.text();
+    if(!sr.ok) throw new Error(`Kling submit: ${srt.slice(0,200)}`);
+    let srd:any; try{srd=JSON.parse(srt);}catch{throw new Error(`Kling bad JSON: ${srt.slice(0,200)}`);}
+    const reqId = srd?.request_id;
+    if(!reqId) throw new Error("Kling no request_id");
+    for(let i=0;i<40;i++){
+      await new Promise(res=>setTimeout(res,4000));
+      const pr = await fetch(`https://queue.fal.run/${KLING}/requests/${reqId}`,{headers:{"Authorization":`Key ${key.trim()}`}});
+      const prt = await pr.text();
+      let pd:any; try{pd=JSON.parse(prt);}catch{continue;}
+      if(pd.status==="COMPLETED"){const u=pd?.output?.video?.url||pd?.output?.videos?.[0]?.url||"";if(u)return u;throw new Error("Kling: no URL in output");}
+      if(pd.status==="FAILED") throw new Error(`Kling failed: ${pd.error||"unknown"}`);
+    }
+    throw new Error("Video timed out after 160s");
   }
-  throw new Error("fal.ai video generation timed out. Try a shorter duration or different model.");
 }
 
 async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,modelOverride=""){
@@ -2972,37 +2995,34 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
 
   // ─── PROJECT ENGINE — Phase 5: Media Generation ─────────────────────────
   const buildMediaPrompt=useCallback((del,ctx)=>{
-    const company=ctx?.company?.name||"the company";
-    const industry=ctx?.company?.industry||"business";
-    const isImage=del.outputFormat==="image"||["image_prompt","image","design","banner","logo","creative","mockup","infographic","diagram","visual","hero","comparison"].some(k=>del.name.toLowerCase().includes(k)||del.outputFormat==="image_prompt");
-    const isVideo=["video","animation","storyboard","veo","film"].some(k=>del.name.toLowerCase().includes(k)||del.outputFormat==="video_prompt");
+    const company  = ctx?.company?.name || "the company";
+    const industry = ctx?.company?.industry || "business";
+    const location = ctx?.company?.location || "";
+    const rawContent = (rawContentStore.current[del.id]||del.rawContent||del.description||"").trim();
+    const isVideo = del.outputFormat==="video"||["video","animation","reel","promotional","promo","overview","film"].some((k:string)=>del.name.toLowerCase().includes(k));
     if(isVideo){
-      return {
-        type:"video",
-        veo:"Scene: "+del.name+" for "+company+" in "+industry+". Professional corporate style. "+
-          "Motion: smooth cinematic camera movement. Duration: 15-30 seconds. "+
-          "Style: modern, clean, minimal. 4K resolution. No text overlays. "+
-          "Context: "+(del.rawContent||del.description||"").slice(0,200),
-        runway:"Create a "+del.name+" video for "+company+". "+
-          "Style: corporate, professional. Duration: 10-15s. "+
-          (del.rawContent||del.description||"").slice(0,150),
-        kling:"Generate video: "+del.name+". Brand: "+company+". "+
-          "Mood: professional. Style: modern corporate. "+
-          (del.rawContent||del.description||"").slice(0,150),
-      };
+      const coreMessage = rawContent.includes("VOICEOVER")
+        ? rawContent.split("\n").filter((l:string)=>l.includes("VOICEOVER")).map((l:string)=>l.replace(/\*\*VOICEOVER[^:]*:\*\*/i,"").trim()).filter(Boolean).join(" ").slice(0,300)
+        : rawContent.slice(0,300);
+      const kling = `Cinematic promotional video for ${company}. Core message: "${coreMessage.slice(0,200)}". Style: modern tech corporate, smooth camera, 4K, professional. Industry: ${industry}. ${location?"Location context: "+location+".":""} No text overlays. Aspirational premium feel.`;
+      const veo   = `Professional ${industry} company (${company}) video. Message: ${coreMessage.slice(0,200)}. Visual: Modern office, AI interfaces, confident professionals. Colors: deep navy, teal, white. Smooth dolly shots. 4K. No text.`;
+      const runway = `${company} AI platform promo video. ${coreMessage.slice(0,150)}. Premium tech brand. Clean modern aesthetic. 16:9.`;
+      return {type:"video",kling,veo,runway};
     }
-    return {
-      type:"image",
-      dalle:"Professional "+del.name+" for "+company+" ("+industry+"). "+
-        "Style: modern, clean, corporate. High quality. No text. "+
-        (del.rawContent||del.description||"").slice(0,200)+
-        " --ar 16:9 --style corporate",
-      stability:"Professional "+del.name+" for "+company+". "+
-        "Corporate style, clean design, modern aesthetic. "+
-        (del.rawContent||del.description||"").slice(0,150),
-      midjourney:"/imagine "+del.name+" for "+company+" "+industry+", professional corporate photography, "+
-        "clean minimal design, modern, high quality --ar 16:9 --v 6",
-    };
+    const isComparison = ["comparison","diagram","vs","before","after","difference"].some((k:string)=>del.name.toLowerCase().includes(k));
+    const isHero = ["hero","banner","cover","header","main","feature"].some((k:string)=>del.name.toLowerCase().includes(k));
+    const colorMatch = rawContent.match(/#[0-9A-Fa-f]{6}/g);
+    const colors = colorMatch?colorMatch.slice(0,3).join(", "):"deep navy, teal, white";
+    const visualSpec = rawContent.split("\n").filter((l:string)=>l.length>20&&["visual","style","color","design","image","show","background"].some(kw=>l.toLowerCase().includes(kw))).slice(0,4).join(". ").slice(0,300);
+    let dalle = "";
+    if(isComparison){
+      dalle = `Clean professional infographic comparison for ${company}. Split: left=old manual workflow (warm reds/grays), right=AI-automated workflow (cool teals/white). Central transition arrow. McKinsey consulting aesthetic. ${colors} palette. Abstract icons only, no real text. White background. 16:9.`;
+    } else if(isHero){
+      dalle = `Premium hero image for ${company}, an AI ${industry} platform. ${visualSpec||"Futuristic glowing AI interface connected to business workflows."}. Professional aspirational enterprise aesthetic. ${colors}. Cinematic lighting, depth of field. No text overlays. 16:9 landscape.`;
+    } else {
+      dalle = `Professional marketing visual for ${company}, ${industry} AI platform. Deliverable: ${del.name}. ${visualSpec.slice(0,200)||"Modern corporate aesthetic, premium feel."}. Color palette: ${colors}. Ultra high quality, 16:9 ratio. No text overlays.`;
+    }
+    return {type:"image",dalle,midjourney:dalle+" --ar 16:9 --style raw --q 2",stability:dalle};
   },[]);
 
   const callDallE=useCallback(async(prompt,openaiKey)=>{
@@ -3260,7 +3280,10 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
           if(falKey){
             try{
               setProjectExecPhase("🎬 Generating video: "+del.name+" (this may take 60-90s)...");
-              const videoUrl=await callFalVideo(falKey,prompts.kling||prompts.veo,5);
+              const scriptContent=rawContentStore.current[del.id]||del.rawContent||"";
+              const voiceLines=scriptContent.split("\n").filter((l:string)=>l.includes("VOICEOVER")).map((l:string)=>l.replace(/\*\*VOICEOVER[^:]*:\*\*/i,"").trim()).filter(Boolean).join(" ").slice(0,400);
+              const cinematicP=voiceLines?`Cinematic ${del.name} for ${proj.context?.company?.name||""}. Key message: "${voiceLines}". Style: modern tech corporate, smooth camera, 4K, professional, aspirational. No text overlays. 16:9.`:(prompts.kling||prompts.veo||del.name);
+              const videoUrl=await callFalVideo(falKey,cinematicP,5);
               if(videoUrl){
                 const vr=await fetch(videoUrl);
                 const vBlob=await vr.blob();
@@ -4135,13 +4158,13 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         <div style={{position:"relative",padding:"6px 8px",borderBottom:"1px solid #1a2030"}}>
           <button onClick={()=>setShowModules(v=>!v)}
             style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"9px 12px",background:"rgba(20,184,166,0.06)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:8,cursor:"pointer",fontFamily:"Manrope,sans-serif",transition:"all 0.15s"}}>
-            <span style={{fontSize:16}}>{[["nerve","🧠"],["workflow","⚡"],["p3","🤖"],["chat","💬"],["data","🗄️"],["ledger","📒"],["dispatch","📡"],["actions","✅"],["studio","🎨"],["funding","💰"],["tokens","🔢"]].find(([v])=>v===view)?.[1]||"🧠"}</span>
-            <span style={{flex:1,fontSize:12,fontWeight:700,color:"#F1F5F9",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.04em"}}>{[["nerve","Nerve Center"],["workflow","Workflow"],["p3","Autopilot"],["chat","Chat"],["data","Data Hub"],["ledger","Ledger"],["dispatch","Pulse"],["actions","Tasks"],["studio","Studio"],["funding","Funding"],["tokens","Tokens"]].find(([v])=>v===view)?.[1]||"Nerve Center"}</span>
+            <span style={{fontSize:16}}>{[["nerve","🧠"],["workflow","⚡"],["agentic","🔗"],["agents","🤖"],["p3","🤖"],["chat","💬"],["data","🗄️"],["ledger","📒"],["dispatch","📡"],["actions","✅"],["studio","🎨"],["funding","💰"],["tokens","🔢"]].find(([v])=>v===view)?.[1]||"🧠"}</span>
+            <span style={{flex:1,fontSize:12,fontWeight:700,color:"#F1F5F9",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.04em"}}>{[["nerve","Nerve Center"],["workflow","Workflow"],["agentic","Agentic AI"],["agents","AI Agents"],["p3","Autopilot"],["chat","Chat"],["data","Data Hub"],["ledger","Ledger"],["dispatch","Pulse"],["actions","Tasks"],["studio","Studio"],["funding","Funding"],["tokens","Tokens"]].find(([v])=>v===view)?.[1]||"Nerve Center"}</span>
             <span style={{fontSize:10,color:"#5A6480",transition:"transform 0.2s",transform:showModules?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
           </button>
           {showModules&&(
-            <div style={{position:"absolute",top:"calc(100% - 6px)",left:8,right:8,background:"#131825",border:"1px solid #1e2433",borderRadius:10,zIndex:200,padding:8,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["ledger","📒","Ledger"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["agents","🤖","AI Agents"],["agentic","🔄","Agentic"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
+            <div style={{position:"absolute",top:"calc(100% - 6px)",left:8,right:8,background:"#131825",border:"1px solid #1e2433",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:8,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
+              {[["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["ledger","📒","Ledger"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["agents","🤖","AI Agents"],["agentic","🔄","Agentic"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
                 <button key={v} onClick={()=>{setView(v);setShowModules(false);}}
                   style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:view===v?"rgba(20,184,166,0.10)":"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"Manrope,sans-serif",marginBottom:2,transition:"background 0.12s"}}>
                   <span style={{fontSize:16,width:24,textAlign:"center"}}>{ic}</span>
