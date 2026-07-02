@@ -806,7 +806,7 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,mode
     timerId=setTimeout(()=>rej(new Error("Request timed out after "+(timeoutMs/1000)+"s. The AI provider may be busy — try switching to Gemini (free tier).")),timeoutMs);
   });
   const callP=(async()=>{
-    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT):provider==="kimi"?await callKimi(key,sys,msgs,maxT):Promise.reject(new Error("Unknown provider: "+provider));
+    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT):provider==="kimi"?await callKimi(key,sys,msgs,maxT):provider==="fal"?await(async()=>{const prompt=rawMsgs?.find((m:any)=>m.role==="user")?.content||"generate image";const url=await callFalImage(key,prompt);return{text:`🖼️ Image URL: ${url}`,truncated:false};})():Promise.reject(new Error("Unknown provider: "+provider));
     if(raw&&typeof raw==="object"&&"text" in raw)return raw as {text:string;truncated:boolean};
     return {text:raw as string,truncated:false};
   })();
@@ -857,6 +857,34 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
     if(!fallbackKey)throw new Error("No API keys available. Check Cloudflare environment variables.");
     const r=await callAI(fallback,fallbackKey,sys,msgs,maxT,false);
     return{primary:r.text,usedProvider:fallback};
+  }
+
+  // ── fal.ai media intercept ───────────────────────────────────────────────
+  // image_gen / video_gen / diagram route to fal.ai directly — NOT through callAI.
+  // callAI is text-only; fal.ai returns image/video URLs.
+  if(active==="fal"){
+    const falKey=key;
+    const mediaPrompt=msgs?.find((m:any)=>m.role==="user")?.content||sys||"generate image";
+    try{
+      if(resolvedTask==="video_gen"){
+        const videoUrl=await callFalVideo(falKey,mediaPrompt,5);
+        return{primary:`✅ Video generated successfully.\n\n🎬 **Video URL:** ${videoUrl}\n\nCopy the URL above to view or download your video. You can also paste it into any video player.`,usedProvider:"fal"};
+      } else {
+        // image_gen and diagram both generate images (Ideogram for diagrams, Flux for images)
+        const imgModel = resolvedTask==="diagram" ? "fal-ai/ideogram/v3" : "fal-ai/flux-pro";
+        const imageUrl=await callFalImage(falKey,mediaPrompt,imgModel);
+        return{primary:`✅ Image generated successfully.\n\n🖼️ **Image URL:** ${imageUrl}\n\n![Generated Image](${imageUrl})\n\nRight-click the image URL to save. Use this in your presentations, documents, or social media.`,usedProvider:"fal"};
+      }
+    }catch(falErr:any){
+      // fal failed — fall back to best available text provider for description
+      const textFallback=["claude","openai","deepseek","gemini","groq"].find(p=>effectiveKeys[p]?.trim());
+      if(textFallback){
+        const fbKey=effectiveKeys[textFallback]?.trim();
+        const fbr=await callAI(textFallback,fbKey,sys,msgs,maxT,false);
+        return{primary:`⚠️ fal.ai media generation failed (${falErr.message}). Here is a text description instead:\n\n${fbr.text}`,usedProvider:textFallback};
+      }
+      throw falErr;
+    }
   }
 
   try{
