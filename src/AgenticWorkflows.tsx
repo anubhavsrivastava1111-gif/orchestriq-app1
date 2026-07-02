@@ -3,6 +3,7 @@
 // No external dependencies beyond TokenAnalytics.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import BusinessExecutionEngine from "./lib/BusinessExecutionEngine";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { saveRecord, estimateCost, estimateTokens } from "./TokenAnalytics";
 
@@ -194,6 +195,7 @@ export class WorkflowStepExecutor {
     private dlFile: (name: string, content: any, mime?: string) => void,
     private parseSections: (md: string) => Array<{ title: string; lines: string[] }>,
     private stripMd: (s: string) => string,
+    private beEngine?: BusinessExecutionEngine,
   ) {}
 
   async executeStep(
@@ -307,12 +309,37 @@ ${result.output}`;
   async generateExcel(
     sheetData: Record<string, string[][]>,
     filename: string,
+    objective?: string,
+    companyContext?: string,
+    aiOutput?: string,
   ): Promise<void> {
+    // Use BusinessExecutionEngine for professional output when available and we have AI content
+    if (this.beEngine && (aiOutput || objective)) {
+      try {
+        const del: any = {
+          type: "excel", title: filename.replace(/\.xlsx$/i,""),
+          purpose: objective || filename,
+          audience: "cfo", qualityStandard: "cfo_model", priority: "primary",
+        };
+        const plan: any = {
+          objectiveRestated: objective || filename,
+          domain: "finance", persona: "Senior FP&A Manager",
+          audience: "cfo", qualityStandard: "cfo_model",
+          decisionContext: objective || filename,
+          deliverables: [del], missingInfo: [], executionOrder: [del.title], validationCriteria: [],
+        };
+        await this.beEngine.generateExcel(plan, del, companyContext || "", aiOutput || "", "USD", "$", () => {});
+        return;
+      } catch { /* fall through to basic generation */ }
+    }
+    // Fallback: basic multi-sheet generation
     const XLSX = await this.ensureXLSX();
     const wb = XLSX.utils.book_new();
     Object.entries(sheetData).forEach(([name, rows]) => {
       const ws = XLSX.utils.aoa_to_sheet(rows);
       ws["!cols"] = rows[0]?.map(() => ({ wch: 20 })) || [];
+      ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+      ws["!autofilter"] = { ref: `A1:${String.fromCharCode(64 + (rows[0]?.length || 1))}1` };
       XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
     });
     const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
@@ -324,7 +351,27 @@ ${result.output}`;
     setTimeout(() => URL.revokeObjectURL(u), 200);
   }
 
-  async generateDocx(content: string, title: string, filename: string): Promise<void> {
+  async generateDocx(content: string, title: string, filename: string, objective?: string, companyContext?: string): Promise<void> {
+    if (this.beEngine && content.length > 200) {
+      try {
+        const del: any = {
+          type: "docx", title,
+          purpose: objective || title,
+          audience: "client", qualityStandard: "client_deliverable", priority: "primary",
+        };
+        const plan: any = {
+          objectiveRestated: objective || title,
+          domain: "general", persona: "Senior Consultant",
+          audience: "client", qualityStandard: "client_deliverable",
+          decisionContext: objective || title,
+          deliverables: [del], missingInfo: [], executionOrder: [title], validationCriteria: [],
+        };
+        await this.beEngine.generateDocx(plan, del, companyContext || "", content, () => {});
+        return;
+      } catch { /* fall through to basic generation */ }
+    }
+    // Fallback: basic DOCX generation
+
     const secs = this.parseSections(content);
     let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><style>body{font-family:Calibri,sans-serif;font-size:11pt;margin:72pt;}h1{font-size:18pt;color:#14B8A6;}h2{font-size:13pt;color:#0D6EFD;}p{line-height:1.5;}table{border-collapse:collapse;width:100%;}th{background:#14B8A6;color:#fff;padding:5pt 8pt;}td{padding:4pt 8pt;border-bottom:1pt solid #ddd;}</style></head><body><h1>${title}</h1>`;
     for (const sec of secs) {
@@ -1112,10 +1159,18 @@ export default function AgenticWorkflows({
 
   useEffect(() => {
     setRuns(loadRuns());
-    // Pass askRef.current wrapper so executor always uses latest ask without
-    // needing to be recreated (avoids re-render cascade).
+    // Stable ask wrapper via ref — avoids infinite render loop
     const stableAsk = (...args: Parameters<typeof ask>) => askRef.current(...args);
-    executorRef.current = new WorkflowStepExecutor(stableAsk, ensureXLSX, ensureJsPDF, ensurePptx, dlFile, parseSections, stripMd);
+    // BusinessExecutionEngine: routes document generation through shared engine
+    // ZIP injection: files go into workflow output folder, not direct download
+    const beEngine = new BusinessExecutionEngine(
+      stableAsk, ensureXLSX, ensurePptx, ensureJsPDF,
+      dlFile,  // direct download for workflow step outputs
+      stripMd,
+    );
+    executorRef.current = new WorkflowStepExecutor(
+      stableAsk, ensureXLSX, ensureJsPDF, ensurePptx, dlFile, parseSections, stripMd, beEngine
+    );
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Intentionally empty: module-level fns are stable; ask updated via ref above
 
@@ -1828,3 +1883,4 @@ ${csv}
 
   return null;
 }
+  }
