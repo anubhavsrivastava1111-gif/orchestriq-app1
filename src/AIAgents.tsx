@@ -582,7 +582,9 @@ interface AIAgentsProps {
   compData: any;
   keys: Record<string,string>;
   defP: string;
-  ask: (sys: string, msgs: any[], maxT?: number) => Promise<any>;
+  ask: (sys: string, msgs: any[], maxT?: number, enableSearch?: boolean, taskType?: string) => Promise<any>;
+  askImage?: (prompt: string, size?: string, model?: string) => Promise<string>;
+  askVideo?: (prompt: string, durationSec?: number, model?: string) => Promise<string>;
   showToast: (msg: string, type?: string) => void;
   dlFile: (name: string, content: any, mime?: string) => void;
   ensureJsPDF: () => Promise<any>;
@@ -603,7 +605,7 @@ interface AIAgentsProps {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function AIAgents({
-  co, compData, keys, defP, ask, showToast, dlFile,
+  co, compData, keys, defP, ask, askImage, askVideo, showToast, dlFile,
   ensureJsPDF, ensureXLSX, ensurePptx, ensureJSZip,
   parseSections, stripMd, brSessions, setBrSessions,
   actionItems, setActionItems, sv
@@ -728,11 +730,34 @@ export default function AIAgents({
         }
       } catch {}
 
+      // ── MEDIA GENERATION ───────────────────────────────────────────────────
+      let generatedImageUrl: string|undefined;
+      let generatedVideoUrl: string|undefined;
+      const rLow = mainReport.toLowerCase();
+      if (askImage && (rLow.includes("[generate image:") || agent.exportFormats?.includes("image"))) {
+        try {
+          const m = mainReport.match(/\[generate image:\s*([^\]]{10,500})\]/i);
+          const p = m ? m[1] : agent.name+" for "+co.name+". "+mainReport.slice(0,300);
+          generatedImageUrl = await askImage(p,"landscape_4_3");
+          if (generatedImageUrl) mainReport = mainReport.replace(/\[generate image:[^\]]*\]/gi,"")
+            +`\n\n---\n**✅ Image Generated**\n\n🖼️ [View Image](${generatedImageUrl})\n\n![${agent.name}](${generatedImageUrl})`;
+        } catch(e:any){ mainReport+=`\n\n*Image generation failed: ${(e.message||"").slice(0,80)}*`; }
+      }
+      if (askVideo && (rLow.includes("[generate video:") || agent.exportFormats?.includes("video"))) {
+        try {
+          const m = mainReport.match(/\[generate video:\s*([^\]]{10,500})\]/i);
+          const p = m ? m[1] : agent.name+" for "+co.name+". "+mainReport.slice(0,300);
+          generatedVideoUrl = await askVideo(p,5);
+          if (generatedVideoUrl) mainReport = mainReport.replace(/\[generate video:[^\]]*\]/gi,"")
+            +`\n\n---\n**✅ Video Generated**\n\n🎬 [Download Video](${generatedVideoUrl})`;
+        } catch(e:any){ mainReport+=`\n\n*Video generation failed: ${(e.message||"").slice(0,80)}*`; }
+      }
       const parsed = parseEvidence(mainReport);
       const run: AgentRun = {
         id: Date.now().toString(36), agentId:agent.id, agentName:agent.name,
         input: inputData.slice(0,300), mode: workingMode,
-        output: { mainReport, excelSchema, automationGuide, emailDraft, actionItems:agentActionItems, ...parsed },
+        output: { mainReport, excelSchema, automationGuide, emailDraft, actionItems:agentActionItems,
+                  generatedImageUrl, generatedVideoUrl, ...parsed },
         ts: new Date().toISOString(), industry,
       };
       saveRecord({ feature:"AI Agents — "+agent.name, featureIcon:agent.icon, provider:defP, model:defP, inputTokens:estimateTokens(inputData), outputTokens:estimateTokens(mainReport), costUsd:estimateCost(defP,estimateTokens(inputData),estimateTokens(mainReport)) });
@@ -741,7 +766,7 @@ export default function AIAgents({
     } catch (e:any) {
       showToast("Agent failed: "+(e.message||"Unknown error"), "error");
     } finally { setRunning(false); }
-  }, [userInput, workingMode, uploadedText, photoNotes, uploadedFileName, industry, co, compData, ask, defP, preferences, showToast, saveHistory]);
+  }, [userInput, workingMode, uploadedText, photoNotes, uploadedFileName, industry, co, compData, ask, askImage, askVideo, defP, preferences, showToast, saveHistory]);
 
   // ─── ORCHESTRATOR ─────────────────────────────────────────────────────────
   const runOrchestrator = useCallback(async (input: string) => {
