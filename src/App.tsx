@@ -143,12 +143,9 @@ const CLAUDE_TASK_MODEL: Record<string,string> = {
 // Called automatically inside callMulti — no change needed at call sites.
 function detectTaskType(prompt: string, context = ""): string {
   const t = (prompt + " " + context).toLowerCase();
-  if (/\b(image|photo|picture|screenshot|generate.*image|create.*image|design.*logo|advertisement.*image|product.*image)\b/.test(t)) return "image_gen";
-  if (/\b(video|animation|reel|clip|advertisement.*video|create.*video|generate.*video|explainer.*video)\b/.test(t)) return "video_gen";
-  if (/\b(diagram|flowchart|org.*chart|process.*map|architecture.*diagram)\b/.test(t)) return "diagram";
-  if (/\b(excel|spreadsheet|xlsx|xlsm|macro|vba|pivot|vlookup|hlookup|sumif|countif|index.*match|named.*range|data.*validation|conditional.*format|multi.*tab|workbook)\b/.test(t)) return "excel_advanced";
-  if (/\b(powerpoint|pptx|slide|presentation|deck|keynote|pitch.*deck)\b/.test(t)) return "powerpoint";
-  if (/\b(research|latest|current news|today|market.*data|competitor|pricing.*202[4-9]|live data|search.*web|recent development)\b/.test(t)) return "research";
+  if (/\b(generate\s+(?:an?\s+)?image|create\s+(?:an?\s+)?(?:image|photo|picture)|make\s+(?:an?\s+)?image|draw\s+(?:an?\s+)?image|render\s+(?:an?\s+)?(?:image|photo)|design\s+(?:an?\s+)?logo\s+for\s+me)\b/.test(t)) return "image_gen";
+  if (/\b(generate\s+(?:an?\s+)?video|create\s+(?:an?\s+)?video\s+(?:for|of|showing)|make\s+(?:an?\s+)?video|produce\s+(?:an?\s+)?video|render\s+(?:an?\s+)?video|animate\s+this|generate\s+(?:an?\s+)?reel)\b/.test(t)) return "video_gen";
+  if (/\b(draw\s+(?:me\s+)?(?:a\s+)?diagram|generate\s+(?:a\s+)?(?:flowchart|diagram)|create\s+(?:a\s+)?(?:flowchart|org\s+chart|process\s+map|architecture\s+diagram))\b/.test(t)) return "diagram";
   if (/\b(p&l|profit.*loss|balance.*sheet|cash.*flow|forecast|budget.*model|ebitda|irr|npv|financial.*model|variance.*analysis|mis.*report|revenue.*projection)\b/.test(t)) return "financial";
   if (/\b(audit|sox|itgc|compliance|risk.*register|internal.*control|workpaper|finding|assurance|concur|servicenow)\b/.test(t)) return "audit";
   if (/\b(photo|ocr|scan.*document|extract.*from.*image|read.*image|visual.*analysis)\b/.test(t)) return "vision";
@@ -2572,7 +2569,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       const ctx=buildProjectContext();
       const nl="\n";
       const architectSys="You are the Project Architect for "+co.name+". Decompose the objective into a structured Execution Plan."+nl+nl+"COMPANY: "+ctx.company.name+" | "+ctx.company.industry+" | "+ctx.company.stage+" | "+ctx.company.location+" | "+ctx.company.currencySymbol+ctx.company.currency+nl+(Object.keys(ctx.dataHub).length>0?"DATA HUB:"+nl+Object.entries(ctx.dataHub).map(function(e){return e[0]+": "+e[1];}).join(nl)+nl:"")+( ctx.boardroomDecisions.length>0?"RECENT DECISIONS:"+nl+ctx.boardroomDecisions.map(function(d){return "Q: "+d.question+" -> "+d.decisionStatus;}).join(nl)+nl:"")+nl+"OUTPUT: Return ONLY valid JSON (no markdown fences) matching this exact schema:"+nl+'{"name":"short project name","objective":"one sentence","complexity":"simple|moderate|complex","estimatedDuration":"e.g. 2-3 hours","modules":[{"id":"module_id","name":"Module Name","icon":"emoji","capabilityType":"marketing|design|content|finance|legal|management|engineering|research|compliance","primaryPersona":"cmo","rationale":"why needed","deliverables":[{"id":"del_moduleid_001","name":"Deliverable Name","description":"what it must contain","outputFormat":"docx|xlsx|pdf|pptx|md|txt|image_prompt|video_prompt","dependsOn":[],"verificationStatus":"AI Generated","confidenceScore":0,"sourceReferences":[]}]}]}'+nl+nl+templateHint+nl+nl+"RULES:"+nl+"1. Every deliverable must be a real file not a discussion."+nl+"2. Use only modules genuinely required."+nl+"3. Min 2 max 8 modules. Min 1 max 5 deliverables each."+nl+"4. dependsOn IDs must reference earlier deliverable ids."+nl+"5. Currency symbol: "+ctx.company.currencySymbol;
-      const raw=await ask(architectSys,[{role:"user",content:"Objective: "+projectObjective}],2500);
+      const raw=await ask(architectSys,[{role:"user",content:"Objective: "+projectObjective}],2500,false,"general");
       let plan=null;
       try{
         const cleaned=raw.trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/```\s*$/,"");
@@ -3843,7 +3840,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
       if(!isPdf){
         try{
           const qeSys=buildSys(pa,co,compData)+"\n\nWORKSPACE CORPUS TO SYNTHESIZE:\n"+corpus+"\n\n"+buildStructuredDeckPrompt(userTitle,tLabel);
-          const qeRaw=await ask(qeSys,[{role:"user",content:"Build the structured slide JSON now."}],4000);
+          const qeRaw=await ask(qeSys,[{role:"user",content:"Build the structured slide JSON now."}],4000,false,"general");
           const slides=parseStructuredDeck(qeRaw);
           if(slides){
             setExpStep("📊 Building PowerPoint (consulting-grade)…");
