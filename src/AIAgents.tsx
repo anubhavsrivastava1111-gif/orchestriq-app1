@@ -1,3 +1,4 @@
+import BusinessExecutionEngine from "./lib/BusinessExecutionEngine";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { saveRecord, estimateCost, estimateTokens } from "./TokenAnalytics";
 
@@ -553,7 +554,35 @@ async function callAgent(sys: string, input: string, ask: any): Promise<string> 
   return JSON.stringify(raw);
 }
 
-async function buildExcelWorkbook(schema: ExcelSchema, ensureXLSX: ()=>Promise<any>, agentName: string): Promise<void> {
+async function buildExcelWorkbook(
+  schema: ExcelSchema,
+  ensureXLSX: ()=>Promise<any>,
+  agentName: string,
+  beEngine?: BusinessExecutionEngine,
+  objective?: string,
+  companyContext?: string,
+  aiOutput?: string,
+): Promise<void> {
+  // Route through BusinessExecutionEngine for professional output
+  if (beEngine && (aiOutput || objective)) {
+    try {
+      const del: any = {
+        type: "excel", title: agentName,
+        purpose: objective || agentName,
+        audience: "cfo" as const, qualityStandard: "cfo_model" as const, priority: "primary" as const,
+      };
+      const plan: any = {
+        objectiveRestated: objective || agentName,
+        domain: "finance", persona: "Senior FP&A Manager",
+        audience: "cfo", qualityStandard: "cfo_model",
+        decisionContext: objective || agentName,
+        deliverables: [del], missingInfo: [], executionOrder: [agentName], validationCriteria: [],
+      };
+      await beEngine.generateExcel(plan, del, companyContext || "", aiOutput || "", "USD", "$", () => {});
+      return;
+    } catch { /* fall through to schema-based generation */ }
+  }
+  // Fallback: schema-based XLSX
   const XLSX = await ensureXLSX();
   const wb = XLSX.utils.book_new();
   schema.sheets.forEach(sheet => {
@@ -562,6 +591,13 @@ async function buildExcelWorkbook(schema: ExcelSchema, ensureXLSX: ()=>Promise<a
     (sheet.rows||[]).forEach(row => rows.push(row));
     const ws = rows.length > 0 ? XLSX.utils.aoa_to_sheet(rows) : XLSX.utils.aoa_to_sheet([[sheet.name],["No data extracted"]]);
     ws["!cols"] = sheet.headers.map(() => ({ wch: 20 }));
+    ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+    if (sheet.headers.length) {
+      sheet.headers.forEach((_: any, ci: number) => {
+        const ref = `${String.fromCharCode(65+ci)}1`;
+        if (ws[ref]) ws[ref].s = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "1E3A5F" } } };
+      });
+    }
     XLSX.utils.book_append_sheet(wb, ws, sheet.name.slice(0,31));
   });
   const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
@@ -823,12 +859,46 @@ export default function AIAgents({
     const nm = run.agentName.replace(/\s+/g,"-");
     const content = editedOutput || run.output.mainReport;
 
-    if (format==="xlsx" && run.output.excelSchema?.sheets?.length) {
-      await buildExcelWorkbook(run.output.excelSchema, ensureXLSX, run.agentName);
+    if (format==="xlsx") {
+      // Prefer BusinessExecutionEngine for CFO-grade workbook
+      const _beEng = new BusinessExecutionEngine(
+        async(sys:any,msgs:any,maxT?:any,_es?:any,tt?:any)=>ask(sys,msgs,maxT,false,tt||"excel_advanced"),
+        ensureXLSX, ensurePptx, ensureJsPDF, dlFile, stripMd,
+      );
+      const _coCtx = [co?.name, co?.industry, co?.stage, co?.location].filter(Boolean).join(" | ");
+      await buildExcelWorkbook(
+        run.output.excelSchema || { sheets: [] },
+        ensureXLSX, run.agentName, _beEng,
+        run.input.slice(0,200),
+        _coCtx,
+        content,
+      );
       return;
     }
     if (format==="md") { dlFile(nm+".md",content,"text/plain"); return; }
     if (format==="docx") {
+      // Use BusinessExecutionEngine for publication-quality DOCX
+      try {
+        const _beEng = new BusinessExecutionEngine(
+          async(sys:any,msgs:any,maxT?:any,_es?:any,tt?:any)=>ask(sys,msgs,maxT,false,tt||"general"),
+          ensureXLSX, ensurePptx, ensureJsPDF, dlFile, stripMd,
+        );
+        const _coCtx = [co?.name, co?.industry, co?.stage, co?.location].filter(Boolean).join(" | ");
+        const _del: any = {
+          type:"docx", title: run.agentName, purpose: run.input.slice(0,200),
+          audience:"client", qualityStandard:"client_deliverable", priority:"primary",
+        };
+        const _plan: any = {
+          objectiveRestated: run.input.slice(0,200),
+          domain:"general", persona:"Senior Consultant",
+          audience:"client", qualityStandard:"client_deliverable",
+          decisionContext: run.input.slice(0,200),
+          deliverables:[_del], missingInfo:[], executionOrder:[run.agentName], validationCriteria:[],
+        };
+        await _beEng.generateDocx(_plan, _del, _coCtx, content, ()=>{});
+        return;
+      } catch {}
+      // Fallback: basic DOCX
       const secs = parseSections(content);
       let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><style>body{font-family:Calibri,sans-serif;font-size:11pt;margin:72pt;}h1{font-size:20pt;color:#14B8A6;border-bottom:2pt solid #14B8A6;padding-bottom:4pt;}h2{font-size:14pt;color:#0D6EFD;margin-top:14pt;}h3{font-size:12pt;color:#333;}p{line-height:1.5;margin:4pt 0;}table{border-collapse:collapse;width:100%;margin:8pt 0;}th{background:#14B8A6;color:#fff;padding:5pt 8pt;text-align:left;}td{padding:4pt 8pt;border-bottom:1pt solid #e2e2e2;}tr:nth-child(even) td{background:#f6f8fb;}</style></head><body><h1>${run.agentName}</h1><p><em>${co?.name||""} · ${new Date(run.ts).toLocaleDateString()} · Confidence: ${run.output.confidence}%</em></p>`;
       for (const sec of secs) {
