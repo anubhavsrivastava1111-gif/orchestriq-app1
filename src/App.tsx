@@ -2974,7 +2974,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   const buildMediaPrompt=useCallback((del,ctx)=>{
     const company=ctx?.company?.name||"the company";
     const industry=ctx?.company?.industry||"business";
-    const isImage=["image_prompt","design","banner","logo","creative","mockup","infographic"].some(k=>del.name.toLowerCase().includes(k)||del.outputFormat==="image_prompt");
+    const isImage=del.outputFormat==="image"||["image_prompt","image","design","banner","logo","creative","mockup","infographic","diagram","visual","hero","comparison"].some(k=>del.name.toLowerCase().includes(k)||del.outputFormat==="image_prompt");
     const isVideo=["video","animation","storyboard","veo","film"].some(k=>del.name.toLowerCase().includes(k)||del.outputFormat==="video_prompt");
     if(isVideo){
       return {
@@ -3232,12 +3232,21 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
             })();
             zip.folder(folder).file(fname+".pdf",buf);
           }catch{zip.folder(folder).file(fname+".md",content);}
+        } else if(fmt==="image"||fmt==="video"){
+          // Image and video deliverables are handled in Phase 5 (media generation).
+          // Save the AI-generated description/script as markdown for reference.
+          const mediaRef=fmt==="video"?"## Video Script\n\n"+content:"## Image Brief\n\n"+content;
+          zip.folder(folder).file(fname+"-brief.md",mediaRef);
+        } else if(fmt==="svg"){
+          // SVG diagrams — save as proper .svg file that opens in browsers
+          const svgContent=content.includes("<svg")?content:"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 800 500\">\n"+content+"\n</svg>";
+          zip.folder(folder).file(fname+".svg",svgContent);
         } else {
           zip.folder(folder).file(fname+"."+(fmt||"txt"),content);
         }
       } // end for(const del of done)
       // Phase 5: Media generation
-      const mediaDels=done.filter(d=>d.outputFormat==="image_prompt"||d.outputFormat==="video_prompt"||["image_prompt","video_prompt"].some(k=>d.name.toLowerCase().includes("image")||d.name.toLowerCase().includes("video")||d.name.toLowerCase().includes("design")||d.name.toLowerCase().includes("banner")));
+      const mediaDels=done.filter(d=>d.outputFormat==="image"||d.outputFormat==="video"||d.outputFormat==="image_prompt"||d.outputFormat==="video_prompt"||d.name.toLowerCase().includes("image")||d.name.toLowerCase().includes("video")||d.name.toLowerCase().includes("design")||d.name.toLowerCase().includes("banner")||d.name.toLowerCase().includes("creative")||d.name.toLowerCase().includes("visual")||d.name.toLowerCase().includes("diagram"));
       const mediaPromptLines=["# Media Generation Prompts","Generated: "+new Date().toLocaleString(),"","These prompts are ready to paste into your chosen tool.",""];
       for(const del of mediaDels){
         const ctx=proj.context||{};
@@ -3246,7 +3255,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
         mediaPromptLines.push("## "+del.name);
         const falKey=(keys.fal||EFF_FAL)?.trim();
-        if(prompts.type==="video"){
+        if(prompts.type==="video"||del.outputFormat==="video"){
           // ── VIDEO: Generate via fal.ai (Kling), fall back to prompts ───────
           if(falKey){
             try{
@@ -3280,7 +3289,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
               setProjectExecPhase("🖼 Generating image via fal.ai: "+del.name);
               const imgModel=del.name.toLowerCase().includes("diagram")||del.name.toLowerCase().includes("infographic")
                 ?"fal-ai/ideogram/v3":"fal-ai/flux-pro";
-              const imgUrl=await callFalImage(falKey,prompts.dalle||prompts.stability||del.description,imgModel);
+              const imgPromptText=prompts.dalle||prompts.stability||del.description||(rawContentStore.current[del.id]||del.rawContent||"").slice(0,600)||del.name;const imgUrl=await callFalImage(falKey,imgPromptText,imgModel);
               if(imgUrl){
                 const ir=await fetch(imgUrl);
                 const ib=await ir.blob();
