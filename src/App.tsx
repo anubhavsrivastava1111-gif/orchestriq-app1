@@ -2049,23 +2049,26 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     setPage("app");
   };
 
-  // taskType is optional — if omitted, auto-detected from prompt via detectTaskType()
-  // Examples: ask(sys,msgs,4000,false,"excel_advanced") → Claude Sonnet
-  //           ask(sys,msgs,3000,false,"general")        → DeepSeek (cheapest)
-  //           askImage(prompt,"landscape_4_3")          → fal.ai Flux Pro
-  const ask=async(sys,msgs,maxT,enableSearch,taskType="")=>(await callMulti(keys,defP,sys,msgs,maxT,enableSearch,taskType)).primary;
-  const askFull=async(sys,msgs,maxT,enableSearch,taskType="")=>await callMulti(keys,defP,sys,msgs,maxT,enableSearch,taskType);
-  // Media generation helpers — use keys.fal from the keys prop
-  const askImage=async(prompt:string,size="landscape_4_3",model="fal-ai/flux-pro"):Promise<string>=>{
+  // ── Stable AI call helpers ─────────────────────────────────────────────────
+  // CRITICAL: All wrapped in useCallback with [keys,defP] deps.
+  // Without useCallback these are recreated every render → AgenticWorkflows
+  // useEffect([ask,...]) fires every render → infinite loop → stack overflow.
+  const ask=useCallback(async(sys:any,msgs:any,maxT?:any,enableSearch?:any,taskType?:any)=>
+    (await callMulti(keys,defP,sys,msgs,maxT,enableSearch,taskType)).primary,
+  [keys,defP]);
+  const askFull=useCallback(async(sys:any,msgs:any,maxT?:any,enableSearch?:any,taskType?:any)=>
+    callMulti(keys,defP,sys,msgs,maxT,enableSearch,taskType),
+  [keys,defP]);
+  const askImage=useCallback(async(prompt:string,size="landscape_4_3",model="fal-ai/flux-pro"):Promise<string>=>{
     const falKey=(keys.fal||EFF_FAL)?.trim();
-    if(!falKey)throw new Error("Add your fal.ai API key in Settings to generate images.");
+    if(!falKey)throw new Error("Add your fal.ai API key in Settings → fal.ai to generate images.");
     return callFalImage(falKey,prompt,model);
-  };
-  const askVideo=async(prompt:string,durationSec=5,model="fal-ai/kling-video/v1.6/standard/text-to-video"):Promise<string>=>{
+  },[keys]);
+  const askVideo=useCallback(async(prompt:string,durationSec=5,model="fal-ai/kling-video/v1.6/standard/text-to-video"):Promise<string>=>{
     const falKey=(keys.fal||EFF_FAL)?.trim();
-    if(!falKey)throw new Error("Add your fal.ai API key in Settings to generate videos.");
+    if(!falKey)throw new Error("Add your fal.ai API key in Settings → fal.ai to generate videos.");
     return callFalVideo(falKey,prompt,durationSec,model);
-  };
+  },[keys]);
 
   // Extracts candidate action items from a Boardroom/Autopilot/TimeMachine output and opens the review modal
   const extractActionItems=async(sourceType:ActionItem["source"],sourceLabel:string,content:string)=>{
@@ -3239,40 +3242,86 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       for(const del of mediaDels){
         const ctx=proj.context||{};
         const prompts=buildMediaPrompt(del,ctx);
+        const folder=del._modName.replace(/[^a-zA-Z0-9]/g,"-");
+        const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
         mediaPromptLines.push("## "+del.name);
+        const falKey=(keys.fal||EFF_FAL)?.trim();
         if(prompts.type==="video"){
-          mediaPromptLines.push("","### Google Veo Prompt","```",prompts.veo,"```","","### Runway ML Prompt","```",prompts.runway,"```","","### Kling AI Prompt","```",prompts.kling,"```","");
-        } else {
-          mediaPromptLines.push("","### DALL-E 3 Prompt","```",prompts.dalle,"```","","### Midjourney Prompt","```",prompts.midjourney,"```","","### Stability AI Prompt","```",prompts.stability,"```","");
-          // Generate real image if paid mode selected
-          if(mediaMode.image==="dalle"&&keys.openai?.trim()){
+          // ── VIDEO: Generate via fal.ai (Kling), fall back to prompts ───────
+          if(falKey){
             try{
-              setProjectExecPhase("🖼 Generating image: "+del.name);
+              setProjectExecPhase("🎬 Generating video: "+del.name+" (this may take 60-90s)...");
+              const videoUrl=await callFalVideo(falKey,prompts.kling||prompts.veo,5);
+              if(videoUrl){
+                const vr=await fetch(videoUrl);
+                const vBlob=await vr.blob();
+                const vBuf=await vBlob.arrayBuffer();
+                zip.folder(folder).file(fname+".mp4",vBuf);
+                mediaPromptLines.push("","**✅ Video generated and saved as: "+fname+".mp4**","");
+              }
+            }catch(e:any){
+              // Generation failed — save prompts as fallback
+              mediaPromptLines.push("","*⚠️ Video generation failed ("+e.message.slice(0,80)+"). Prompts saved below.*","");
+              mediaPromptLines.push("","### Kling / fal.ai Prompt","```",prompts.kling||"","```","");
+              mediaPromptLines.push("### Google Veo Prompt","```",prompts.veo||"","```","");
+              mediaPromptLines.push("### Runway ML Prompt","```",prompts.runway||"","```","");
+            }
+          } else {
+            // No fal key — save high-quality prompts ready to use
+            mediaPromptLines.push("","### Kling / fal.ai Prompt (add fal.ai key to auto-generate)","```",prompts.kling||"","```","");
+            mediaPromptLines.push("### Google Veo Prompt","```",prompts.veo||"","```","");
+            mediaPromptLines.push("### Runway ML Prompt","```",prompts.runway||"","```","");
+          }
+        } else {
+          // ── IMAGE: fal.ai first, then DALL-E, then Stability, then prompts ─
+          let imgGenerated=false;
+          if(falKey&&!imgGenerated){
+            try{
+              setProjectExecPhase("🖼 Generating image via fal.ai: "+del.name);
+              const imgModel=del.name.toLowerCase().includes("diagram")||del.name.toLowerCase().includes("infographic")
+                ?"fal-ai/ideogram/v3":"fal-ai/flux-pro";
+              const imgUrl=await callFalImage(falKey,prompts.dalle||prompts.stability||del.description,imgModel);
+              if(imgUrl){
+                const ir=await fetch(imgUrl);
+                const ib=await ir.blob();
+                const ibuf=await ib.arrayBuffer();
+                zip.folder(folder).file(fname+".png",ibuf);
+                mediaPromptLines.push("","**✅ Image generated via fal.ai and saved as: "+fname+".png**","");
+                imgGenerated=true;
+              }
+            }catch(e:any){
+              mediaPromptLines.push("","*⚠️ fal.ai image failed ("+e.message.slice(0,60)+"), trying next provider...*","");
+            }
+          }
+          if(!imgGenerated&&mediaMode.image==="dalle"&&keys.openai?.trim()){
+            try{
+              setProjectExecPhase("🖼 Generating image via DALL-E: "+del.name);
               const imgUrl=await callDallE(prompts.dalle,keys.openai);
               if(imgUrl){
-                const imgR=await fetch(imgUrl);
-                const imgBlob=await imgR.blob();
-                const imgBuf=await imgBlob.arrayBuffer();
-                const folder=del._modName.replace(/[^a-zA-Z0-9]/g,"-");
-                const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
-                zip.folder(folder).file(fname+".png",imgBuf);
-                mediaPromptLines.push("**Generated image saved as: "+fname+".png**","");
+                const ir=await fetch(imgUrl);const ib=await ir.blob();const ibuf=await ib.arrayBuffer();
+                zip.folder(folder).file(fname+".png",ibuf);
+                mediaPromptLines.push("","**✅ Image generated via DALL-E and saved as: "+fname+".png**","");
+                imgGenerated=true;
               }
-            }catch(e){mediaPromptLines.push("*Image generation failed: "+e.message.slice(0,60)+"*","");}
-          } else if(mediaMode.image==="stability"&&keys.stability?.trim()){
+            }catch(e:any){mediaPromptLines.push("","*DALL-E failed: "+e.message.slice(0,60)+"*","");}
+          }
+          if(!imgGenerated&&mediaMode.image==="stability"&&keys.stability?.trim()){
             try{
-              setProjectExecPhase("🖼 Generating image: "+del.name);
+              setProjectExecPhase("🖼 Generating image via Stability: "+del.name);
               const imgUrl=await callStabilityAI(prompts.stability,keys.stability);
               if(imgUrl){
-                const imgR=await fetch(imgUrl);
-                const imgBlob=await imgR.blob();
-                const imgBuf=await imgBlob.arrayBuffer();
-                const folder=del._modName.replace(/[^a-zA-Z0-9]/g,"-");
-                const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
-                zip.folder(folder).file(fname+".png",imgBuf);
-                mediaPromptLines.push("**Generated image saved as: "+fname+".png**","");
+                const ir=await fetch(imgUrl);const ib=await ir.blob();const ibuf=await ib.arrayBuffer();
+                zip.folder(folder).file(fname+".png",ibuf);
+                mediaPromptLines.push("","**✅ Image generated via Stability AI and saved as: "+fname+".png**","");
+                imgGenerated=true;
               }
-            }catch(e){mediaPromptLines.push("*Image generation failed: "+e.message.slice(0,60)+"*","");}
+            }catch(e:any){mediaPromptLines.push("","*Stability AI failed: "+e.message.slice(0,60)+"*","");}
+          }
+          if(!imgGenerated){
+            // All providers failed or no key — save quality prompts
+            mediaPromptLines.push("","### DALL-E 3 Prompt","```",prompts.dalle||"","```","");
+            mediaPromptLines.push("### Midjourney Prompt","```",prompts.midjourney||"","```","");
+            mediaPromptLines.push("*(Add fal.ai key in Settings to auto-generate images)*","");
           }
         }
       }
@@ -5031,6 +5080,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
             keys={keys}
             defP={defP}
             ask={ask}
+            askImage={askImage}
+            askVideo={askVideo}
             showToast={showToast}
             dlFile={dlFile}
             ensureJsPDF={ensureJsPDF}
@@ -5049,6 +5100,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         {view==="agentic"&&(
           <AgenticWorkflows
             co={co} compData={compData} keys={keys} defP={defP} ask={ask}
+            askImage={askImage} askVideo={askVideo}
             showToast={showToast} dlFile={dlFile}
             ensureJsPDF={ensureJsPDF} ensureXLSX={ensureXLSX}
             ensurePptx={ensurePptx} ensureJSZip={ensureJSZip}
