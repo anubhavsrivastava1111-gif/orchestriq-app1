@@ -574,6 +574,19 @@ export class BusinessExecutionEngine {
 
       const ws = XLSX.utils.aoa_to_sheet(rows);
 
+      // ── Formula post-processing ───────────────────────────────────────────
+      // SheetJS aoa_to_sheet writes all values as strings.
+      // Cells whose value starts with "=" must be promoted to formula cells
+      // so Excel evaluates them natively on open.
+      Object.keys(ws).filter(k => !k.startsWith("!")).forEach(k => {
+        const cell = ws[k];
+        if (cell && typeof cell.v === "string" && cell.v.startsWith("=")) {
+          cell.f = cell.v.slice(1); // formula string without leading "="
+          cell.t = "n";             // expect numeric result
+          delete cell.v;            // remove string value — Excel computes
+        }
+      });
+
       // ── Column widths ─────────────────────────────────────────────────────
       if (sheet.colWidths?.length) {
         ws["!cols"] = sheet.colWidths.map((w: number) => ({ wch: w }));
