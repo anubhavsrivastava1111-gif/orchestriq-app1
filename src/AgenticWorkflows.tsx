@@ -120,6 +120,8 @@ export interface StepContext {
   inputData: Record<string, string>;
   previousOutputs: Record<string, string>;
   mode: WorkflowMode;
+  askImage?: (prompt: string, size?: string, model?: string) => Promise<string>;
+  askVideo?: (prompt: string, durationSec?: number, model?: string) => Promise<string>;
 }
 
 // ─── MEMORY MANAGER ───────────────────────────────────────────────────────────
@@ -229,6 +231,38 @@ export class WorkflowStepExecutor {
         onProgress(`✓ ${step.name} complete (no AI required)`);
       }
 
+      // ── POST-AI: Convert output to real artefact if format requires it ───
+      const fmt = step.outputFormat || "";
+      const outputLower = result.output.toLowerCase();
+      // Detect image request from format or AI output
+      if (fmt === "image" || fmt === "image_gen" || outputLower.includes("generate image:") || outputLower.includes("[image:")) {
+        const imgPrompt = result.output.replace(/\[image:\s*/gi, "").replace(/\]/g, "").slice(0, 1000);
+        const url = await this.generateImage(imgPrompt, step.name, ctx.askImage);
+        if (url) {
+          result.generatedFiles.push({ name: step.name + ".png", url, type: "image" });
+          result.output = `✅ Image generated successfully.
+
+🖼️ **Image URL:** ${url}
+
+![${step.name}](${url})
+
+${result.output}`;
+        }
+      }
+      // Detect video request
+      if (fmt === "video" || fmt === "video_gen" || outputLower.includes("generate video:") || outputLower.includes("[video:")) {
+        const vidPrompt = result.output.replace(/\[video:\s*/gi, "").replace(/\]/g, "").slice(0, 800);
+        const url = await this.generateVideo(vidPrompt, 5, ctx.askVideo);
+        if (url) {
+          result.generatedFiles.push({ name: step.name + ".mp4", url, type: "video" });
+          result.output = `✅ Video generated successfully.
+
+🎬 **Video URL:** ${url}
+
+${result.output}`;
+        }
+      }
+
       result.status = "done";
       result.completedAt = new Date().toISOString();
     } catch (e: any) {
@@ -237,6 +271,37 @@ export class WorkflowStepExecutor {
     }
 
     return result;
+  }
+
+  async generateImage(
+    prompt: string,
+    filename: string,
+    askImageFn?: (prompt: string, size?: string) => Promise<string>,
+  ): Promise<string | null> {
+    if (!askImageFn) return null;
+    try {
+      const url = await askImageFn(prompt, "landscape_4_3");
+      if (!url) return null;
+      // Return URL — caller handles download/embed
+      return url;
+    } catch {
+      return null;
+    }
+  }
+
+  async generateVideo(
+    prompt: string,
+    durationSec: number,
+    askVideoFn?: (prompt: string, durationSec?: number) => Promise<string>,
+  ): Promise<string | null> {
+    if (!askVideoFn) return null;
+    try {
+      const url = await askVideoFn(prompt, durationSec);
+      if (!url) return null;
+      return url;
+    } catch {
+      return null;
+    }
   }
 
   async generateExcel(
@@ -988,7 +1053,9 @@ ${ctx.previousOutputs.load_support||""}` },
 
 interface Props {
   co: any; compData: any; keys: Record<string, string>; defP: string;
-  ask: (sys: string, msgs: any[], maxT?: number) => Promise<any>;
+  ask: (sys: string, msgs: any[], maxT?: number, enableSearch?: boolean, taskType?: string) => Promise<any>;
+  askImage?: (prompt: string, size?: string, model?: string) => Promise<string>;
+  askVideo?: (prompt: string, durationSec?: number, model?: string) => Promise<string>;
   showToast: (msg: string, type?: string) => void;
   dlFile: (name: string, content: any, mime?: string) => void;
   ensureJsPDF: () => Promise<any>; ensureXLSX: () => Promise<any>;
@@ -1014,7 +1081,7 @@ function parseExcelJSON(text: string): { sheets: any[] } | null {
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 
 export default function AgenticWorkflows({
-  co, compData, keys, defP, ask, showToast, dlFile,
+  co, compData, keys, defP, ask, askImage, askVideo, showToast, dlFile,
   ensureJsPDF, ensureXLSX, ensurePptx, ensureJSZip,
   parseSections, stripMd, actionItems, setActionItems,
   brSessions, setBrSessions, sv
@@ -1035,10 +1102,22 @@ export default function AgenticWorkflows({
   const fileRef = useRef<HTMLInputElement>(null);
   const currentStepRef = useRef<string>("");
 
+  // ── STABLE INITIALIZATION ────────────────────────────────────────────────
+  // Module-level functions (ensureXLSX, dlFile, parseSections, stripMd etc.) are
+  // stable references (defined outside App component) → safe in dep array.
+  // ask IS wrapped in useCallback([keys,defP]) in App.tsx → also stable.
+  // Running once on mount is sufficient; executor is updated via askRef when keys change.
+  const askRef = useRef(ask);
+  useEffect(() => { askRef.current = ask; }, [ask]);
+
   useEffect(() => {
     setRuns(loadRuns());
-    executorRef.current = new WorkflowStepExecutor(ask, ensureXLSX, ensureJsPDF, ensurePptx, dlFile, parseSections, stripMd);
-  }, [ask, ensureXLSX, ensureJsPDF, ensurePptx, dlFile, parseSections, stripMd]);
+    // Pass askRef.current wrapper so executor always uses latest ask without
+    // needing to be recreated (avoids re-render cascade).
+    const stableAsk = (...args: Parameters<typeof ask>) => askRef.current(...args);
+    executorRef.current = new WorkflowStepExecutor(stableAsk, ensureXLSX, ensureJsPDF, ensurePptx, dlFile, parseSections, stripMd);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Intentionally empty: module-level fns are stable; ask updated via ref above
 
   const log = useCallback((msg: string) => setProgressLog(p => [msg, ...p].slice(0, 50)), []);
 
@@ -1099,7 +1178,7 @@ export default function AgenticWorkflows({
           inputData[inp.id] = stepInputs[inp.id] || fromMem || "";
         });
 
-        const ctx: StepContext = { company: co, compData, config: cfg, memory: mem, inputData, previousOutputs: outputs, mode: run.mode };
+        const ctx: StepContext = { company: co, compData, config: cfg, memory: mem, inputData, previousOutputs: outputs, mode: run.mode, askImage, askVideo };
         updatedRun.steps[step.id] = { ...updatedRun.steps[step.id], status: "running" };
         setCurrentRun({ ...updatedRun });
         log(`▶ ${step.name}...`);
