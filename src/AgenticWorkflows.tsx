@@ -1486,7 +1486,14 @@ ${csv}
       showToast(`🔍 Reading ${file.name}...`, "info");
       try {
         const buf = await file.arrayBuffer();
-        const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+        // Safe base64 encoding — spread operator on large arrays causes stack overflow
+        const bytes = new Uint8Array(buf);
+        let b64 = '';
+        const CHUNK = 8192;
+        for (let ci = 0; ci < bytes.length; ci += CHUNK) {
+          b64 += String.fromCharCode.apply(null, bytes.subarray(ci, ci + CHUNK) as unknown as number[]);
+        }
+        b64 = btoa(b64);
         const mediaType = isPDF ? "application/pdf"
           : ext === "png" ? "image/png"
           : ext === "gif" ? "image/gif"
