@@ -13,6 +13,7 @@ import { getExecutivesCached } from "./lib/executives";
 import { supabase } from "./lib/supabase";
 import { WorkspaceMemory } from "./lib/WorkspaceMemory";
 import { ENGINE_ENABLED, runPipeline, classifyDomain, selectFramework } from "./lib/IntelligenceEngine";
+import BusinessExecutionEngine, { type ExecutionPlan, type DeliverableSpec } from "./lib/BusinessExecutionEngine";
 
 // ─── SESSION GATE ────────────────────────────────────────────────────────────
 async function checkSessionGate(): Promise<{allowed:boolean;reason?:string;plan?:string;used?:number;limit?:number}> {
@@ -3118,29 +3119,100 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         // ── IMPROVED 2: Enterprise multi-sheet XLSX ──
         } else if(fmt==="xlsx"){
           try{
-            const XLSX=await ensureXLSX();
-            const wb=XLSX.utils.book_new();
-            const secs=parseSections(content);
-            // Main data sheet — extract all tables
-            const allRows=[];
-            secs.forEach(sec=>{
-              allRows.push([sec.title]); allRows.push([]);
-              const tRows=sec.lines.filter(l=>l.includes("|")&&l.trim().startsWith("|")&&!l.trim().match(/^\|[\s|:-]+\|$/)).map(r=>r.split("|").filter((c,ii,a)=>ii>0&&ii<a.length-1).map(c=>c.trim()));
-              if(tRows.length>0){tRows.forEach(r=>allRows.push(r));allRows.push([]);}
-              else{sec.lines.filter(l=>l.trim()).forEach(l=>allRows.push([stripMd(l)]));}
-              allRows.push([]);
-            });
-            const wsMain=XLSX.utils.aoa_to_sheet(allRows.length>2?allRows:[[del.name],[""],[ content]]);
-            XLSX.utils.book_append_sheet(wb,wsMain,del.name.slice(0,31)||"Data");
-            // Summary sheet
-            const wsSummary=XLSX.utils.aoa_to_sheet([[del.name],["Generated",new Date().toLocaleDateString()],["Company",proj.context?.company?.name||""],["Industry",proj.context?.company?.industry||""],["Stage",proj.context?.company?.stage||""],["Currency",proj.context?.company?.currencySymbol||""],["QA Score",(del.qaResult?.score||0)+"%"],["QA Status",del.qaResult?.passed?"Passed":"Review"]]);
-            XLSX.utils.book_append_sheet(wb,wsSummary,"Summary");
-            // Assumptions sheet — extract [ASSUMPTION] and [ESTIMATE] lines
-            const assumptions=content.split("\n").filter(l=>/\[ASSUMPTION\]|\[ESTIMATE\]/i.test(l)).map(l=>[stripMd(l)]);
-            if(assumptions.length){const wsA=XLSX.utils.aoa_to_sheet([["Assumption/Estimate"],...assumptions]);XLSX.utils.book_append_sheet(wb,wsA,"Assumptions");}
-            const buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
-            zip.folder(folder).file(fname+".xlsx",buf);
-          }catch{zip.folder(folder).file(fname+".md",content);}
+            // ── BEE-POWERED EXCEL: Professional workbook with formulas ──────
+            // BusinessExecutionEngine generates: Dashboard tab, formula cells,
+            // conditional formatting, freeze panes, auto-filter, named ranges.
+            const _xlsxCurrency = proj.context?.company?.currency||co.currency||"INR";
+            const _xlsxSymbol   = proj.context?.company?.currencySymbol||co.currencySymbol||"₹";
+            const _xlsxCoCtx    = [
+              "Company: "+(proj.context?.company?.name||co.name||""),
+              "Industry: "+(proj.context?.company?.industry||co.industry||""),
+              "Stage: "+(proj.context?.company?.stage||co.stage||""),
+              "Location: "+(proj.context?.company?.location||co.location||""),
+              "Currency: "+_xlsxSymbol+_xlsxCurrency,
+            ].join("\n");
+            // Buffer into ZIP — BEE dlFile injects here
+            let _xlsxWritten = false;
+            const _xlsxBEE = new BusinessExecutionEngine(
+              async(sys:any,msgs:any,maxT?:any,_es?:any,tt?:any)=>(await callMulti({...keys,...(EFF_CLAUDE?.trim()?{claude:EFF_CLAUDE}:{}),...(EFF_GEMINI?.trim()?{gemini:EFF_GEMINI}:{}),...(EFF_GROQ?.trim()?{groq:EFF_GROQ}:{})},defP,sys,msgs,maxT||4000,false,tt||"excel_advanced")).primary,
+              ensureXLSX, ensurePptx, ensureJsPDF,
+              (name:any, xlsxContent:any) => {
+                // Route into ZIP instead of direct download
+                const _safeName = String(name).replace(/[^a-zA-Z0-9._-]/g,"-");
+                if(xlsxContent instanceof ArrayBuffer){
+                  zip.folder(folder).file(_safeName, xlsxContent);
+                  _xlsxWritten = true;
+                } else if(xlsxContent && typeof xlsxContent === "object" && xlsxContent.buffer){
+                  zip.folder(folder).file(_safeName, xlsxContent.buffer || xlsxContent);
+                  _xlsxWritten = true;
+                } else {
+                  // Blob — need to read it
+                  zip.folder(folder).file(_safeName, xlsxContent);
+                  _xlsxWritten = true;
+                }
+              },
+              stripMd,
+            );
+            const _xlsxDel: DeliverableSpec = {
+              type: "excel",
+              title: del.name,
+              purpose: del.description || del.name,
+              audience: (del.aiPersona||del.capabilityType||"cfo").toLowerCase().includes("board") ? "board" : "cfo",
+              qualityStandard: "cfo_model",
+              priority: "primary",
+            };
+            const _xlsxPlan: ExecutionPlan = {
+              objectiveRestated: del.description||del.name,
+              domain: (["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"finance",
+              persona: "Senior FP&A Manager",
+              audience: "cfo",
+              qualityStandard: "cfo_model",
+              decisionContext: del.description||del.name,
+              deliverables: [_xlsxDel],
+              missingInfo: [],
+              executionOrder: [del.name],
+              validationCriteria: [],
+            };
+            setProjectExecPhase("📊 Building professional Excel workbook: "+del.name);
+            await _xlsxBEE.generateExcel(_xlsxPlan, _xlsxDel, _xlsxCoCtx, content, _xlsxCurrency, _xlsxSymbol, (msg:string)=>setProjectExecPhase(msg));
+            if(!_xlsxWritten){
+              // BEE fallback: write basic structured XLSX
+              throw new Error("BEE did not write file");
+            }
+          }catch(xlsxErr:any){
+            // Fallback: structured XLSX with formula detection
+            try{
+              const XLSX=await ensureXLSX();
+              const wb=XLSX.utils.book_new();
+              const secs=parseSections(content);
+              const allRows:any[][]=[];
+              secs.forEach(sec=>{
+                allRows.push([sec.title]); allRows.push([]);
+                const tRows=sec.lines.filter((l:string)=>l.includes("|")&&l.trim().startsWith("|")&&!l.trim().match(/^\|[\s|:-]+\|$/)).map((r:string)=>r.split("|").filter((c:string,ii:number,a:string[])=>ii>0&&ii<a.length-1).map((c:string)=>c.trim()));
+                if(tRows.length>0){tRows.forEach((r:string[])=>allRows.push(r));allRows.push([]);}
+                else{sec.lines.filter((l:string)=>l.trim()).forEach((l:string)=>allRows.push([stripMd(l)]));}
+                allRows.push([]);
+              });
+              const wsMain=XLSX.utils.aoa_to_sheet(allRows.length>2?allRows:[[del.name],[""],[ content]]);
+              // Apply formula detection: cells starting with = become formulas
+              Object.keys(wsMain).filter(k=>!k.startsWith("!")).forEach(k=>{
+                const cell=wsMain[k];
+                if(cell&&typeof cell.v==="string"&&cell.v.startsWith("=")){
+                  cell.f=cell.v.slice(1); cell.t="n"; delete cell.v;
+                }
+              });
+              // Freeze first row, add auto-filter
+              wsMain["!freeze"]={xSplit:0,ySplit:1};
+              if(allRows[0]?.length) wsMain["!autofilter"]={ref:`A1:${String.fromCharCode(64+allRows[0].length)}1`};
+              wsMain["!cols"]=allRows[0]?.map?.(()=>({wch:18}))||[];
+              XLSX.utils.book_append_sheet(wb,wsMain,del.name.slice(0,31)||"Data");
+              // Assumptions sheet
+              const assumptions=content.split("\n").filter((l:string)=>/\[ASSUMPTION\]|\[ESTIMATE\]/i.test(l)).map((l:string)=>[stripMd(l)]);
+              if(assumptions.length){const wsA=XLSX.utils.aoa_to_sheet([["Assumption/Estimate"],...assumptions]);XLSX.utils.book_append_sheet(wb,wsA,"Assumptions");}
+              const buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+              zip.folder(folder).file(fname+".xlsx",buf);
+            }catch{zip.folder(folder).file(fname+".md",content);}
+          }
         // ── IMPROVED 3: Enterprise PPTX — reuse Quality Engine ──
         } else if(fmt==="pptx"){
           try{
