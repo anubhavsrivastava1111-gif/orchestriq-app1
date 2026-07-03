@@ -10,6 +10,8 @@ const ALL_KEYS = [
   "cos-actions","cos-admin-config","cos-tm","cos-tm-live",
   "cos-ap","cos-ap-live","cos-vl","cos-theme",
   "cos-lastvisit","oiq-sb-col","cos-decision-history",
+  "cos-pulse-concur","cos-pulse-email","cos-pulse-sn","cos-pulse-cfg",
+  "cos-fin-ap","cos-fin-ar",
 ];
 
 export const WorkspaceMemory = {
