@@ -1079,6 +1079,96 @@ function getModuleContext(category,{ledgerEntries,brSessions,workflows,tQueue,tm
   return parts.length?parts.join("\n\n"):"";
 }
 
+// ─── VISUALIZATION ENGINE ─── auto-detects numeric tables in AI reports and
+// renders an SVG chart beneath them. Bar chart by default; line chart when the
+// label column is dates. Zero libraries, zero AI calls, fail-safe.
+function vizNum(s){
+  try{
+    let t=String(s??"").replace(/[,₹$€£\s]/g,"").trim();
+    let mult=1;
+    const suf=t.match(/(k|m|b|cr|l|lakh|lac)$/i);
+    if(suf){const u=suf[1].toLowerCase();mult=u==="k"?1e3:u==="m"?1e6:u==="b"?1e9:u==="cr"?1e7:1e5;t=t.slice(0,-suf[1].length);}
+    if(t.endsWith("%"))t=t.slice(0,-1);
+    const m=t.match(/^-?\d+(\.\d+)?$/);
+    return m?parseFloat(t)*mult:NaN;
+  }catch{return NaN;}
+}
+function vizFmt(n){
+  const a=Math.abs(n);
+  if(a>=1e7)return (n/1e7).toFixed(1)+"Cr";
+  if(a>=1e5)return (n/1e5).toFixed(1)+"L";
+  if(a>=1e3)return (n/1e3).toFixed(1)+"K";
+  return String(Math.round(n*100)/100);
+}
+function AutoChart({labels,values,seriesName,accent}){
+  try{
+    if(!labels||!values||values.length<2)return null;
+    const c=accent||"#14B8A6";
+    const W=560,H=180,padL=46,padR=10,padT=26,padB=34;
+    const iw=W-padL-padR,ih=H-padT-padB;
+    const max=Math.max(...values,0),min=Math.min(...values,0);
+    const range=(max-min)||1;
+    const y=v=>padT+ih-((v-min)/range)*ih;
+    const isDates=labels.every(l=>!isNaN(new Date(String(l).trim()).getTime())&&/\d/.test(String(l)));
+    const n=values.length;
+    const short=(s)=>{const t=String(s).trim();return t.length>9?t.slice(0,8)+"…":t;};
+    let body;
+    if(isDates){
+      const x=i=>padL+(n===1?iw/2:(i/(n-1))*iw);
+      const pts=values.map((v,i)=>x(i)+","+y(v)).join(" ");
+      body=(<g>
+        <polyline points={pts} fill="none" stroke={c} strokeWidth="2"/>
+        {values.map((v,i)=>(<g key={i}>
+          <circle cx={x(i)} cy={y(v)} r="3" fill={c}/>
+          <text x={x(i)} y={y(v)-7} textAnchor="middle" fontSize="8" fill="#A0AAC0">{vizFmt(v)}</text>
+          <text x={x(i)} y={H-padB+12} textAnchor="middle" fontSize="7.5" fill="#5A6480">{short(labels[i])}</text>
+        </g>))}
+      </g>);
+    }else{
+      const bw=Math.min(44,(iw/n)*0.62);
+      const x=i=>padL+(i+0.5)*(iw/n)-bw/2;
+      body=(<g>
+        {values.map((v,i)=>{
+          const yv=y(Math.max(v,0)),y0=y(0);
+          const h=Math.max(2,Math.abs(y0-yv));
+          return (<g key={i}>
+            <rect x={x(i)} y={v>=0?yv:y0} width={bw} height={h} rx="3" fill={c} opacity={0.85}/>
+            <text x={x(i)+bw/2} y={(v>=0?yv:y0+h)-4} textAnchor="middle" fontSize="8" fill="#A0AAC0">{vizFmt(v)}</text>
+            <text x={x(i)+bw/2} y={H-padB+12} textAnchor="middle" fontSize="7.5" fill="#5A6480">{short(labels[i])}</text>
+          </g>);
+        })}
+      </g>);
+    }
+    return (
+      <div style={{margin:"6px 0 10px",background:"#0d1220",border:"1px solid #1a2030",borderRadius:6,padding:"8px 6px 2px"}}>
+        <div style={{fontSize:9,fontWeight:700,color:c,textTransform:"uppercase",letterSpacing:"0.05em",padding:"0 8px 4px"}}>{"📊 "}{seriesName||"Values"}<span style={{color:"#5A6480",fontWeight:500,textTransform:"none",marginLeft:6}}>auto-generated chart</span></div>
+        <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:"auto",display:"block"}}>
+          <line x1={padL} y1={y(0)} x2={W-padR} y2={y(0)} stroke="#2a3244" strokeWidth="1"/>
+          <text x={padL-6} y={y(max)+3} textAnchor="end" fontSize="8" fill="#5A6480">{vizFmt(max)}</text>
+          <text x={padL-6} y={y(min)+3} textAnchor="end" fontSize="8" fill="#5A6480">{vizFmt(min)}</text>
+          {body}
+        </svg>
+      </div>
+    );
+  }catch{return null;}
+}
+function autoChartFromTable(header,dataRows,accent,key){
+  try{
+    if(!header||!dataRows||dataRows.length<2||dataRows.length>14)return null;
+    const cols=header.length;
+    let numCol=-1;
+    for(let ci=1;ci<cols;ci++){
+      const vals=dataRows.map(r=>vizNum(r[ci]));
+      const okCount=vals.filter(v=>!isNaN(v)).length;
+      if(okCount>=Math.ceil(dataRows.length*0.7)&&vals.some(v=>v!==0&&!isNaN(v))){numCol=ci;break;}
+    }
+    if(numCol===-1)return null;
+    const pairs=dataRows.map(r=>({l:String(r[0]||"").trim(),v:vizNum(r[numCol])})).filter(p=>p.l&&!isNaN(p.v)).slice(0,12);
+    if(pairs.length<2)return null;
+    return <AutoChart key={key} labels={pairs.map(p=>p.l)} values={pairs.map(p=>p.v)} seriesName={String(header[numCol]||"").trim()} accent={accent}/>;
+  }catch{return null;}
+}
+
 function Md({text,ac}){
   if(!text)return null;
   const c=ac||"#14B8A6";
@@ -1088,6 +1178,7 @@ function Md({text,ac}){
     if(!tbl.length)return;
     const h=tbl[0],d=tbl.slice(2);
     els.push(<div key={"t"+els.length} style={{overflowX:"auto",margin:"8px 0",borderRadius:6,border:"1px solid #1a2030"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}><thead><tr>{h.map((v,i)=><th key={i} style={{textAlign:"left",padding:"6px 8px",borderBottom:"2px solid "+c+"33",color:c,fontWeight:700,fontSize:9,textTransform:"uppercase",background:"#0d1220"}}>{v.trim()}</th>)}</tr></thead><tbody>{d.map((row,ri)=><tr key={ri}>{row.map((cell,ci)=><td key={ci} style={{padding:"5px 8px",borderBottom:"1px solid #14192a",color:"#A0AAC0",fontSize:11}}>{cell.trim()}</td>)}</tr>)}</tbody></table></div>);
+    try{const ch=autoChartFromTable(h,d,c,"ch"+els.length);if(ch)els.push(ch);}catch{}
     tbl=[];inT=false;
   };
   for(let i=0;i<lines.length;i++){
