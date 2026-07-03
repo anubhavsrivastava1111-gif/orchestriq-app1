@@ -1,5 +1,41 @@
 import React, { useState, useMemo, useCallback, useEffect } from "react";
 import DataIngestion, { ModuleKey } from "./DataIngestion";
+import { WorkspaceMemory } from "./lib/WorkspaceMemory";
+import { classifyEvidence } from "./lib/IntelligenceEngine";
+
+// ─── PULSE HARDENING ─── persistence, Excel export, evidence-audited AI reports
+function usePersistedState<T>(key:string,initial:T):[T,React.Dispatch<React.SetStateAction<T>>]{
+  const [state,setState]=useState<T>(()=>{try{const s=WorkspaceMemory.get<T>(key);return (s!==null&&s!==undefined)?s:initial;}catch{return initial;}});
+  useEffect(()=>{try{WorkspaceMemory.set(key,state);}catch{}},[key,state]);
+  return [state,setState];
+}
+function loadScriptOnce(src:string):Promise<void>{
+  return new Promise((res,rej)=>{
+    if((window as any).XLSX)return res();
+    const ex=document.querySelector('script[src="'+src+'"]');
+    if(ex){ex.addEventListener("load",()=>res());return;}
+    const s=document.createElement("script");s.src=src;s.onload=()=>res();s.onerror=()=>rej(new Error("Excel library failed to load"));document.head.appendChild(s);
+  });
+}
+async function downloadExcel(filename:string,sheetName:string,data:Record<string,unknown>[]):Promise<void>{
+  if(!data.length)return;
+  await loadScriptOnce("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+  const X=(window as any).XLSX;
+  if(!X)throw new Error("Excel library unavailable");
+  const ws=X.utils.json_to_sheet(data);
+  const wb=X.utils.book_new();
+  X.utils.book_append_sheet(wb,ws,sheetName.slice(0,31));
+  X.writeFile(wb,filename);
+}
+function evidenceAuditLine(text:string):string{
+  try{
+    const tags=classifyEvidence(text||"");
+    if(!tags.length)return "";
+    const cnt:{[k:string]:number}={};tags.forEach(t=>{cnt[t.category]=(cnt[t.category]||0)+1;});
+    return "\n\n---\nEvidence audit (Intelligence Engine): "+Object.entries(cnt).map(([k,v])=>v+" "+k).join(" · ");
+  }catch{return "";}
+}
+const AI_EVIDENCE_RULES="\n\nEVIDENCE RULES: Label every figure-based finding [Calculation] (derived from the KPI data above — show the formula) and every forward-looking claim [Assumption] or [Expert Inference]. Never present an invented number as fact.";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PULSE — Integrated Governance Intelligence Hub v2
@@ -241,7 +277,7 @@ function ConfigPanel({cfg,setCfg,onClose}:{cfg:Config;setCfg:(c:Config)=>void;on
 // CONCUR T&E AUDIT MODULE
 // ═══════════════════════════════════════════════════════════════════════════
 function ConcurModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;callAI?:(p:string)=>Promise<string>;callVision?:(p:string,img?:string,mime?:string)=>Promise<string>;companyName:string;onPublish:(p:PublishPayload)=>void}) {
-  const [rows,setRows]=useState<ConcurRow[]>([]);
+  const [rows,setRows]=usePersistedState<ConcurRow[]>("cos-pulse-concur",[]);
   const [view,setView]=useState<"dashboard"|"table"|"ai">("dashboard");
   const [chartMode,setChartMode]=useState<"daily"|"weekly">("weekly");
   const [aiReport,setAiReport]=useState("");
@@ -317,7 +353,7 @@ function ConcurModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;
     if(!callAI||!rows.length)return;
     setAiLoading(true);
     const m=metrics!;
-    try{setAiReport(await callAI(`You are a T&E Audit Governance Analyst for ${companyName}. Produce a structured governance report.\n\nLIVE KPI DATA:\n- Workable Inflow: ${m.workableInflow} (Threshold: ${workableThresh})\n- Processed: ${m.processed} (${fmtPct(m.pctThreshold)} of target)\n- TAT within 2 days: ${fmtPct(m.tatPct)} (SLA: ${fmtPct(cfg.tatSLA)}) — ${m.tatPct>=cfg.tatSLA?"MEETS SLA":"BREACH"}\n- Combined Accuracy: ${fmtPct(m.accuracy)} (SLA: ${fmtPct(cfg.accuracySLA)}) — ${m.accuracy>=cfg.accuracySLA?"MEETS SLA":"BREACH"}\n- Rejection Rate: ${fmtPct(m.rejPct)} (Target: ${fmtPct(cfg.rejectionTarget)}) — ${m.rejPct<=cfg.rejectionTarget?"WITHIN TARGET":"EXCEEDS TARGET"}\n- Backlog: ${m.backlog} (Threshold: ${cfg.backlogThreshold})\n- Aging: 0-2d: ${m.aging.a}, 3-5d: ${m.aging.b}, 6-15d: ${m.aging.c}, >15d: ${m.aging.d}\n\nPRODUCE:\n1. EXECUTIVE SUMMARY (3 sentences with specific numbers)\n2. SLA COMPLIANCE TABLE (TAT | Accuracy | Rejection | Backlog)\n3. AGING RISK ANALYSIS — which items need immediate action\n4. THROUGHPUT ANALYSIS — processed vs threshold\n5. TOP 3 ACTION ITEMS with owner and deadline\n6. RISK FLAGS`));}catch(e:any){setAiReport("Error: "+e.message);}
+    try{setAiReport(await callAI(`You are a T&E Audit Governance Analyst for ${companyName}. Produce a structured governance report.\n\nLIVE KPI DATA:\n- Workable Inflow: ${m.workableInflow} (Threshold: ${workableThresh})\n- Processed: ${m.processed} (${fmtPct(m.pctThreshold)} of target)\n- TAT within 2 days: ${fmtPct(m.tatPct)} (SLA: ${fmtPct(cfg.tatSLA)}) — ${m.tatPct>=cfg.tatSLA?"MEETS SLA":"BREACH"}\n- Combined Accuracy: ${fmtPct(m.accuracy)} (SLA: ${fmtPct(cfg.accuracySLA)}) — ${m.accuracy>=cfg.accuracySLA?"MEETS SLA":"BREACH"}\n- Rejection Rate: ${fmtPct(m.rejPct)} (Target: ${fmtPct(cfg.rejectionTarget)}) — ${m.rejPct<=cfg.rejectionTarget?"WITHIN TARGET":"EXCEEDS TARGET"}\n- Backlog: ${m.backlog} (Threshold: ${cfg.backlogThreshold})\n- Aging: 0-2d: ${m.aging.a}, 3-5d: ${m.aging.b}, 6-15d: ${m.aging.c}, >15d: ${m.aging.d}\n\nPRODUCE:\n1. EXECUTIVE SUMMARY (3 sentences with specific numbers)\n2. SLA COMPLIANCE TABLE (TAT | Accuracy | Rejection | Backlog)\n3. AGING RISK ANALYSIS — which items need immediate action\n4. THROUGHPUT ANALYSIS — processed vs threshold\n5. TOP 3 ACTION ITEMS with owner and deadline\n6. RISK FLAGS`+AI_EVIDENCE_RULES).then(r=>r+evidenceAuditLine(r)));}catch(e:any){setAiReport("Error: "+e.message);}
     setAiLoading(false);
   };
 
@@ -346,6 +382,9 @@ function ConcurModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;
           ))}
           <button onClick={publishToEmail} disabled={!metrics} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.purple}44`,background:C.purpleDim,color:C.purple,cursor:metrics?"pointer":"not-allowed",opacity:metrics?1:0.4}}>
             📧 Publish Report
+          </button>
+          <button onClick={()=>{downloadExcel("Concur_TE_Audit_"+today()+".xlsx","Concur T&E",rows.map(({id,...r})=>r)).catch(()=>{});}} disabled={!rows.length} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.success}44`,background:"rgba(16,185,129,0.10)",color:C.success,cursor:rows.length?"pointer":"not-allowed",opacity:rows.length?1:0.4}}>
+            ⬇ Excel
           </button>
           <button onClick={()=>setShowIngestion(true)} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.accent}44`,background:C.accentDim,color:C.accentText,cursor:"pointer"}}>
             📥 Import Data
@@ -492,7 +531,7 @@ function ConcurModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;
 // EMAIL HELPDESK MODULE
 // ═══════════════════════════════════════════════════════════════════════════
 function EmailModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;callAI?:(p:string)=>Promise<string>;callVision?:(p:string,img?:string,mime?:string)=>Promise<string>;companyName:string;onPublish:(p:PublishPayload)=>void}) {
-  const [rows,setRows]=useState<EmailRow[]>([]);
+  const [rows,setRows]=usePersistedState<EmailRow[]>("cos-pulse-email",[]);
   const [view,setView]=useState<"dashboard"|"table"|"ai">("dashboard");
   const [chartMode,setChartMode]=useState<"daily"|"weekly">("weekly");
   const [aiReport,setAiReport]=useState("");
@@ -549,7 +588,7 @@ function EmailModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;c
     if(!callAI||!rows.length)return;
     setAiLoading(true);
     const m=metrics!;
-    try{setAiReport(await callAI(`You are a Helpdesk Communication Governance Analyst for ${companyName}.\n\nLIVE DATA:\n- Total Received: ${m.total}\n- Total Resolved: ${m.totalRes} (${fmtPct(m.totalRes/Math.max(m.total,1))})\n- Average SLA (24hr): ${fmtPct(m.avgSLA)} (Target: ${fmtPct(cfg.helpdeskSLA)})\n- Pending Ops Team: ${m.pendingOpsTeam}\n- Pending Client: ${m.pendingClient}\n- Carry Forward: ${m.carryForward}\n\nPRODUCE:\n1. EXECUTIVE SUMMARY\n2. SLA COMPLIANCE — breaches and patterns\n3. PENDING ANALYSIS — Ops Team vs Client split\n4. TOP 3 ACTION ITEMS\n5. RISK FLAGS`));}catch(e:any){setAiReport("Error: "+e.message);}
+    try{setAiReport(await callAI(`You are a Helpdesk Communication Governance Analyst for ${companyName}.\n\nLIVE DATA:\n- Total Received: ${m.total}\n- Total Resolved: ${m.totalRes} (${fmtPct(m.totalRes/Math.max(m.total,1))})\n- Average SLA (24hr): ${fmtPct(m.avgSLA)} (Target: ${fmtPct(cfg.helpdeskSLA)})\n- Pending Ops Team: ${m.pendingOpsTeam}\n- Pending Client: ${m.pendingClient}\n- Carry Forward: ${m.carryForward}\n\nPRODUCE:\n1. EXECUTIVE SUMMARY\n2. SLA COMPLIANCE — breaches and patterns\n3. PENDING ANALYSIS — Ops Team vs Client split\n4. TOP 3 ACTION ITEMS\n5. RISK FLAGS`+AI_EVIDENCE_RULES).then(r=>r+evidenceAuditLine(r)));}catch(e:any){setAiReport("Error: "+e.message);}
     setAiLoading(false);
   };
 
@@ -578,6 +617,9 @@ function EmailModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;c
           ))}
           <button onClick={publishToEmail} disabled={!metrics} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.purple}44`,background:C.purpleDim,color:C.purple,cursor:metrics?"pointer":"not-allowed",opacity:metrics?1:0.4}}>
             📧 Publish Report
+          </button>
+          <button onClick={()=>{downloadExcel("Email_Helpdesk_"+today()+".xlsx","Email Helpdesk",rows.map(({id,...r})=>r)).catch(()=>{});}} disabled={!rows.length} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.success}44`,background:"rgba(16,185,129,0.10)",color:C.success,cursor:rows.length?"pointer":"not-allowed",opacity:rows.length?1:0.4}}>
+            ⬇ Excel
           </button>
           <button onClick={()=>setShowIngestion(true)} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.warn}44`,background:C.warnDim,color:C.warn,cursor:"pointer"}}>
             📥 Import Data
@@ -670,7 +712,7 @@ function EmailModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;c
 // SERVICENOW MODULE
 // ═══════════════════════════════════════════════════════════════════════════
 function ServiceNowModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Config;callAI?:(p:string)=>Promise<string>;callVision?:(p:string,img?:string,mime?:string)=>Promise<string>;companyName:string;onPublish:(p:PublishPayload)=>void}) {
-  const [tickets,setTickets]=useState<SNTicket[]>([]);
+  const [tickets,setTickets]=usePersistedState<SNTicket[]>("cos-pulse-sn",[]);
   const [view,setView]=useState<"dashboard"|"table"|"ai">("dashboard");
   const [aiReport,setAiReport]=useState("");
   const [aiLoading,setAiLoading]=useState(false);
@@ -719,7 +761,7 @@ function ServiceNowModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Con
     if(!callAI||!tickets.length)return;
     setAiLoading(true);
     const m=metrics;
-    try{setAiReport(await callAI(`You are an IT Service Management governance analyst for ${companyName}.\n\nTICKET DATA:\n- Total: ${m.total} | Active: ${m.active} | Resolved: ${m.resolved}\n- SLA (first response ≤3 days): ${fmtPct(m.slaPct)}\n- Aging: 0-3d: ${m.aging.a}, 4-5d: ${m.aging.b}, 6-15d: ${m.aging.c}, >15d: ${m.aging.d}\n- Priority: ${JSON.stringify(m.byPriority)}\n- Teams: ${JSON.stringify(m.byTeam)}\n\nPRODUCE:\n1. EXECUTIVE SUMMARY\n2. SLA COMPLIANCE ANALYSIS\n3. AGING RISK — items needing escalation\n4. TEAM PERFORMANCE — resolution rates\n5. TOP 3 ACTION ITEMS\n6. RISK FLAGS`));}catch(e:any){setAiReport("Error: "+e.message);}
+    try{setAiReport(await callAI(`You are an IT Service Management governance analyst for ${companyName}.\n\nTICKET DATA:\n- Total: ${m.total} | Active: ${m.active} | Resolved: ${m.resolved}\n- SLA (first response ≤3 days): ${fmtPct(m.slaPct)}\n- Aging: 0-3d: ${m.aging.a}, 4-5d: ${m.aging.b}, 6-15d: ${m.aging.c}, >15d: ${m.aging.d}\n- Priority: ${JSON.stringify(m.byPriority)}\n- Teams: ${JSON.stringify(m.byTeam)}\n\nPRODUCE:\n1. EXECUTIVE SUMMARY\n2. SLA COMPLIANCE ANALYSIS\n3. AGING RISK — items needing escalation\n4. TEAM PERFORMANCE — resolution rates\n5. TOP 3 ACTION ITEMS\n6. RISK FLAGS`+AI_EVIDENCE_RULES).then(r=>r+evidenceAuditLine(r)));}catch(e:any){setAiReport("Error: "+e.message);}
     setAiLoading(false);
   };
 
@@ -742,6 +784,9 @@ function ServiceNowModule({cfg,callAI,callVision,companyName,onPublish}:{cfg:Con
         <div style={{marginLeft:"auto",display:"flex",gap:4}}>
           <button onClick={publishToEmail} disabled={!tickets.length} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.purple}44`,background:C.purpleDim,color:C.purple,cursor:tickets.length?"pointer":"not-allowed",opacity:tickets.length?1:0.4}}>
             📧 Publish Report
+          </button>
+          <button onClick={()=>{downloadExcel("ServiceNow_Tickets_"+today()+".xlsx","Tickets",tickets.map(({id,...t})=>({...t,agingDays:daysBetween(t.date),slaMet:t.firstResponse?(daysBetween(t.date,t.firstResponse)<=3?"Yes":"No"):""}))).catch(()=>{});}} disabled={!tickets.length} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.success}44`,background:"rgba(16,185,129,0.10)",color:C.success,cursor:tickets.length?"pointer":"not-allowed",opacity:tickets.length?1:0.4}}>
+            ⬇ Excel
           </button>
           <button onClick={()=>setShowIngestion(true)} style={{padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.blue}44`,background:C.blueDim,color:C.blue,cursor:"pointer"}}>
             📥 Import Data
@@ -1076,7 +1121,7 @@ interface PulseProps {
 
 export default function PulseGovernance({callAI,companyName="Your Company",defaultModule,showToast,askVision}:PulseProps) {
   const [module,setModule]=useState<"dispatch"|"concur"|"email"|"servicenow">((defaultModule as any)||"dispatch");
-  const [cfg,setCfg]=useState<Config>(DEFAULT_CONFIG);
+  const [cfg,setCfg]=usePersistedState<Config>("cos-pulse-cfg",DEFAULT_CONFIG);
   const [showConfig,setShowConfig]=useState(false);
   const [pendingPublish,setPendingPublish]=useState<PublishPayload|null>(null);
 
