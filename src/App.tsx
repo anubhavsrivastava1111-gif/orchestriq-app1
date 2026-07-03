@@ -23,6 +23,39 @@ function ieEvidenceAudit(text:string):string{
     return "\n\n---\n**Evidence audit (Intelligence Engine):** "+Object.entries(cnt).map(([k,v])=>v+" "+k).join(" · ");
   }catch{return "";}
 }
+
+// ─── DECISION HISTORY ───────────────────────────────────────────────────────
+// Boardroom decisions saved via WorkspaceMemory; surfaced in future sessions
+// on similar topics. Pure local logic — zero AI calls.
+function saveDecisionRecord(rec:{[k:string]:unknown}):void{
+  try{
+    const hist=WorkspaceMemory.get<any[]>("cos-decision-history")||[];
+    hist.unshift(rec);
+    WorkspaceMemory.set("cos-decision-history",hist.slice(0,25));
+  }catch{/* storage full — silent */}
+}
+function extractRecommendationSnippet(syn:string):string{
+  try{
+    const m=(syn||"").match(/##\s*Quantified Recommendation\s*\n([\s\S]*?)(\n##|$)/i);
+    const raw=(m?m[1]:(syn||"")).replace(/[#*|>\-]/g," ").replace(/\s+/g," ").trim();
+    return raw.slice(0,300);
+  }catch{return "";}
+}
+function buildDecisionHistoryContext(question:string):string{
+  try{
+    const hist=WorkspaceMemory.get<any[]>("cos-decision-history")||[];
+    if(!hist.length)return "";
+    const words=((question||"").toLowerCase().match(/[a-z]{4,}/g)||[]);
+    if(!words.length)return "";
+    const scored=hist.map(h=>{
+      const txt=(String(h.question||"")+" "+String(h.recommendation||"")).toLowerCase();
+      return {h,score:words.filter(w=>txt.includes(w)).length};
+    }).filter(x=>x.score>=2).sort((a,b)=>b.score-a.score).slice(0,2);
+    if(!scored.length)return "";
+    return "\n\nPAST BOARD DECISIONS ON SIMILAR TOPICS (reference these; explicitly flag if today's question conflicts with, repeats, or should build on a past decision):\n"+
+      scored.map(x=>"- ["+String(x.h.ts||"").slice(0,10)+"] Q: \""+String(x.h.question||"").slice(0,120)+"\" → Status: "+String(x.h.status||"n/a")+". Decision: "+String(x.h.recommendation||"").slice(0,200)).join("\n")+"\n";
+  }catch{return "";}
+}
 import BusinessExecutionEngine, { type ExecutionPlan, type DeliverableSpec } from "./lib/BusinessExecutionEngine";
 
 // ─── SESSION GATE ────────────────────────────────────────────────────────────
@@ -2272,9 +2305,9 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         setBrCur(prev=>({...prev,researchBrief}));
         setBrResearching(false);
       }
-      const researchContext=researchBrief
+      const researchContext=(researchBrief
         ?"\nVERIFIED RESEARCH BRIEF (current data gathered for this debate - use these figures and cite this brief as your source; do not re-search):\n"+researchBrief+"\n"
-        :"";
+        :"")+buildDecisionHistoryContext(brQ);
       for(let i=0;i<agents.length;i++){
         if(cancelRef.current.br){showToast("Boardroom cancelled","warning");break;}
         const ag=agents[i];const p=EP[ag.id]||{};
@@ -2383,6 +2416,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         let syn=await ask(synSys,[{role:"user",content:"Question: \""+brQ+"\"\nDebate:\n"+allPos}],6000);
         syn+=ieEvidenceAudit(syn);
         const decisionStatus=extractDecisionStatus(syn);
+        try{saveDecisionRecord({id:Date.now(),ts:new Date().toISOString(),question:brQ,executives:brAg,status:decisionStatus,recommendation:extractRecommendationSnippet(syn)});}catch{}
         const stage1={stageNumber:1,type:"original",question:brQ,
           executiveIds:brAg,debate:res,synthesis:syn,
           decisionStatus,completedAt:new Date().toISOString(),frozen:true};
@@ -2487,6 +2521,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
           completedAt:new Date().toISOString(),
           frozen:true,
         };
+        try{saveDecisionRecord({id:Date.now(),ts:new Date().toISOString(),question:brFollowUp,executives:prevExecIds,status:newStage.decisionStatus,recommendation:extractRecommendationSnippet(stageSyn)});}catch{}
         const updatedStages=[...prevStages,newStage];
         const updatedCur={...brCur,stages:updatedStages};
         setBrCur(updatedCur);
