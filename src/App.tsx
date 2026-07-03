@@ -12,7 +12,7 @@ import AgenticWorkflows from "./AgenticWorkflows";
 import { getExecutivesCached } from "./lib/executives";
 import { supabase } from "./lib/supabase";
 import { WorkspaceMemory } from "./lib/WorkspaceMemory";
-import { ENGINE_ENABLED, runPipeline, classifyDomain, selectFramework } from "./lib/IntelligenceEngine";
+import { ENGINE_ENABLED, runPipeline, classifyDomain, selectFramework, selfReview, classifyEvidence } from "./lib/IntelligenceEngine";
 import BusinessExecutionEngine, { type ExecutionPlan, type DeliverableSpec } from "./lib/BusinessExecutionEngine";
 
 // ─── SESSION GATE ────────────────────────────────────────────────────────────
@@ -3858,6 +3858,18 @@ if(!role){
       const cleanReply=reply.replace(/===\s*\n?CAPABILITY_BRIEF/g,"===CAPABILITY_BRIEF===");
       const parsed=parseCapabilityBrief(cleanReply);
       stepOutput=parsed.output;
+      // Intelligence Engine — quality validation at final level (fail-safe: keeps original on any error)
+      try{
+        setWfPhase("🔍 Quality Review — validating final deliverable");
+        const ieCompany={name:co.name||"the company",industry:co.industry||"",stage:co.stage||"",location:co.location||"",markets:co.markets||"",currency:co.currency||"INR",currencySymbol:wfCurr.sym||""};
+        const reviewed=await selfReview(stepOutput,taskText,ieCompany,(s,m,t)=>ask(s,m,t,false));
+        if(reviewed&&reviewed.length>stepOutput.length*0.5)stepOutput=reviewed;
+        const evTags=classifyEvidence(stepOutput);
+        if(evTags.length>0){
+          const cnt={};evTags.forEach(t=>{cnt[t.category]=(cnt[t.category]||0)+1;});
+          stepOutput+="\n\n---\n**Evidence audit (Intelligence Engine):** "+Object.entries(cnt).map(([k,v])=>v+" "+k).join(" · ");
+        }
+      }catch(ieErr){/* keep original output */}
       if(parsed.capability){
         const fee=computeServiceFee(parsed.capability.est_cost_usd||0);
         const rate=await fetchExchangeRate(wfCurr.code);
