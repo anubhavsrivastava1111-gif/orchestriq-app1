@@ -3431,12 +3431,13 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               const XLSX=await ensureXLSX();
               const wb=XLSX.utils.book_new();
               const secs=parseSections(content);
+              const cleanCellV=(v:string):string|number=>{if(v.startsWith("="))return v;const c=v.replace(/\*\*([^*]+)\*\*/g,"$1").replace(/\*([^*]+)\*/g,"$1").replace(/`([^`]+)`/g,"$1").replace(/^#+\s*/,"").replace(/^[-*]\s*/,"").trim();const n=Number(c.replace(/[₹$£€,\s%]/g,""));return(!isNaN(n)&&c!=""&&/^[₹$£€]?[\d,.]+[%]?$/.test(c))?n:c;};
               const allRows:any[][]=[];
               secs.forEach(sec=>{
-                allRows.push([sec.title]); allRows.push([]);
-                const tRows=sec.lines.filter((l:string)=>l.includes("|")&&l.trim().startsWith("|")&&!l.trim().match(/^\|[\s|:-]+\|$/)).map((r:string)=>r.split("|").filter((c:string,ii:number,a:string[])=>ii>0&&ii<a.length-1).map((c:string)=>c.trim()));
-                if(tRows.length>0){tRows.forEach((r:string[])=>allRows.push(r));allRows.push([]);}
-                else{sec.lines.filter((l:string)=>l.trim()).forEach((l:string)=>allRows.push([stripMd(l)]));}
+                allRows.push([stripMd(sec.title)]); allRows.push([]);
+                const tRows=sec.lines.filter((l:string)=>l.includes("|")&&l.trim().startsWith("|")&&!l.trim().match(/^\|[\s|:-]+\|$/)).map((r:string)=>r.split("|").filter((c:string,ii:number,a:string[])=>ii>0&&ii<a.length-1).map((c:string)=>cleanCellV(c.trim())));
+                if(tRows.length>0){tRows.forEach((r:any[])=>allRows.push(r));allRows.push([]);}
+                else{sec.lines.filter((l:string)=>l.trim()).forEach((l:string)=>allRows.push([cleanCellV(stripMd(l))]));}
                 allRows.push([]);
               });
               const wsMain=XLSX.utils.aoa_to_sheet(allRows.length>2?allRows:[[del.name],[""],[ content]]);
@@ -3595,58 +3596,43 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             zip.folder(folder).file(fname+"-pptx-error.md","PPTX generation error: "+pptxErr.message+"\n\nRaw content:\n"+content);
           }
         } else if(fmt==="pdf"){
-          try{
-            const buf=await (async()=>{
-              const jsPDF=await ensureJsPDF();
-              const doc=new jsPDF({unit:"pt",format:"a4"});
-              const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),M=48;
-              let y=M;
-              const AC=[20,184,166];
-              doc.setFillColor(...AC);doc.rect(0,0,W,72,"F");
-              doc.setTextColor(255,255,255);doc.setFont("helvetica","bold");doc.setFontSize(18);
-              doc.text(del.name,M,42,{maxWidth:W-2*M});
-              doc.setFontSize(10);doc.setFont("helvetica","normal");
-              doc.text((proj.context?.company?.name||"")+" \u00b7 "+new Date().toLocaleDateString(),M,62);
-              y=96;
-              const secs=parseSections(content);
-              for(const sec of secs){
-                if(y>H-M){doc.addPage();y=M;}
-                doc.setFont("helvetica","bold");doc.setFontSize(13);doc.setTextColor(...AC);
-                doc.splitTextToSize(sec.title,W-2*M).forEach(l=>{if(y>H-M){doc.addPage();y=M;}doc.text(l,M,y);y+=18;});
-                doc.setFont("helvetica","normal");doc.setFontSize(10);doc.setTextColor(45,45,45);
-                // Detect and render tables
-                const tRows=sec.lines.filter(l=>l.includes("|")&&l.trim().startsWith("|")&&!l.trim().match(/^\|[\s|:-]+\|$/)).map(r=>r.split("|").filter((c,ii,a)=>ii>0&&ii<a.length-1).map(c=>c.trim()));
-                if(tRows.length>=2){
-                  const colW=(W-2*M)/Math.max(tRows[0].length,1);
-                  if(y+20>H-M){doc.addPage();y=M;}
-                  doc.setFillColor(...AC);doc.rect(M,y,W-2*M,16,"F");
-                  doc.setTextColor(255,255,255);doc.setFontSize(9);doc.setFont("helvetica","bold");
-                  tRows[0].forEach((h,ci)=>doc.text(h.slice(0,20),M+ci*colW+3,y+11));
-                  y+=18;doc.setTextColor(45,45,45);doc.setFont("helvetica","normal");
-                  tRows.slice(1).forEach((row,ri)=>{
-                    if(y>H-M){doc.addPage();y=M;}
-                    if(ri%2===1){doc.setFillColor(246,248,251);doc.rect(M,y,W-2*M,14,"F");}
-                    doc.setTextColor(45,45,45);doc.setFontSize(9);
-                    row.forEach((c,ci)=>doc.text(c.slice(0,25),M+ci*colW+3,y+10));
-                    y+=14;
-                  });
-                  y+=8;
-                } else {
-                  for(const ln of sec.lines){
-                    const txt=stripMd(ln).replace(/[\u2019\u2018]/g,"'").replace(/[\u201c\u201d]/g,'"');
-                    if(!txt.trim())continue;
-                    if(y>H-M){doc.addPage();y=M;}
-                    doc.splitTextToSize(txt,W-2*M).forEach(w=>{if(y>H-M){doc.addPage();y=M;}doc.text(w,M,y);y+=14;});
-                  }
-                }
-                y+=8;
+          try{const pdfBuf=await(async()=>{
+            const jsPDF=await ensureJsPDF();const doc=new jsPDF({orientation:"portrait",unit:"pt",format:"a4"});
+            const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),ML=54,MR=54,MT=54,MB=54,CW=W-ML-MR;
+            const TEAL:any=[20,184,166],NAVY:any=[30,58,95],DARK:any=[30,30,30],GREY:any=[100,100,100],WHITE:any=[255,255,255];
+            const TBL=16;const y={v:MT+40};
+            const hdr=()=>{doc.setFillColor(...NAVY);doc.rect(0,0,W,36,"F");doc.setFontSize(8);doc.setFont("helvetica","normal");doc.setTextColor(...WHITE);doc.text(del.name.slice(0,55),ML,24);doc.text(proj.context?.company?.name||co.name||"",W-MR,24,{align:"right"});};
+            const safeT=(t:string,x:number,fs:number,col:any[],bd=false,mw=CW)=>{doc.setFontSize(fs);doc.setFont("helvetica",bd?"bold":"normal");doc.setTextColor(...col);doc.splitTextToSize(String(t),mw).forEach((l:string)=>{if(y.v+fs*1.4>H-MB){doc.addPage();y.v=MT+40;hdr();}doc.text(l,x,y.v);y.v+=fs*1.4;});};
+            doc.setFillColor(...NAVY);doc.rect(0,0,W,H,"F");doc.setFillColor(...TEAL);doc.rect(0,255,W,4,"F");
+            doc.setFont("helvetica","bold");doc.setFontSize(26);doc.setTextColor(...WHITE);doc.splitTextToSize(del.name,CW).forEach((l:string,i:number)=>doc.text(l,ML,285+i*34));
+            doc.setFontSize(13);doc.setFont("helvetica","normal");doc.setTextColor(...TEAL);doc.text(proj.context?.company?.name||co.name||"",ML,340);
+            doc.setFontSize(10);doc.setTextColor(180,190,200);doc.text(new Date().toLocaleDateString("en-GB")+"  ·  Confidential",ML,362);
+            doc.addPage();hdr();
+            const SKIPRE=/^(cover|table of contents?|toc|contents?)$/i;
+            parseSections(content).filter((s:any)=>!SKIPRE.test(s.title.trim())).forEach(sec=>{
+              if(y.v+30>H-MB){doc.addPage();y.v=MT+40;hdr();}
+              doc.setFillColor(244,246,250);doc.rect(ML-6,y.v-14,CW+12,20,"F");doc.setFillColor(...TEAL);doc.rect(ML-6,y.v-14,3,20,"F");
+              safeT(sec.title,ML+4,11,NAVY,true,CW-8);y.v+=4;
+              const tR=sec.lines.filter((l:string)=>l.includes("|")||l.trim().startsWith("|")).filter((l:string)=>!l.match(/^\|[-:\s|]+\|$/)).map((r:string)=>r.split("|").filter((c:string,ii:number,a:string[])=>ii>0&&ii<a.length-1).map((c:string)=>stripMd(c).trim()));
+              if(tR.length>=2){
+                const cc=Math.max(...tR.map((r:string[])=>r.length),1),cw=CW/cc;
+                if(y.v+TBL>H-MB){doc.addPage();y.v=MT+40;hdr();}
+                doc.setFillColor(...NAVY);doc.rect(ML,y.v-11,CW,TBL,"F");doc.setFontSize(8);doc.setFont("helvetica","bold");doc.setTextColor(...WHITE);
+                tR[0].forEach((h:string,ci:number)=>doc.text(h.slice(0,22),ML+ci*cw+3,y.v));y.v+=TBL+1;doc.setFont("helvetica","normal");
+                tR.slice(1).forEach((row:string[],ri:number)=>{
+                  if(y.v+TBL>H-MB){doc.addPage();y.v=MT+40;hdr();}
+                  if(ri%2===0){doc.setFillColor(248,250,252);doc.rect(ML,y.v-11,CW,TBL,"F");}
+                  doc.setTextColor(...DARK);doc.setFontSize(8);row.forEach((c:string,ci:number)=>doc.text(String(c).slice(0,26),ML+ci*cw+3,y.v));y.v+=TBL;
+                });y.v+=8;
+              } else {
+                sec.lines.forEach((ln:string)=>{const raw=ln.trim();if(!raw||raw.match(/^\|[-:\s|]+\|$/))return;const txt=stripMd(raw).replace(/[\u2019\u2018]/g,"'").replace(/[\u201c\u201d]/g,'"').replace(/\[VERIFIED\]/gi,"✓").replace(/\[ESTIMATE\]/gi,"~").replace(/\[ASSUMPTION\]/gi,"*");if(!txt.trim())return;const ib=raw.startsWith("-")||raw.startsWith("*")||raw.startsWith("•");if(ib&&y.v+10<H-MB){doc.setFontSize(8);doc.setTextColor(...TEAL);doc.text("▸",ML,y.v);}safeT(txt,ib?ML+12:ML,9.5,DARK,false,CW-(ib?12:0));y.v+=2;});
               }
-              const pages=doc.internal.getNumberOfPages();
-              for(let p=1;p<=pages;p++){doc.setPage(p);doc.setFontSize(7);doc.setTextColor(150,150,150);doc.text("Page "+p+" of "+pages,M,H-18);}
-              return doc.output("arraybuffer");
-            })();
-            zip.folder(folder).file(fname+".pdf",buf);
-          }catch{zip.folder(folder).file(fname+".md",content);}
+              y.v+=10;
+            });
+            const tot=doc.internal.getNumberOfPages();for(let p=1;p<=tot;p++){doc.setPage(p);doc.setFontSize(7);doc.setTextColor(...GREY);doc.text("Page "+p+" of "+tot,W/2,H-18,{align:"center"});doc.text("Confidential",ML,H-18);}
+            return doc.output("arraybuffer");
+          })();zip.folder(folder).file(fname+".pdf",pdfBuf);
+          }catch(pdfErr:any){zip.folder(folder).file(fname+"-error.md","PDF error: "+(pdfErr?.message||String(pdfErr))+"\n\n"+content.slice(0,2000));}
         } else if(fmt==="image"||fmt==="video"){
           // Image and video deliverables are handled in Phase 5 (media generation).
           // Save the AI-generated description/script as markdown for reference.
