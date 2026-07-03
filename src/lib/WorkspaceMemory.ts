@@ -9,7 +9,7 @@ const ALL_KEYS = [
   "cos-ledger","cos-accounts","cos-dispatch-templates",
   "cos-actions","cos-admin-config","cos-tm","cos-tm-live",
   "cos-ap","cos-ap-live","cos-vl","cos-theme",
-  "cos-lastvisit","oiq-sb-col",
+  "cos-lastvisit","oiq-sb-col","cos-decision-history",
 ];
 
 export const WorkspaceMemory = {
