@@ -440,6 +440,7 @@ export class BusinessExecutionEngine {
     private ensureJsPDF: () => Promise<any>,
     private dlFile: (name: string, content: any, mime?: string) => void,
     private stripMd: (s: string) => string,
+    private media?: { image?: (prompt: string) => Promise<string>; video?: (prompt: string) => Promise<string> },
   ) {}
 
   // ── MAIN ENTRY POINT ────────────────────────────────────────────────────────
@@ -526,6 +527,10 @@ export class BusinessExecutionEngine {
         return this.generatePDF(plan, del, companyContext, data, onProgress);
       case "docx":
         return this.generateDocx(plan, del, companyContext, data, onProgress);
+      case "image":
+        return this.generateImage(plan, del, companyContext, onProgress);
+      case "video":
+        return this.generateVideo(plan, del, companyContext, onProgress);
       default:
         return null;
     }
@@ -877,6 +882,72 @@ export class BusinessExecutionEngine {
       summary: schema.instructions || `${del.title} workbook generated with ${(schema.sheets || []).length} sheets.`,
       content: `Professional Excel workbook delivered: **${filename}**\n\n${schema.instructions || ""}`,
     };
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // MEDIA ENGINE — Business-grade image & video generation (fal.ai)
+  // ════════════════════════════════════════════════════════════════════════════
+
+  private async craftMediaPrompt(kind: "image" | "video", plan: ExecutionPlan, del: DeliverableSpec, companyContext: string): Promise<string> {
+    // Use planner hint if present; otherwise have the model design a professional media brief.
+    if (del.promptHint?.trim()) return del.promptHint.trim();
+    try {
+      const p = await this.ask(
+        "You are a senior brand art director. Write ONE production-ready " + kind + " generation prompt (max 90 words). Business context, professional corporate aesthetic, no text overlays, no watermarks. Return ONLY the prompt text.",
+        [{ role: "user", content: "Objective: " + plan.objective + "\nDeliverable: " + del.title + " — " + del.purpose + "\nCompany:\n" + companyContext.slice(0, 600) }],
+        300,
+      );
+      const cleaned = this.stripMd(String(p || "")).trim();
+      if (cleaned) return cleaned.slice(0, 700);
+    } catch { /* fall through */ }
+    return "Professional corporate " + kind + " for: " + del.title + ". Clean, modern, business-grade aesthetic.";
+  }
+
+  private mediaFailureOutput(kind: "image" | "video", del: DeliverableSpec, prompt: string, err: string): ExecutionOutput {
+    // Explicit failure artefact — never a silent prompt-file substitution.
+    const filename = del.title.replace(/\s+/g, "-") + "-" + kind + "-GENERATION-FAILED.txt";
+    const body = "⚠ " + kind.toUpperCase() + " GENERATION FAILED\n\nERROR: " + err + "\n\nFIX: Check the fal.ai API key in Settings → fal.ai, account credits, and network access to fal.run.\n\nPROMPT (retry manually or after fixing the key):\n" + prompt;
+    this.dlFile(filename, body, "text/plain");
+    return { deliverable: del, status: "failed", filename, error: err, summary: kind + " generation failed: " + err };
+  }
+
+  async generateImage(plan: ExecutionPlan, del: DeliverableSpec, companyContext: string, onProgress: (msg: string) => void): Promise<ExecutionOutput> {
+    const prompt = await this.craftMediaPrompt("image", plan, del, companyContext);
+    if (!this.media?.image) return this.mediaFailureOutput("image", del, prompt, "Image generator not wired — fal.ai caller missing at engine construction.");
+    try {
+      onProgress("🎨 Generating image: " + del.title + "...");
+      const url = await this.media.image(prompt);
+      if (!url) throw new Error("fal.ai returned no image URL");
+      onProgress("⬇ Downloading generated image...");
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error("Image download failed: HTTP " + resp.status);
+      const blob = await resp.blob();
+      const ext = (blob.type.split("/")[1] || "png").split("+")[0];
+      const filename = del.title.replace(/\s+/g, "-") + "-" + Date.now() + "." + ext;
+      this.dlFile(filename, blob, blob.type || "image/png");
+      return { deliverable: del, status: "complete", filename, summary: "Generated image (" + Math.round(blob.size / 1024) + " KB) — " + del.title };
+    } catch (e: any) {
+      return this.mediaFailureOutput("image", del, prompt, e?.message || String(e));
+    }
+  }
+
+  async generateVideo(plan: ExecutionPlan, del: DeliverableSpec, companyContext: string, onProgress: (msg: string) => void): Promise<ExecutionOutput> {
+    const prompt = await this.craftMediaPrompt("video", plan, del, companyContext);
+    if (!this.media?.video) return this.mediaFailureOutput("video", del, prompt, "Video generator not wired — fal.ai caller missing at engine construction.");
+    try {
+      onProgress("🎬 Generating video: " + del.title + " (may take 1–3 minutes)...");
+      const url = await this.media.video(prompt);
+      if (!url) throw new Error("fal.ai returned no video URL");
+      onProgress("⬇ Downloading generated video...");
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error("Video download failed: HTTP " + resp.status);
+      const blob = await resp.blob();
+      const filename = del.title.replace(/\s+/g, "-") + "-" + Date.now() + ".mp4";
+      this.dlFile(filename, blob, blob.type || "video/mp4");
+      return { deliverable: del, status: "complete", filename, summary: "Generated video (" + Math.round(blob.size / 1048576) + " MB) — " + del.title };
+    } catch (e: any) {
+      return this.mediaFailureOutput("video", del, prompt, e?.message || String(e));
+    }
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -1675,6 +1746,12 @@ ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: 
 }
 
 // ─── EXECUTION OUTPUT TYPE ────────────────────────────────────────────────────
+
+// ═══ MEDIA ENGINE ═══ Real image/video generation via injected fal.ai callers.
+// Success = the actual media file is delivered. A prompt file is produced ONLY
+// when generation genuinely fails, and it always states the exact error so the
+// routing issue is visible instead of silently swallowed.
+export interface ExecutionOutputMediaPatch {} // type-anchor only
 
 export interface ExecutionOutput {
   deliverable: DeliverableSpec;
