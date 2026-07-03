@@ -535,6 +535,118 @@ export class BusinessExecutionEngine {
   // EXCEL ENGINE — Professional-grade workbook generation
   // ════════════════════════════════════════════════════════════════════════════
 
+  // ── MARKDOWN → EXCEL SCHEMA CONVERTER ──────────────────────────────────
+  // When AI returns markdown instead of JSON, convert it to a valid schema.
+  // This is the primary fallback when JSON extraction fails.
+  private markdownToExcelSchemaFn(text: string, title: string, sym: string): any {
+    const lines = text.split("\n");
+    const sheets: any[] = [];
+    let currentSheet: any = null;
+    let currentRows: any[][] = [];
+
+    const flushSheet = () => {
+      if (currentRows.length > 0) {
+        sheets.push({
+          name: (currentSheet || title).slice(0, 31),
+          type: "data",
+          rows: currentRows.map(row =>
+            // Strip markdown: remove ** * __ _ ` and clean text
+            row.map(cell => {
+              if (typeof cell !== "string") return cell;
+              return cell
+                .replace(/\*\*([^*]+)\*\*/g, "$1")
+                .replace(/\*([^*]+)\*/g, "$1")
+                .replace(/`([^`]+)`/g, "$1")
+                .replace(/_{2}([^_]+)_{2}/g, "$1")
+                .replace(/\.md$/i, "")
+                .trim();
+            })
+          ),
+          colWidths: Array(Math.max(...currentRows.map(r => r.length), 1)).fill(20),
+          frozenRows: 1,
+          autoFilter: currentRows[0]?.length ? `A1:${String.fromCharCode(64 + currentRows[0].length)}1` : undefined,
+          headerRow: 0,
+        });
+        currentRows = [];
+      }
+    };
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      // Detect sheet headers: # Heading or ## Heading
+      if (/^#{1,3}\s/.test(trimmed)) {
+        flushSheet();
+        currentSheet = trimmed.replace(/^#+\s*/, "").slice(0, 31);
+        continue;
+      }
+
+      // Parse markdown table rows
+      if (trimmed.startsWith("|") && !trimmed.match(/^\|[-:\s|]+\|$/)) {
+        const cells = trimmed.split("|")
+          .filter((c, i, a) => i > 0 && i < a.length - 1)
+          .map(c => {
+            const v = c.trim()
+              .replace(/\*\*([^*]+)\*\*/g, "$1")
+              .replace(/\*([^*]+)\*/g, "$1")
+              .replace(/`([^`]+)`/g, "$1")
+              .trim();
+            // Detect formula strings
+            if (v.startsWith("=")) return v;
+            // Detect numbers with currency
+            const numMatch = v.replace(/[₹$£€,\s]/g, "");
+            if (!isNaN(Number(numMatch)) && numMatch !== "") return Number(numMatch);
+            return v;
+          });
+        if (cells.length > 0) currentRows.push(cells);
+        continue;
+      }
+
+      // Key-value pairs: "Label: Value"
+      const kvMatch = trimmed.match(/^([^:]+):\s*(.+)$/);
+      if (kvMatch && !trimmed.startsWith("#")) {
+        const label = kvMatch[1].replace(/\*\*/g, "").trim();
+        const val = kvMatch[2].replace(/\*\*/g, "").trim();
+        if (currentRows.length === 0) currentRows.push(["Item", "Value"]);
+        currentRows.push([label, val]);
+      }
+    }
+    flushSheet();
+
+    // Always ensure at least one usable sheet
+    if (!sheets.length) {
+      sheets.push({
+        name: title.slice(0, 31),
+        type: "data",
+        rows: [["Description"], [text.replace(/[*_`#]/g, "").slice(0, 500)]],
+        colWidths: [80],
+        frozenRows: 1,
+      });
+    }
+
+    // Add Assumptions sheet if [ASSUMPTION] or [ESTIMATE] tags exist
+    const assumptions = text.split("\n")
+      .filter(l => /\[ASSUMPTION\]|\[ESTIMATE\]/i.test(l))
+      .map(l => [l.replace(/[*_`]/g, "").trim()]);
+    if (assumptions.length) {
+      sheets.push({
+        name: "Assumptions",
+        type: "assumptions",
+        rows: [["Assumption / Estimate"], ...assumptions],
+        colWidths: [80],
+        frozenRows: 1,
+      });
+    }
+
+    return {
+      filename: title.replace(/\s+/g, "-") + ".xlsx",
+      title,
+      sheets,
+      instructions: `Workbook generated from: ${title}. Review assumptions tab.`,
+    };
+  }
+
   async generateExcel(
     plan: ExecutionPlan,
     del: DeliverableSpec,
@@ -553,13 +665,45 @@ export class BusinessExecutionEngine {
     }], 6000, false, "excel_advanced");
 
     const text = typeof raw === "string" ? raw : raw?.text || "";
-    const cleaned = text.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
 
-    let schema: any;
-    try {
-      schema = JSON.parse(cleaned);
-    } catch {
-      return { deliverable: del, status: "failed", error: "Excel schema generation failed — JSON parse error" };
+    // ── AGGRESSIVE JSON EXTRACTION ────────────────────────────────────────
+    // AI models often wrap JSON in markdown or add explanatory text.
+    // Try multiple extraction strategies before giving up.
+    let schema: any = null;
+
+    const tryParseJSON = (s: string): any => {
+      try { return JSON.parse(s); } catch { return null; }
+    };
+
+    // Strategy 1: clean markdown fences
+    const cleaned = text.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+    schema = tryParseJSON(cleaned);
+
+    // Strategy 2: find first { ... } block that contains "sheets"
+    if (!schema?.sheets) {
+      const jsonMatch = text.match(/\{[\s\S]*"sheets"[\s\S]*\}/);
+      if (jsonMatch) schema = tryParseJSON(jsonMatch[0]);
+    }
+
+    // Strategy 3: find any JSON object in the response
+    if (!schema?.sheets) {
+      const allBraces = text.match(/\{[\s\S]{100,}\}/g);
+      if (allBraces) {
+        for (const candidate of allBraces) {
+          const parsed = tryParseJSON(candidate);
+          if (parsed?.sheets) { schema = parsed; break; }
+        }
+      }
+    }
+
+    // Strategy 4: markdown → schema converter
+    // When AI outputs a markdown table instead of JSON, convert it
+    if (!schema?.sheets) {
+      schema = this.markdownToExcelSchemaFn(text, del.title, currencySymbol);
+    }
+
+    if (!schema?.sheets?.length) {
+      return { deliverable: del, status: "failed", error: `Excel schema: could not extract valid workbook structure from AI response (${text.slice(0,100)})` };
     }
 
     onProgress(`📊 Building workbook: ${schema.filename || del.title}...`);
@@ -572,7 +716,21 @@ export class BusinessExecutionEngine {
       const rows: any[][] = sheet.rows || [];
       if (!rows.length) continue;
 
-      const ws = XLSX.utils.aoa_to_sheet(rows);
+      // ── Strip markdown from all cells before writing ─────────────────────
+      const cleanRows = rows.map((row: any[]) => row.map((cell: any) => {
+        if (typeof cell !== "string") return cell;
+        if (cell.startsWith("=")) return cell; // preserve formula strings
+        return cell
+          .replace(/\*\*([^*]+)\*\*/g, "$1")  // **bold** → bold
+          .replace(/\*([^*]+)\*/g, "$1")        // *italic* → italic
+          .replace(/`([^`]+)`/g, "$1")           // `code` → code
+          .replace(/_{2}([^_]+)_{2}/g, "$1")     // __bold__ → bold
+          .replace(/^#+\s+/, "")                 // ## heading → heading
+          .replace(/^[-*]\s+/, "")               // - bullet → text
+          .trim();
+      }));
+
+      const ws = XLSX.utils.aoa_to_sheet(cleanRows);
 
       // ── Formula post-processing ───────────────────────────────────────────
       // SheetJS aoa_to_sheet writes all values as strings.
