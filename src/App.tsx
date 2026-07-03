@@ -2693,18 +2693,260 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     // Helper: build the system prompt for a deliverable
     const buildDelSys=(ctx,mod,del,priorDepContent)=>{
       const nl="\n";
-      return "You are an expert "+mod.capabilityType+" specialist working for "+ctx.company.name+"."+nl+
-        "COMPANY: "+ctx.company.name+" | "+ctx.company.industry+" | "+ctx.company.stage+" | "+ctx.company.location+" | "+ctx.company.currencySymbol+ctx.company.currency+nl+
-        (Object.keys(ctx.dataHub||{}).length?"DATA HUB:"+nl+Object.entries(ctx.dataHub).map(([k,v])=>k+": "+v).join(nl)+nl:"")+
-        (ctx.timeMachineForecasts?"FORECASTS: "+ctx.timeMachineForecasts+nl:"")+
-        ((ctx.boardroomDecisions||[]).length?"DECISIONS: "+ctx.boardroomDecisions.map(d=>"Q:"+d.question+" → "+d.decisionStatus).join(" | ")+nl:"")+
-        (priorDepContent?"DEPENDENCY OUTPUT (use this as input):"+nl+priorDepContent+nl:"")+nl+
-        "YOUR TASK: Produce the deliverable below. Output the COMPLETE deliverable only — no preamble, no meta-commentary, no section headers about what you are doing. Start directly with the content."+nl+
-        "DELIVERABLE: "+del.name+nl+
-        "DESCRIPTION: "+del.description+nl+
-        "FORMAT: "+del.outputFormat+nl+
-        "VERIFICATION: Label any unverified figure as [ASSUMPTION] or [ESTIMATE]. Label verified data as [VERIFIED]."+nl+
-        "CURRENCY: "+ctx.company.currencySymbol;
+      const co=ctx.company||{};
+      const fmt=(del.outputFormat||"md").toLowerCase();
+      const sym=co.currencySymbol||"₹";
+      const currency=co.currency||"INR";
+      const coCtx=`${co.name} | ${co.industry} | ${co.stage} | ${co.location} | ${sym}${currency}`;
+
+      // ── DOMAIN EXPERT PERSONA ─────────────────────────────────────────────
+      // Assign the most qualified professional persona for this deliverable type
+      const PERSONAS:{[k:string]:string}={
+        finance:   "Senior FP&A Manager from McKinsey's CFO Advisory practice with 15 years experience in financial modelling, variance analysis, and management reporting for Fortune 500 companies",
+        audit:     "Senior Manager from Deloitte's Internal Audit practice, expert in ITGC, SOX compliance, risk registers, and audit workpapers",
+        strategy:  "Principal at BCG with expertise in corporate strategy, market entry, competitive analysis, and board-level presentations",
+        marketing: "VP of Marketing with consulting background, expert in brand strategy, campaign design, ROI measurement, and executive presentations",
+        design:    "Creative Director with B2B SaaS expertise, skilled in visual communication, infographic design, and brand-aligned assets",
+        content:   "Senior Business Writer from Bain & Company, expert in executive communications, business cases, and client-facing deliverables",
+        legal:     "Corporate counsel with M&A and compliance expertise, skilled in contract drafting and regulatory documentation",
+        management:"Senior Partner with expertise in change management, operational excellence, and C-suite presentations",
+        engineering:"Principal Solutions Architect with expertise in technical documentation, system design, and API specifications",
+        research:  "Senior Research Analyst with expertise in primary and secondary market research, competitive intelligence, and insight reports",
+        compliance:"Big4 Compliance Manager expert in regulatory frameworks, control testing, and assurance documentation",
+        hr:        "CHRO Advisory specialist with expertise in HR analytics, talent strategy, and people management frameworks",
+        operations:"McKinsey Operations Practice expert in process design, efficiency analysis, and operational dashboards",
+        sales:     "Sales Strategy Director with expertise in pipeline analysis, revenue modelling, and go-to-market planning",
+      };
+      const persona=PERSONAS[mod.capabilityType]||PERSONAS[mod.capabilityType?.split("_")[0]]||"Senior Business Consultant with Big4 experience";
+
+      // ── FORMAT-SPECIFIC OUTPUT INSTRUCTIONS ───────────────────────────────
+      const FORMAT_RULES:{[k:string]:string}={
+        xlsx:`
+EXCEL OUTPUT RULES (CRITICAL — follow exactly):
+You are building a PROFESSIONAL FINANCIAL WORKBOOK, not a table.
+Structure your output as SHEETS separated by === SHEET: [Name] ===
+
+Required sheets:
+=== SHEET: Dashboard ===
+(KPI summary: key metrics with formula references to data sheets)
+KEY METRICS: label | value | formula | format | trend
+Example rows:
+Revenue | ${sym}0 | =Data!B${15} | currency | ▼
+Burn Rate | ${sym}0 | =Data!C${8} | currency | ▲
+
+=== SHEET: Data ===
+(Structured data table with headers in row 1)
+Row 1: HEADERS (bold, freeze this row)
+Row 2+: Data rows
+Totals row: Use =SUM() formulas — example: =SUM(B2:B13)
+Variances: Use =B14-C14 or =IFERROR((B14-C14)/C14,"N/A")
+Conditional: Flag variances >10% with [FLAG]
+
+=== SHEET: Analysis ===
+(Derived calculations, trends, ratios)
+Use formula strings: =IF(B5>0,"▲ Growth","▼ Decline")
+Ratios: =IFERROR(B8/B9,0)
+
+=== SHEET: Assumptions ===
+Named | Value | Basis | Confidence
+Each assumption on its own row, labeled [VERIFIED] or [ESTIMATE]
+
+=== VBA: Refresh Macro ===
+(Optional VBA code if automation adds value — copy-paste instructions)
+
+FORMULA REQUIREMENTS:
+- ALL totals must use =SUM() not hardcoded numbers
+- ALL ratios must use =IFERROR(numerator/denominator,"N/A")
+- ALL variances must use =Actual-Budget or =(Actual-Budget)/Budget
+- Prefix formula cells with = sign
+- Reference between sheets: ='Sheet Name'!B5
+- Named ranges: use descriptive names in formulas where possible
+- Currency: format numbers as ${sym} values
+- DO NOT output pre-calculated numbers as text — use formulas`,
+
+        pptx:`
+POWERPOINT OUTPUT RULES (CRITICAL — follow exactly):
+You are creating a CONSULTING-GRADE PRESENTATION (McKinsey/BCG standard).
+Output as structured JSON inside a code block:
+
+\`\`\`json
+{
+  "title": "Presentation Title",
+  "theme": "navy",
+  "slides": [
+    {
+      "layout": "title",
+      "title": "Main Title",
+      "subtitle": "Subtitle",
+      "meta": "Company | Date | Confidential"
+    },
+    {
+      "layout": "exec_summary",
+      "title": "SO WHAT headline — not a topic label",
+      "bullets": ["Key insight 1", "Key insight 2", "Key insight 3"],
+      "so_what": "The one sentence the CEO must remember"
+    },
+    {
+      "layout": "chart",
+      "title": "SO WHAT headline about this chart",
+      "chart_type": "bar|line|pie|waterfall",
+      "chart_title": "Chart title",
+      "categories": ["Q1","Q2","Q3","Q4"],
+      "series": [
+        {"name": "Actual", "values": [100,120,115,140], "color": "teal"},
+        {"name": "Budget", "values": [110,110,120,130], "color": "navy"}
+      ],
+      "insight": "One sentence explaining what the chart shows"
+    },
+    {
+      "layout": "two_col",
+      "title": "SO WHAT headline",
+      "left_header": "Left Column Header",
+      "left": ["Bullet 1", "Bullet 2", "Bullet 3"],
+      "right_header": "Right Column Header",
+      "right": ["Bullet 1", "Bullet 2", "Bullet 3"]
+    },
+    {
+      "layout": "table",
+      "title": "SO WHAT headline",
+      "headers": ["Column 1", "Column 2", "Column 3"],
+      "rows": [["R1C1","R1C2","R1C3"],["R2C1","R2C2","R2C3"]],
+      "highlight_row": 0
+    },
+    {
+      "layout": "closing",
+      "title": "Recommendation / Next Steps",
+      "actions": ["Action 1: Owner | Timeline", "Action 2: Owner | Timeline"],
+      "bottom_line": "The single most important takeaway"
+    }
+  ]
+}
+\`\`\`
+
+SLIDE QUALITY RULES:
+- Every slide title must be a "SO WHAT" sentence, not a topic label
+  BAD: "Revenue Analysis" | GOOD: "Revenue grew 23% YoY driven by enterprise segment"
+- Include at least 2 chart slides with real numerical data
+- Every chart must have actual numbers that tell a story
+- Speaker notes: add as "notes" field on each slide
+- Minimum 8 slides, maximum 15 slides
+- Closing slide must have specific, numbered action items`,
+
+        pdf:`
+PDF / REPORT OUTPUT RULES:
+You are producing a PUBLICATION-QUALITY business report (Big4/consulting standard).
+Structure:
+
+# COVER
+Title | Author | Date | Classification: Confidential
+
+# EXECUTIVE SUMMARY (max 250 words)
+3-5 key findings. What the reader must know before anything else.
+
+# KEY FINDINGS
+1. **Finding headline** — Supporting evidence. [VERIFIED/ESTIMATE]
+2. **Finding headline** — Supporting evidence.
+
+# [NUMBERED SECTIONS — each section earns its place]
+## 1.0 [Section Title]
+### 1.1 [Subsection]
+Content with evidence-based statements.
+Tables formatted as:
+| Column 1 | Column 2 | Column 3 |
+|----------|----------|----------|
+| Data     | Data     | Data     |
+
+# RECOMMENDATIONS
+1. **[Specific action]** — Rationale. Owner: [role]. Timeline: [period].
+2. **[Specific action]** — Rationale. Owner: [role]. Timeline: [period].
+
+# APPENDIX
+Supporting data, methodology, assumptions
+
+QUALITY RULES:
+- Every claim must have evidence or be labeled [ESTIMATE]
+- No generic statements — every sentence must add information
+- Tables must have headers and be properly formatted
+- Recommendations must be specific, measurable, and assigned`,
+
+        docx:`
+WORD DOCUMENT OUTPUT RULES:
+Produce a SUBMISSION-READY document.
+Use the same structure as PDF above.
+Include:
+- Professional heading hierarchy (H1 → H2 → H3)
+- Properly formatted tables with bold headers
+- Executive Summary always first
+- Numbered recommendations always last
+- Appendix for supporting data`,
+
+        md:`
+REPORT OUTPUT RULES:
+Produce a COMPLETE, professional business document.
+- Use proper markdown: ## for sections, ### for subsections
+- Every table must have headers and alignment
+- Every claim must be evidence-based or labeled [ESTIMATE/ASSUMPTION]
+- Executive Summary first, Recommendations last
+- Minimum 800 words for any analytical deliverable`,
+      };
+
+      const formatRules=FORMAT_RULES[fmt]||FORMAT_RULES.md;
+
+      // ── QUALITY STANDARD ─────────────────────────────────────────────────
+      const qualityStandard=`
+QUALITY STANDARD:
+Could this output be presented directly to a CFO, Board, or senior client WITHOUT manual editing?
+If no, it is not complete. Do not submit incomplete work.
+Every number must be sourced or labeled. Every recommendation must be specific and actionable.
+This is McKinsey/Deloitte standard — not a draft, not a template, not a starting point.`;
+
+      // ── BUILD THE FULL SYSTEM PROMPT ─────────────────────────────────────
+      return `You are a ${persona}.
+
+ENGAGEMENT CONTEXT:
+Company: ${coCtx}
+${Object.keys(ctx.dataHub||{}).length?`DATA AVAILABLE:\n${Object.entries(ctx.dataHub).map(([k,v])=>`${k}: ${v}`).join(nl)}\n`:""}${ctx.timeMachineForecasts?`FORECASTS: ${ctx.timeMachineForecasts}\n`:""}${(ctx.boardroomDecisions||[]).length?`BOARD DECISIONS: ${ctx.boardroomDecisions.map((d:any)=>`${d.question} → ${d.decisionStatus}`).join(" | ")}\n`:""}${priorDepContent?`\nPRIOR WORK (use as input — do not repeat):\n${priorDepContent}\n`:""}
+
+DELIVERABLE TO PRODUCE:
+Name: ${del.name}
+Purpose: ${del.description}
+Output Format: ${fmt.toUpperCase()}
+${formatRules}
+
+DATA LABELING:
+- [VERIFIED]: confirmed data from provided sources
+- [ESTIMATE]: calculated or inferred
+- [ASSUMPTION]: stated assumption requiring validation
+
+${qualityStandard}
+
+Now produce the complete ${del.name}. Start with content immediately — no preamble.`;
+    };
+
+    // Helper: parse markdown content into slide schema when AI doesn't output JSON
+    const parseMdToSlides=(md:string,coName:string,title:string)=>{
+      const lines=md.split("\n").filter((l:string)=>l.trim());
+      const slides:any[]=[{layout:"title",title,subtitle:coName,meta:`${coName} · ${new Date().toLocaleDateString("en-GB")}`}];
+      let currentSlide:any=null;
+      const pushCurrent=()=>{if(currentSlide?.bullets?.length||currentSlide?.content)slides.push(currentSlide);};
+      for(const line of lines){
+        if(line.startsWith("# ")){
+          pushCurrent();
+          currentSlide={layout:"exec_summary",title:line.replace(/^#+\s*/,""),bullets:[]};
+        } else if(line.startsWith("## ")){
+          pushCurrent();
+          currentSlide={layout:"full_text",title:line.replace(/^#+\s*/,""),bullets:[]};
+        } else if(line.startsWith("### ")){
+          pushCurrent();
+          currentSlide={layout:"full_text",title:line.replace(/^#+\s*/,""),bullets:[]};
+        } else if(currentSlide){
+          const clean=line.replace(/^[-*•]\s*/,"").trim();
+          if(clean) currentSlide.bullets=(currentSlide.bullets||[]).concat([clean]);
+        }
+      }
+      pushCurrent();
+      slides.push({layout:"closing",title:"Next Steps & Recommendations",actions:["Review findings with leadership","Assign owners and timelines","Implement priority actions"]});
+      return {title,slides};
     };
 
     // Helper: call AI with retry + failover + waiting
@@ -2756,10 +2998,11 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       const userMsg="Generate the complete deliverable now: "+del.name;
 
       // Estimate if chunking is needed based on description length
-      const needsChunking=del.description.length>300||["blog","landing page","press release","terms","privacy","contract","roadmap","forecast"].some(k=>del.name.toLowerCase().includes(k));
+      const needsChunking=del.description.length>300||["blog","landing page","press release","terms","privacy","contract","roadmap","forecast","excel","xlsx","financial","pptx","presentation","deck","report","analysis","audit","strategy"].some(k=>del.name.toLowerCase().includes(k)||del.outputFormat==="xlsx"||del.outputFormat==="pptx"||del.outputFormat==="pdf");
 
       if(!needsChunking){
-        return await callDelAI(sys,userMsg,2500,del.name);
+        const isLargeDeliverable=["xlsx","pptx","pdf","docx"].includes(del.outputFormat?.toLowerCase()||"")||del.description.length>200;
+      return await callDelAI(sys,userMsg,isLargeDeliverable?4500:2500,del.name);
       }
 
       // Chunked generation — split into logical sections
@@ -3063,7 +3306,10 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       const allDels=(proj.modules||[]).flatMap(m=>(m.deliverables||[]).map(d=>({...d,_modName:m.name})));
       const excluded=proj._excluded||{};
       const done=allDels.filter(d=>d.rawContent&&d.status!=="failed"&&!excluded[d.id]);
+      // Execute deliverables serially — yield UI between each to prevent blocking
+      const yieldUI=()=>new Promise<void>(r=>setTimeout(r,0));
       for(const del of done){
+        await yieldUI(); // Release UI thread before each deliverable
         const folder=del._modName.replace(/[^a-zA-Z0-9]/g,"-");
         const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
         const fmt=(del.outputFormat||"md").toLowerCase();
@@ -3213,64 +3459,141 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
               zip.folder(folder).file(fname+".xlsx",buf);
             }catch{zip.folder(folder).file(fname+".md",content);}
           }
-        // ── IMPROVED 3: Enterprise PPTX — reuse Quality Engine ──
+        // ── PPTX: JSON-driven consulting-grade presentation ─────────────────
         } else if(fmt==="pptx"){
           try{
             const PptxGenJS=await ensurePptx();
             const pptx=new PptxGenJS();
-            pptx.defineLayout({name:"WIDE",width:13.333,height:7.5});pptx.layout="WIDE";
-            const coN=proj.context?.company?.name||"";
-            const deckType=del.capabilityType||"briefing";
-            const tLabel=del.name;
-            // Try Quality Engine structured deck first
-            let usedQE=false;
-            try{
-              const allKeys={...keys};
-              if(EFF_CLAUDE?.trim())allKeys.claude=EFF_CLAUDE;
-              const provs=["deepseek","claude","openai","gemini","groq","kimi"].filter(p=>allKeys[p]?.trim());
-              if(provs.length){
-                const qeSys=buildStructuredDeckPrompt(tLabel,"Consulting Presentation");
-                const qeCtx="COMPANY: "+coN+"\nCONTENT:\n"+content.slice(0,2000);
-                const qeRaw=await callAI(provs[0],allKeys[provs[0]],qeSys,[{role:"user",content:qeCtx}],2000);
-                const slides=parseStructuredDeck(qeRaw.text||qeRaw);
-                if(slides&&slides.length>1){
-                  slides.forEach(s=>{if(s.type==="title"){s.companyName=coN;s.deckTitle=s.deckTitle||tLabel;}});
-                  const PAL={briefing:"14B8A6",strategy:"6366F1",investor:"A855F7",research:"06B6D4",management:"F59E0B",marketing:"EF4444",finance:"3B82F6"};
-                  const A=PAL[deckType]||"14B8A6";
-                  renderStructuredDeck(pptx,slides,A,QE_PAL);
-                  usedQE=true;
-                }
-              }
-            }catch{}
-            // Fallback: section-based slides
-            if(!usedQE){
-              const secs=parseSections(content);
-              const s0=pptx.addSlide();s0.background={color:"0A0E1A"};
-              s0.addShape(pptx.ShapeType.rect,{x:0,y:3.0,w:0.35,h:1.5,fill:{color:"14B8A6"}});
-              s0.addText(del.name,{x:0.7,y:2.8,w:12,h:1.2,fontSize:30,bold:true,color:"F1F5F9"});
-              s0.addText(coN,{x:0.7,y:4.2,w:12,h:0.6,fontSize:16,color:"14B8A6"});
-              s0.addText("Generated "+new Date().toLocaleDateString()+" · Confidential",{x:0.7,y:6.8,w:12,h:0.3,fontSize:9,color:"5A6480"});
-              secs.slice(0,10).forEach((sec,idx)=>{
-                const s=pptx.addSlide();s.background={color:"0A0E1A"};
-                s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:13.333,h:0.9,fill:{color:"131825"}});
-                s.addShape(pptx.ShapeType.rect,{x:0,y:0,w:0.25,h:0.9,fill:{color:"14B8A6"}});
-                s.addText(sec.title,{x:0.5,y:0.1,w:11.5,h:0.7,fontSize:20,bold:true,color:"F1F5F9",valign:"middle"});
-                s.addText(String(idx+1).padStart(2,"0"),{x:12.3,y:0.1,w:0.9,h:0.7,fontSize:16,color:"14B8A6",align:"right",valign:"middle"});
-                const tRows=sec.lines.filter(l=>l.includes("|")&&l.trim().startsWith("|")&&!l.trim().match(/^\|[\s|:-]+\|$/)).map(r=>r.split("|").filter((c,ii,a)=>ii>0&&ii<a.length-1).map(c=>c.trim()));
-                if(tRows.length>=2){
-                  const hdr=[{text:"",options:{fill:{color:"14B8A6"},color:"0A0E1A",bold:true,fontSize:11}},...tRows[0].map(c=>({text:c,options:{fill:{color:"14B8A6"},color:"0A0E1A",bold:true,fontSize:11}}))].slice(0,tRows[0].length);
-                  const body=tRows.slice(1).map(r=>r.map(c=>({text:c,options:{fill:{color:"131825"},color:"A0AAC0",fontSize:10}})));
-                  s.addTable([tRows[0].map(c=>({text:c,options:{fill:{color:"14B8A6"},color:"0A0E1A",bold:true,fontSize:10}})),...tRows.slice(1).map(r=>r.map(c=>({text:c,options:{fill:{color:"131825"},color:"A0AAC0",fontSize:10}})))],{x:0.5,y:1.2,w:12.3,border:{type:"solid",color:"1a2030",pt:1},autoPage:false});
-                } else {
-                  const bullets=sec.lines.map(l=>stripMd(l)).filter(Boolean).slice(0,8);
-                  if(bullets.length)s.addText(bullets.map(b=>({text:b.replace(/^[*\-]\s*/,""),options:{bullet:{code:"2022"},color:"A0AAC0",fontSize:14,paraSpaceAfter:8}})),{x:0.7,y:1.2,w:12,h:5.8,valign:"top"});
-                }
-                s.addText(coN+" · Confidential",{x:0.5,y:7.1,w:12,h:0.3,fontSize:8,color:"3A4060"});
-              });
+            pptx.defineLayout({name:"WIDE",width:13.333,height:7.5}); pptx.layout="WIDE";
+            const coN=proj.context?.company?.name||co.name||"Company";
+            const sym=proj.context?.company?.currencySymbol||co.currencySymbol||"₹";
+
+            // ── PARSE JSON OUTPUT FROM AI ──────────────────────────────────
+            // AI now outputs structured JSON with slide specs
+            let schema:any=null;
+            const jsonMatch=content.match(/```json([\s\S]*?)```/i)||content.match(/\{[\s\S]*"slides"[\s\S]*\}/);
+            if(jsonMatch){
+              try{ schema=JSON.parse((jsonMatch[1]||jsonMatch[0]).trim()); }catch{}
             }
+            if(!schema?.slides?.length){
+              // Fallback: parse markdown into slide structure
+              schema=parseMdToSlides(content,coN,del.name);
+            }
+            const slides:any[]=schema.slides||[];
+
+            // ── THEME COLOURS ──────────────────────────────────────────────
+            const THEME={
+              dark:"0A0E1A", primary:"1E3A5F", accent:"14B8A6",
+              white:"FFFFFF", muted:"94A3B8", light:"F1F5F9",
+              amber:"D97706", red:"DC2626", green:"16A34A",
+            };
+            const CHART_COLORS=["14B8A6","1E3A5F","3B82F6","F59E0B","EF4444","10B981","A855F7"];
+
+            // ── SLIDE BUILDERS ─────────────────────────────────────────────
+            const addStdHeader=(slide:any,title:string,slideNum:number,total:number)=>{
+              slide.addShape(pptx.ShapeType.rect,{x:0,y:0,w:13.333,h:0.85,fill:{color:"131825"}});
+              slide.addShape(pptx.ShapeType.rect,{x:0,y:0,w:0.22,h:0.85,fill:{color:THEME.accent}});
+              slide.addText(title,{x:0.4,y:0.08,w:11.5,h:0.7,fontSize:19,bold:true,color:THEME.white,fontFace:"Calibri",valign:"middle"});
+              slide.addText(`${slideNum}/${total}`,{x:12.2,y:0.08,w:1.0,h:0.7,fontSize:9,color:THEME.muted,align:"right",fontFace:"Calibri"});
+            };
+
+            for(let si=0;si<slides.length;si++){
+              const sd=slides[si];
+              const slide=pptx.addSlide();
+              const total=slides.length;
+
+              if(sd.layout==="title"){
+                slide.background={color:THEME.dark};
+                slide.addShape(pptx.ShapeType.rect,{x:0,y:2.9,w:0.4,h:1.8,fill:{color:THEME.accent}});
+                slide.addText(sd.title||del.name,{x:0.7,y:2.8,w:11,h:1.1,fontSize:34,bold:true,color:THEME.white,fontFace:"Calibri"});
+                slide.addText(sd.subtitle||"",{x:0.7,y:3.95,w:11,h:0.7,fontSize:18,color:THEME.accent,fontFace:"Calibri"});
+                slide.addText(sd.meta||`${coN}  ·  ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}  ·  Confidential`,{x:0.7,y:6.9,w:11,h:0.4,fontSize:10,color:THEME.muted,fontFace:"Calibri"});
+              }
+              else if(sd.layout==="exec_summary"){
+                slide.background={color:THEME.dark};
+                addStdHeader(slide,sd.title||"Executive Summary",si+1,total);
+                const bullets=(sd.bullets||[]).slice(0,5);
+                bullets.forEach((b:string,bi:number)=>{
+                  const y=1.1+bi*1.1;
+                  slide.addShape(pptx.ShapeType.ellipse,{x:0.35,y:y+0.08,w:0.5,h:0.5,fill:{color:THEME.accent}});
+                  slide.addText(String(bi+1),{x:0.35,y:y+0.02,w:0.5,h:0.5,fontSize:14,bold:true,color:THEME.white,align:"center",fontFace:"Calibri"});
+                  slide.addText(b.replace(/^[-•*]\s*/,""),{x:1.0,y,w:11.8,h:0.9,fontSize:14,color:THEME.white,fontFace:"Calibri",valign:"middle"});
+                });
+                if(sd.so_what) slide.addText(`Key takeaway: ${sd.so_what}`,{x:0.4,y:6.8,w:12.5,h:0.5,fontSize:11,color:THEME.accent,italic:true,fontFace:"Calibri"});
+                if(sd.notes) slide.addNotes(sd.notes);
+              }
+              else if(sd.layout==="chart"&&sd.series?.length){
+                slide.background={color:THEME.dark};
+                addStdHeader(slide,sd.title||"Analysis",si+1,total);
+                try{
+                  const ctMap:any={bar:pptx.ChartType?.bar,line:pptx.ChartType?.line,pie:pptx.ChartType?.pie,waterfall:pptx.ChartType?.bar,scatter:pptx.ChartType?.scatter};
+                  const chartData=sd.series.map((s:any,ci:number)=>({name:s.name,labels:sd.categories||[],values:(s.values||[]).map(Number)}));
+                  slide.addChart(ctMap[sd.chart_type]||pptx.ChartType?.bar,chartData,{
+                    x:0.3,y:1.0,w:8.5,h:5.8,
+                    showLegend:true,legendPos:"b",legendFontSize:10,legendColor:THEME.muted,
+                    chartColors:CHART_COLORS,plotAreaBkgndColor:THEME.dark,
+                    valAxisLabelColor:THEME.muted,catAxisLabelColor:THEME.muted,
+                    showTitle:false,dataLabelFontSize:9,
+                  });
+                  if(sd.insight) slide.addText(sd.insight,{x:9.0,y:1.0,w:4.1,h:5.8,fontSize:12,color:THEME.white,fontFace:"Calibri",valign:"top",wrap:true});
+                }catch{
+                  // Chart failed - render as text
+                  slide.addText(content.slice(0,500),{x:0.4,y:1.0,w:12.5,h:5.8,fontSize:11,color:THEME.white,fontFace:"Calibri",wrap:true});
+                }
+                if(sd.notes) slide.addNotes(sd.notes);
+              }
+              else if(sd.layout==="two_col"){
+                slide.background={color:THEME.dark};
+                addStdHeader(slide,sd.title||"Analysis",si+1,total);
+                slide.addShape(pptx.ShapeType.rect,{x:6.65,y:1.0,w:0.03,h:6.0,fill:{color:"263050"}});
+                if(sd.left_header) slide.addText(sd.left_header,{x:0.4,y:1.0,w:5.9,h:0.5,fontSize:12,bold:true,color:THEME.accent,fontFace:"Calibri"});
+                if(sd.right_header) slide.addText(sd.right_header,{x:7.0,y:1.0,w:6.0,h:0.5,fontSize:12,bold:true,color:THEME.accent,fontFace:"Calibri"});
+                (sd.left||[]).forEach((b:string,bi:number)=>slide.addText("▸  "+b.replace(/^[-•*]\s*/,""),{x:0.4,y:1.65+bi*0.8,w:5.9,h:0.7,fontSize:12,color:THEME.white,fontFace:"Calibri"}));
+                (sd.right||[]).forEach((b:string,bi:number)=>slide.addText("▸  "+b.replace(/^[-•*]\s*/,""),{x:7.0,y:1.65+bi*0.8,w:6.0,h:0.7,fontSize:12,color:THEME.white,fontFace:"Calibri"}));
+                if(sd.notes) slide.addNotes(sd.notes);
+              }
+              else if(sd.layout==="table"&&sd.headers?.length){
+                slide.background={color:THEME.dark};
+                addStdHeader(slide,sd.title||"Data",si+1,total);
+                try{
+                  const colW=Math.floor(12.5/sd.headers.length);
+                  const tblData=[
+                    sd.headers.map((h:string)=>({text:h,options:{bold:true,color:THEME.white,fill:{color:THEME.primary},fontSize:11,align:"center"}})),
+                    ...(sd.rows||[]).map((row:string[],ri:number)=>row.map((cell:string)=>({text:String(cell),options:{color:THEME.white,fill:{color:ri%2===0?"131825":"0A0E1A"},fontSize:10,align:"center"}})))
+                  ];
+                  slide.addTable(tblData,{x:0.4,y:1.1,w:12.5,colW:sd.headers.map(()=>colW),rowH:0.42,border:{type:"solid",color:"263050",pt:0.5}});
+                }catch{
+                  const tableText=(sd.headers.join(" | ")+"\n"+(sd.rows||[]).map((r:string[])=>r.join(" | ")).join("\n"));
+                  slide.addText(tableText,{x:0.4,y:1.1,w:12.5,h:5.8,fontSize:10,color:THEME.white,fontFace:"Calibri",wrap:true});
+                }
+                if(sd.notes) slide.addNotes(sd.notes);
+              }
+              else if(sd.layout==="closing"){
+                slide.background={color:THEME.primary};
+                slide.addShape(pptx.ShapeType.rect,{x:0,y:3.0,w:0.4,h:2.2,fill:{color:THEME.accent}});
+                slide.addText(sd.title||"Recommendations & Next Steps",{x:0.7,y:2.9,w:11,h:1.0,fontSize:28,bold:true,color:THEME.white,fontFace:"Calibri"});
+                (sd.actions||[]).forEach((a:string,ai:number)=>slide.addText(`${ai+1}. ${a}`,{x:0.7,y:4.05+ai*0.7,w:11,h:0.65,fontSize:14,color:THEME.white,fontFace:"Calibri"}));
+                if(sd.bottom_line) slide.addText(sd.bottom_line,{x:0.7,y:6.9,w:11,h:0.4,fontSize:11,color:THEME.accent,italic:true,fontFace:"Calibri"});
+                if(sd.notes) slide.addNotes(sd.notes);
+              }
+              else{
+                // Generic text slide fallback
+                slide.background={color:THEME.dark};
+                addStdHeader(slide,sd.title||del.name,si+1,total);
+                const bulletText=(sd.bullets||sd.content||(typeof sd=="string"?[sd]:[JSON.stringify(sd)]));
+                const bullets=Array.isArray(bulletText)?bulletText:[bulletText];
+                bullets.slice(0,8).forEach((b:string,bi:number)=>
+                  slide.addText("▸  "+(b||"")||"",{x:0.4,y:1.15+bi*0.73,w:12.5,h:0.65,fontSize:13,color:THEME.white,fontFace:"Calibri",valign:"middle"})
+                );
+                if(sd.notes) slide.addNotes(sd.notes);
+              }
+            }
+
             const buf=await pptx.write({outputType:"arraybuffer"});
             zip.folder(folder).file(fname+".pptx",buf);
-          }catch{zip.folder(folder).file(fname+".md",content);}
+          }catch(pptxErr:any){
+            zip.folder(folder).file(fname+"-pptx-error.md","PPTX generation error: "+pptxErr.message+"\n\nRaw content:\n"+content);
+          }
         } else if(fmt==="pdf"){
           try{
             const buf=await (async()=>{
