@@ -13,6 +13,16 @@ import { getExecutivesCached } from "./lib/executives";
 import { supabase } from "./lib/supabase";
 import { WorkspaceMemory } from "./lib/WorkspaceMemory";
 import { ENGINE_ENABLED, runPipeline, classifyDomain, selectFramework, selfReview, classifyEvidence } from "./lib/IntelligenceEngine";
+
+// Intelligence Engine — evidence audit line appended to final deliverables (no AI call, fail-safe)
+function ieEvidenceAudit(text:string):string{
+  try{
+    const evTags=classifyEvidence(text||"");
+    if(!evTags.length)return "";
+    const cnt:{[k:string]:number}={};evTags.forEach(t=>{cnt[t.category]=(cnt[t.category]||0)+1;});
+    return "\n\n---\n**Evidence audit (Intelligence Engine):** "+Object.entries(cnt).map(([k,v])=>v+" "+k).join(" · ");
+  }catch{return "";}
+}
 import BusinessExecutionEngine, { type ExecutionPlan, type DeliverableSpec } from "./lib/BusinessExecutionEngine";
 
 // ─── SESSION GATE ────────────────────────────────────────────────────────────
@@ -2183,7 +2193,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       setTmResearchBrief(researchBrief);
       setTmPh("Running simulation…");
       const researchContext="\nVERIFIED RESEARCH BRIEF (current data for this simulation - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n";
-      const sys="You are a Business Simulation Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nSimulate TWO parallel 12-month timelines. ALL figures in "+tmCur.sym+tmCur.code+".\nSections: Decision, Baseline Assumptions, TIMELINE A PROCEED (table: Month/Revenue/OpEx/Cash/Key Event), TIMELINE B DO NOT PROCEED (same table), Divergence Summary, Best/Worst/Black Swan scenarios, Verdict table (Expected Value A&B, Cost of Waiting per week, Reversibility, Recommendation with confidence %), First 30 Days Action Plan, Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled 'ESTIMATE (unverified)'. Do not present invented numbers as fact.";
+      const sys="You are a Business Simulation Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nSimulate TWO parallel 12-month timelines. ALL figures in "+tmCur.sym+tmCur.code+".\nSections: Decision, Baseline Assumptions, TIMELINE A PROCEED (table: Month/Revenue/OpEx/Cash/Key Event), TIMELINE B DO NOT PROCEED (same table), Divergence Summary, Best/Worst/Black Swan scenarios, Verdict table (Expected Value A&B, Cost of Waiting per week, Reversibility, Recommendation with confidence %), First 30 Days Action Plan, Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled [Assumption]. Figures taken from the VERIFIED RESEARCH BRIEF must be labeled [Retrieved Evidence]. Derived figures must show the formula and be labeled [Calculation]. Do not present invented numbers as fact.";
       const res=await ask(sys,[{role:"user",content:"Simulate: \""+tmDec+"\""}],4500);
       if(!cancelRef.current.tm){
         setTmRes(res);
@@ -2219,8 +2229,9 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       setApResearchBrief(researchBrief);
       setApPh("Scanning all decision vectors…");
       const researchContext="\nVERIFIED RESEARCH BRIEF (current data for this scan - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n";
-      const sys="You are the Decision Intelligence Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nIdentify 6 CRITICAL decisions the founder should make RIGHT NOW. ALL figures in "+apCur.sym+apCur.code+".\nFor each: Title, Urgency, Owner, Decide By, Cost of delay/week (with calculation), Options 1/2/3 with outcomes, Recommendation, "+co.location+" Context, Data Needed. End with: THE ONE DECISION THAT MATTERS MOST THIS WEEK. Then a final section: Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled 'ESTIMATE (unverified)'. Do not present invented numbers as fact.";
-      const res=await ask(sys,[{role:"user",content:"Run complete decision scan."}],4500);
+      const sys="You are the Decision Intelligence Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nIdentify 6 CRITICAL decisions the founder should make RIGHT NOW. ALL figures in "+apCur.sym+apCur.code+".\nFor each: Title, Urgency, Owner, Decide By, Cost of delay/week (with calculation), Options 1/2/3 with outcomes, Recommendation, "+co.location+" Context, Data Needed. End with: THE ONE DECISION THAT MATTERS MOST THIS WEEK. Then a final section: Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled [Assumption]. Figures taken from the VERIFIED RESEARCH BRIEF must be labeled [Retrieved Evidence]. Derived figures must show the formula and be labeled [Calculation]. Do not present invented numbers as fact.";
+      let res=await ask(sys,[{role:"user",content:"Run complete decision scan."}],4500);
+      res+=ieEvidenceAudit(res);
       if(!cancelRef.current.ap){
         setApRes(res);sv("cos-ap-live",{res,brief:researchBrief});
         try{const apI=estimateTokens(co.name);const apO=estimateTokens(res);
@@ -2369,7 +2380,8 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         setBrPh("Synthesizing consensus…");
         const allPos=res.map(r=>r.ag.t+":\n"+r.text).join("\n\n---\n\n");
         const synSys="You are Chief of Staff at "+JSON.stringify(co.name)+". "+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN CLASSIFIED: "+domain+"\nRECOMMENDED FRAMEWORKS (for reference — apply where relevant to strengthen the synthesis): "+frameworks.map(f=>f.name).join(", ")+"\n\nSynthesize the boardroom debate into a board-ready executive report. Use this EXACT format with all sections present:\n\n"+"# Executive Summary\n"+"(3-4 sentences: the single decision, headline number in "+synCur.sym+", recommended action)\n\n"+"## Business Domain\n"+"Domain: "+domain+" | Frameworks referenced: "+frameworks.map(f=>f.name).join(" · ")+"\n\n"+"## Key Insights\n"+"(4-6 bullet points, each opening with a bold keyword. New synthesis only — do not restate individual exec arguments.)\n\n"+"## Points of Conflict\n"+"| Leader | Position | Why It Matters |\n|--------|----------|----------------|\n"+"(one row per genuine disagreement found in the debate — if executives agreed, note that)\n\n"+"## Evidence Quality Review\n"+"(Review the evidence labels used in the debate. List any [Assumption] or [Estimate] that materially affects the recommendation and note what validation is needed.)\n\n"+"## Quantified Recommendation\n"+"(Single recommended path. Show: formula, assumption, result for every figure in "+synCur.sym+")\n\n"+"## Financial Impact\n"+"| Phase | Actions | Investment "+synCur.sym+" | Expected Return | Owner |\n|-------|---------|--------------------------|-----------------|-------|\n"+"(30-60-90 day plan, one row per phase)\n\n"+"## Risk Register\n"+"| Risk | Likelihood | Impact | Mitigation | Owner |\n|------|------------|--------|------------|-------|\n"+"(max 5 rows)\n\n"+"## Opportunities\n"+"(3-5 bullets, each with upside in "+synCur.sym+", timeframe, and owner)\n\n"+"## This Week's Decision\n"+"(Single action required now. Cost of inaction: "+synCur.sym+" per week. Owner and deadline.)\n\n"+"## Recommendations\n"+"| Priority | Action | Impact | Effort | Deadline |\n|----------|--------|--------|--------|----------|\n"+"(ranked by priority)\n\n"+"## Sources and References\n"+"(every figure cited: Source name, figure, URL or evidence label)\n\n"+"FORMATTING RULES: Bold all key metrics. Use tables for all numbers. Never write unbroken paragraph blocks. Every number must have a unit ("+synCur.sym+" or %). Under 2600 words. All sections must be present and complete. Figures from VERIFIED RESEARCH BRIEF: cite source and URL. All others: label [Assumption] or [Estimate (unverified)].\n\nDECISION STATUS (mandatory final line): After your synthesis write exactly:\nDECISION STATUS: [choose one: Proceed | Proceed with Conditions | Needs More Information | Do Not Proceed | No Consensus]\nReason: [one sentence explaining this status based on the debate evidence]"
-        const syn=await ask(synSys,[{role:"user",content:"Question: \""+brQ+"\"\nDebate:\n"+allPos}],6000);
+        let syn=await ask(synSys,[{role:"user",content:"Question: \""+brQ+"\"\nDebate:\n"+allPos}],6000);
+        syn+=ieEvidenceAudit(syn);
         const decisionStatus=extractDecisionStatus(syn);
         const stage1={stageNumber:1,type:"original",question:brQ,
           executiveIds:brAg,debate:res,synthesis:syn,
@@ -4022,7 +4034,17 @@ const processTask=useCallback(async(task:any)=>{
     let providerFailures=0;
 
     try{
-      const reply=await ask(sys,[{role:"user",content:"Process: \""+task.task+"\""}],2800);
+      let reply=await ask(sys,[{role:"user",content:"Process: \""+task.task+"\""}],2800);
+      // Intelligence Engine — quality validation at final level (fail-safe: keeps original on any error)
+      if(isLast){
+        try{
+          setP3Phase("🔍 Quality Review — validating final deliverable");
+          const ieCompany={name:co.name||"the company",industry:co.industry||"",stage:co.stage||"",location:co.location||"",markets:co.markets||"",currency:co.currency||"INR",currencySymbol:p3Curr.sym||""};
+          const reviewed=await selfReview(reply,task.task,ieCompany,(s,m,t)=>ask(s,m,t,false));
+          if(reviewed&&reviewed.length>reply.length*0.5)reply=reviewed;
+          reply+=ieEvidenceAudit(reply);
+        }catch(ieErr){/* keep original output */}
+      }
       const levelDuration=Date.now()-levelStartTime;
 
       // Phase 1: compress this level's output for next level context
