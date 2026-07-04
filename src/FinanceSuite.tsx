@@ -43,6 +43,7 @@ function usePersistedState<T>(key:string,initial:T):[T,React.Dispatch<React.SetS
 function loadScriptOnce(src:string):Promise<void>{
   return new Promise((res,rej)=>{
     if((window as any).XLSX)return res();
+    src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js";
     const ex=document.querySelector('script[src="'+src+'"]');
     if(ex){ex.addEventListener("load",()=>res());return;}
     const s=document.createElement("script");s.src=src;s.onload=()=>res();s.onerror=()=>rej(new Error("Excel library failed to load"));document.head.appendChild(s);
