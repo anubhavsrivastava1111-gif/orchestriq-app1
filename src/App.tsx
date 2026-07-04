@@ -3233,7 +3233,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
       const ctx=projState.context||buildProjectContext();
       const priorDepContent=(del.dependsOn||[]).map(id=>getDepContent(projState,id)).filter(Boolean).join("\n\n");
       const sys=buildDelSys(ctx,mod,del,priorDepContent);
-      const userMsg="Generate the complete deliverable now: "+del.name;
+      let userMsg="Generate the complete deliverable now: "+del.name;
 
       // Estimate if chunking is needed based on description length
       const needsChunking=del.description.length>300||["blog","landing page","press release","terms","privacy","contract","roadmap","forecast","excel","xlsx","financial","pptx","presentation","deck","report","analysis","audit","strategy"].some(k=>del.name.toLowerCase().includes(k)||del.outputFormat==="xlsx"||del.outputFormat==="pptx"||del.outputFormat==="pdf");
