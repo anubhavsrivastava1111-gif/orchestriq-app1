@@ -3241,6 +3241,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
       if(!needsChunking){
         const isLargeDeliverable=["xlsx","pptx","pdf","docx"].includes(del.outputFormat?.toLowerCase()||"")||del.description.length>200;
       const delTask=({xlsx:"excel_advanced",pptx:"powerpoint",pdf:"financial",docx:"financial"})[del.outputFormat]||"general";
+      if(del.outputFormat==="pptx")userMsg+="\n\nThe deck MUST contain 12-16 substantive slides covering the full narrative arc (title, executive summary, agenda, 6-10 content/analysis slides with data, recommendations, next steps, closing).";
       return await callDelAI(sys,userMsg,del.outputFormat==="pptx"?6500:isLargeDeliverable?4500:2500,del.name,delTask);
       }
 
@@ -3571,9 +3572,13 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             const _spec:DeliverableSpec={type:"docx",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
             const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
             setProjectExecPhase("\ud83d\udcc4 Building publication-quality Word document: "+del.name);
-            await _bee.generateDocx(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
+            const _beeRes:any=await _bee.generateDocx(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
             _docDone=_w;
-          }catch{/* fall through to inline path */}
+            if(!_w&&_beeRes?.error){throw new Error(_beeRes.error);}
+          }catch(_beeErr:any){
+            console.error("[OIQ] Publication engine (docx) fell back:",_beeErr?.message||_beeErr);
+            try{const uf=WorkspaceMemory.get<any[]>("cos-unfulfilled-log")||[];uf.unshift({ts:new Date().toISOString(),project:"engine-diagnostic",deliverable:del.name,format:"docx-engine",error:String(_beeErr?.message||_beeErr).slice(0,200)});WorkspaceMemory.set("cos-unfulfilled-log",uf.slice(0,50));}catch{}
+          }
           if(!_docDone)try{
             const secs=parseSections(content);
             const coName=proj.context?.company?.name||"";
@@ -3871,10 +3876,16 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             const _spec:DeliverableSpec={type:"pdf",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
             const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
             setProjectExecPhase("\ud83d\udcd1 Building publication-quality PDF report: "+del.name);
-            await _bee.generatePDF(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
+            const _beeRes:any=await _bee.generatePDF(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
             _pdfDone=_w;
-          }catch{/* fall through to inline path */}
-          if(!_pdfDone)try{const pdfBuf=await(async()=>{
+            if(!_w&&_beeRes?.error){throw new Error(_beeRes.error);}
+          }catch(_beeErr:any){
+            console.error("[OIQ] Publication engine (pdf) fell back:",_beeErr?.message||_beeErr);
+            try{const uf=WorkspaceMemory.get<any[]>("cos-unfulfilled-log")||[];uf.unshift({ts:new Date().toISOString(),project:"engine-diagnostic",deliverable:del.name,format:"pdf-engine",error:String(_beeErr?.message||_beeErr).slice(0,200)});WorkspaceMemory.set("cos-unfulfilled-log",uf.slice(0,50));}catch{}
+          }
+          if(!_pdfDone)try{
+            var _pdfContentSafe=pdfSafeText((content||"").replace(/^\s*---+\s*$/gm,""));const pdfBuf=await(async()=>{
+              const content=_pdfContentSafe; // shadow: entire inline renderer uses sanitized text
             const jsPDF=await ensureJsPDF();const doc=new jsPDF({orientation:"portrait",unit:"pt",format:"a4"});
             const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),ML=54,MR=54,MT=54,MB=54,CW=W-ML-MR;
             const TEAL:any=[20,184,166],NAVY:any=[30,58,95],DARK:any=[30,30,30],GREY:any=[100,100,100],WHITE:any=[255,255,255];
@@ -3945,6 +3956,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
           }catch(mediaErr:any){
             zip.folder(folder).file(fname+"-GENERATION-FAILED.md",
               "\u26a0 "+fmt.toUpperCase()+" GENERATION FAILED\n\nERROR: "+(mediaErr?.message||String(mediaErr))+
+              "\n\nDALL\u00b7E fallback: "+(fmt==="image"?(((keys as any).openai||"").trim()?"attempted (see error above)":"NOT attempted \u2014 no OpenAI key saved in Settings"):"not applicable (video)")+
               "\n\nFIX: Verify the fal.ai API key (Settings \u2192 fal.ai), account credits, and network access to fal.run.\n\n## Prompt (retry after fixing)\n\n"+content);
           }
         } else if(fmt==="svg"){
