@@ -796,7 +796,8 @@ async function callFalImage(key:string, prompt:string, model="fal-ai/flux-pro"):
   const r = await fetch(`https://fal.run/${model}`, {
     method:"POST",
     headers:{"Authorization":`Key ${key.trim()}`,"Content-Type":"application/json"},
-    body:JSON.stringify({prompt, image_size:"landscape_4_3", num_images:1, enable_safety_checker:true})
+    body:JSON.stringify({prompt, image_size:"landscape_4_3", num_images:1, enable_safety_checker:true}),
+    signal:AbortSignal.timeout(90000), // hard 90s cap — a stalled connection can never hang the pipeline
   });
   if(!r.ok){
     const t = await r.text().catch(()=>"");
@@ -815,6 +816,7 @@ async function callFalVideo(key:string, prompt:string, durationSec=5, _model="fa
       method:"POST",
       headers:{"Authorization":`Key ${key.trim()}`,"Content-Type":"application/json"},
       body:JSON.stringify({prompt, num_frames:81, frames_per_second:16, resolution:"480p"}),
+      signal:AbortSignal.timeout(150000),
     });
     const t = await r.text();
     if(!r.ok) throw new Error(`HTTP ${r.status}: ${t.slice(0,200)}`);
@@ -829,6 +831,7 @@ async function callFalVideo(key:string, prompt:string, durationSec=5, _model="fa
         method:"POST",
         headers:{"Authorization":`Key ${key.trim()}`,"Content-Type":"application/json"},
         body:JSON.stringify({prompt, duration:`${durationSec}s`, aspect_ratio:"16:9"}),
+        signal:AbortSignal.timeout(90000),
       });
       const t2 = await r2.text();
       let d2:any; try{d2=JSON.parse(t2);}catch{throw new Error(`Fallback bad JSON`);}
@@ -841,6 +844,7 @@ async function callFalVideo(key:string, prompt:string, durationSec=5, _model="fa
       method:"POST",
       headers:{"Authorization":`Key ${key.trim()}`,"Content-Type":"application/json"},
       body:JSON.stringify({prompt, duration:"5", aspect_ratio:"16:9"}),
+      signal:AbortSignal.timeout(30000),
     });
     const srt = await sr.text();
     if(!sr.ok) throw new Error(`Kling submit: ${srt.slice(0,200)}`);
@@ -849,7 +853,7 @@ async function callFalVideo(key:string, prompt:string, durationSec=5, _model="fa
     if(!reqId) throw new Error("Kling no request_id");
     for(let i=0;i<40;i++){
       await new Promise(res=>setTimeout(res,4000));
-      const pr = await fetch(`https://queue.fal.run/${KLING}/requests/${reqId}`,{headers:{"Authorization":`Key ${key.trim()}`}});
+      const pr = await fetch(`https://queue.fal.run/${KLING}/requests/${reqId}`,{headers:{"Authorization":`Key ${key.trim()}`},signal:AbortSignal.timeout(15000)});
       const prt = await pr.text();
       let pd:any; try{pd=JSON.parse(prt);}catch{continue;}
       if(pd.status==="COMPLETED"){const u=pd?.output?.video?.url||pd?.output?.videos?.[0]?.url||"";if(u)return u;throw new Error("Kling: no URL in output");}
@@ -2060,6 +2064,10 @@ export default function App(){
   const [projectExecuting,setProjectExecuting]=useState(false);
   const [projectExecPhase,setProjectExecPhase]=useState(""); // live status message
   const [projectExecCancel,setProjectExecCancel]=useState(false);
+  // Ref mirror of the cancel flag — async loops read THIS. React state alone is
+  // frozen inside long-running closures (stale closure), which made the Cancel
+  // button functionally dead: it set state the loop could never observe.
+  const projectExecCancelRef=useRef(false);
   const runProjectExecutionRef=useRef(null); // ref to avoid TDZ with useCallback ordering
   const rawContentStore=useRef({}); // full content stored outside React state to prevent memory/render overload
   const [projectQARunning,setProjectQARunning]=useState(false);
@@ -2826,6 +2834,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     if(projectExecuting)return;
     setProjectExecuting(true);
     setProjectExecCancel(false);
+    projectExecCancelRef.current=false;
     setProjectExecution({...project,status:"executing"});
 
     // Helper: update a single deliverable across the execution state
@@ -3129,9 +3138,11 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
       if(!providerOrder.length)throw new Error("No API keys configured.");
 
       let lastErr=null;
+      const delDeadline=Date.now()+240000; // hard 4-minute cap per deliverable — fail fast, never hang
       for(let attempt=0;attempt<2;attempt++){
         for(const prov of providerOrder){
-          if(projectExecCancel)throw new Error("CANCELLED");
+          if(projectExecCancelRef.current)throw new Error("CANCELLED");
+          if(Date.now()>delDeadline)throw new Error("Deliverable timed out after 4 minutes (providers unresponsive): "+delLabel);
           const key=allKeys[prov]?.trim();
           if(!key)continue;
           try{
@@ -3188,7 +3199,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
 
       const chunks=[];
       for(let si=0;si<sections.length;si++){
-        if(projectExecCancel)throw new Error("CANCELLED");
+        if(projectExecCancelRef.current)throw new Error("CANCELLED");
         const section=sections[si];
         setProjectExecPhase("Generating section "+(si+1)+"/"+sections.length+": "+section);
         const chunkSys=sys+"\n\nYou are generating SECTION "+(si+1)+" of "+sections.length+" of this deliverable."+(chunks.length?"\n\nCOMPLETED SECTIONS SO FAR:\n"+chunks.join("\n\n"):"");
@@ -3219,7 +3230,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
     // Process in waves — each wave processes all deliverables whose deps are met
     const MAX_WAVES=20;
     for(let wave=0;wave<MAX_WAVES;wave++){
-      if(projectExecCancel){
+      if(projectExecCancelRef.current){
         currentProj={...currentProj,status:"cancelled"};
         break;
       }
@@ -3251,7 +3262,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
 
       // Process all ready deliverables (sequentially to avoid rate limits)
       for(const del of ready){
-        if(projectExecCancel)break;
+        if(projectExecCancelRef.current)break;
         const mod=currentProj.modules.find(m=>m.id===del._modId);
         if(!mod)continue;
 
@@ -3476,6 +3487,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
       // Execute deliverables serially — yield UI between each to prevent blocking
       const yieldUI=()=>new Promise<void>(r=>setTimeout(r,0));
       for(const del of done){
+        if(projectExecCancelRef.current)break;
         await yieldUI(); // Release UI thread before each deliverable
         const folder=del._modName.replace(/[^a-zA-Z0-9]/g,"-");
         const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
@@ -3814,7 +3826,8 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             const url=fmt==="video"?await callFalVideo(falK,genPrompt):await callFalImage(falK,genPrompt);
             if(!url)throw new Error("fal.ai returned no media URL");
             setProjectExecPhase("\u2b07 Downloading generated "+fmt+": "+del.name+"...");
-            const resp=await fetch(url);
+            if(projectExecCancelRef.current)throw new Error("CANCELLED");
+            const resp=await fetch(url,{signal:AbortSignal.timeout(120000)});
             if(!resp.ok)throw new Error("media download failed: HTTP "+resp.status);
             const blob=await resp.blob();
             const ext=fmt==="video"?"mp4":(((blob.type||"image/png").split("/")[1]||"png").split("+")[0]);
@@ -5086,7 +5099,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                             <span style={{width:5,height:5,borderRadius:"50%",background:projectQARunning?"#3B82F6":"#14B8A6",display:"inline-block",animation:"pulse 1s infinite",flexShrink:0}}/>{projectExecPhase}
                           </div>
                         )}
-                        {projectExecuting&&<button onClick={()=>setProjectExecCancel(true)} style={{...S.cancelBtn,marginTop:8,fontSize:9}}>Cancel Execution</button>}
+                        {projectExecuting&&<button onClick={()=>{setProjectExecCancel(true);projectExecCancelRef.current=true;setProjectExecPhase("\u23f9 Stopping \u2014 finishing current step, completed deliverables will be kept...");}} style={{...S.cancelBtn,marginTop:8,fontSize:9}}>⏹ Stop Execution</button>}
                       </div>
                       {/* Module cards */}
                       <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
