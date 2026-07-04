@@ -3199,7 +3199,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
       const ctx=projState.context||buildProjectContext();
       const priorDepContent=(del.dependsOn||[]).map(id=>getDepContent(projState,id)).filter(Boolean).join("\n\n");
       const sys=buildDelSys(ctx,mod,del,priorDepContent);
-      const userMsg="Generate the complete deliverable now: "+del.name+(del.improveNote?"\n\nIMPROVEMENT REQUIRED \u2014 the user reviewed the previous version and asked for: "+del.improveNote+"\nApply this feedback throughout the deliverable.":"");
+      const userMsg="Generate the complete deliverable now: "+del.name;
 
       // Estimate if chunking is needed based on description length
       const needsChunking=del.description.length>300||["blog","landing page","press release","terms","privacy","contract","roadmap","forecast","excel","xlsx","financial","pptx","presentation","deck","report","analysis","audit","strategy"].some(k=>del.name.toLowerCase().includes(k)||del.outputFormat==="xlsx"||del.outputFormat==="pptx"||del.outputFormat==="pdf");
@@ -3313,12 +3313,6 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             verificationStatus:"Failed"
           });
           failedCount++;
-          // Continuous-improvement log — every unfulfilled request is recorded
-          try{
-            const uf=WorkspaceMemory.get<any[]>("cos-unfulfilled-log")||[];
-            uf.unshift({ts:new Date().toISOString(),project:project.name||project.objective||"",deliverable:del.name,format:del.outputFormat||"",error:String(e.message||e).slice(0,200)});
-            WorkspaceMemory.set("cos-unfulfilled-log",uf.slice(0,50));
-          }catch{}
           showToast("⚠ "+del.name+" failed: "+e.message.slice(0,60),"warning");
           continue;
         }
@@ -3525,7 +3519,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
         const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
         const fmt=(del.outputFormat||"md").toLowerCase();
         const lsContent=(()=>{try{return localStorage.getItem("cos-rc-"+del.id)||"";}catch{return "";}})();
-        const content=(rawContentStore.current[del.id]||lsContent||del.rawContent||"").replace(/^\s*(Here is|Here's|Below is|I've created|I have created|I'll create)[^\n]*\n+/i,"").replace(/^\s*(Here is|Here's) SECTION[^\n]*$/gmi,"");
+        const content=(rawContentStore.current[del.id]||lsContent||del.rawContent||"").replace(/^\s*(Here is|Here's|Below is|I've created|I have created|I'll create)[^\n]*\n+/i,"").replace(/^\s*(Here is|Here's) SECTION[^\n]*$/gmi,"").replace(/^\s*Here is Section \d+[^\n]*$/gmi,"").replace(/^\s*Here is the (complete|final)[^\n]*$/gmi,"");
         // ── IMPROVED 1: Native DOCX via Word HTML (opens natively in Word) ──
         if(fmt==="docx"){
           // Publication engine first (branded typography, TOC, callouts);
@@ -3891,7 +3885,19 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             setProjectExecPhase((fmt==="video"?"\ud83c\udfac Generating video: ":"\ud83c\udfa8 Generating image: ")+del.name+"...");
             const mp:any=buildMediaPrompt(del,proj.context||{});
             const genPrompt=fmt==="video"?(mp.kling||mp.veo||content.slice(0,500)):(mp.dalle||content.slice(0,500));
-            const url=fmt==="video"?await callFalVideo(falK,genPrompt):await callFalImage(falK,genPrompt);
+            let url="";
+            if(fmt==="video"){
+              url=await callFalVideo(falK,genPrompt);
+            }else{
+              try{url=await callFalImage(falK,genPrompt);}
+              catch(falErr:any){
+                const _oa=((keys as any).openai||"").trim();
+                if(_oa){
+                  setProjectExecPhase("\ud83c\udfa8 fal.ai unavailable \u2014 generating via DALL\u00b7E: "+del.name);
+                  url=await callDallE(genPrompt,_oa);
+                }else{throw falErr;}
+              }
+            }
             if(!url)throw new Error("fal.ai returned no media URL");
             setProjectExecPhase("\u2b07 Downloading generated "+fmt+": "+del.name+"...");
             if(projectExecCancelRef.current)throw new Error("CANCELLED");
@@ -5190,22 +5196,6 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                     <div key={di} style={{background:sc+"15",border:"1px solid "+sc+"44",borderRadius:4,padding:"3px 7px",fontSize:8}}>
                                       <div style={{color:sc,fontWeight:700,marginBottom:1}}>{del.status==="generating"?"⟳ ":del.status==="complete"?"✓ ":del.status==="failed"?"✗ ":""}{del.name}</div>
                                       {del.status==="complete"&&<div style={{color:"#5A6480"}}>{del.outputFormat} · {del.confidenceScore}%</div>}
-                                      {!projectExecuting&&del.status==="failed"&&(
-                                        <button onClick={()=>{
-                                          const p2={...projectExecution,modules:(projectExecution.modules||[]).map(m=>m.id!==mod.id?m:{...m,deliverables:(m.deliverables||[]).map(d=>d.id!==del.id?d:{...d,status:"queued",rawContent:"",qaResult:null})})};
-                                          setProjectExecution(p2);
-                                          runProjectExecutionRef.current&&runProjectExecutionRef.current(p2);
-                                        }} style={{marginTop:2,padding:"1px 6px",borderRadius:3,fontSize:7,fontWeight:700,border:"1px solid #EF444455",background:"#EF444415",color:"#EF4444",cursor:"pointer"}}>↻ Retry</button>
-                                      )}
-                                      {!projectExecuting&&del.status==="complete"&&(
-                                        <button onClick={()=>{
-                                          const note=window.prompt("What should be improved in \""+del.name+"\"?\n(e.g. add more detail on pricing, formal tone, expand risk section)");
-                                          if(!note||!note.trim())return;
-                                          const p2={...projectExecution,modules:(projectExecution.modules||[]).map(m=>m.id!==mod.id?m:{...m,deliverables:(m.deliverables||[]).map(d=>d.id!==del.id?d:{...d,status:"queued",improveNote:note.trim(),qaResult:null})})};
-                                          setProjectExecution(p2);
-                                          runProjectExecutionRef.current&&runProjectExecutionRef.current(p2);
-                                        }} style={{marginTop:2,marginLeft:3,padding:"1px 6px",borderRadius:3,fontSize:7,fontWeight:700,border:"1px solid #8B5CF655",background:"#8B5CF615",color:"#A78BFA",cursor:"pointer"}}>✨ Improve</button>
-                                      )}
                                     </div>
                                   );
                                 })}
