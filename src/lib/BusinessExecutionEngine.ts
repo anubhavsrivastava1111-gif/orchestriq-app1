@@ -919,7 +919,7 @@ export class BusinessExecutionEngine {
       const url = await this.media.image(prompt);
       if (!url) throw new Error("fal.ai returned no image URL");
       onProgress("⬇ Downloading generated image...");
-      const resp = await fetch(url);
+      const resp = await fetch(url, { signal: AbortSignal.timeout(120000) });
       if (!resp.ok) throw new Error("Image download failed: HTTP " + resp.status);
       const blob = await resp.blob();
       const ext = (blob.type.split("/")[1] || "png").split("+")[0];
@@ -939,7 +939,7 @@ export class BusinessExecutionEngine {
       const url = await this.media.video(prompt);
       if (!url) throw new Error("fal.ai returned no video URL");
       onProgress("⬇ Downloading generated video...");
-      const resp = await fetch(url);
+      const resp = await fetch(url, { signal: AbortSignal.timeout(120000) });
       if (!resp.ok) throw new Error("Video download failed: HTTP " + resp.status);
       const blob = await resp.blob();
       const filename = del.title.replace(/\s+/g, "-") + "-" + Date.now() + ".mp4";
