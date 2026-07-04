@@ -86,6 +86,7 @@ async function saveBYOKeyToSupabase(apiKey: string): Promise<void> {
 }
 import Ledger, { type JournalEntry } from "./Ledger";
 import FinanceSuite from "./FinanceSuite";
+import CommandCenter from "./CommandCenter";
 import Dispatch, { type DispatchTemplate } from "./Dispatch";
 import ActionTracker, { ExtractReviewModal, extractItemsFromJSON, EXTRACTION_PROMPT, type ActionItem, type ExtractedItem } from "./ActionTracker";
 import type { Executive } from "./lib/executives";
@@ -3660,7 +3661,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
                 }
               },
               stripMd,
-              { image:(p:string)=>callFalImage((keys as any).fal||EFF_FAL,p),
+              { image:async(p:string)=>{const _oa=((keys as any).openai||"").trim();if(_oa){try{const u=await callDallE(p,_oa);if(u)return u;}catch{}}return callFalImage((keys as any).fal||EFF_FAL,p);},
                 video:(p:string)=>callFalVideo((keys as any).fal||EFF_FAL,p) },
             );
             const _xlsxDel: DeliverableSpec = {
@@ -3935,13 +3936,20 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             if(fmt==="video"){
               url=await callFalVideo(falK,genPrompt);
             }else{
-              try{url=await callFalImage(falK,genPrompt);}
-              catch(falErr:any){
-                const _oa=((keys as any).openai||"").trim();
-                if(_oa){
-                  setProjectExecPhase("\ud83c\udfa8 fal.ai unavailable \u2014 generating via DALL\u00b7E: "+del.name);
+              // DALL\u00b7E is the PRIMARY image provider (fal.ai billing on hold);
+              // fal.ai remains the automatic fallback when no OpenAI key exists.
+              const _oa=((keys as any).openai||"").trim();
+              if(_oa){
+                try{
+                  setProjectExecPhase("\ud83c\udfa8 Generating image via DALL\u00b7E: "+del.name+"...");
                   url=await callDallE(genPrompt,_oa);
-                }else{throw falErr;}
+                  if(!url)throw new Error("DALL\u00b7E returned no image URL");
+                }catch(dErr:any){
+                  setProjectExecPhase("\ud83c\udfa8 DALL\u00b7E unavailable \u2014 trying fal.ai: "+del.name);
+                  url=await callFalImage(falK,genPrompt);
+                }
+              }else{
+                url=await callFalImage(falK,genPrompt);
               }
             }
             if(!url)throw new Error("fal.ai returned no media URL");
@@ -4883,12 +4891,12 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           <button onClick={()=>setShowModules(v=>!v)}
             style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"9px 12px",background:"rgba(20,184,166,0.06)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:8,cursor:"pointer",fontFamily:"Manrope,sans-serif",transition:"all 0.15s"}}>
             <span style={{fontSize:16}}>{[["nerve","🧠"],["workflow","⚡"],["agentic","🔗"],["agents","🤖"],["p3","🤖"],["chat","💬"],["data","🗄️"],["ledger","📒"],["dispatch","📡"],["actions","✅"],["studio","🎨"],["funding","💰"],["tokens","🔢"]].find(([v])=>v===view)?.[1]||"🧠"}</span>
-            <span style={{flex:1,fontSize:12,fontWeight:700,color:"#F1F5F9",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.04em"}}>{[["nerve","Nerve Center"],["workflow","Workflow"],["agentic","Agentic AI"],["agents","AI Agents"],["p3","Autopilot"],["chat","Chat"],["data","Data Hub"],["ledger","Ledger"],["finance","Finance"],["dispatch","Pulse"],["actions","Tasks"],["studio","Studio"],["funding","Funding"],["tokens","Tokens"]].find(([v])=>v===view)?.[1]||"Nerve Center"}</span>
+            <span style={{flex:1,fontSize:12,fontWeight:700,color:"#F1F5F9",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.04em"}}>{[["nerve","Nerve Center"],["workflow","Workflow"],["agentic","Agentic AI"],["agents","AI Agents"],["p3","Autopilot"],["chat","Chat"],["data","Data Hub"],["home","Command Center"],["ledger","Ledger"],["finance","Finance"],["dispatch","Pulse"],["actions","Tasks"],["studio","Studio"],["funding","Funding"],["tokens","Tokens"]].find(([v])=>v===view)?.[1]||"Nerve Center"}</span>
             <span style={{fontSize:10,color:"#5A6480",transition:"transform 0.2s",transform:showModules?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
           </button>
           {showModules&&(
             <div style={{position:"absolute",top:"calc(100% - 6px)",left:8,right:8,background:"#131825",border:"1px solid #1e2433",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:8,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["agents","🤖","AI Agents"],["agentic","🔄","Agentic"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
+              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
                 <button key={v} onClick={()=>{setView(v);setShowModules(false);}}
                   style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:view===v?"rgba(20,184,166,0.10)":"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"Manrope,sans-serif",marginBottom:2,transition:"background 0.12s"}}>
                   <span style={{fontSize:16,width:24,textAlign:"center"}}>{ic}</span>
@@ -5774,6 +5782,10 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 
 {view==="finance"&&(
   <FinanceSuite curSym={cur.sym} ask={(s,m,t)=>ask(s,m,t)} showToast={showToast}/>
+)}
+
+{view==="home"&&(
+  <CommandCenter co={co} curSym={cur.sym} ledgerEntries={ledgerEntries} workflows={workflows} tQueue={tQueue} brSessions={brSessions} setView={setView}/>
 )}
 
         {/* PULSE AGENTIC */}
