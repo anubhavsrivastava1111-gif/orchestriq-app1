@@ -292,8 +292,16 @@ Return this JSON structure:
     }
   ],
   "vbaCode": "Optional VBA macro code as a string if automation adds value",
+  "charts": [
+    {"type": "bar|line", "title": "Revenue by Quarter", "seriesName": "Revenue", "labels": ["Q1","Q2","Q3","Q4"], "values": [120,145,160,190]}
+  ],
   "instructions": "Brief user instructions for this workbook"
 }
+
+CHART REQUIREMENTS:
+- Include 2-4 charts in the "charts" array visualising the most decision-relevant data from your sheets.
+- Values must be plain numbers (no currency symbols); labels short.
+- Use "line" for time series, "bar" for categorical comparisons.
 
 FORMULA RULES:
 - Write actual Excel formula strings: =SUM(B2:B10), =IFERROR(B5/B6,"N/A"), =IF(C2>0,"▲","▼")&TEXT(ABS(C2/B2),"0.0%")
@@ -871,7 +879,13 @@ export class BusinessExecutionEngine {
     }
 
     // ── Write and download ────────────────────────────────────────────────
-    const buf = XLSX.write(wb, { type: "array", bookType: "xlsx", bookSST: false });
+    let buf: any = XLSX.write(wb, { type: "array", bookType: "xlsx", bookSST: false });
+    if (Array.isArray(schema.charts) && schema.charts.length) {
+      try {
+        onProgress("\ud83d\udcc8 Rendering dashboard charts (" + schema.charts.length + ")...");
+        buf = await this.embedChartsSheet(buf, schema.charts, palette);
+      } catch (chartErr) { /* charts optional — ship the workbook regardless */ }
+    }
     const filename = (schema.filename || `${del.title.replace(/\s+/g, "-")}-${Date.now()}.xlsx`);
     this.dlFile(filename, buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
@@ -882,6 +896,112 @@ export class BusinessExecutionEngine {
       summary: schema.instructions || `${del.title} workbook generated with ${(schema.sheets || []).length} sheets.`,
       content: `Professional Excel workbook delivered: **${filename}**\n\n${schema.instructions || ""}`,
     };
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // EXCEL CHARTS ENGINE — canvas-rendered chart images embedded via ExcelJS.
+  // Browser spreadsheet libraries cannot write native Excel charts; this engine
+  // renders publication-grade PNG charts and embeds them in a Dashboard sheet.
+  // Fully fail-safe: any error ships the original (chartless) workbook.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  private async ensureExcelJS(): Promise<any> {
+    const w = window as any;
+    if (w.ExcelJS) return w.ExcelJS;
+    await new Promise<void>((res, rej) => {
+      const src = "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+      const ex = document.querySelector('script[src="' + src + '"]');
+      if (ex) { ex.addEventListener("load", () => res()); return; }
+      const s = document.createElement("script");
+      s.src = src; s.onload = () => res(); s.onerror = () => rej(new Error("ExcelJS load failed"));
+      document.head.appendChild(s);
+    });
+    if (!w.ExcelJS) throw new Error("ExcelJS unavailable");
+    return w.ExcelJS;
+  }
+
+  private renderChartPNG(spec: any, primaryHex: string, accentHex: string): string {
+    const labels: string[] = (spec.labels || []).map((l: any) => String(l)).slice(0, 12);
+    const values: number[] = (spec.values || []).map((v: any) => Number(v) || 0).slice(0, 12);
+    if (labels.length < 2 || values.length < 2) throw new Error("chart needs 2+ points");
+    const W = 760, H = 420, padL = 70, padR = 24, padT = 56, padB = 64;
+    const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+    const g = cv.getContext("2d")!;
+    // background + frame
+    g.fillStyle = "#FFFFFF"; g.fillRect(0, 0, W, H);
+    g.strokeStyle = "#E2E8F0"; g.strokeRect(0.5, 0.5, W - 1, H - 1);
+    // title
+    g.fillStyle = "#" + primaryHex; g.font = "bold 20px Calibri, Arial";
+    g.fillText(String(spec.title || spec.seriesName || "Chart"), padL, 32);
+    g.fillStyle = "#" + accentHex; g.fillRect(padL, 40, 60, 3);
+    const iw = W - padL - padR, ih = H - padT - padB;
+    const max = Math.max(...values, 0), min = Math.min(...values, 0);
+    const range = (max - min) || 1;
+    const yOf = (v: number) => padT + ih - ((v - min) / range) * ih;
+    // gridlines + y labels
+    g.font = "12px Calibri, Arial"; g.textAlign = "right";
+    for (let gi = 0; gi <= 4; gi++) {
+      const gv = min + (range * gi) / 4, gy = yOf(gv);
+      g.strokeStyle = "#F1F5F9"; g.beginPath(); g.moveTo(padL, gy); g.lineTo(W - padR, gy); g.stroke();
+      g.fillStyle = "#94A3B8";
+      const a = Math.abs(gv);
+      const lbl = a >= 1e7 ? (gv / 1e7).toFixed(1) + "Cr" : a >= 1e5 ? (gv / 1e5).toFixed(1) + "L" : a >= 1e3 ? (gv / 1e3).toFixed(1) + "K" : String(Math.round(gv * 10) / 10);
+      g.fillText(lbl, padL - 8, gy + 4);
+    }
+    const n = values.length;
+    g.textAlign = "center";
+    if ((spec.type || "bar") === "line") {
+      const xOf = (i: number) => padL + (n === 1 ? iw / 2 : (i / (n - 1)) * iw);
+      g.strokeStyle = "#" + accentHex; g.lineWidth = 3; g.beginPath();
+      values.forEach((v, i) => { const x = xOf(i), y = yOf(v); i === 0 ? g.moveTo(x, y) : g.lineTo(x, y); });
+      g.stroke();
+      values.forEach((v, i) => {
+        const x = xOf(i), y = yOf(v);
+        g.fillStyle = "#" + accentHex; g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2); g.fill();
+        g.fillStyle = "#FFFFFF"; g.beginPath(); g.arc(x, y, 2.5, 0, Math.PI * 2); g.fill();
+        g.fillStyle = "#475569"; g.font = "11px Calibri, Arial";
+        g.fillText(labels[i].slice(0, 10), x, H - padB + 20);
+      });
+    } else {
+      const bw = Math.min(64, (iw / n) * 0.6);
+      values.forEach((v, i) => {
+        const x = padL + (i + 0.5) * (iw / n) - bw / 2;
+        const y0 = yOf(0), yv = yOf(Math.max(v, 0));
+        const bh = Math.max(2, Math.abs(y0 - yv));
+        const grad = g.createLinearGradient(0, yv, 0, yv + bh);
+        grad.addColorStop(0, "#" + accentHex); grad.addColorStop(1, "#" + primaryHex);
+        g.fillStyle = grad;
+        g.fillRect(x, v >= 0 ? yv : y0, bw, bh);
+        g.fillStyle = "#475569"; g.font = "11px Calibri, Arial";
+        g.fillText(labels[i].slice(0, 10), x + bw / 2, H - padB + 20);
+        g.fillStyle = "#1E293B"; g.font = "bold 11px Calibri, Arial";
+        const a = Math.abs(v);
+        const vl = a >= 1e7 ? (v / 1e7).toFixed(1) + "Cr" : a >= 1e5 ? (v / 1e5).toFixed(1) + "L" : a >= 1e3 ? (v / 1e3).toFixed(1) + "K" : String(v);
+        g.fillText(vl, x + bw / 2, (v >= 0 ? yv : y0 + bh) - 6);
+      });
+    }
+    return cv.toDataURL("image/png").split(",")[1];
+  }
+
+  private async embedChartsSheet(xlsxBuf: any, charts: any[], pal: any): Promise<any> {
+    const ExcelJS = await this.ensureExcelJS();
+    const wb2 = new ExcelJS.Workbook();
+    await wb2.xlsx.load(xlsxBuf);
+    const ws = wb2.addWorksheet("\ud83d\udcc8 Charts", { views: [{ showGridLines: false }] });
+    ws.getCell("B2").value = "VISUAL DASHBOARD";
+    ws.getCell("B2").font = { name: "Calibri", size: 18, bold: true, color: { argb: "FF" + (pal?.primary || "1E3A5F") } };
+    ws.getCell("B3").value = "Auto-generated charts \u2014 data lives in the worksheet tabs";
+    ws.getCell("B3").font = { name: "Calibri", size: 10, italic: true, color: { argb: "FF94A3B8" } };
+    let row = 5;
+    for (const spec of charts.slice(0, 4)) {
+      try {
+        const b64 = this.renderChartPNG(spec, pal?.primary || "1E3A5F", pal?.accent || "14B8A6");
+        const imgId = wb2.addImage({ base64: b64, extension: "png" });
+        ws.addImage(imgId, { tl: { col: 1, row: row - 1 }, ext: { width: 640, height: 354 } });
+        row += 20;
+      } catch { /* skip bad chart spec */ }
+    }
+    return await wb2.xlsx.writeBuffer();
   }
 
   // ════════════════════════════════════════════════════════════════════════════
