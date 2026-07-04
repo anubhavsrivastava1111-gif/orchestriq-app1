@@ -709,6 +709,12 @@ export class BusinessExecutionEngine {
       }
     }
 
+    // Strategy 3.5: repair truncated JSON — recovers everything up to the cut
+    if (!schema?.sheets) {
+      const repaired = repairTruncatedJson(text);
+      if (repaired?.sheets?.length) schema = repaired;
+    }
+
     // Strategy 4: markdown → schema converter
     // When AI outputs a markdown table instead of JSON, convert it
     if (!schema?.sheets) {
@@ -1096,7 +1102,8 @@ export class BusinessExecutionEngine {
     try {
       schema = JSON.parse(cleaned);
     } catch {
-      return { deliverable: del, status: "failed", error: "PPTX schema generation failed" };
+      schema = repairTruncatedJson(text);
+      if (!schema?.slides?.length) return { deliverable: del, status: "failed", error: "PPTX schema generation failed" };
     }
 
     onProgress(`📊 Building ${(schema.slides || []).length} slides...`);
@@ -1479,8 +1486,11 @@ export class BusinessExecutionEngine {
     try {
       schema = JSON.parse(cleaned);
     } catch {
-      return { deliverable: del, status: "failed", error: "PDF schema generation failed" };
+      schema = repairTruncatedJson(text);
+      if (!schema?.sections?.length && !schema?.executiveSummary) return { deliverable: del, status: "failed", error: "PDF schema generation failed" };
     }
+    // WinAnsi-safe: rupee symbol, dashes, smart quotes would render as garbage
+    schema = pdfSafeText(schema);
 
     const jsPDF = await this.ensureJsPDF();
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -1821,7 +1831,8 @@ export class BusinessExecutionEngine {
     try {
       schema = JSON.parse(cleaned);
     } catch {
-      return { deliverable: del, status: "failed", error: "DOCX schema generation failed" };
+      schema = repairTruncatedJson(text);
+      if (!schema) return { deliverable: del, status: "failed", error: "DOCX schema generation failed" };
     }
 
     const pal = BRAND_PALETTES[plan.domain];
@@ -2003,6 +2014,82 @@ ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: 
 // when generation genuinely fails, and it always states the exact error so the
 // routing issue is visible instead of silently swallowed.
 export interface ExecutionOutputMediaPatch {} // type-anchor only
+
+// ─── UNIVERSAL JSON REPAIR ───────────────────────────────────────────────────
+// Root cause of "schema generation failed" across Excel/PPTX/PDF/DOCX: long AI
+// responses get truncated mid-JSON. This walks the text tracking brace/bracket/
+// string state and appends the exact closing sequence, recovering everything
+// generated up to the cut — instead of discarding the entire deliverable.
+export function repairTruncatedJson(text: string): any {
+  try {
+    let s = String(text || "").trim()
+      .replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+    const start = s.indexOf("{");
+    if (start === -1) return null;
+    s = s.slice(start);
+    const stack: string[] = [];
+    let inStr = false, esc = false, lastGood = 0;
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (esc) { esc = false; continue; }
+      if (ch === "\\") { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === "{") stack.push("}");
+      else if (ch === "[") stack.push("]");
+      else if (ch === "}" || ch === "]") { stack.pop(); if (stack.length === 0) { lastGood = i + 1; break; } }
+      if (ch === "}" || ch === "]" || ch === ",") lastGood = i + 1;
+    }
+    if (stack.length === 0 && lastGood > 0) {
+      try { return JSON.parse(s.slice(0, lastGood)); } catch { /* continue to repair */ }
+    }
+    // Truncated: cut back to the last structural boundary, drop a dangling
+    // partial element, then close every open scope in reverse order.
+    let body = s.slice(0, lastGood || s.length);
+    body = body.replace(/,\s*$/, "");
+    // Recompute open scopes for the trimmed body
+    const st2: string[] = []; inStr = false; esc = false;
+    for (let i = 0; i < body.length; i++) {
+      const ch = body[i];
+      if (esc) { esc = false; continue; }
+      if (ch === "\\") { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === "{") st2.push("}");
+      else if (ch === "[") st2.push("]");
+      else if (ch === "}" || ch === "]") st2.pop();
+    }
+    if (inStr) body += '"';
+    const closers = st2.reverse().join("");
+    try { return JSON.parse(body + closers); } catch { }
+    // Last resort: also drop a possibly-dangling final property
+    const lastComma = body.lastIndexOf(",");
+    if (lastComma > 0) {
+      try { return JSON.parse(body.slice(0, lastComma) + closers); } catch { }
+    }
+    return null;
+  } catch { return null; }
+}
+
+// jsPDF core fonts are WinAnsi — they cannot render \u20b9 (rupee), en/em dashes,
+// or smart quotes; those bytes come out as garbage in the PDF. Sanitize every
+// string that reaches the renderer.
+export function pdfSafeText(v: any): any {
+  if (typeof v === "string") {
+    return v
+      .replace(/\u20b9/g, "Rs. ")
+      .replace(/[\u2013\u2014]/g, "-")
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201c\u201d]/g, '"')
+      .replace(/\u2026/g, "...")
+      .replace(/\u00b7/g, "-")
+      .replace(/[\u2022\u25b8\u25aa]/g, "-")
+      .replace(/[^\x00-\xFF]/g, "");
+  }
+  if (Array.isArray(v)) return v.map(pdfSafeText);
+  if (v && typeof v === "object") { const o: any = {}; for (const k of Object.keys(v)) o[k] = pdfSafeText(v[k]); return o; }
+  return v;
+}
 
 export interface ExecutionOutput {
   deliverable: DeliverableSpec;
