@@ -3184,14 +3184,16 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
     };
 
     // Helper: call AI with retry + failover + waiting
-    const callDelAI=async(sys,userMsg,maxT,delLabel)=>{
+    const callDelAI=async(sys,userMsg,maxT,delLabel,delTask)=>{
       const providerOrder=[];
       const allKeys={...keys};
       if(EFF_GROQ?.trim())allKeys.groq=EFF_GROQ;
       if(EFF_GEMINI?.trim())allKeys.gemini=EFF_GEMINI;
       if(EFF_CLAUDE?.trim())allKeys.claude=EFF_CLAUDE;
-      // Build ordered list: deepseek first (paid), then others
-      const preferred=["deepseek","claude","openai","gemini","groq","kimi"];
+      // Primary-aware routing (honors the user's Primary AI + specialist chains).
+      // The old hardcoded "deepseek first" ladder bypassed the router entirely.
+      const preferred=resolveRoute(delTask||"general",defP);
+      if(!preferred.includes("kimi")&&allKeys.kimi?.trim())preferred.push("kimi");
       preferred.forEach(p=>{if(allKeys[p]?.trim())providerOrder.push(p);});
       if(!providerOrder.length)throw new Error("No API keys configured.");
 
@@ -3238,7 +3240,8 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
 
       if(!needsChunking){
         const isLargeDeliverable=["xlsx","pptx","pdf","docx"].includes(del.outputFormat?.toLowerCase()||"")||del.description.length>200;
-      return await callDelAI(sys,userMsg,del.outputFormat==="pptx"?6500:isLargeDeliverable?4500:2500,del.name);
+      const delTask=({xlsx:"excel_advanced",pptx:"powerpoint",pdf:"financial",docx:"financial"})[del.outputFormat]||"general";
+      return await callDelAI(sys,userMsg,del.outputFormat==="pptx"?6500:isLargeDeliverable?4500:2500,del.name,delTask);
       }
 
       // Chunked generation — split into logical sections
@@ -3246,13 +3249,13 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
       const planSys=sys+"\n\nFirst, list the logical sections for this deliverable as a JSON array of strings. Output ONLY the JSON array, no other text. Maximum 4 sections.";
       let sections=[];
       try{
-        const planRaw=await callDelAI(planSys,"List sections for: "+del.name,400,del.name+" (planning)");
+        const planRaw=await callDelAI(planSys,"List sections for: "+del.name,400,del.name+" (planning)",({xlsx:"excel_advanced",pptx:"powerpoint",pdf:"financial",docx:"financial"})[del.outputFormat]||"general");
         const cleaned=planRaw.trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/```\s*$/,"");
         sections=JSON.parse(cleaned);
         if(!Array.isArray(sections)||sections.length===0)throw new Error("No sections");
       }catch{
         // If planning fails, generate as single chunk
-        return await callDelAI(sys,userMsg,2500,del.name);
+        return await callDelAI(sys,userMsg,2500,del.name,({xlsx:"excel_advanced",pptx:"powerpoint",pdf:"financial",docx:"financial"})[del.outputFormat]||"general");
       }
 
       const chunks=[];
@@ -3261,7 +3264,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
         const section=sections[si];
         setProjectExecPhase("Generating section "+(si+1)+"/"+sections.length+": "+section);
         const chunkSys=sys+"\n\nYou are generating SECTION "+(si+1)+" of "+sections.length+" of this deliverable."+(chunks.length?"\n\nCOMPLETED SECTIONS SO FAR:\n"+chunks.join("\n\n"):"");
-        const chunkContent=await callDelAI(chunkSys,"Generate section: "+section,1800,del.name+" §"+(si+1));
+        const chunkContent=await callDelAI(chunkSys,"Generate section: "+section,1800,del.name+" §"+(si+1),({xlsx:"excel_advanced",pptx:"powerpoint",pdf:"financial",docx:"financial"})[del.outputFormat]||"general");
         chunks.push("## "+section+"\n\n"+chunkContent);
       }
       return chunks.join("\n\n");
