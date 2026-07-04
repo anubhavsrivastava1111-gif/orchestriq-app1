@@ -2821,7 +2821,14 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       const ctx=buildProjectContext();
       const nl="\n";
       const architectSys="You are the Project Architect for "+co.name+". Decompose the objective into a structured Execution Plan."+nl+nl+"COMPANY: "+ctx.company.name+" | "+ctx.company.industry+" | "+ctx.company.stage+" | "+ctx.company.location+" | "+ctx.company.currencySymbol+ctx.company.currency+nl+(Object.keys(ctx.dataHub).length>0?"DATA HUB:"+nl+Object.entries(ctx.dataHub).map(function(e){return e[0]+": "+e[1];}).join(nl)+nl:"")+( ctx.boardroomDecisions.length>0?"RECENT DECISIONS:"+nl+ctx.boardroomDecisions.map(function(d){return "Q: "+d.question+" -> "+d.decisionStatus;}).join(nl)+nl:"")+nl+"OUTPUT: Return ONLY valid JSON (no markdown fences) matching this exact schema:"+nl+'{"name":"short project name","objective":"one sentence","complexity":"simple|moderate|complex","estimatedDuration":"e.g. 2-3 hours","modules":[{"id":"module_id","name":"Module Name","icon":"emoji","capabilityType":"marketing|design|content|finance|legal|management|engineering|research|compliance","primaryPersona":"cmo","rationale":"why needed","deliverables":[{"id":"del_moduleid_001","name":"Deliverable Name","description":"what it must contain","outputFormat":"docx|xlsx|pdf|pptx|md|txt|image|video","dependsOn":[],"verificationStatus":"AI Generated","confidenceScore":0,"sourceReferences":[]}]}]}'+nl+nl+templateHint+nl+nl+"RULES:"+nl+"1. Every deliverable must be a real file not a discussion."+nl+"2. Use only modules genuinely required."+nl+"3. Min 2 max 8 modules. Min 1 max 5 deliverables each."+nl+"4. dependsOn IDs must reference earlier deliverable ids."+nl+"5. Currency symbol: "+ctx.company.currencySymbol+"\n6. IMPORTANT — Use outputFormat=image for any visual deliverable (ad image, logo, banner, infographic, social creative). Platform generates the actual image via fal.ai automatically."+"\n7. IMPORTANT — Use outputFormat=video for any video deliverable (promo video, explainer, reel, ad video). Platform generates the actual video via fal.ai automatically."+"\n8. NEVER use image_prompt or video_prompt. These are deprecated. Always use image or video.";
-      const raw=await ask(architectSys,[{role:"user",content:"Objective: "+projectObjective}],4000,false,"general");
+      let raw=await ask(architectSys,[{role:"user",content:"Objective: "+projectObjective}],4000,false,"general");
+      // Guard: empty or error-string responses (provider limit, consensus-merge
+      // hiccup) are not plan failures — retry once, forcing a clean single call.
+      const looksBad=(r:string)=>!r||r.trim().length<40||/^(error|rate limit|too many|unauthorized|invalid api)/i.test(r.trim());
+      if(looksBad(raw)){
+        await new Promise(r=>setTimeout(r,1500));
+        raw=await ask(architectSys,[{role:"user",content:"Objective: "+projectObjective+"\n\nReturn ONLY the JSON plan, no other text."}],4000,false,"general");
+      }
       let plan=null;
       try{
         const cleaned=raw.trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/```\s*$/,"");
@@ -2836,8 +2843,11 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         // Drop any partially-recovered module missing essentials
         plan.modules=plan.modules.filter((m)=>m&&m.name&&Array.isArray(m.deliverables)&&m.deliverables.length);
         if(!plan.modules.length)throw new Error("Invalid plan structure");
-      }catch(parseErr){
-        showToast("Project Architect returned an invalid plan. Please try again.","error");
+      }catch(parseErr:any){
+        const reason=looksBad(raw)?"the AI provider returned an empty response (check API keys / usage limits, and turn OFF Multi-AI Consensus)":"the plan format could not be parsed";
+        console.error("[OIQ] Plan generation failed:",reason,"| raw head:",String(raw||"").slice(0,300));
+        try{const uf=WorkspaceMemory.get<any[]>("cos-unfulfilled-log")||[];uf.unshift({ts:new Date().toISOString(),project:projectObjective.slice(0,80),deliverable:"Execution Plan",format:"plan",error:reason+" :: "+String(raw||"").slice(0,120)});WorkspaceMemory.set("cos-unfulfilled-log",uf.slice(0,50));}catch{}
+        showToast("Plan generation failed \u2014 "+reason+".","error");
         setProjectPlanning(false);
         return;
       }
