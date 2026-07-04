@@ -1169,6 +1169,31 @@ function autoChartFromTable(header,dataRows,accent,key){
   }catch{return null;}
 }
 
+// Module-scope markdown→slides parser — the Project Engine PPTX fallback path.
+// (A closure-scoped copy exists elsewhere but was NOT visible at the render call
+// site, causing "parseMdToSlides is not defined" → every PPTX crashed to a .md dump.)
+function parseMdToSlidesGlobal(md:string,coName:string,title:string){
+  const lines=md.split("\n").filter((l:string)=>l.trim());
+  const slides:any[]=[{layout:"title",title,subtitle:coName,meta:coName+" \u00b7 "+new Date().toLocaleDateString("en-GB")}];
+  let currentSlide:any=null;
+  const pushCurrent=()=>{if(currentSlide?.bullets?.length||currentSlide?.content)slides.push(currentSlide);};
+  for(const line of lines){
+    if(line.startsWith("# ")){
+      pushCurrent();
+      currentSlide={layout:"exec_summary",title:line.replace(/^#+\s*/,""),bullets:[]};
+    } else if(line.startsWith("## ")||line.startsWith("### ")){
+      pushCurrent();
+      currentSlide={layout:"full_text",title:line.replace(/^#+\s*/,""),bullets:[]};
+    } else if(currentSlide){
+      const clean=line.replace(/^[-*\u2022]\s*/,"").trim();
+      if(clean) currentSlide.bullets=(currentSlide.bullets||[]).concat([clean]);
+    }
+  }
+  pushCurrent();
+  slides.push({layout:"closing",title:"Next Steps & Recommendations",actions:["Review findings with leadership","Assign owners and timelines","Implement priority actions"]});
+  return {title,slides};
+}
+
 function Md({text,ac}){
   if(!text)return null;
   const c=ac||"#14B8A6";
@@ -3456,7 +3481,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
         const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
         const fmt=(del.outputFormat||"md").toLowerCase();
         const lsContent=(()=>{try{return localStorage.getItem("cos-rc-"+del.id)||"";}catch{return "";}})();
-        const content=rawContentStore.current[del.id]||lsContent||del.rawContent||"";
+        const content=(rawContentStore.current[del.id]||lsContent||del.rawContent||"").replace(/^\s*(Here is|Here's|Below is|I've created|I have created|I'll create)[^\n]*\n+/i,"").replace(/^\s*(Here is|Here's) SECTION[^\n]*$/gmi,"");
         // ── IMPROVED 1: Native DOCX via Word HTML (opens natively in Word) ──
         if(fmt==="docx"){
           try{
@@ -3622,7 +3647,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             }
             if(!schema?.slides?.length){
               // Fallback: parse markdown into slide structure
-              schema=parseMdToSlides(content,coN,del.name);
+              schema=parseMdToSlidesGlobal(content,coN,del.name);
             }
             const slides:any[]=schema.slides||[];
 
@@ -3778,10 +3803,28 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
           })();zip.folder(folder).file(fname+".pdf",pdfBuf);
           }catch(pdfErr:any){zip.folder(folder).file(fname+"-error.md","PDF error: "+(pdfErr?.message||String(pdfErr))+"\n\n"+content.slice(0,2000));}
         } else if(fmt==="image"||fmt==="video"){
-          // Image and video deliverables are handled in Phase 5 (media generation).
-          // Save the AI-generated description/script as markdown for reference.
-          const mediaRef=fmt==="video"?"## Video Script\n\n"+content:"## Image Brief\n\n"+content;
-          zip.folder(folder).file(fname+"-brief.md",mediaRef);
+          // REAL media generation — deliver the actual PNG/MP4, never a prompt file.
+          // Script/brief is included alongside as reference. A prompt file is written
+          // ONLY on genuine failure, and it states the exact error and fix.
+          const falK=((keys as any).fal||EFF_FAL||"").trim();
+          try{
+            setProjectExecPhase((fmt==="video"?"\ud83c\udfac Generating video: ":"\ud83c\udfa8 Generating image: ")+del.name+"...");
+            const mp:any=buildMediaPrompt(del,proj.context||{});
+            const genPrompt=fmt==="video"?(mp.kling||mp.veo||content.slice(0,500)):(mp.dalle||content.slice(0,500));
+            const url=fmt==="video"?await callFalVideo(falK,genPrompt):await callFalImage(falK,genPrompt);
+            if(!url)throw new Error("fal.ai returned no media URL");
+            setProjectExecPhase("\u2b07 Downloading generated "+fmt+": "+del.name+"...");
+            const resp=await fetch(url);
+            if(!resp.ok)throw new Error("media download failed: HTTP "+resp.status);
+            const blob=await resp.blob();
+            const ext=fmt==="video"?"mp4":(((blob.type||"image/png").split("/")[1]||"png").split("+")[0]);
+            zip.folder(folder).file(fname+"."+ext,blob);
+            zip.folder(folder).file(fname+(fmt==="video"?"-script.md":"-brief.md"),(fmt==="video"?"## Video Script\n\n":"## Image Brief\n\n")+content);
+          }catch(mediaErr:any){
+            zip.folder(folder).file(fname+"-GENERATION-FAILED.md",
+              "\u26a0 "+fmt.toUpperCase()+" GENERATION FAILED\n\nERROR: "+(mediaErr?.message||String(mediaErr))+
+              "\n\nFIX: Verify the fal.ai API key (Settings \u2192 fal.ai), account credits, and network access to fal.run.\n\n## Prompt (retry after fixing)\n\n"+content);
+          }
         } else if(fmt==="svg"){
           // SVG diagrams — save as proper .svg file that opens in browsers
           const svgContent=content.includes("<svg")?content:"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 800 500\">\n"+content+"\n</svg>";
