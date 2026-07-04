@@ -987,11 +987,23 @@ export class BusinessExecutionEngine {
     pptx.layout = "WIDE";
 
     const pal = BRAND_PALETTES[plan.domain];
+    // Brand master — consistent chrome on every slide (accent baseline + doc footer)
+    try {
+      pptx.defineSlideMaster({
+        title: "OIQ_MASTER",
+        background: { color: pal.dark },
+        objects: [
+          { rect: { x: 0, y: 7.34, w: 13.333, h: 0.16, fill: { color: pal.accent } } },
+          { text: { text: (schema.title || del.title) + "   \u00b7   Confidential", options: { x: 0.5, y: 6.98, w: 9.5, h: 0.3, fontSize: 8, color: pal.muted, fontFace: "Calibri" } } },
+        ],
+      });
+    } catch { /* master optional — slides render without it */ }
     const slides: any[] = schema.slides || [];
 
     for (let i = 0; i < slides.length; i++) {
       const sd = slides[i];
-      const slide = pptx.addSlide();
+      let slide: any;
+      try { slide = pptx.addSlide({ masterName: "OIQ_MASTER" }); } catch { slide = pptx.addSlide(); }
 
       switch (sd.layout) {
         case "title":
@@ -1031,7 +1043,7 @@ export class BusinessExecutionEngine {
       slide.addText(`${i + 1} / ${slides.length}`, {
         x: 12.0, y: 7.0, w: 1.2, h: 0.35,
         fontSize: 9, color: pal.muted, align: "right",
-        fontFace: "Arial",
+        fontFace: "Calibri",
       });
     }
 
@@ -1057,22 +1069,22 @@ export class BusinessExecutionEngine {
     // Company name
     slide.addText(plan.objectiveRestated?.split(" ").slice(0, 3).join(" ") || "OrchestrIQ", {
       x: 0.6, y: 2.6, w: 11, h: 0.8,
-      fontSize: 36, bold: true, color: pal.light, fontFace: "Arial",
+      fontSize: 36, bold: true, color: pal.light, fontFace: "Calibri",
     });
     // Title
     slide.addText(sd.title, {
       x: 0.6, y: 3.5, w: 11, h: 0.7,
-      fontSize: 22, color: pal.accent, fontFace: "Arial",
+      fontSize: 22, color: pal.accent, fontFace: "Calibri",
     });
     // Subtitle / metadata
     slide.addText(sd.content || "", {
       x: 0.6, y: 4.3, w: 11, h: 0.5,
-      fontSize: 14, color: pal.muted, fontFace: "Arial",
+      fontSize: 14, color: pal.muted, fontFace: "Calibri",
     });
     // Date / confidential
     slide.addText(`${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}   ·   Confidential`, {
       x: 0.6, y: 6.9, w: 8, h: 0.35,
-      fontSize: 10, color: pal.muted, fontFace: "Arial",
+      fontSize: 10, color: pal.muted, fontFace: "Calibri",
     });
   }
 
@@ -1083,7 +1095,7 @@ export class BusinessExecutionEngine {
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.25, h: 1.1, fill: { color: pal.accent } });
     slide.addText("EXECUTIVE SUMMARY", {
       x: 0.5, y: 0.2, w: 10, h: 0.65,
-      fontSize: 22, bold: true, color: pal.light, fontFace: "Arial",
+      fontSize: 22, bold: true, color: pal.light, fontFace: "Calibri",
     });
     // Takeaways — parse content into bullets
     const bullets = (sd.content || "").split("\n").filter((l: string) => l.trim());
@@ -1093,12 +1105,12 @@ export class BusinessExecutionEngine {
       slide.addShape(pptx.ShapeType.ellipse, { x: 0.4, y: y + 0.1, w: 0.45, h: 0.45, fill: { color: pal.accent } });
       slide.addText(String(idx + 1), {
         x: 0.4, y: y + 0.05, w: 0.45, h: 0.45,
-        fontSize: 14, bold: true, color: "FFFFFF", align: "center", fontFace: "Arial",
+        fontSize: 14, bold: true, color: "FFFFFF", align: "center", fontFace: "Calibri",
       });
       // Bullet text
       slide.addText(bullet.replace(/^[-•*]\s*/, ""), {
         x: 1.1, y, w: 11.5, h: 0.85,
-        fontSize: 15, color: pal.light, fontFace: "Arial", valign: "middle",
+        fontSize: 15, color: pal.light, fontFace: "Calibri", valign: "middle",
       });
     });
   }
@@ -1109,18 +1121,18 @@ export class BusinessExecutionEngine {
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.25, h: 1.1, fill: { color: pal.accent } });
     slide.addText("AGENDA", {
       x: 0.5, y: 0.2, w: 10, h: 0.65,
-      fontSize: 22, bold: true, color: pal.light, fontFace: "Arial",
+      fontSize: 22, bold: true, color: pal.light, fontFace: "Calibri",
     });
     const items = (sd.content || "").split("\n").filter((l: string) => l.trim());
     items.slice(0, 7).forEach((item: string, idx: number) => {
       const y = 1.35 + idx * 0.75;
       slide.addText(`${String(idx + 1).padStart(2, "0")}`, {
         x: 0.4, y, w: 0.6, h: 0.6,
-        fontSize: 20, bold: true, color: pal.accent, fontFace: "Arial",
+        fontSize: 20, bold: true, color: pal.accent, fontFace: "Calibri",
       });
       slide.addText(item.replace(/^[\d\.\-•*]\s*/, ""), {
         x: 1.2, y: y + 0.05, w: 11, h: 0.55,
-        fontSize: 16, color: pal.light, fontFace: "Arial", valign: "middle",
+        fontSize: 16, color: pal.light, fontFace: "Calibri", valign: "middle",
       });
       // Separator line
       slide.addShape(pptx.ShapeType.rect, { x: 0.4, y: y + 0.6, w: 12.5, h: 0.01, fill: { color: "263050" } });
@@ -1132,17 +1144,17 @@ export class BusinessExecutionEngine {
     // Large section number
     slide.addText(String(idx + 1).padStart(2, "0"), {
       x: 0.5, y: 1.5, w: 3, h: 3,
-      fontSize: 120, bold: true, color: pal.accent, fontFace: "Arial",
+      fontSize: 120, bold: true, color: pal.accent, fontFace: "Calibri",
       transparency: 70,
     });
     // Section title
     slide.addText(sd.title, {
       x: 3.0, y: 2.8, w: 9.5, h: 1.2,
-      fontSize: 36, bold: true, color: "FFFFFF", fontFace: "Arial",
+      fontSize: 36, bold: true, color: "FFFFFF", fontFace: "Calibri",
     });
     slide.addText(sd.content || "", {
       x: 3.0, y: 4.1, w: 9.5, h: 0.8,
-      fontSize: 16, color: pal.muted, fontFace: "Arial",
+      fontSize: 16, color: pal.muted, fontFace: "Calibri",
     });
   }
 
@@ -1153,7 +1165,7 @@ export class BusinessExecutionEngine {
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.2, h: 0.85, fill: { color: pal.accent } });
     slide.addText(sd.title, {
       x: 0.4, y: 0.1, w: 11, h: 0.65,
-      fontSize: 20, bold: true, color: pal.light, fontFace: "Arial", valign: "middle",
+      fontSize: 20, bold: true, color: pal.light, fontFace: "Calibri", valign: "middle",
     });
 
     // Chart (left 60%)
@@ -1193,7 +1205,7 @@ export class BusinessExecutionEngine {
     bullets.slice(0, 6).forEach((b: string, i: number) => {
       slide.addText("▸  " + b.replace(/^[-•*]\s*/, ""), {
         x: 8.2, y: 1.1 + i * 0.85, w: 4.7, h: 0.75,
-        fontSize: 12, color: pal.light, fontFace: "Arial", valign: "top",
+        fontSize: 12, color: pal.light, fontFace: "Calibri", valign: "top",
         bullet: false,
       });
     });
@@ -1205,7 +1217,7 @@ export class BusinessExecutionEngine {
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.2, h: 0.85, fill: { color: pal.accent } });
     slide.addText(sd.title, {
       x: 0.4, y: 0.1, w: 12.5, h: 0.65,
-      fontSize: 20, bold: true, color: pal.light, fontFace: "Arial",
+      fontSize: 20, bold: true, color: pal.light, fontFace: "Calibri",
     });
     // Divider
     slide.addShape(pptx.ShapeType.rect, { x: 6.5, y: 1.0, w: 0.03, h: 6.0, fill: { color: "263050" } });
@@ -1215,11 +1227,11 @@ export class BusinessExecutionEngine {
     const right = (parts[1] || "").trim();
     slide.addText(left, {
       x: 0.4, y: 1.1, w: 5.8, h: 6.0,
-      fontSize: 13, color: pal.light, fontFace: "Arial", valign: "top", wrap: true,
+      fontSize: 13, color: pal.light, fontFace: "Calibri", valign: "top", wrap: true,
     });
     slide.addText(right, {
       x: 6.8, y: 1.1, w: 6.2, h: 6.0,
-      fontSize: 13, color: pal.light, fontFace: "Arial", valign: "top", wrap: true,
+      fontSize: 13, color: pal.light, fontFace: "Calibri", valign: "top", wrap: true,
     });
   }
 
@@ -1229,7 +1241,7 @@ export class BusinessExecutionEngine {
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.2, h: 0.85, fill: { color: pal.accent } });
     slide.addText(sd.title, {
       x: 0.4, y: 0.1, w: 12.5, h: 0.65,
-      fontSize: 20, bold: true, color: pal.light, fontFace: "Arial",
+      fontSize: 20, bold: true, color: pal.light, fontFace: "Calibri",
     });
 
     // Parse markdown table from content
@@ -1276,7 +1288,7 @@ export class BusinessExecutionEngine {
         // Fallback to text if table fails
         slide.addText(sd.content || "", {
           x: 0.4, y: 1.1, w: 12.5, h: 6.0,
-          fontSize: 11, color: pal.light, fontFace: "Arial",
+          fontSize: 11, color: pal.light, fontFace: "Calibri",
         });
       }
     }
@@ -1288,7 +1300,7 @@ export class BusinessExecutionEngine {
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.2, h: 0.85, fill: { color: pal.accent } });
     slide.addText(sd.title, {
       x: 0.4, y: 0.1, w: 12.5, h: 0.65,
-      fontSize: 20, bold: true, color: pal.light, fontFace: "Arial",
+      fontSize: 20, bold: true, color: pal.light, fontFace: "Calibri",
     });
 
     const bullets = (sd.content || "").split("\n").filter((l: string) => l.trim());
@@ -1297,7 +1309,7 @@ export class BusinessExecutionEngine {
       slide.addText(b.replace(/^[-•*\s]+/, ""), {
         x: isSubBullet ? 1.0 : 0.5, y: 1.1 + i * 0.72, w: isSubBullet ? 12.0 : 12.5, h: 0.65,
         fontSize: isSubBullet ? 12 : 14, color: isSubBullet ? pal.muted : pal.light,
-        fontFace: "Arial", valign: "middle",
+        fontFace: "Calibri", valign: "middle",
         bullet: { type: "bullet", code: isSubBullet ? "2013" : "25B8", color: pal.accent },
       });
     });
@@ -1309,15 +1321,15 @@ export class BusinessExecutionEngine {
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 3.3, w: 0.35, h: 2.0, fill: { color: pal.accent } });
     slide.addText(sd.title, {
       x: 0.7, y: 3.1, w: 11, h: 1.0,
-      fontSize: 36, bold: true, color: "FFFFFF", fontFace: "Arial",
+      fontSize: 36, bold: true, color: "FFFFFF", fontFace: "Calibri",
     });
     slide.addText(sd.content || "Thank you", {
       x: 0.7, y: 4.2, w: 11, h: 1.5,
-      fontSize: 18, color: pal.muted, fontFace: "Arial",
+      fontSize: 18, color: pal.muted, fontFace: "Calibri",
     });
     slide.addText(`Prepared by OrchestrIQ  ·  ${new Date().toLocaleDateString("en-GB", { month: "long", year: "numeric" })}`, {
       x: 0.7, y: 6.8, w: 11, h: 0.35,
-      fontSize: 10, color: pal.muted, fontFace: "Arial",
+      fontSize: 10, color: pal.muted, fontFace: "Calibri",
     });
   }
 
@@ -1414,8 +1426,14 @@ export class BusinessExecutionEngine {
     doc.text(new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }), M, 260);
     doc.text(schema.classification || "Confidential", M, 270);
 
-    // ── PAGE 2: EXECUTIVE SUMMARY ─────────────────────────────────────────
+    // ── TABLE OF CONTENTS (reserved page — filled after render) ──────────
+    const tocEntries: { t: string; p: number }[] = [];
     addPage();
+    const tocPageNo = (doc as any).internal.getNumberOfPages();
+
+    // ── EXECUTIVE SUMMARY ─────────────────────────────────────────────────
+    addPage();
+    tocEntries.push({ t: "Executive Summary", p: (doc as any).internal.getNumberOfPages() });
     const aa = hexToRgb(pal.accent);
     doc.setFontSize(18);
     doc.setFont("helvetica", "bold");
@@ -1461,6 +1479,7 @@ export class BusinessExecutionEngine {
       if (sec.level === 1) {
         secNum++;
         checkPageBreak(20);
+        tocEntries.push({ t: secNum + ".0  " + sec.title, p: (doc as any).internal.getNumberOfPages() });
         doc.setFontSize(15);
         doc.setFont("helvetica", "bold");
         doc.setTextColor(aa.r, aa.g, aa.b);
@@ -1478,17 +1497,92 @@ export class BusinessExecutionEngine {
         y += 7;
       }
 
-      // Render content (strip markdown, handle tables)
-      const stripped = this.stripMd(sec.content || "");
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(30, 41, 59);
-      const contentLines = doc.splitTextToSize(stripped, CW);
-      contentLines.forEach((line: string) => {
-        checkPageBreak(6);
-        doc.text(line, M, y);
-        y += 6;
-      });
+      // Render content — markdown-aware: real tables (wrapped cells, zebra,
+      // page-break-safe rows), subheadings, bullets. No more stripped tables.
+      const rawLines = String(sec.content || "").split("\n");
+      let li = 0;
+      while (li < rawLines.length) {
+        const line = rawLines[li];
+        const isTableLine = /^\s*\|.*\|\s*$/.test(line);
+        if (isTableLine) {
+          // collect full table block
+          const block: string[] = [];
+          while (li < rawLines.length && /^\s*\|.*\|\s*$/.test(rawLines[li])) { block.push(rawLines[li]); li++; }
+          const parseRow = (r: string) => r.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(x => this.stripMd(x.trim()));
+          const rowsT = block.filter(r => !/^\s*\|?[\s:|-]+\|?\s*$/.test(r)).map(parseRow);
+          if (rowsT.length >= 2) {
+            const nCols = Math.max(...rowsT.map(r => r.length));
+            // proportional column widths by content length, min 16mm
+            const weights = Array.from({ length: nCols }, (_, ci) => Math.max(4, ...rowsT.map(r => (r[ci] || "").length)));
+            const wCap = Math.max(12, (weights.reduce((a, b) => a + b, 0) / nCols) * 2.2);
+            for (let wi = 0; wi < weights.length; wi++) weights[wi] = Math.min(weights[wi], wCap);
+            const wSum = weights.reduce((a, b) => a + b, 0);
+            const colWs = weights.map(wt => Math.max(16, (wt / wSum) * CW));
+            const cwSum = colWs.reduce((a, b) => a + b, 0);
+            const scale = CW / cwSum;
+            const finalWs = colWs.map(cw2 => cw2 * scale);
+            doc.setFontSize(8.5);
+            for (let ri = 0; ri < rowsT.length; ri++) {
+              const isHead = ri === 0;
+              const cellsWrapped = rowsT[ri].map((cell, ci) => doc.splitTextToSize(String(cell || ""), finalWs[ci] - 3));
+              const rowH = Math.max(...cellsWrapped.map(cl => cl.length)) * 3.8 + 3;
+              if (y + rowH > 275) { addPage(); doc.setFontSize(8.5); }
+              let xC = M;
+              for (let ci = 0; ci < nCols; ci++) {
+                if (isHead) {
+                  doc.setFillColor(pc.r, pc.g, pc.b);
+                  doc.rect(xC, y - 3.5, finalWs[ci], rowH, "F");
+                  doc.setTextColor(255, 255, 255);
+                  doc.setFont("helvetica", "bold");
+                } else {
+                  if (ri % 2 === 0) { doc.setFillColor(246, 248, 251); doc.rect(xC, y - 3.5, finalWs[ci], rowH, "F"); }
+                  doc.setTextColor(30, 41, 59);
+                  doc.setFont("helvetica", "normal");
+                }
+                doc.text(cellsWrapped[ci], xC + 1.5, y);
+                xC += finalWs[ci];
+              }
+              // row border
+              doc.setDrawColor(226, 232, 240);
+              doc.rect(M, y - 3.5, CW, rowH, "S");
+              y += rowH;
+            }
+            y += 5;
+            doc.setFontSize(10);
+          }
+          continue;
+        }
+        // non-table content
+        const t = line.trim();
+        if (!t) { y += 2; li++; continue; }
+        if (t.startsWith("## ") || t.startsWith("### ")) {
+          checkPageBreak(10);
+          doc.setFontSize(11.5);
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(pc.r, pc.g, pc.b);
+          doc.text(this.stripMd(t.replace(/^#+\s*/, "")), M, y);
+          y += 6.5;
+          doc.setFontSize(10);
+        } else if (/^[-*\u2022]\s+/.test(t)) {
+          const bt = this.stripMd(t.replace(/^[-*\u2022]\s+/, ""));
+          const bl = doc.splitTextToSize(bt, CW - 8);
+          checkPageBreak(bl.length * 5.5 + 2);
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(30, 41, 59);
+          doc.circle(M + 2, y - 1.2, 0.7, "F");
+          doc.text(bl, M + 6, y);
+          y += bl.length * 5.5 + 1.5;
+        } else {
+          const pl = doc.splitTextToSize(this.stripMd(t), CW);
+          checkPageBreak(pl.length * 6);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(10);
+          doc.setTextColor(30, 41, 59);
+          doc.text(pl, M, y);
+          y += pl.length * 6;
+        }
+        li++;
+      }
       y += 4;
     }
 
@@ -1498,6 +1592,7 @@ export class BusinessExecutionEngine {
       doc.setFontSize(15);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(aa.r, aa.g, aa.b);
+      tocEntries.push({ t: "Recommendations", p: (doc as any).internal.getNumberOfPages() });
       doc.text("RECOMMENDATIONS", M, y);
       y += 2;
       doc.setFillColor(aa.r, aa.g, aa.b);
@@ -1522,6 +1617,7 @@ export class BusinessExecutionEngine {
       doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(aa.r, aa.g, aa.b);
+      tocEntries.push({ t: "Appendix " + String.fromCharCode(65 + ai) + ": " + app.title, p: (doc as any).internal.getNumberOfPages() });
       doc.text(`Appendix ${String.fromCharCode(65 + ai)}: ${app.title}`, M, y);
       y += 8;
       const aLines = doc.splitTextToSize(this.stripMd(app.content || ""), CW);
@@ -1530,6 +1626,41 @@ export class BusinessExecutionEngine {
       doc.setTextColor(30, 41, 59);
       doc.text(aLines, M, y);
     }
+
+    // ── DRAW TABLE OF CONTENTS on the reserved page ───────────────────────
+    try {
+      const lastPage = (doc as any).internal.getNumberOfPages();
+      doc.setPage(tocPageNo);
+      let yT = 30;
+      doc.setFontSize(18);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(pc.r, pc.g, pc.b);
+      doc.text("TABLE OF CONTENTS", M, yT);
+      yT += 3;
+      doc.setFillColor(ac.r, ac.g, ac.b);
+      doc.rect(M, yT, CW, 0.5, "F");
+      yT += 10;
+      doc.setFontSize(10.5);
+      tocEntries.slice(0, 34).forEach((e) => {
+        doc.setFont("helvetica", e.t.match(/^\d/) ? "bold" : "normal");
+        doc.setTextColor(30, 41, 59);
+        const label = e.t.length > 78 ? e.t.slice(0, 77) + "\u2026" : e.t;
+        doc.text(label, M, yT);
+        const pageStr = String(e.p);
+        doc.setTextColor(100, 116, 139);
+        // dot leader
+        const labelW = doc.getTextWidth(label);
+        const pw = doc.getTextWidth(pageStr);
+        let dots = "";
+        const avail = CW - labelW - pw - 6;
+        const dotW = doc.getTextWidth(".");
+        for (let dwi = 0; dwi < Math.max(0, Math.floor(avail / dotW)); dwi++) dots += ".";
+        doc.text(dots, M + labelW + 2, yT);
+        doc.text(pageStr, W - M, yT, { align: "right" });
+        yT += 7;
+      });
+      doc.setPage(lastPage);
+    } catch { /* TOC failure never blocks delivery */ }
 
     const pdfBuffer = doc.output("arraybuffer");
     const filename = `${del.title.replace(/\s+/g, "-")}-${Date.now()}.pdf`;
