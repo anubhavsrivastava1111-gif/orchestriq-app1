@@ -56,7 +56,7 @@ function buildDecisionHistoryContext(question:string):string{
       scored.map(x=>"- ["+String(x.h.ts||"").slice(0,10)+"] Q: \""+String(x.h.question||"").slice(0,120)+"\" → Status: "+String(x.h.status||"n/a")+". Decision: "+String(x.h.recommendation||"").slice(0,200)).join("\n")+"\n";
   }catch{return "";}
 }
-import BusinessExecutionEngine, { type ExecutionPlan, type DeliverableSpec, repairTruncatedJson } from "./lib/BusinessExecutionEngine";
+import BusinessExecutionEngine, { type ExecutionPlan, type DeliverableSpec, repairTruncatedJson, pdfSafeText } from "./lib/BusinessExecutionEngine";
 
 // ─── SESSION GATE ────────────────────────────────────────────────────────────
 async function checkSessionGate(): Promise<{allowed:boolean;reason?:string;plan?:string;used?:number;limit?:number}> {
