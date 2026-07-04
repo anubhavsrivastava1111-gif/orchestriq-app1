@@ -1176,6 +1176,32 @@ function autoChartFromTable(header,dataRows,accent,key){
 // Module-scope markdown→slides parser — the Project Engine PPTX fallback path.
 // (A closure-scoped copy exists elsewhere but was NOT visible at the render call
 // site, causing "parseMdToSlides is not defined" → every PPTX crashed to a .md dump.)
+// Salvage complete slide objects from truncated/malformed JSON — a cut-off
+// AI response no longer collapses a 12-slide deck down to 2 slides.
+function salvageSlidesJson(content:string):any[]{
+  try{
+    const out:any[]=[];let i=0;
+    while(i<content.length){
+      const a=content.indexOf('{"layout"',i);
+      const b=content.indexOf('{ "layout"',i);
+      const st=(a===-1)?b:(b===-1?a:Math.min(a,b));
+      if(st===-1)break;
+      let depth=0,j=st,inStr=false,esc=false;
+      for(;j<content.length;j++){
+        const ch=content[j];
+        if(esc){esc=false;continue;}
+        if(ch==="\\"){esc=true;continue;}
+        if(ch==='"'){inStr=!inStr;continue;}
+        if(!inStr){if(ch==="{")depth++;else if(ch==="}"){depth--;if(depth===0){j++;break;}}}
+      }
+      if(depth!==0)break;
+      try{const o=JSON.parse(content.slice(st,j));if(o&&o.layout)out.push(o);}catch{}
+      i=j;
+    }
+    return out;
+  }catch{return [];}
+}
+
 function parseMdToSlidesGlobal(md:string,coName:string,title:string){
   const lines=md.split("\n").filter((l:string)=>l.trim());
   const slides:any[]=[{layout:"title",title,subtitle:coName,meta:coName+" \u00b7 "+new Date().toLocaleDateString("en-GB")}];
@@ -3180,7 +3206,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
 
       if(!needsChunking){
         const isLargeDeliverable=["xlsx","pptx","pdf","docx"].includes(del.outputFormat?.toLowerCase()||"")||del.description.length>200;
-      return await callDelAI(sys,userMsg,isLargeDeliverable?4500:2500,del.name);
+      return await callDelAI(sys,userMsg,del.outputFormat==="pptx"?6500:isLargeDeliverable?4500:2500,del.name);
       }
 
       // Chunked generation — split into logical sections
@@ -3496,7 +3522,24 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
         const content=(rawContentStore.current[del.id]||lsContent||del.rawContent||"").replace(/^\s*(Here is|Here's|Below is|I've created|I have created|I'll create)[^\n]*\n+/i,"").replace(/^\s*(Here is|Here's) SECTION[^\n]*$/gmi,"");
         // ── IMPROVED 1: Native DOCX via Word HTML (opens natively in Word) ──
         if(fmt==="docx"){
+          // Publication engine first (branded typography, TOC, callouts);
+          // the inline Word-HTML path below remains as automatic fallback.
+          let _docDone=false;
           try{
+            const _pubCtx=["Company: "+(proj.context?.company?.name||co.name||""),"Industry: "+(proj.context?.company?.industry||co.industry||""),"Stage: "+(proj.context?.company?.stage||co.stage||"")].join("\n");
+            let _w=false;
+            const _bee=new BusinessExecutionEngine(
+              async(sys:any,msgs:any,maxT?:any,_es?:any,tt?:any)=>(await callMulti({...keys,...(EFF_CLAUDE?.trim()?{claude:EFF_CLAUDE}:{}),...(EFF_GEMINI?.trim()?{gemini:EFF_GEMINI}:{}),...(EFF_GROQ?.trim()?{groq:EFF_GROQ}:{})},defP,sys,msgs,maxT||6000,false,tt||"general")).primary,
+              ensureXLSX,ensurePptx,ensureJsPDF,
+              (name:any,buf:any)=>{zip.folder(folder).file(String(name).replace(/[^a-zA-Z0-9._-]/g,"-"),buf);_w=true;},
+              stripMd);
+            const _spec:DeliverableSpec={type:"docx",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
+            const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+            setProjectExecPhase("\ud83d\udcc4 Building publication-quality Word document: "+del.name);
+            await _bee.generateDocx(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
+            _docDone=_w;
+          }catch{/* fall through to inline path */}
+          if(!_docDone)try{
             const secs=parseSections(content);
             const coName=proj.context?.company?.name||"";
             let html="<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:w=\"urn:schemas-microsoft-com:office:word\" xmlns=\"http://www.w3.org/TR/REC-html40\">"
@@ -3658,8 +3701,10 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               try{ schema=JSON.parse((jsonMatch[1]||jsonMatch[0]).trim()); }catch{}
             }
             if(!schema?.slides?.length){
-              // Fallback: parse markdown into slide structure
-              schema=parseMdToSlidesGlobal(content,coN,del.name);
+              // Salvage complete slides from truncated JSON before giving up
+              const salvaged=salvageSlidesJson(content);
+              if(salvaged.length>=2){schema={title:del.name,slides:salvaged};}
+              else{schema=parseMdToSlidesGlobal(content,coN,del.name);}
             }
             const slides:any[]=schema.slides||[];
 
@@ -3777,7 +3822,24 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             zip.folder(folder).file(fname+"-pptx-error.md","PPTX generation error: "+pptxErr.message+"\n\nRaw content:\n"+content);
           }
         } else if(fmt==="pdf"){
-          try{const pdfBuf=await(async()=>{
+          // Publication engine first (cover, TOC, branded wrapped tables);
+          // the inline jsPDF path below remains as automatic fallback.
+          let _pdfDone=false;
+          try{
+            const _pubCtx=["Company: "+(proj.context?.company?.name||co.name||""),"Industry: "+(proj.context?.company?.industry||co.industry||""),"Stage: "+(proj.context?.company?.stage||co.stage||"")].join("\n");
+            let _w=false;
+            const _bee=new BusinessExecutionEngine(
+              async(sys:any,msgs:any,maxT?:any,_es?:any,tt?:any)=>(await callMulti({...keys,...(EFF_CLAUDE?.trim()?{claude:EFF_CLAUDE}:{}),...(EFF_GEMINI?.trim()?{gemini:EFF_GEMINI}:{}),...(EFF_GROQ?.trim()?{groq:EFF_GROQ}:{})},defP,sys,msgs,maxT||6000,false,tt||"general")).primary,
+              ensureXLSX,ensurePptx,ensureJsPDF,
+              (name:any,buf:any)=>{zip.folder(folder).file(String(name).replace(/[^a-zA-Z0-9._-]/g,"-"),buf);_w=true;},
+              stripMd);
+            const _spec:DeliverableSpec={type:"pdf",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
+            const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+            setProjectExecPhase("\ud83d\udcd1 Building publication-quality PDF report: "+del.name);
+            await _bee.generatePDF(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
+            _pdfDone=_w;
+          }catch{/* fall through to inline path */}
+          if(!_pdfDone)try{const pdfBuf=await(async()=>{
             const jsPDF=await ensureJsPDF();const doc=new jsPDF({orientation:"portrait",unit:"pt",format:"a4"});
             const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),ML=54,MR=54,MT=54,MB=54,CW=W-ML-MR;
             const TEAL:any=[20,184,166],NAVY:any=[30,58,95],DARK:any=[30,30,30],GREY:any=[100,100,100],WHITE:any=[255,255,255];
