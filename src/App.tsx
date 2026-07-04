@@ -186,6 +186,29 @@ const CLAUDE_TASK_MODEL: Record<string,string> = {
 
 // Auto-classify the task type from prompt + system context.
 // Called automatically inside callMulti — no change needed at call sites.
+// ─── PROVIDER CAPABILITY REGISTRY ────────────────────────────────────────────
+// Pure data. Adding a provider = one entry here + a key field; zero logic edits.
+const PROVIDER_META = {
+  claude:   {name:"Claude",   cost:"$$$",speed:"medium",quality:"best", blurb:"Best for documents, Excel, decks, deep reasoning"},
+  openai:   {name:"ChatGPT",  cost:"$$$",speed:"medium",quality:"best", blurb:"Strong all-rounder; images via DALL·E"},
+  deepseek: {name:"DeepSeek", cost:"$",  speed:"fast",  quality:"great",blurb:"Best value for general work and code"},
+  gemini:   {name:"Gemini",   cost:"$",  speed:"fast",  quality:"great",blurb:"Fast, generous free tier, good research"},
+  groq:     {name:"Groq",     cost:"$",  speed:"fast",  quality:"good", blurb:"Fastest responses; great for drafts"},
+  fal:      {name:"fal.ai",   cost:"$$", speed:"medium",quality:"best", blurb:"Images & video (Flux, Kling, Veo)"},
+} as Record<string,{name:string;cost:string;speed:string;quality:string;blurb:string}>;
+// Tasks where the user's Primary AI leads; specialists lead everywhere else.
+const PRIMARY_LED_TASKS=["general","creative","code","research"];
+// Primary-aware routing: for specialist tasks the top specialists go first,
+// then the user's Primary AI, then the remaining chain. The user's model
+// choice is honored for orchestration; capability quality for specialists.
+function resolveRoute(task:string,primary:string):string[]{
+  const chain=TASK_ROUTING[task]||TASK_ROUTING.general;
+  const ordered=PRIMARY_LED_TASKS.includes(task)
+    ? [primary,...chain]
+    : [...chain.slice(0,2),primary,...chain];
+  return ordered.filter((p,i)=>p&&ordered.indexOf(p)===i);
+}
+
 function detectTaskType(prompt: string, context = ""): string {
   const t = (prompt + " " + context).toLowerCase();
   if (/\b(generate\s+(?:an?\s+)?image|create\s+(?:an?\s+)?(?:image|photo|picture)|make\s+(?:an?\s+)?image|draw\s+(?:an?\s+)?image|render\s+(?:an?\s+)?(?:image|photo)|design\s+(?:an?\s+)?logo\s+for\s+me)\b/.test(t)) return "image_gen";
@@ -895,7 +918,7 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
   const resolvedTask = taskType || detectTaskType(userPrompt, sys||"");
 
   // Task routing: walk preference list, pick first provider with an available key
-  const routeOrder = TASK_ROUTING[resolvedTask] || TASK_ROUTING.general;
+  const routeOrder = resolveRoute(resolvedTask, defP);
   let taskRoutedProvider = "";
   for(const p of routeOrder){
     if(effectiveKeys[p]?.trim()){taskRoutedProvider=p;break;}
@@ -6068,9 +6091,33 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 ))}
                 {cfgP.length>1&&(
                   <div style={{padding:"10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:10}}>
-                    <label style={{...S.lbl,marginBottom:5}}>Default Model</label>
-                    <div style={{display:"flex",gap:4,marginBottom:8}}>
-                      {cfgP.map(p=><button key={p} onClick={()=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} style={{flex:1,padding:"5px",borderRadius:4,fontSize:10,fontWeight:600,border:"1px solid "+(defP===p?MODELS[p].color:"#1a2030"),background:defP===p?MODELS[p].color+"15":"transparent",color:defP===p?MODELS[p].color:"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{MODELS[p].name}</button>)}
+                    <label style={{...S.lbl,marginBottom:2}}>Primary AI</label>
+                    <div style={{fontSize:8.5,color:"#5A6480",marginBottom:6,lineHeight:1.5}}>Your Primary AI handles all general reasoning, research, writing and orchestration. Specialist tasks are automatically routed to the best available model, then control returns to your Primary AI.</div>
+                    <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
+                      {cfgP.map(p=>{const pm=PROVIDER_META[p];return(
+                        <button key={p} onClick={()=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} style={{flex:"1 1 110px",padding:"7px 6px",borderRadius:5,border:"1px solid "+(defP===p?MODELS[p].color:"#1a2030"),background:defP===p?MODELS[p].color+"15":"transparent",cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"left"}}>
+                          <div style={{fontSize:10,fontWeight:700,color:defP===p?MODELS[p].color:"#A0AAC0"}}>{MODELS[p].name}{defP===p?" ✓":""}</div>
+                          {pm&&<div style={{fontSize:7.5,color:"#5A6480",marginTop:2}}>Cost {pm.cost} · {pm.speed} · {pm.quality}</div>}
+                          {pm&&<div style={{fontSize:7.5,color:"#5A6480",marginTop:1,lineHeight:1.4}}>{pm.blurb}</div>}
+                        </button>);})}
+                    </div>
+                    <label style={{...S.lbl,marginBottom:4}}>Automatic Specialist Routing</label>
+                    <div style={{border:"1px solid #1a2030",borderRadius:5,overflow:"hidden",marginBottom:8}}>
+                      {(()=>{
+                        const hasK=(p)=>!!(keys[p]?.trim()||(p==="claude"&&EFF_CLAUDE?.trim())||(p==="gemini"&&EFF_GEMINI?.trim())||(p==="groq"&&EFF_GROQ?.trim())||(p==="fal"&&EFF_FAL?.trim()));
+                        const CAPS=[["General & Writing","general"],["Research","research"],["Code","code"],["Excel & Financial","excel_advanced"],["PowerPoint","powerpoint"],["Word / PDF","financial"],["Image Generation","image_gen"],["Video Generation","video_gen"]];
+                        return CAPS.map(([label,task],i)=>{
+                          const route=resolveRoute(task,defP);
+                          const act=route.find(hasK);
+                          const fb=route.filter(p=>p!==act&&hasK(p)).slice(0,2);
+                          return(
+                            <div key={task} style={{display:"flex",alignItems:"center",padding:"4px 8px",fontSize:8.5,background:i%2?"#0a0e1a":"transparent",borderBottom:i<CAPS.length-1?"1px solid #141a28":"none"}}>
+                              <span style={{flex:1,color:"#A0AAC0",fontWeight:600}}>{label}</span>
+                              <span style={{color:act?(MODELS[act]?.color||"#14B8A6"):"#EF4444",fontWeight:700}}>{act?(MODELS[act]?.name||act):"⚠ No provider"}</span>
+                              {fb.length>0&&<span style={{color:"#3A4060",marginLeft:6}}>→ {fb.map(p=>MODELS[p]?.name||p).join(" → ")}</span>}
+                            </div>);
+                        });
+                      })()}
                     </div>
                     <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
                       <input type="checkbox" checked={multiAI} onChange={e=>{setMultiAI(e.target.checked);sv("cos-keys",{keys,defaultProvider:defP,multiAI:e.target.checked});}} style={{accentColor:"#14B8A6"}}/>
