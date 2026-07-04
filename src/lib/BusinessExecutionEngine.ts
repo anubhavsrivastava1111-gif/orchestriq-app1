@@ -886,6 +886,27 @@ export class BusinessExecutionEngine {
 
     // ── Write and download ────────────────────────────────────────────────
     let buf: any = XLSX.write(wb, { type: "array", bookType: "xlsx", bookSST: false });
+    // GUARANTEE charts: if the AI omitted chart specs, derive them from the
+    // first sheet's numeric columns so every workbook ships with a Charts tab.
+    if (!Array.isArray(schema.charts) || !schema.charts.length) {
+      try {
+        const derived: any[] = [];
+        for (const sh of (schema.sheets || []).slice(0, 2)) {
+          const rows: any[][] = sh.rows || [];
+          if (rows.length < 3) continue;
+          const header = rows[0] || [];
+          for (let ci = 1; ci < header.length && derived.length < 2; ci++) {
+            const vals = rows.slice(1, 11).map(r => { const t = String((r||[])[ci] ?? "").replace(/[,\u20b9$%\s]/g, ""); const n = parseFloat(t); return isNaN(n) ? null : n; });
+            const good = vals.filter(v => v !== null) as number[];
+            if (good.length >= 3 && good.some(v => v !== 0)) {
+              derived.push({ type: "bar", title: String(sh.name || "Data") + " \u2014 " + String(header[ci] || "Values"), seriesName: String(header[ci] || "Values"), labels: rows.slice(1, 11).filter((_,ri)=>vals[ri]!==null).map(r => String((r||[])[0] ?? "").slice(0, 12)), values: good });
+              break;
+            }
+          }
+        }
+        if (derived.length) schema.charts = derived;
+      } catch { /* derivation optional */ }
+    }
     if (Array.isArray(schema.charts) && schema.charts.length) {
       try {
         onProgress("\ud83d\udcc8 Rendering dashboard charts (" + schema.charts.length + ")...");
