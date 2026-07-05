@@ -33,6 +33,14 @@ async function callClaudeDirectly(
     );
   }
 
+  // Size guard — base64 inflates ~33%; Claude vision cap ~5MB raw / ~7MB base64.
+  // A >4.8MB base64 payload = ~3.5MB image → fine. >8MB = likely rejected.
+  if (imageBase64 && imageBase64.length > 8_000_000) {
+    throw new Error(
+      "Image too large (" + Math.round(imageBase64.length / 1_048_576) + "MB base64). Please compress or take a lower-resolution screenshot (aim for under 3MB before upload)."
+    );
+  }
+
   const userContent: any[] = [];
   if (imageBase64 && imageMime) {
     if (imageMime === "application/pdf") {
@@ -49,24 +57,39 @@ async function callClaudeDirectly(
   }
   userContent.push({ type: "text", text: prompt });
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": key,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
+  let res: Response;
+  try {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+      // Claude Sonnet 4.5 — current stable vision-capable model.
+      // "claude-sonnet-4-6" was a non-existent identifier producing
+      // "Failed to fetch" (CORS-level rejection on unknown model IDs).
+      model: "claude-sonnet-4-5-20250929",
       max_tokens: 4096,
       messages: [{ role: "user", content: userContent }],
     }),
-  });
+    });
+  } catch (netErr: any) {
+    // "Failed to fetch" surfaces here — wrap with actionable guidance
+    throw new Error(
+      "Network error reaching Anthropic: " + (netErr?.message || String(netErr)) +
+      ". Check: (a) your Claude API key is valid, (b) internet connection, (c) image is under 3MB, (d) no ad-blocker/VPN blocking api.anthropic.com."
+    );
+  }
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new Error("Claude API error: " + errText.slice(0, 300));
+    const errText = await res.text().catch(() => "");
+    // Extract the actual reason from Anthropic's JSON error envelope when present
+    let reason = errText.slice(0, 300);
+    try { const j = JSON.parse(errText); reason = j?.error?.message || reason; } catch { /* keep raw */ }
+    throw new Error("Claude API " + res.status + ": " + reason);
   }
   const data = await res.json();
   return (data.content || []).map((b: any) => b.text || "").join("");
