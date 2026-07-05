@@ -1368,17 +1368,42 @@ Rules:
 
     // ── Try Claude ────────────────────────────────────────────────────────────
     if (claudeKey) {
-      const r = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": claudeKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 4000, system: VISION_SYS,
-          messages: [{ role: "user", content: [
-            { type: "image", source: { type: "base64", media_type: mediaType, data: b64 } },
-            { type: "text", text: VISION_PROMPT }
-          ]}]
-        })
-      });
-      if (r.ok) {
+      // Guard: base64 > ~8MB → Claude rejects. Fail fast with actionable message.
+      if (b64 && b64.length > 8_000_000) {
+        showToast("Image too large (" + Math.round(b64.length/1_048_576) + "MB base64). Compress or lower resolution to under 3MB.", "error");
+        // fall through to try smaller providers if any
+      }
+      let r: Response | null = null;
+      try {
+        r = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": claudeKey,
+            "anthropic-version": "2023-06-01",
+            // REQUIRED by Anthropic for direct browser fetch — without this the
+            // request is blocked at CORS pre-flight → "TypeError: Failed to fetch"
+            "anthropic-dangerous-direct-browser-access": "true",
+          },
+          body: JSON.stringify({
+            // Correct current stable model ID. "claude-sonnet-4-6" was invalid
+            // → Anthropic rejected at edge → browser reported "Failed to fetch"
+            model: "claude-sonnet-4-5-20250929", max_tokens: 4000, system: VISION_SYS,
+            messages: [{ role: "user", content: [
+              { type: "image", source: { type: "base64", media_type: mediaType, data: b64 } },
+              { type: "text", text: VISION_PROMPT }
+            ]}]
+          })
+        });
+      } catch (netErr:any) {
+        showToast("Claude network error: " + (netErr?.message||"unknown") + " — trying fallback...", "warning");
+      }
+      if (r && !r.ok) {
+        let reason = "";
+        try { const j = await r.clone().json(); reason = j?.error?.message || ""; } catch {}
+        if (reason) showToast("Claude " + r.status + ": " + reason.slice(0,120), "warning");
+      }
+      if (r && r.ok) {
         const d = await r.json();
         const text = d?.content
   ?.filter((b:any)=>b.type==="text")
