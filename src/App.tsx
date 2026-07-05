@@ -2066,7 +2066,7 @@ export default function App(){
   const [extracting,setExtracting]=useState<string|null>(null); // which source is currently extracting
   const [adminConfig,setAdminConfig]=useState<{[k:string]:boolean}>({ledgerEnabled:true,dispatchEnabled:true,actionsEnabled:true});
   const [dataF,setDataF]=useState({k:"",v:""});
-  const [view,setView]=useState("nerve");
+  const [view,setView]=useState("home");
   const [nTab,setNTab]=useState("boardroom");
   const [brQ,setBrQ]=useState("");
   const [brAg,setBrAg]=useState(["ceo","cfo","cto","cmo"]);
@@ -2839,8 +2839,12 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
           // Truncation tolerance: universal repair recovers all complete modules
           if(!plan?.modules)plan=repairTruncatedJson(raw);
         }
+        if(!plan||!plan.modules||!Array.isArray(plan.modules)||!plan.modules.length){
+          const retryRaw=await ask(architectSys+"\n\nCRITICAL: Your entire response must be ONLY the JSON object. Start with { and end with }. No prose, no fences, no explanation.",[{role:"user",content:"Objective: "+projectObjective}],4500,false,"general");
+          const rc=retryRaw.trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/```\s*$/,"");
+          try{plan=JSON.parse(rc);}catch{const s2=rc.indexOf("{");if(s2>=0){try{plan=JSON.parse(rc.slice(s2,rc.lastIndexOf("}")+1));}catch{}}if(!plan?.modules)plan=repairTruncatedJson(retryRaw);}
+        }
         if(!plan||!plan.modules||!Array.isArray(plan.modules)||!plan.modules.length)throw new Error("Invalid plan structure");
-        // Drop any partially-recovered module missing essentials
         plan.modules=plan.modules.filter((m)=>m&&m.name&&Array.isArray(m.deliverables)&&m.deliverables.length);
         if(!plan.modules.length)throw new Error("Invalid plan structure");
       }catch(parseErr:any){
