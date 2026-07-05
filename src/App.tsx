@@ -178,11 +178,11 @@ const TASK_ROUTING: Record<string,string[]> = {
 // Models to use when a task routes to Claude (default = haiku, premium = sonnet)
 // Sonnet is used for tasks that require deep reasoning, long structured outputs.
 const CLAUDE_TASK_MODEL: Record<string,string> = {
-  excel_advanced: "claude-sonnet-4-6",
-  powerpoint:     "claude-sonnet-4-6",
-  financial:      "claude-sonnet-4-6",
-  audit:          "claude-sonnet-4-6",
-  research:       "claude-sonnet-4-6",
+  excel_advanced: "claude-sonnet-4-5-20250929",
+  powerpoint:     "claude-sonnet-4-5-20250929",
+  financial:      "claude-sonnet-4-5-20250929",
+  audit:          "claude-sonnet-4-5-20250929",
+  research:       "claude-sonnet-4-5-20250929",
 };
 
 // Auto-classify the task type from prompt + system context.
