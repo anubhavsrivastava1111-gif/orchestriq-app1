@@ -2591,15 +2591,32 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
         const synSys="You are Chief of Staff at "+JSON.stringify(co.name)+". "+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN CLASSIFIED: "+domain+"\nRECOMMENDED FRAMEWORKS (for reference — apply where relevant to strengthen the synthesis): "+frameworks.map(f=>f.name).join(", ")+"\n\nSynthesize the boardroom debate into a board-ready executive report. Use this EXACT format with all sections present:\n\n"+"# Executive Summary\n"+"(3-4 sentences: the single decision, headline number in "+synCur.sym+", recommended action)\n\n"+"## Business Domain\n"+"Domain: "+domain+" | Frameworks referenced: "+frameworks.map(f=>f.name).join(" · ")+"\n\n"+"## Key Insights\n"+"(4-6 bullet points, each opening with a bold keyword. New synthesis only — do not restate individual exec arguments.)\n\n"+"## Points of Conflict\n"+"| Leader | Position | Why It Matters |\n|--------|----------|----------------|\n"+"(one row per genuine disagreement found in the debate — if executives agreed, note that)\n\n"+"## Evidence Quality Review\n"+"(Review the evidence labels used in the debate. List any [Assumption] or [Estimate] that materially affects the recommendation and note what validation is needed.)\n\n"+"## Quantified Recommendation\n"+"(Single recommended path. Show: formula, assumption, result for every figure in "+synCur.sym+")\n\n"+"## Financial Impact\n"+"| Phase | Actions | Investment "+synCur.sym+" | Expected Return | Owner |\n|-------|---------|--------------------------|-----------------|-------|\n"+"(30-60-90 day plan, one row per phase)\n\n"+"## Risk Register\n"+"| Risk | Likelihood | Impact | Mitigation | Owner |\n|------|------------|--------|------------|-------|\n"+"(max 5 rows)\n\n"+"## Opportunities\n"+"(3-5 bullets, each with upside in "+synCur.sym+", timeframe, and owner)\n\n"+"## This Week's Decision\n"+"(Single action required now. Cost of inaction: "+synCur.sym+" per week. Owner and deadline.)\n\n"+"## Recommendations\n"+"| Priority | Action | Impact | Effort | Deadline |\n|----------|--------|--------|--------|----------|\n"+"(ranked by priority)\n\n"+"## Sources and References\n"+"(every figure cited: Source name, figure, URL or evidence label)\n\n"+"FORMATTING RULES: Bold all key metrics. Use tables for all numbers. Never write unbroken paragraph blocks. Every number must have a unit ("+synCur.sym+" or %). Under 2600 words. All sections must be present and complete. Figures from VERIFIED RESEARCH BRIEF: cite source and URL. All others: label [Assumption] or [Estimate (unverified)].\n\nDECISION STATUS (mandatory final line): After your synthesis write exactly:\nDECISION STATUS: [choose one: Proceed | Proceed with Conditions | Needs More Information | Do Not Proceed | No Consensus]\nReason: [one sentence explaining this status based on the debate evidence]"
         let syn=await ask(synSys,[{role:"user",content:"Question: \""+brQ+"\"\nDebate:\n"+allPos}],6000);
         // Intelligence Engine quality review — same standard as Workflow and Task
-        // Queue final levels. Fail-safe: any error keeps the original synthesis.
+        // Queue final levels. HARDENED: the reviewed version must prove it is a
+        // complete, well-formed improvement (all structural markers present,
+        // within 90s, adequate length) or the ORIGINAL synthesis is kept.
+        // The review can only ever improve — never degrade, truncate, or hang.
         try{
           setBrPh("\ud83d\udd0d Quality Review \u2014 validating board synthesis...");
           const ieCompany={name:co.name||"the company",industry:co.industry||"",stage:co.stage||"",location:co.location||"",markets:co.markets||"",currency:co.currency||"INR",currencySymbol:synCur.sym||""};
-          const reviewed=await selfReview(syn,brQ,ieCompany,(s,m,t)=>ask(s,m,t,false));
-          if(reviewed&&reviewed.length>syn.length*0.5)syn=reviewed;
-        }catch(qErr){/* keep original synthesis */}
+          const reviewed:any=await Promise.race([
+            selfReview(syn,brQ,ieCompany,(s,m,_t)=>ask(s,m,6500,false)),
+            new Promise((_,rej)=>setTimeout(()=>rej(new Error("review timeout")),90000)),
+          ]);
+          const structurallyComplete=
+            typeof reviewed==="string"&&
+            reviewed.length>syn.length*0.7&&
+            reviewed.includes("Executive Summary")&&
+            reviewed.includes("DECISION STATUS");
+          if(structurallyComplete){syn=reviewed;}
+          else if(reviewed){showToast("Quality review returned an incomplete draft \u2014 original synthesis kept","info");}
+        }catch(qErr:any){showToast("Quality review skipped ("+String(qErr?.message||qErr).slice(0,40)+") \u2014 original synthesis kept","info");}
         syn+=ieEvidenceAudit(syn);
-        const decisionStatus=extractDecisionStatus(syn);
+        // GUARANTEE: from this point the synthesis is persisted no matter what.
+        // Every step below is individually guarded so a failure in decision
+        // extraction, history saving, or token accounting can never blank the
+        // synthesis the user just paid tokens to generate.
+        let decisionStatus="No Consensus";
+        try{decisionStatus=extractDecisionStatus(syn);}catch{}
         try{saveDecisionRecord({id:Date.now(),ts:new Date().toISOString(),question:brQ,executives:brAg,status:decisionStatus,recommendation:extractRecommendationSnippet(syn)});}catch{}
         const stage1={stageNumber:1,type:"original",question:brQ,
           executiveIds:brAg,debate:res,synthesis:syn,
@@ -2608,7 +2625,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
           format:"threaded",stages:[stage1],researchBrief,ts:new Date().toISOString()};
         const finalCur={q:brQ,researchBrief,format:"threaded",stages:[stage1]};
         setBrCur(finalCur);
-        sv("cos-br-live",finalCur);
+        try{sv("cos-br-live",finalCur);}catch{}
         try{
           const bI=estimateTokens(brQ);const bO=estimateTokens(syn+(res||[]).map(r=>r.text||"").join(""));
           saveRecord({feature:"AI Boardroom — "+brQ.slice(0,35),provider:defP,model:MODELS[defP]?.model||defP,inputTokens:bI,outputTokens:bO,cost:estimateCost(defP,bI,bO)||0});
