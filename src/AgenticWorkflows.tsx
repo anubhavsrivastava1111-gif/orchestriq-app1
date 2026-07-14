@@ -3,6 +3,8 @@
 // No external dependencies beyond TokenAnalytics.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { WorkspaceMemory } from "./lib/WorkspaceMemory";
+
 import BusinessExecutionEngine from "./lib/BusinessExecutionEngine";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { saveRecord, estimateCost, estimateTokens } from "./TokenAnalytics";
