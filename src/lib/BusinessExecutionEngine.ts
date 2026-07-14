@@ -1867,7 +1867,7 @@ xmlns="http://www.w3.org/TR/REC-html40">
   mso-page-orientation: portrait;
   margin: 2.54cm;
 }
-body { font-family: Calibri, sans-serif; font-size: 11pt; color: #1E293B; line-height: 1.6; }
+body { font-family: Calibri, sans-serif; font-size: 11pt; color: #1E293B; line-height: 1.6; text-align: left; }
 h1 { font-size: 18pt; color: #${pal.primary}; border-bottom: 2pt solid #${pal.accent}; padding-bottom: 4pt; margin-top: 20pt; }
 h2 { font-size: 14pt; color: #${pal.secondary}; margin-top: 14pt; }
 h3 { font-size: 12pt; color: #${pal.primary}; font-style: italic; margin-top: 10pt; }
