@@ -2041,7 +2041,7 @@ export default function App(){
   const [page,setPage]=useState("landing");
   const [sbOpen,setSbOpen]=useState(false);
   const [showModules,setShowModules]=useState(false);
-  const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return localStorage.getItem("oiq-sb-col")==="1";}catch{return false;}});
+  const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return WorkspaceMemory.get<string>("oiq-sb-col")==="1";}catch{return false;}});
   const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:""});
   const [mediaMode,setMediaMode]=useState({image:"prompts",video:"veo"});
   const [showMediaPicker,setShowMediaPicker]=useState(false);
@@ -2152,7 +2152,7 @@ export default function App(){
   const [localDn,setLocalDn]=useState({ownerName:"",ownerEmail:"",upiId:"",bankName:"",accountNo:"",ifsc:"",accountType:"",paypalMe:"",stripeLink:"",note:"",qrImage:"",enabled:false});
 
   // Derived currency — declared early so callbacks (runExport, quickExport) can reference it safely
-  const cur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
+  const cur=useMemo(()=>CURRENCIES.find(cv=>cv.code===co.currency)||CURRENCIES[0],[co.currency]);
   // FIX BUG 7: toast state
   const [toasts,setToasts]=useState([]);
   // API health indicator
@@ -2197,9 +2197,9 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
  useEffect(()=>{
   attachBenchmarkToWindow();
   (async()=>{
-    try{const th=localStorage.getItem("cos-theme");const tid=th&&THEMES[th]?th:"dark";setTheme(tid);applyTheme(tid);}catch{applyTheme("dark");}
-    try{const c=localStorage.getItem("cos-co");if(c)setCo(p=>({...p,...JSON.parse(c)}));}catch{}
-    try{const k=localStorage.getItem("cos-keys");if(k){
+    try{const th=WorkspaceMemory.get<string>("cos-theme");const tid=th&&THEMES[th]?th:"dark";setTheme(tid);applyTheme(tid);}catch{applyTheme("dark");}
+    try{const c=WorkspaceMemory.get<typeof co>("cos-co");if(c)setCo(p=>({...p,...c}));}catch{}
+    try{const k=WorkspaceMemory.get<any>("cos-keys");if(k){
       const p=JSON.parse(k);
       const loadedKeys={claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",...(p.keys||{})};
       setKeys(loadedKeys);setDefP(p.defaultProvider||"claude");setMultiAI(p.multiAI||false);
@@ -2213,33 +2213,33 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
           .catch(()=>setApiHealth("fail"));
       }
     }}catch{}
-    try{const vl=localStorage.getItem("cos-vl");if(vl)setVLang(vl);}catch{}
-    try{const h=localStorage.getItem("cos-ch");if(h)setChats(JSON.parse(h));}catch{}
-    try{const d=localStorage.getItem("cos-dp");if(d)setExpD(JSON.parse(d));}catch{}
-    try{const cd=localStorage.getItem("cos-cd");if(cd)setCompData(JSON.parse(cd));}catch{}
-    try{const le=localStorage.getItem("cos-ledger");if(le)setLedgerEntries(JSON.parse(le));}catch{}
-    try{const ca=localStorage.getItem("cos-accounts");if(ca)setCustomAccounts(JSON.parse(ca));}catch{}
-    try{const dt=localStorage.getItem("cos-dispatch-templates");if(dt)setDispatchTemplates(JSON.parse(dt));}catch{}
-    try{const acts=localStorage.getItem("cos-actions");if(acts)setActionItems(JSON.parse(acts));}catch{}
-    try{const ac=localStorage.getItem("cos-admin-config");if(ac)setAdminConfig({...adminConfig,...JSON.parse(ac)});}catch{}
-    try{const br=localStorage.getItem("cos-br");if(br)setBrSessions(JSON.parse(br));}catch{}
-    try{const projs=localStorage.getItem("cos-projects");if(projs){const parsed=JSON.parse(projs);const cleaned=parsed.map(p=>p.status==="executing"||p.status==="qa"?{...p,status:"partial"}:p);setProjects(cleaned);localStorage.setItem("cos-projects",JSON.stringify(cleaned));}}catch{}
+    try{const vl=WorkspaceMemory.get<string>("cos-vl");if(vl)setVLang(vl);}catch{}
+    try{const h=WorkspaceMemory.get<any>("cos-ch");if(h)setChats(h);}catch{}
+    try{const d=WorkspaceMemory.get<any>("cos-dp");if(d)setExpD(d);}catch{}
+    try{const cd=WorkspaceMemory.get<any>("cos-cd");if(cd)setCompData(cd);}catch{}
+    try{const le=WorkspaceMemory.get<any>("cos-ledger");if(le)setLedgerEntries(le);}catch{}
+    try{const ca=WorkspaceMemory.get<any>("cos-accounts");if(ca)setCustomAccounts(ca);}catch{}
+    try{const dt=WorkspaceMemory.get<any>("cos-dispatch-templates");if(dt)setDispatchTemplates(dt);}catch{}
+    try{const acts=WorkspaceMemory.get<any>("cos-actions");if(acts)setActionItems(acts);}catch{}
+    try{const ac=WorkspaceMemory.get<any>("cos-admin-config");if(ac)setAdminConfig(p=>({...p,...ac}));}catch{}
+    try{const br=WorkspaceMemory.get<any>("cos-br");if(br)setBrSessions(br);}catch{}
+    try{const projs=WorkspaceMemory.get<any[]>("cos-projects");if(projs){const cleaned=projs.map((p:any)=>p.status==="executing"||p.status==="qa"?{...p,status:"partial"}:p);setProjects(cleaned);WorkspaceMemory.set("cos-projects",cleaned);}}catch{}
     try{localStorage.removeItem("cos-project-plan");}catch{} // always start fresh
-    try{const brLive=localStorage.getItem("cos-br-live");if(brLive){const parsed=JSON.parse(brLive);if(parsed?.q)setBrCur(parsed);}}catch{}
-    try{const tm=localStorage.getItem("cos-tm");if(tm)setTmSessions(JSON.parse(tm));}catch{}
-    try{const tmLive=localStorage.getItem("cos-tm-live");if(tmLive){const p=JSON.parse(tmLive);if(p?.dec){setTmDec(p.dec);setTmRes(p.res||"");setTmResearchBrief(p.brief||"");}}}catch{}
-    try{const ap=localStorage.getItem("cos-ap");if(ap)setApSessions(JSON.parse(ap));}catch{}
-    try{const apLive=localStorage.getItem("cos-ap-live");if(apLive){const p=JSON.parse(apLive);if(p?.res){setApRes(p.res);setApResearchBrief(p.brief||"");}}}catch{}
-    try{const dn=localStorage.getItem("cos-dn");if(dn){const parsed=JSON.parse(dn);setDnCfg(parsed);setLocalDn(parsed);}}catch{}
-    try{const wf=localStorage.getItem("cos-wf");if(wf)setWorkflows(JSON.parse(wf));}catch{}
-    try{const tq=localStorage.getItem("cos-tq");if(tq){const p=JSON.parse(tq);setTQueue(p);tQRef.current=p;}}catch{}
-    try{const last=localStorage.getItem("cos-lastvisit");if(last){const days=Math.floor((Date.now()-parseInt(last))/86400000);if(days>=1)setResumeInfo({days});}localStorage.setItem("cos-lastvisit",String(Date.now()));}catch{}
+    try{const brLive=WorkspaceMemory.get<any>("cos-br-live");if(brLive?.q)setBrCur(brLive);}catch{}
+    try{const tm=WorkspaceMemory.get<any>("cos-tm");if(tm)setTmSessions(tm);}catch{}
+    try{const tmLive=WorkspaceMemory.get<any>("cos-tm-live");if(tmLive?.dec){setTmDec(tmLive.dec);setTmRes(tmLive.res||"");setTmResearchBrief(tmLive.brief||"");}}catch{}
+    try{const ap=WorkspaceMemory.get<any>("cos-ap");if(ap)setApSessions(ap);}catch{}
+    try{const apLive=WorkspaceMemory.get<any>("cos-ap-live");if(apLive?.res){setApRes(apLive.res);setApResearchBrief(apLive.brief||"");}}catch{}
+    try{const dn=WorkspaceMemory.get<any>("cos-dn");if(dn){setDnCfg(dn);setLocalDn(dn);}}catch{}
+    try{const wf=WorkspaceMemory.get<any>("cos-wf");if(wf)setWorkflows(wf);}catch{}
+    try{const tq=WorkspaceMemory.get<any>("cos-tq");if(tq){setTQueue(tq);tQRef.current=tq;}}catch{}
+    try{const last=WorkspaceMemory.get<string>("cos-lastvisit");if(last){const days=Math.floor((Date.now()-parseInt(last))/86400000);if(days>=1)setResumeInfo({days});}WorkspaceMemory.set("cos-lastvisit",String(Date.now()));}catch{}
     const saved=loadResumeState();
     if(saved)setWfResumeData(saved);
     enrichEPFromSupabase();
     setTimeout(()=>{
       initA11y();
-      try{const r=document.getElementById("oiq-root");if(r&&localStorage.getItem("oiq-sb-col")==="1")r.classList.add("oiq-sb-collapsed");}catch{}
+      try{const r=document.getElementById("oiq-root");if(r&&WorkspaceMemory.get<string>("oiq-sb-col")==="1")r.classList.add("oiq-sb-collapsed");}catch{}
     },300);
   })();
 },[]);
@@ -2273,7 +2273,11 @@ useEffect(()=>{
   useEffect(()=>{chatEnd.current?.scrollIntoView({behavior:"smooth"});},[chats,selRole,loading]);
   useEffect(()=>{brEnd.current?.scrollIntoView({behavior:"smooth"});},[brCur,brPh]);
 
-  const sv=async(k,v)=>{try{localStorage.setItem(k,typeof v==="string"?v:JSON.stringify(v));}catch{}};
+  // sv(): now routes through WorkspaceMemory so every save is caught by
+  // Full Reset and future cloud sync automatically.
+  const sv=useCallback((k:string,v:unknown)=>{
+    try{WorkspaceMemory.set(k,v);}catch{}
+  },[]);
   const cp=t=>{try{navigator.clipboard.writeText(t);showToast("Copied to clipboard","success");}catch{showToast("Copy failed","error");}};
   const addN=(msg,type)=>setP3Notify(prev=>[{id:Date.now(),msg,type:type||"info",ts:new Date().toISOString()},...prev].slice(0,20));
 
@@ -4742,33 +4746,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
   const sColor=s=>s===TS.APPROVED?"#10B981":s===TS.REVIEWING?"#8B5CF6":s===TS.RUNNING?"#14B8A6":s===TS.REJECTED||s===TS.FAILED?"#EF4444":"#F59E0B";
   const sBg=s=>s===TS.APPROVED?"rgba(16,185,129,0.12)":s===TS.REVIEWING?"rgba(139,92,246,0.1)":s===TS.RUNNING?"rgba(20,184,166,0.1)":s===TS.REJECTED||s===TS.FAILED?"rgba(239,68,68,0.1)":"rgba(245,158,11,0.1)";
 
-  const S={
-    lbl:{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:3,display:"block"},
-    inp:{width:"100%",background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:6,padding:"9px 11px",color:"#F1F5F9",fontSize:12,fontFamily:"Manrope,sans-serif"},
-    pBtn:{background:"#14B8A6",color:"#0a0e1a",border:"none",borderRadius:6,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"Manrope,sans-serif",marginTop:6,width:"100%"},
-    hBtn:{background:"none",border:"1px solid #1a2030",borderRadius:4,padding:"3px 6px",color:"#5A6480",fontSize:9,cursor:"pointer",fontFamily:"Manrope,sans-serif"},
-    iBtn:{background:"none",border:"1px solid #1a2030",borderRadius:4,padding:"3px 6px",color:"#A0AAC0",fontSize:11,cursor:"pointer",fontFamily:"Manrope,sans-serif"},
-    cancelBtn:{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:5,padding:"5px 12px",color:"#EF4444",fontSize:10,fontWeight:600,cursor:"pointer",fontFamily:"Manrope,sans-serif"},
-    actBtn:{background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:5,padding:"10px 12px",color:"#A0AAC0",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"center",width:"100%"},
-    errB:{background:"rgba(239,68,68,0.06)",border:"1px solid rgba(239,68,68,0.18)",borderRadius:5,padding:"8px 10px",display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6,fontSize:10,color:"#EF4444",gap:8},
-    retBtn:{background:"#EF4444",color:"#fff",border:"none",borderRadius:3,padding:"3px 8px",fontSize:9,fontWeight:600,cursor:"pointer",fontFamily:"Manrope,sans-serif",whiteSpace:"nowrap"},
-    dot:{width:5,height:5,borderRadius:"50%",background:"#14B8A6",animation:"pulse 1s ease-in-out infinite",display:"inline-block"},
-    uMsg:{background:"rgba(20,184,166,0.04)",borderRadius:6,padding:"8px 10px",borderLeft:"3px solid #14B8A6"},
-    aMsg:{background:"#131825",borderRadius:6,padding:"9px 11px",border:"1px solid #1a2030"},
-    mLbl:{fontSize:8,fontWeight:700,color:"#3A4060",marginBottom:3,textTransform:"uppercase",letterSpacing:"0.5px"},
-    qaBtn:{background:"#131825",border:"1px solid #1a2030",borderRadius:5,padding:"8px 10px",color:"#A0AAC0",fontSize:10,cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"left",lineHeight:1.4},
-    pill:{background:"none",border:"1px solid #1a2030",borderRadius:4,padding:"2px 5px",fontSize:11,color:"#3A4060",cursor:"pointer",fontFamily:"Manrope,sans-serif",flex:1,textAlign:"center"},
-    dH:{width:"100%",display:"flex",alignItems:"center",gap:4,padding:"3px 5px",background:"none",border:"none",cursor:"pointer",fontFamily:"Manrope,sans-serif",borderRadius:4},
-    rBtn:{width:"100%",display:"flex",alignItems:"center",gap:4,padding:"4px 5px 4px 16px",background:"none",border:"1px solid transparent",cursor:"pointer",fontFamily:"Manrope,sans-serif",borderRadius:4,textAlign:"left"},
-    nTab:{display:"flex",flexDirection:"column",alignItems:"center",gap:1,background:"none",border:"1px solid #1a2030",borderRadius:4,padding:"4px 0",color:"#3A4060",cursor:"pointer",fontFamily:"Manrope,sans-serif"},
-    nrvTab:{display:"flex",flexDirection:"column",alignItems:"center",gap:1,flex:1,background:"none",border:"1px solid #1a2030",borderRadius:6,padding:"7px 4px",color:"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"},
-    inpA:{padding:"6px 12px 8px",borderTop:"1px solid #14192a",background:"#0c1120"},
-    inpR:{display:"flex",alignItems:"flex-end",gap:4,background:"#131825",border:"1px solid #1a2030",borderRadius:6,padding:"3px 3px 3px 10px"},
-    ta:{flex:1,background:"none",border:"none",color:"#F1F5F9",fontSize:12,fontFamily:"Manrope,sans-serif",resize:"none",padding:"6px 0",lineHeight:1.5},
-    sBtn:{width:28,height:28,borderRadius:5,border:"none",color:"#0a0e1a",fontSize:14,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0},
-    modalBg:{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",backdropFilter:"blur(3px)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20},
-    modal:{background:"#131825",border:"1px solid #1a2030",borderRadius:12,padding:"20px 22px",width:"100%",maxWidth:460,maxHeight:"92vh",overflowY:"auto"},
-  };
+  // S: defined at module scope below
 
   const healthDot=apiHealth==="ok"?"🟢":apiHealth==="fail"?"🔴":apiHealth==="checking"?"🟡":"⚪";
   const healthTip=apiHealth==="ok"?"API connected":apiHealth==="fail"?"API check failed — verify key in Settings":apiHealth==="checking"?"Checking API…":"API not tested";
@@ -4884,7 +4862,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
             {Object.entries(THEMES).map(([id,t])=><option key={id} value={id} style={{background:"#0a0e1a"}}>{t.ic} {t.name}</option>)}
           </select>
           <button aria-label={sbCollapsed?"Expand sidebar":"Collapse sidebar"}
-            onClick={()=>{const next=!sbCollapsed;setSbCollapsed(next);try{localStorage.setItem("oiq-sb-col",next?"1":"0");}catch{}const r=document.getElementById("oiq-root");if(r)r.classList.toggle("oiq-sb-collapsed",next);}}
+            onClick={()=>{const next=!sbCollapsed;setSbCollapsed(next);try{WorkspaceMemory.set("oiq-sb-col",next?"1":"0");}catch{}const r=document.getElementById("oiq-root");if(r)r.classList.toggle("oiq-sb-collapsed",next);}}
             style={{background:"none",border:"1px solid #1a2030",borderRadius:8,padding:"4px 10px",color:"#A0AAC0",cursor:"pointer",fontSize:14,fontFamily:"Inter,sans-serif",height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>
             {sbCollapsed?"»":"«"}
           </button>
