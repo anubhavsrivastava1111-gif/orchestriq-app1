@@ -3673,7 +3673,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             const coName=proj.context?.company?.name||"";
             let html="<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:w=\"urn:schemas-microsoft-com:office:word\" xmlns=\"http://www.w3.org/TR/REC-html40\">"
               +"<head><meta charset=\"UTF-8\"><style>"
-              +"body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1a1a1a;margin:72pt 72pt 72pt 72pt;}"
+              +"@page{mso-page-orientation:portrait;margin:2.54cm;}body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1a1a1a;text-align:left;}p{text-align:left;}"
               +"h1{font-size:20pt;color:#0D6EFD;border-bottom:2pt solid #0D6EFD;padding-bottom:4pt;margin-top:18pt;}"
               +"h2{font-size:14pt;color:#14B8A6;margin-top:14pt;}"
               +"h3{font-size:12pt;color:#333;margin-top:10pt;}"
@@ -5372,7 +5372,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                     }catch(e){showToast("Excel: "+e.message,"error");}}
                                     else if(fmt==="docx"){
                                       const secs=parseSections(cnt);
-                                      let html="<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:w=\"urn:schemas-microsoft-com:office:word\" xmlns=\"http://www.w3.org/TR/REC-html40\"><head><meta charset=\"UTF-8\"><style>body{font-family:Calibri,sans-serif;font-size:11pt;margin:72pt;}h1{font-size:18pt;color:#14B8A6;}h2{font-size:13pt;}p{line-height:1.5;}table{border-collapse:collapse;width:100%;}th{background:#14B8A6;color:#fff;padding:5pt 8pt;}td{padding:4pt 8pt;border-bottom:1pt solid #ddd;}</style></head><body><h1>"+del.name+"</h1>";
+                                      let html="<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:w=\"urn:schemas-microsoft-com:office:word\" xmlns=\"http://www.w3.org/TR/REC-html40\"><head><meta charset=\"UTF-8\"><style>@page{mso-page-orientation:portrait;margin:2.54cm;}body{font-family:Calibri,sans-serif;font-size:11pt;text-align:left;}h1{font-size:18pt;color:#14B8A6;}h2{font-size:13pt;}p{line-height:1.5;text-align:left;}table{border-collapse:collapse;width:100%;}th{background:#14B8A6;color:#fff;padding:5pt 8pt;}td{padding:4pt 8pt;border-bottom:1pt solid #ddd;}</style></head><body><h1>"+del.name+"</h1>";
                                       for(const sec of secs){html+="<h2>"+sec.title+"</h2>";sec.lines.forEach(ln=>{const t=stripMd(ln).trim();if(t)html+="<p>"+t+"</p>";});}
                                       html+="</body></html>";dlFile(nm+".doc",html,"application/msword");
                                     } else if(fmt==="pptx"){try{
