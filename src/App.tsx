@@ -2035,6 +2035,16 @@ function renderStructuredDeck(pptx,slides,A,pal=QE_PAL){
   });
 }
 
+// ─── STYLE CONSTANTS (module scope) ────────────────────────────────────────────
+// Created once at module load instead of on every component render.
+const S={
+  lbl:{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:3,display:"block"},
+  inp:{width:"100%",background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:6,padding:"9px 11px",color:"#F1F5F9",fontSize:12,fontFamily:"Manrope,sans-serif"},
+  pBtn:{background:"#14B8A6",color:"#0a0e1a",border:"none",borderRadius:6,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"Manrope,sans-serif",marginTop:6,width:"100%"},
+  hBtn:{background:"none",border:"1px solid #1a2030",borderRadius:4,padding:"3px 6px",color:"#5A6480",fontSize:9,cursor:"pointer",fontFamily:"Manrope,sans-serif"},
+  iBtn:{background:"none",border:"1px solid #1a2030",borderRadius:4,padding:"3px 6px",color:"#A0AAC0",fontSize:11,cursor:"pointer",fontFamily:"Manrope,sans-serif"},
+};
+
 // ─── MAIN APP ────────────────────────────────────────────────────────────────
 
 export default function App(){
@@ -4336,13 +4346,13 @@ const processTask=useCallback(async(task:any)=>{
       return;
     }
 
-    const roleId=activeChain[i];
+    const roleId=ch.chain[i];
     const role=AR.find(r=>r.id===roleId);
     if(!role)continue;
 
     const p=EP[roleId]||{};
     const isFirst=i===0;
-    const isLast=i===activeChain.length-1;
+    const isLast=i===ch.chain.length-1;
     setP3Phase(role.ic+" "+role.t+" — Level "+(i+1)+"/"+ch.chain.length);
     upd({currentLevel:i+1,status:TS.RUNNING});
 
