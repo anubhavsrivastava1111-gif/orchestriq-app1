@@ -145,7 +145,16 @@ const MODELS = {
   kimi:{name:"Kimi",company:"Moonshot AI",model:"moonshot-v1-8k",placeholder:"sk-...",color:"#8B5CF6",keyUrl:"https://platform.moonshot.cn/console/api-keys",note:"Fast · Affordable · Strong multilingual"},
   stability:{name:"Stability AI",company:"Stability AI",model:"stable-diffusion-xl-1024-v1-0",placeholder:"sk-...",color:"#EC4899",keyUrl:"https://platform.stability.ai/account/credits",note:"Image generation · ~₹3/image · Optional"},
   fal:{name:"fal.ai",company:"fal.ai",placeholder:"key-...",color:"#7C3AED",keyUrl:"https://fal.ai/dashboard/keys"},
+  nvidia:{name:"NVIDIA (Free)",company:"NVIDIA",model:"meta/llama-3.3-70b-instruct",color:"#76B900",note:"No key needed \u2014 free tier via NVIDIA NIM"},
 };
+const NVIDIA_MODELS=[
+  {id:"meta/llama-3.3-70b-instruct",label:"Llama 3.3 70B",note:"Best all-rounder"},
+  {id:"nvidia/llama-3.1-nemotron-70b-instruct",label:"Nemotron 70B",note:"NVIDIA-tuned reasoning"},
+  {id:"deepseek-ai/deepseek-r1",label:"DeepSeek R1",note:"Strong step-by-step reasoning"},
+  {id:"mistralai/mixtral-8x22b-instruct-v0.1",label:"Mixtral 8x22B",note:"Fast, capable"},
+  {id:"meta/llama-3.1-405b-instruct",label:"Llama 3.1 405B",note:"Largest, most capable"},
+  {id:"nvidia/nemotron-4-340b-instruct",label:"Nemotron 4 340B",note:"NVIDIA flagship"},
+];
 // ─── DONATION QR ────────────────────────────────────────────────────────────
 // Paste your QR code as a base64 data URI between the quotes below to hard-code it,
 // e.g. "data:image/png;base64,iVBORw0KGgo...". Until then, upload it once via
@@ -156,6 +165,7 @@ const DEFAULT_QR = "";
 // DeepSeek = default for general text (cheapest). Claude Sonnet = specialist tasks.
 // fal.ai = ALL image and video generation (500+ models, one key).
 // Add future providers here — routing inherits automatically.
+const NVIDIA_FALLBACK=["nvidia"];
 const TASK_ROUTING: Record<string,string[]> = {
   // ── MEDIA (non-text — fal.ai is the exclusive gateway) ──────────────────
   image_gen:      ["fal"],                                  // fal.ai: Flux, Seedream, Imagen, Ideogram
@@ -196,6 +206,7 @@ const PROVIDER_META = {
   gemini:   {name:"Gemini",   cost:"$",  speed:"fast",  quality:"great",blurb:"Fast, generous free tier, good research"},
   groq:     {name:"Groq",     cost:"$",  speed:"fast",  quality:"good", blurb:"Fastest responses; great for drafts"},
   fal:      {name:"fal.ai",   cost:"$$", speed:"medium",quality:"best", blurb:"Images & video (Flux, Kling, Veo)"},
+  nvidia:   {name:"NVIDIA (Free)", cost:"Free",speed:"medium",quality:"good", blurb:"No key needed \u2014 great starting point"},
 } as Record<string,{name:string;cost:string;speed:string;quality:string;blurb:string}>;
 // Tasks where the user's Primary AI leads; specialists lead everywhere else.
 const PRIMARY_LED_TASKS=["general","creative","code","research"];
@@ -207,7 +218,8 @@ function resolveRoute(task:string,primary:string):string[]{
   const ordered=PRIMARY_LED_TASKS.includes(task)
     ? [primary,...chain]
     : [...chain.slice(0,2),primary,...chain];
-  return ordered.filter((p,i)=>p&&ordered.indexOf(p)===i);
+  const withFallback=(task==="image_gen"||task==="video_gen")?ordered:[...ordered,...NVIDIA_FALLBACK];
+  return withFallback.filter((p,i)=>p&&withFallback.indexOf(p)===i);
 }
 
 function detectTaskType(prompt: string, context = ""): string {
@@ -762,6 +774,11 @@ function getExecutiveIntel(roleId: string): { b: string; m: string; enrichment: 
 
 // ─── API FUNCTIONS ──────────────────────────────────────────────────────────
 
+async function callNvidia(sys,msgs,maxT,modelOverride?:string){
+  const r=await fetch("/api/nvidia",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sys,messages:msgs,model:modelOverride||MODELS.nvidia.model,max_tokens:maxT})});
+  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error;}catch{m=t.slice(0,200);}if(r.status===429)throw new Error("NVIDIA: Free daily limit reached. Add your own key in Settings for unlimited use.");if(r.status===503)throw new Error("NVIDIA: Free tier not yet configured on this deployment.");throw new Error(m||("NVIDIA "+r.status));}
+  const d=await r.json();return d.choices?.[0]?.message?.content||"";
+}
 async function callGroq(key,sys,msgs,maxT){
   const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.groq.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("Groq: Invalid API key.");if(r.status===429)throw new Error("Groq: Rate limit hit. Wait a moment.");throw new Error("Groq "+r.status+": "+(m||r.statusText));}
@@ -897,7 +914,7 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,mode
     timerId=setTimeout(()=>rej(new Error("Request timed out after "+(timeoutMs/1000)+"s. The AI provider may be busy — try switching to Gemini (free tier).")),timeoutMs);
   });
   const callP=(async()=>{
-    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT):provider==="kimi"?await callKimi(key,sys,msgs,maxT):provider==="fal"?await(async()=>{const prompt=rawMsgs?.find((m:any)=>m.role==="user")?.content||"generate image";const url=await callFalImage(key,prompt);return{text:`🖼️ Image URL: ${url}`,truncated:false};})():Promise.reject(new Error("Unknown provider: "+provider));
+    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT):provider==="kimi"?await callKimi(key,sys,msgs,maxT):provider==="fal"?await(async()=>{const prompt=rawMsgs?.find((m:any)=>m.role==="user")?.content||"generate image";const url=await callFalImage(key,prompt);return{text:`🖼️ Image URL: ${url}`,truncated:false};})():provider==="nvidia"?{text:await callNvidia(sys,msgs,maxT),truncated:false}:Promise.reject(new Error("Unknown provider: "+provider));
     if(raw&&typeof raw==="object"&&"text" in raw)return raw as {text:string;truncated:boolean};
     return {text:raw as string,truncated:false};
   })();
@@ -2075,7 +2092,7 @@ export default function App(){
   const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:""});
   const [mediaMode,setMediaMode]=useState({image:"prompts",video:"veo"});
   const [showMediaPicker,setShowMediaPicker]=useState(false);
-  const [defP,setDefP]=useState("groq");
+  const [defP,setDefP]=useState("nvidia"); // free, zero-setup default
   const [multiAI,setMultiAI]=useState(false);
   const [co,setCo]=useState({name:"",industry:"",stage:"idea",location:"",markets:"",currency:"INR"});
   const [selRole,setSelRole]=useState(null);
@@ -4772,7 +4789,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 
   const curRole=AR.find(r=>r.id===selRole);
   const curMsgs=selRole?(chats[selRole]||[]):[];
-  const cfgP=Object.keys(keys).filter(p=>keys[p]?.trim());
+  const cfgP=["nvidia",...Object.keys(keys).filter(p=>keys[p]?.trim())];
   const sColor=s=>s===TS.APPROVED?"#10B981":s===TS.REVIEWING?"#8B5CF6":s===TS.RUNNING?"#14B8A6":s===TS.REJECTED||s===TS.FAILED?"#EF4444":"#F59E0B";
   const sBg=s=>s===TS.APPROVED?"rgba(16,185,129,0.12)":s===TS.REVIEWING?"rgba(139,92,246,0.1)":s===TS.RUNNING?"rgba(20,184,166,0.1)":s===TS.REJECTED||s===TS.FAILED?"rgba(239,68,68,0.1)":"rgba(245,158,11,0.1)";
 
@@ -6157,7 +6174,10 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 <div style={{background:"rgba(16,185,129,0.05)",border:"1px solid rgba(16,185,129,0.2)",borderRadius:6,padding:"8px 10px",marginBottom:12,fontSize:10,color:"#10B981"}}>
                   Gemini is free — no billing needed. Get key at <a href={MODELS.gemini.keyUrl} target="_blank" rel="noopener noreferrer" style={{color:"#4285F4"}}>aistudio.google.com</a>
                 </div>
-                {Object.entries(MODELS).map(([id,m])=>(
+                <div style={{background:"rgba(118,185,0,0.06)",border:"1px solid rgba(118,185,0,0.25)",borderRadius:6,padding:"8px 10px",marginBottom:12,fontSize:10,color:"#76B900"}}>
+                  \u2728 NVIDIA (Free) works automatically \u2014 no key needed. Select it as your Primary AI below to try the platform instantly.
+                </div>
+                {Object.entries(MODELS).filter(([id])=>id!=="nvidia").map(([id,m])=>(
                   <div key={id} style={{marginBottom:10}}>
                     <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}>
                       <div style={{width:6,height:6,borderRadius:"50%",background:keys[id]?.trim()?m.color:"#3A4060"}}/>
@@ -6180,8 +6200,17 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                           <div style={{fontSize:10,fontWeight:700,color:defP===p?MODELS[p].color:"#A0AAC0"}}>{MODELS[p].name}{defP===p?" ✓":""}</div>
                           {pm&&<div style={{fontSize:7.5,color:"#5A6480",marginTop:2}}>Cost {pm.cost} · {pm.speed} · {pm.quality}</div>}
                           {pm&&<div style={{fontSize:7.5,color:"#5A6480",marginTop:1,lineHeight:1.4}}>{pm.blurb}</div>}
+                          {p==="nvidia"&&<div style={{fontSize:7.5,color:"#76B900",marginTop:2,fontWeight:700}}>\u2728 No key needed</div>}
                         </button>);})}
                     </div>
+                    {defP==="nvidia"&&(
+                      <div style={{marginBottom:8}}>
+                        <label style={{...S.lbl,marginBottom:3}}>NVIDIA model</label>
+                        <select value={keys.nvidiaModel||MODELS.nvidia.model} onChange={e=>{const nk={...keys,nvidiaModel:e.target.value};setKeys(nk);sv("cos-keys",{keys:nk,defaultProvider:defP,multiAI});}} style={{...S.inp,cursor:"pointer"}}>
+                          {NVIDIA_MODELS.map(m=><option key={m.id} value={m.id}>{m.label} \u2014 {m.note}</option>)}
+                        </select>
+                      </div>
+                    )}
                     <label style={{...S.lbl,marginBottom:4}}>Automatic Specialist Routing</label>
                     <div style={{border:"1px solid #1a2030",borderRadius:5,overflow:"hidden",marginBottom:8}}>
                       {(()=>{
