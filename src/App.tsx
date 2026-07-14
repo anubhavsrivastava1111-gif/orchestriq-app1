@@ -3815,7 +3815,30 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
           }
         // ── PPTX: JSON-driven consulting-grade presentation ─────────────────
         } else if(fmt==="pptx"){
+          // Publication engine first (brand master slide, Calibri design system,
+          // 12-16 slide mandate, native editable charts); the inline PptxGenJS
+          // path below remains as the automatic fallback — same pattern already
+          // proven for PDF and Word in this exact function.
+          let _pptxDone=false;
           try{
+            const _pubCtx=["Company: "+(proj.context?.company?.name||co.name||""),"Industry: "+(proj.context?.company?.industry||co.industry||""),"Stage: "+(proj.context?.company?.stage||co.stage||"")].join("\n");
+            let _w=false;
+            const _bee=new BusinessExecutionEngine(
+              async(sys:any,msgs:any,maxT?:any,_es?:any,tt?:any)=>(await callMulti({...keys,...(EFF_CLAUDE?.trim()?{claude:EFF_CLAUDE}:{}),...(EFF_GEMINI?.trim()?{gemini:EFF_GEMINI}:{}),...(EFF_GROQ?.trim()?{groq:EFF_GROQ}:{})},defP,sys,msgs,maxT||6000,false,tt||"general")).primary,
+              ensureXLSX,ensurePptx,ensureJsPDF,
+              (name:any,buf:any)=>{zip.folder(folder).file(String(name).replace(/[^a-zA-Z0-9._-]/g,"-"),buf);_w=true;},
+              stripMd);
+            const _spec:DeliverableSpec={type:"pptx",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
+            const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+            setProjectExecPhase("\ud83d\udcca Building publication-quality presentation: "+del.name);
+            const _beeRes:any=await _bee.generatePPTX(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
+            _pptxDone=_w;
+            if(!_w&&_beeRes?.error){throw new Error(_beeRes.error);}
+          }catch(_beeErr:any){
+            console.error("[OIQ] Publication engine (pptx) fell back:",_beeErr?.message||_beeErr);
+            try{const uf=WorkspaceMemory.get<any[]>("cos-unfulfilled-log")||[];uf.unshift({ts:new Date().toISOString(),project:"engine-diagnostic",deliverable:del.name,format:"pptx-engine",error:String(_beeErr?.message||_beeErr).slice(0,200)});WorkspaceMemory.set("cos-unfulfilled-log",uf.slice(0,50));}catch{}
+          }
+          if(!_pptxDone)try{
             const PptxGenJS=await ensurePptx();
             const pptx=new PptxGenJS();
             pptx.defineLayout({name:"WIDE",width:13.333,height:7.5}); pptx.layout="WIDE";
