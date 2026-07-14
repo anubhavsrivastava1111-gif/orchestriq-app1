@@ -44,7 +44,7 @@ const ALLOWED_MODELS = new Set([
 ]);
 const DEFAULT_MODEL = "meta/llama-3.3-70b-instruct";
 
-export const onRequestPost: PagesFunction<Env> = async (context) => {
+export async function onRequestPost(context: { request: Request; env: Env }): Promise<Response> {
   const { request, env } = context;
 
   const cors = {
@@ -123,9 +123,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       { status: 502, headers: { "Content-Type": "application/json", ...cors } }
     );
   }
-};
+}
 
-export const onRequestOptions: PagesFunction = async () => {
+export async function onRequestOptions(): Promise<Response> {
   return new Response(null, {
     headers: {
       "Access-Control-Allow-Origin": "*",
@@ -133,7 +133,7 @@ export const onRequestOptions: PagesFunction = async () => {
       "Access-Control-Allow-Headers": "Content-Type",
     },
   });
-};
+}
 
 // ─── FAST-FOLLOW: per-visitor daily quota via Cloudflare KV ──────────────────
 // Once real traffic exists, add a KV namespace binding (NVIDIA_QUOTA) and:
