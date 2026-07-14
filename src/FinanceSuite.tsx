@@ -40,25 +40,7 @@ function usePersistedState<T>(key:string,initial:T):[T,React.Dispatch<React.SetS
   useEffect(()=>{try{WorkspaceMemory.set(key,state);}catch{}},[key,state]);
   return [state,setState];
 }
-function loadScriptOnce(src:string):Promise<void>{
-  return new Promise((res,rej)=>{
-    if((window as any).XLSX)return res();
-    src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js";
-    const ex=document.querySelector('script[src="'+src+'"]');
-    if(ex){ex.addEventListener("load",()=>res());return;}
-    const s=document.createElement("script");s.src=src;s.onload=()=>res();s.onerror=()=>rej(new Error("Excel library failed to load"));document.head.appendChild(s);
-  });
-}
-async function downloadExcel(filename:string,sheetName:string,data:Record<string,unknown>[]):Promise<void>{
-  if(!data.length)return;
-  await loadScriptOnce("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
-  const X=(window as any).XLSX;
-  if(!X)throw new Error("Excel library unavailable");
-  const ws=X.utils.json_to_sheet(data);
-  const wb=X.utils.book_new();
-  X.utils.book_append_sheet(wb,ws,sheetName.slice(0,31));
-  X.writeFile(wb,filename);
-}
+import { downloadExcel } from "./utils/excelExport";
 function evidenceAuditLine(text:string):string{
   try{
     const tags=classifyEvidence(text||"");
