@@ -6,6 +6,7 @@ import ProfileSetup from "./ProfileSetup";
 import PlanSelection from "./PlanSelection";
 import App from "./App";
 import "./index.css";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 type Screen = "loading" | "auth" | "profile" | "plan" | "app";
 
@@ -91,4 +92,8 @@ function Root() {
   return <App />;
 }
 
-ReactDOM.createRoot(document.getElementById("root")!).render(<Root />);
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <ErrorBoundary>
+    <Root />
+  </ErrorBoundary>
+);
