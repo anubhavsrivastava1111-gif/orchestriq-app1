@@ -1,4 +1,5 @@
 import BusinessExecutionEngine from "./lib/BusinessExecutionEngine";
+import { WorkspaceMemory } from "./lib/WorkspaceMemory";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { saveRecord, estimateCost, estimateTokens } from "./TokenAnalytics";
 
