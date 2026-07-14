@@ -671,14 +671,14 @@ export default function AIAgents({
   const fileRef    = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    try { const h = JSON.parse(localStorage.getItem("oiq-agent-history")||"[]"); setHistory(h); historyRef.current = h; } catch {}
-    try { const p = JSON.parse(localStorage.getItem("oiq-agent-prefs")||"{}"); setPreferences(p); } catch {}
+    try { const h = (WorkspaceMemory.get<any[]>("oiq-agent-history")||[]); setHistory(h); historyRef.current = h; } catch {}
+    try { const p = WorkspaceMemory.get<any>("oiq-agent-prefs")||{}; setPreferences(p); } catch {}
   }, []);
 
   const saveHistory = useCallback((runs: AgentRun[]) => {
     const trimmed = runs.slice(0,100);
     historyRef.current = trimmed; setHistory(trimmed);
-    try { localStorage.setItem("oiq-agent-history", JSON.stringify(trimmed)); } catch {}
+    try { WorkspaceMemory.set("oiq-agent-history", trimmed); } catch {}
   }, []);
 
   // ─── FILE UPLOAD ─────────────────────────────────────────────────────────
@@ -1001,7 +1001,7 @@ export default function AIAgents({
           </div>
           <div style={{display:"flex",gap:6}}>
             <button onClick={()=>setView("orchestrate")} style={{...S.hBtn,color:"#A855F7",borderColor:"#A855F744"}}>🎯 Orchestrate</button>
-            <button onClick={()=>{try{const h=JSON.parse(localStorage.getItem("oiq-agent-history")||"[]");setHistory(h);}catch{}setView("history");}} style={S.hBtn}>History</button>
+            <button onClick={()=>{try{const h=(WorkspaceMemory.get<any[]>("oiq-agent-history")||[]);setHistory(h);}catch{}setView("history");}} style={S.hBtn}>History</button>
           </div>
         </div>
         <div style={{display:"flex",gap:6,marginTop:12,flexWrap:"wrap" as const}}>
@@ -1197,7 +1197,7 @@ export default function AIAgents({
                 <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid #14B8A644",borderRadius:6,padding:"10px 12px",marginTop:8}}>
                   <div style={{fontSize:11,fontWeight:700,color:"#14B8A6",marginBottom:6}}>💡 Save edits as style preference for future runs?</div>
                   <div style={{display:"flex",gap:6}}>
-                    <button onClick={()=>{const p={...preferences,[result.agentId]:"Match this style: "+editedOutput.slice(0,200)};setPreferences(p);try{localStorage.setItem("oiq-agent-prefs",JSON.stringify(p));}catch{}setShowPrefPrompt(false);showToast("Style preference saved","success");}} style={{...S.btn,flex:1,fontSize:10}}>Yes — Save</button>
+                    <button onClick={()=>{const p={...preferences,[result.agentId]:"Match this style: "+editedOutput.slice(0,200)};setPreferences(p);try{WorkspaceMemory.set("oiq-agent-prefs",p);}catch{}setShowPrefPrompt(false);showToast("Style preference saved","success");}} style={{...S.btn,flex:1,fontSize:10}}>Yes — Save</button>
                     <button onClick={()=>setShowPrefPrompt(false)} style={{...S.hBtn,flex:1,textAlign:"center" as const}}>No</button>
                   </div>
                 </div>
