@@ -132,14 +132,14 @@ export class WorkflowMemoryManager {
 
   load(workflowId: string): WorkflowMemory {
     try {
-      const raw = localStorage.getItem(this.key(workflowId));
+      const raw = localStorage.getItem(this.key(workflowId)); // TODO: migrate to WorkspaceMemory in Batch E
       if (raw) return JSON.parse(raw);
     } catch {}
     return { workflowId, config: {}, uploadedData: {}, snapshots: [], preferences: {} };
   }
 
   save(mem: WorkflowMemory): void {
-    try { localStorage.setItem(this.key(mem.workflowId), JSON.stringify(mem)); } catch {}
+    try { localStorage.setItem(this.key(mem.workflowId), JSON.stringify(mem)); } catch {} // TODO: migrate in Batch E
   }
 
   saveUpload(workflowId: string, stepId: string, data: string): void {
@@ -174,14 +174,14 @@ export const memoryManager = new WorkflowMemoryManager();
 
 export function saveRun(run: WorkflowRun): void {
   try {
-    const runs: WorkflowRun[] = JSON.parse(localStorage.getItem("oiq-wf-runs") || "[]");
+    const runs: WorkflowRun[] = WorkspaceMemory.get<WorkflowRun[]>("oiq-wf-runs") || [];
     const updated = [run, ...runs.filter(r => r.id !== run.id)].slice(0, 50);
-    localStorage.setItem("oiq-wf-runs", JSON.stringify(updated));
+    WorkspaceMemory.set("oiq-wf-runs", updated);
   } catch {}
 }
 
 export function loadRuns(): WorkflowRun[] {
-  try { return JSON.parse(localStorage.getItem("oiq-wf-runs") || "[]"); } catch { return []; }
+  try { return WorkspaceMemory.get<WorkflowRun[]>("oiq-wf-runs") || []; } catch { return []; }
 }
 
 // ─── STEP EXECUTOR ────────────────────────────────────────────────────────────
@@ -1858,7 +1858,7 @@ ${csv}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button onClick={() => setView("library")} style={{ ...S.hBtn, color: "#14B8A6", borderColor: "#14B8A633" }}>← Workflows</button>
           <div style={{ fontSize: 14, fontWeight: 800, color: "#F0F4FF" }}>Workflow History ({runs.length})</div>
-          <button onClick={() => { if (confirm("Clear all history?")) { localStorage.removeItem("oiq-wf-runs"); setRuns([]); } }} style={{ ...S.hBtn, color: "#EF4444", borderColor: "#EF444433", marginLeft: "auto" }}>Clear</button>
+          <button onClick={() => { if (confirm("Clear all history?")) { WorkspaceMemory.set("oiq-wf-runs",[]); setRuns([]); } }} style={{ ...S.hBtn, color: "#EF4444", borderColor: "#EF444433", marginLeft: "auto" }}>Clear</button>
         </div>
       </div>
       <div style={{ padding: "0 24px 24px" }}>
