@@ -375,7 +375,7 @@ ${result.output}`;
     // Fallback: basic DOCX generation
 
     const secs = this.parseSections(content);
-    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><style>body{font-family:Calibri,sans-serif;font-size:11pt;margin:72pt;}h1{font-size:18pt;color:#14B8A6;}h2{font-size:13pt;color:#0D6EFD;}p{line-height:1.5;}table{border-collapse:collapse;width:100%;}th{background:#14B8A6;color:#fff;padding:5pt 8pt;}td{padding:4pt 8pt;border-bottom:1pt solid #ddd;}</style></head><body><h1>${title}</h1>`;
+    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><style>@page{mso-page-orientation:portrait;margin:2.54cm;}body{font-family:Calibri,sans-serif;font-size:11pt;text-align:left;}h1{font-size:18pt;color:#14B8A6;}h2{font-size:13pt;color:#0D6EFD;}p{line-height:1.5;text-align:left;}table{border-collapse:collapse;width:100%;}th{background:#14B8A6;color:#fff;padding:5pt 8pt;}td{padding:4pt 8pt;border-bottom:1pt solid #ddd;}</style></head><body><h1>${title}</h1>`;
     for (const sec of secs) {
       html += `<h2>${sec.title}</h2>`;
       sec.lines.forEach(ln => { const t = this.stripMd(ln).trim(); if (t) html += `<p>${t}</p>`; });
