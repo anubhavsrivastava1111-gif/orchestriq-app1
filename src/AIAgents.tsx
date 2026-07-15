@@ -918,6 +918,29 @@ export default function AIAgents({
       dlFile(nm+".doc",html,"application/msword"); return;
     }
     if (format==="pdf") {
+      // Publication engine first (cover, TOC, branded wrapped tables) — same
+      // pattern already used successfully for xlsx and docx exports above.
+      try {
+        const _beEng = new BusinessExecutionEngine(
+          async(sys:any,msgs:any,maxT?:any,_es?:any,tt?:any)=>ask(sys,msgs,maxT,false,tt||"general"),
+          ensureXLSX, ensurePptx, ensureJsPDF, dlFile, stripMd,
+        );
+        const _coCtx = [co?.name, co?.industry, co?.stage, co?.location].filter(Boolean).join(" | ");
+        const _del: any = {
+          type:"pdf", title: run.agentName, purpose: run.input.slice(0,200),
+          audience:"client", qualityStandard:"client_deliverable", priority:"primary",
+        };
+        const _plan: any = {
+          objectiveRestated: run.input.slice(0,200),
+          domain:"general", persona:"Senior Consultant",
+          audience:"client", qualityStandard:"client_deliverable",
+          decisionContext: run.input.slice(0,200),
+          deliverables:[_del], missingInfo:[], executionOrder:[run.agentName], validationCriteria:[],
+        };
+        await _beEng.generatePDF(_plan, _del, _coCtx, content, ()=>{});
+        return;
+      } catch {}
+      // Fallback: basic PDF
       try {
         const jsPDF = await ensureJsPDF();
         const doc = new jsPDF({unit:"pt",format:"a4"});
