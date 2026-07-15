@@ -283,96 +283,79 @@ function buildExcelGenPrompt(
   currency: string,
   currencySymbol: string,
 ): string {
-  return `You are a ${deliverable.audience === "board" ? "Big4 Partner" : "Senior FP&A Manager"} 
-building a professional Excel workbook.
-
-BUSINESS OBJECTIVE: ${objective}
-WORKBOOK PURPOSE: ${deliverable.purpose}
-AUDIENCE: ${deliverable.audience}
-QUALITY STANDARD: ${deliverable.qualityStandard}
-CURRENCY: ${currencySymbol} (${currency})
-
-COMPANY CONTEXT:
-${companyContext}
-
-DATA / INPUTS:
-${data || "Generate representative professional data based on industry and objective."}
-
-CRITICAL INSTRUCTIONS:
-You must produce a JSON object describing the complete workbook architecture.
-The workbook must be production-ready — suitable for direct delivery to the stated audience.
-
-Think like an experienced professional. Decide automatically:
-- How many sheets are needed
-- What each sheet contains
-- Where formulas are required (use real Excel formula strings like =SUM(B2:B12))
-- Where conditional formatting applies (RAG indicators, variance highlighting)
-- What named ranges improve usability
-- What data validation prevents errors
-- What the dashboard should display
-- What documentation the user needs
-
-Return this JSON structure:
-{
-  "filename": "descriptive-professional-filename.xlsx",
-  "title": "Document title",
-  "sheets": [
-    {
-      "name": "Sheet tab name (max 31 chars)",
-      "type": "dashboard|data|analysis|assumptions|vba|instructions",
-      "rows": [
-        ["Header1", "Header2", "Header3"],
-        ["=FORMULA", value, value]
-      ],
-      "colWidths": [20, 15, 12],
-      "frozenRows": 1,
-      "frozenCols": 0,
-      "autoFilter": "A1:F1",
-      "headerRow": 0,
-      "conditionalCols": [3, 4],
-      "conditionalType": "rag|positive_green|negative_red",
-      "namedRanges": {"AssumptionRate": "C3"},
-      "merges": ["A1:F1"],
-      "summaryKPIs": [
-        {"label": "Total Revenue", "value": "=SUM(Revenue!C2:C13)", "format": "currency"}
-      ]
-    }
-  ],
-  "vbaCode": "Optional VBA macro code as a string if automation adds value",
-  "charts": [
-    {"type": "bar|line", "title": "Revenue by Quarter", "seriesName": "Revenue", "labels": ["Q1","Q2","Q3","Q4"], "values": [120,145,160,190]}
-  ],
-  "instructions": "Brief user instructions for this workbook"
+  const noData = !data || data.trim().length < 20;
+  return (
+    `You are a Big4 Partner / Senior FP\u0026A Director. Build a production-grade Excel workbook for a CFO.` +
+    `\n\nBUSINESS OBJECTIVE: ${objective}` +
+    `\nWORKBOOK PURPOSE: ${deliverable.purpose}` +
+    `\nAUDIENCE: ${deliverable.audience}` +
+    `\nCURRENCY: ${currencySymbol} (${currency})` +
+    `\nCOMPANY CONTEXT:\n${companyContext}` +
+    `\nINPUT DATA:\n${noData ? "No data provided. Generate realistic professional sample data (see DATA RULES)." : data}` +
+    `\n\n` +
+    `=== THE MOST IMPORTANT RULE ===\n` +
+    `ZERO IS NEVER AN ACCEPTABLE FINANCIAL FIGURE. A workbook of zeros is worthless.\n` +
+    `Every revenue, expense, and balance cell MUST contain a real number.\n` +
+    `If no data is provided, INVENT realistic industry-appropriate figures. That is your job.\n` +
+    `=== END MOST IMPORTANT RULE ===\n\n` +
+    `DATA RULES (non-negotiable):\n` +
+    `1. ALL numeric cells must be real numbers, never 0 unless 0 is genuinely correct.\n` +
+    `2. Data must be internally consistent (monthly x 12 = annual).\n` +
+    `3. Every formula must reference cells that contain populated data in this workbook.\n` +
+    `4. Dashboard KPIs must be formula-driven from data sheets, never hardcoded.\n` +
+    `5. Time series must cover at least 6 periods.\n` +
+    `6. Sample data must be realistic for the industry and objective stated.\n\n` +
+    `FORMULA RULES:\n` +
+    `- Use real Excel formula strings: =SUM(B2:B13), =IFERROR(C5/B5-1,"N/A"), =IF(D2>E2,"Over Budget","OK")\n` +
+    `- Cross-sheet: =Data!C2, ='Bank Transactions'!B15\n` +
+    `- A formula cell must start with "=" — it will be promoted to a real Excel formula.\n` +
+    `- NEVER write a formula referencing an empty cell. Populate the source cell first.\n\n` +
+    `CORRECT row example (P&L data sheet):\n` +
+    `["Jan 2024", 1250000, 840000, "=B2-C2", "=D2/B2"]\n` +
+    `CORRECT row example (assumptions sheet):\n` +
+    `["Revenue Growth Rate", 0.08, "Annual rate — update this cell only"]\n` +
+    `CORRECT row example (dashboard KPI):\n` +
+    `["Total Revenue", "=SUM(Data!B2:B13)", "currency", "YTD"]\n\n` +
+    `WRONG — will produce a zero workbook (NEVER DO THIS):\n` +
+    `["Total Revenue", 0, null, "currency"]  <- zero is wrong\n` +
+    `["Total Revenue", null, null, "currency"] <- null is wrong\n` +
+    `["Total Revenue", "VALUE", null] <- string placeholder is wrong\n\n` +
+    `SHEET BUILD ORDER (build Assumptions first, reference it from all later sheets):\n` +
+    `1. Assumptions — all input variables (growth: 0.08, tax: 0.25). Data sheets reference these.\n` +
+    `2. Data sheet(s) — populated rows with real numbers.\n` +
+    `3. Calculations — derived metrics, all formula-driven from Data.\n` +
+    `4. Dashboard — KPI tiles formula-driven from Calculations. Charts from Data.\n` +
+    `5. Instructions — how to use the workbook.\n\n` +
+    `OUTPUT FORMAT (JSON only, no fences, no preamble):\n` +
+    `{\n` +
+    `  "filename": "descriptive-filename.xlsx",\n` +
+    `  "title": "Workbook title",\n` +
+    `  "sheets": [\n` +
+    `    {\n` +
+    `      "name": "Tab name max 31 chars",\n` +
+    `      "type": "assumptions|data|calculations|dashboard|instructions",\n` +
+    `      "rows": [["Header","Value","Notes"],["Revenue Growth",0.08,"Annual rate"]],\n` +
+    `      "colWidths": [28,16,12],\n` +
+    `      "frozenRows": 1,\n` +
+    `      "headerRow": 0,\n` +
+    `      "autoFilter": "A1:D1",\n` +
+    `      "conditionalCols": [2],\n` +
+    `      "conditionalType": "positive_green|rag|negative_red",\n` +
+    `      "namedRanges": {"GrowthRate": "B2"},\n` +
+    `      "merges": ["A1:D1"],\n` +
+    `      "summaryKPIs": [{"label":"Net Revenue","value":"=SUM(Data!C2:C13)","format":"currency"}]\n` +
+    `    }\n` +
+    `  ],\n` +
+    `  "charts": [\n` +
+    `    {"type":"bar","title":"Monthly Revenue vs Cost","seriesName":"Revenue","labels":["Jan","Feb","Mar","Apr","May","Jun"],"values":[1250000,1310000,1280000,1420000,1380000,1510000]},\n` +
+    `    {"type":"line","title":"Net Cash Flow Trend","seriesName":"Net CF","labels":["Jan","Feb","Mar","Apr","May","Jun"],"values":[410000,470000,440000,580000,540000,670000]}\n` +
+    `  ],\n` +
+    `  "vbaCode": "Sub RefreshAll()\\\\nActiveWorkbook.RefreshAll\\\\nMsgBox \\"Done!\\"\\\\nEnd Sub",\n` +
+    `  "instructions": "Update Assumptions to change projections. All sheets auto-update."\n` +
+    `}`
+  );
 }
 
-CHART REQUIREMENTS:
-- Include 2-4 charts in the "charts" array visualising the most decision-relevant data from your sheets.
-- Values must be plain numbers (no currency symbols); labels short.
-- Use "line" for time series, "bar" for categorical comparisons.
-
-FORMULA RULES:
-- Write actual Excel formula strings: =SUM(B2:B10), =IFERROR(B5/B6,"N/A"), =IF(C2>0,"▲","▼")&TEXT(ABS(C2/B2),"0.0%")
-- Reference other sheets correctly: =Dashboard!C5, ='P&L'!B15
-- Use named ranges where defined: =SUM(Revenue)
-- Format numbers professionally: use number formats, not pre-formatted strings
-
-SHEET REQUIREMENTS:
-1. DASHBOARD (always first): Executive KPI summary. Key metrics at a glance. Formula-driven from data sheets.
-2. DATA SHEETS: Clean, structured, filterable. Real data or representative professional examples.
-3. ANALYSIS SHEETS: Calculations, variances, trends. Formula-driven. No hardcoded results.
-4. ASSUMPTIONS: All input variables in one place with labels, values, and brief documentation.
-5. INSTRUCTIONS (always last): What each sheet does. How to update inputs. Key formulas explained.
-${deliverable.qualityStandard === "big4_audit" || deliverable.qualityStandard === "cfo_model" ?
-  "6. VBA SHEET: Include automation code for report refresh, formatting, or export if it adds material value." : ""}
-
-Output ONLY the JSON object. No preamble, no explanation, no markdown fences.`;
-}
-
-// Reasoning step (Presentation Intelligence Engine, Phase 1): commits to the
-// decision the audience must make BEFORE any slide gets written. This is the
-// core difference between a generic AI deck and a consulting-grade one \u2014
-// every slide downstream must trace back to supporting this one decision.
-// Same fail-safe two-call architecture as the Excel Intelligence Engine.
 function buildPPTXPlanningPrompt(
   objective: string,
   deliverable: DeliverableSpec,
@@ -425,62 +408,55 @@ function buildPPTXGenPrompt(
   data: string,
   domain: Domain,
 ): string {
-  return `You are a ${deliverable.qualityStandard === "mckinsey_deck" ? "McKinsey Senior Partner" : "Strategy Director"} 
-building a consulting-grade presentation.
-
-BUSINESS OBJECTIVE: ${objective}
-PRESENTATION PURPOSE: ${deliverable.purpose}
-AUDIENCE: ${deliverable.audience}
-QUALITY STANDARD: ${deliverable.qualityStandard}
-
-COMPANY CONTEXT:
-${companyContext}
-
-SUPPORTING DATA:
-${data || "Use professional estimates and best practices for the industry."}
-
-YOUR JOB:
-Design the complete narrative arc before writing a single slide.
-Think: What story does this audience need to hear? What decisions should they make after this presentation?
-
-Return a JSON object:
-{
-  "title": "Presentation title",
-  "narrativeArc": "One paragraph: what story this presentation tells and why in this sequence",
-  "slides": [
-    {
-      "layout": "title|exec_summary|agenda|section_divider|chart_narrative|two_column|data_table|full_text|closing",
-      "title": "Slide title",
-      "content": "Full slide content — bullets, table rows, or narrative text",
-      "speakerNotes": "What the presenter says — not what is on the slide",
-      "chartType": "bar|line|pie|waterfall|scatter (only if layout is chart_narrative)",
-      "chartData": {
-        "labels": ["Q1","Q2","Q3","Q4"],
-        "series": [{"name":"Revenue","values":[100,120,115,140]}]
-      }
-    }
-  ]
-}
-
-SLIDE SEQUENCE RULES:
-1. Title slide — always first
-2. Executive Summary — key takeaways upfront (3 maximum)
-3. Agenda — for decks over 8 slides
-4. Section dividers — for each major theme
-5. Supporting analysis slides — chart_narrative or two_column
-6. Data tables — for detailed figures
-7. Closing — recommendations, next steps, call to action
-
-CONSULTING QUALITY RULES:
-- Every slide must earn its place. No filler.
-- Titles must be "so what" headlines, not topic labels. Bad: "Revenue". Good: "Revenue grew 23% YoY, driven by enterprise segment."
-- Content must support the headline, not repeat it.
-- Speaker notes must be substantive — what a senior presenter would actually say.
-- Chart data must be realistic and internally consistent.
-- For a Board presentation: maximum 15 slides. For operational: up to 25.
-- Appendix slides are numbered separately (A1, A2 etc.) — include them.
-
-Output ONLY the JSON object. No preamble, no explanation, no markdown fences.`;
+  return (
+    `You are a McKinsey Senior Partner. Build a consulting-grade PowerPoint deck.\n\n` +
+    `OBJECTIVE: ${objective}\n` +
+    `PURPOSE: ${deliverable.purpose}\n` +
+    `AUDIENCE: ${deliverable.audience}\n` +
+    `COMPANY CONTEXT: ${companyContext}\n` +
+    `SUPPORTING DATA: ${data || "Use professional industry estimates."}\n\n` +
+    `=== SLIDE COUNT RULE — NON-NEGOTIABLE ===\n` +
+    `A board deck MUST have 12-16 slides. An operational deck up to 20.\n` +
+    `A deck with fewer than 10 slides is REJECTED and regenerated.\n` +
+    `EVERY slide must have a "so what" title, real content, and speaker notes.\n` +
+    `=== END SLIDE COUNT RULE ===\n\n` +
+    `MANDATORY SLIDE SEQUENCE:\n` +
+    `1. Title slide\n` +
+    `2. Executive Summary (3 key takeaways, each a one-sentence insight with a number)\n` +
+    `3. Agenda (list all major sections)\n` +
+    `4-5. Situation / Context (what is happening, with data)\n` +
+    `6-7. Analysis (what the data means, charts required here)\n` +
+    `8-9. Implications / So What (what this means for the business)\n` +
+    `10-11. Recommendations (specific, actionable, numbered)\n` +
+    `12. Implementation / Next Steps (who does what by when)\n` +
+    `13. Financial Impact (numbers required — revenue, cost, margin)\n` +
+    `14. Risk Register (top 3-5 risks with mitigation)\n` +
+    `15. Closing / Call to Action\n` +
+    `A1, A2... Appendix slides (supporting detail)\n\n` +
+    `CONTENT RULES:\n` +
+    `- Titles must be "so what" headlines with a number: "Revenue up 23% — driven by enterprise"\n` +
+    `- NOT topic labels like "Revenue Analysis" — those will be rejected\n` +
+    `- Content must have 4-6 substantive bullets per slide, not 1-2 vague ones\n` +
+    `- Every chart must have realistic data (no zeros, no placeholders)\n` +
+    `- Speaker notes must be 3-5 sentences of what a senior presenter would actually say\n` +
+    `- NO slide may contain [PLACEHOLDER], [TBD], [INSERT], or similar\n\n` +
+    `JSON FORMAT:\n` +
+    `{\n` +
+    `  "title": "Deck title",\n` +
+    `  "narrativeArc": "One paragraph describing the story and why in this sequence",\n` +
+    `  "slides": [\n` +
+    `    {\n` +
+    `      "layout": "title|exec_summary|agenda|section_divider|chart_narrative|two_column|data_table|full_text|closing",\n` +
+    `      "title": "So-what headline with a number",\n` +
+    `      "content": "Bullet 1\\nBullet 2\\nBullet 3\\nBullet 4",\n` +
+    `      "speakerNotes": "3-5 sentences the presenter would actually say",\n` +
+    `      "chartType": "bar|line|pie (only for chart_narrative layout)",\n` +
+    `      "chartData": {"labels":["Q1","Q2","Q3","Q4"],"series":[{"name":"Revenue","values":[1250,1380,1290,1520]}]}\n` +
+    `    }\n` +
+    `  ]\n` +
+    `}\n\n` +
+    `Output ONLY the JSON. No preamble. No fences. No explanation.`
+  );
 }
 
 function buildPDFDocxPrompt(
