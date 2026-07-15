@@ -2052,6 +2052,25 @@ function renderStructuredDeck(pptx,slides,A,pal=QE_PAL){
   });
 }
 
+// ─── ENGINE DOWNGRADE TRACKER ─────────────────────────────────────────────────
+// Records every time the publication engine fails and a basic fallback produces
+// the file instead. Without this, a downgraded deliverable looks identical to a
+// finished one — which is exactly how quality problems went undetected.
+// Surfaced in QA-Report.md and as an on-screen warning so a silent downgrade
+// becomes impossible.
+type EngineDowngrade={deliverable:string;format:string;reason:string;ts:string};
+const engineDowngrades:{list:EngineDowngrade[]}={list:[]};
+function recordEngineDowngrade(deliverable:string,format:string,err:unknown){
+  const reason=String((err as any)?.message||err||"unknown error").slice(0,180);
+  try{
+    engineDowngrades.list.push({deliverable,format,reason,ts:new Date().toISOString()});
+    console.error("[OIQ] Publication engine ("+format+") fell back for \""+deliverable+"\":",reason);
+    const uf=WorkspaceMemory.get<any[]>("cos-unfulfilled-log")||[];
+    uf.unshift({ts:new Date().toISOString(),project:"engine-downgrade",deliverable,format:format+"-engine",error:reason});
+    WorkspaceMemory.set("cos-unfulfilled-log",uf.slice(0,50));
+  }catch{}
+}
+
 // ─── STYLE CONSTANTS (module scope) ────────────────────────────────────────────
 // Created once at module load instead of on every component render.
 const S={
@@ -3443,6 +3462,39 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
         }
 
         if(!genFailed&&rawContent){
+          // ── QUALITY GATE (blocking, one retry) ──────────────────────────
+          // Previously QA only SCORED bad content then shipped it anyway —
+          // which is how a workbook of all-zeros and a deck containing a raw
+          // [ASSUMPTION] reached the user looking finished. Now: detect the
+          // two fatal defects, regenerate once with explicit corrective
+          // instructions, and keep the better of the two attempts.
+          const isDeadNumbers=(t:string)=>{
+            const nums=t.match(/(?:^|[\s|₹$€£])(-?[\d,]+(?:\.\d+)?)(?=[\s|%]|$)/gm)||[];
+            if(nums.length<8)return false; // too few numbers to judge
+            const zeros=nums.filter(n=>parseFloat(n.replace(/[^\d.-]/g,""))===0).length;
+            return zeros/nums.length>0.8; // >80% of all figures are zero
+          };
+          const hasFatalPlaceholder=(t:string)=>/\[INSERT\]|\[TBD\]|PLACEHOLDER|Lorem ipsum|\[ASSUMPTION\]|\[X+\]|TODO:/i.test(t);
+          const needsRegen=(t:string)=>hasFatalPlaceholder(t)||isDeadNumbers(t);
+
+          if(needsRegen(rawContent)){
+            try{
+              const why=[hasFatalPlaceholder(rawContent)?"it contained unfilled placeholders":"",isDeadNumbers(rawContent)?"nearly every figure was zero":""].filter(Boolean).join(" and ");
+              setProjectExecPhase("\u26a0 Regenerating "+del.name+" \u2014 "+why);
+              // Re-run through generateDeliverable (which owns the prompt scope),
+              // passing the rejection reason so the model corrects course.
+              const retryDel={...del,description:(del.description||"")+
+                "\n\nCRITICAL \u2014 THE PREVIOUS ATTEMPT WAS REJECTED because "+why+
+                ". This version MUST contain concrete, realistic figures derived from the business context. "+
+                "Never emit [ASSUMPTION], [TBD], [INSERT] or similar markers as literal output text \u2014 if a "+
+                "figure is estimated, state the actual estimated number and note its basis alongside it. "+
+                "Never emit a table of zeros: every monetary and percentage value must be a real, defensible number."};
+              const retry=await generateDeliverable(currentProj,mod,retryDel);
+              // Keep the retry only if it is genuinely better
+              if(retry&&retry.length>200&&!needsRegen(retry))rawContent=retry;
+            }catch{/* keep original — a failed retry must never lose the first attempt */}
+          }
+
           // Quick QA: detect placeholders
           const hasPlaceholders=/\[INSERT\]|\[TBD\]|PLACEHOLDER|Lorem ipsum/i.test(rawContent);
           const hasAssumptions=/\[ASSUMPTION\]|\[ESTIMATE\]/i.test(rawContent);
@@ -3637,6 +3689,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
       const done=allDels.filter(d=>d.rawContent&&d.status!=="failed"&&!excluded[d.id]);
       // Execute deliverables serially — yield UI between each to prevent blocking
       const yieldUI=()=>new Promise<void>(r=>setTimeout(r,0));
+      engineDowngrades.list=[]; // reset per packaging run
       for(const del of done){
         if(projectExecCancelRef.current)break;
         await yieldUI(); // Release UI thread before each deliverable
@@ -3665,8 +3718,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             _docDone=_w;
             if(!_w&&_beeRes?.error){throw new Error(_beeRes.error);}
           }catch(_beeErr:any){
-            console.error("[OIQ] Publication engine (docx) fell back:",_beeErr?.message||_beeErr);
-            try{const uf=WorkspaceMemory.get<any[]>("cos-unfulfilled-log")||[];uf.unshift({ts:new Date().toISOString(),project:"engine-diagnostic",deliverable:del.name,format:"docx-engine",error:String(_beeErr?.message||_beeErr).slice(0,200)});WorkspaceMemory.set("cos-unfulfilled-log",uf.slice(0,50));}catch{}
+            recordEngineDowngrade(del.name,"docx",_beeErr);
           }
           if(!_docDone)try{
             const secs=parseSections(content);
@@ -3815,7 +3867,29 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
           }
         // ── PPTX: JSON-driven consulting-grade presentation ─────────────────
         } else if(fmt==="pptx"){
+          // Publication engine first (brand master, Calibri design system,
+          // 12-16 slide mandate, decision-first planning, native charts).
+          // The inline PptxGenJS path below stays as the automatic fallback —
+          // and any use of it is now recorded and surfaced to the user.
+          let _pptxDone=false;
           try{
+            const _pubCtx=["Company: "+(proj.context?.company?.name||co.name||""),"Industry: "+(proj.context?.company?.industry||co.industry||""),"Stage: "+(proj.context?.company?.stage||co.stage||"")].join("\n");
+            let _w=false;
+            const _bee=new BusinessExecutionEngine(
+              async(sys:any,msgs:any,maxT?:any,_es?:any,tt?:any)=>(await callMulti({...keys,...(EFF_CLAUDE?.trim()?{claude:EFF_CLAUDE}:{}),...(EFF_GEMINI?.trim()?{gemini:EFF_GEMINI}:{}),...(EFF_GROQ?.trim()?{groq:EFF_GROQ}:{})},defP,sys,msgs,maxT||6000,false,tt||"general")).primary,
+              ensureXLSX,ensurePptx,ensureJsPDF,
+              (name:any,buf:any)=>{zip.folder(folder).file(String(name).replace(/[^a-zA-Z0-9._-]/g,"-"),buf);_w=true;},
+              stripMd);
+            const _spec:DeliverableSpec={type:"pptx",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"mckinsey_deck",priority:"primary"};
+            const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"mckinsey_deck",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+            setProjectExecPhase("\ud83d\udcca Building publication-quality presentation: "+del.name);
+            const _beeRes:any=await _bee.generatePPTX(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
+            _pptxDone=_w;
+            if(!_w&&_beeRes?.error){throw new Error(_beeRes.error);}
+          }catch(_beeErr:any){
+            recordEngineDowngrade(del.name,"pptx",_beeErr);
+          }
+          if(!_pptxDone)try{
             const PptxGenJS=await ensurePptx();
             const pptx=new PptxGenJS();
             pptx.defineLayout({name:"WIDE",width:13.333,height:7.5}); pptx.layout="WIDE";
@@ -3969,8 +4043,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             _pdfDone=_w;
             if(!_w&&_beeRes?.error){throw new Error(_beeRes.error);}
           }catch(_beeErr:any){
-            console.error("[OIQ] Publication engine (pdf) fell back:",_beeErr?.message||_beeErr);
-            try{const uf=WorkspaceMemory.get<any[]>("cos-unfulfilled-log")||[];uf.unshift({ts:new Date().toISOString(),project:"engine-diagnostic",deliverable:del.name,format:"pdf-engine",error:String(_beeErr?.message||_beeErr).slice(0,200)});WorkspaceMemory.set("cos-unfulfilled-log",uf.slice(0,50));}catch{}
+            recordEngineDowngrade(del.name,"pdf",_beeErr);
           }
           if(!_pdfDone)try{
             var _pdfContentSafe=pdfSafeText((content||"").replace(/^\s*---+\s*$/gm,""));const pdfBuf=await(async()=>{
@@ -4158,6 +4231,15 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
       if(mediaDels.length>0)zip.file("Media-Prompts.md",mediaPromptLines.join("\n"));
 
       const qaLines=["# QA Report — "+proj.name,"Generated: "+new Date().toLocaleString(),"","## Deliverables",...done.map(d=>"- **"+d.name+"** ("+d.outputFormat+") QA:"+(d.qaResult?.passed?"✓":"⚠")+" "+( d.qaResult?.score||0)+"% — "+(d.qaResult?.summary||""))];
+      // Engine downgrade transparency: a file built by the basic fallback is
+      // visually indistinguishable from an engine-built one. Surface it here
+      // and on screen so a quality downgrade can never pass unnoticed.
+      if(engineDowngrades.list.length>0){
+        qaLines.push("","## \u26a0 PUBLICATION ENGINE DOWNGRADES","","The following deliverables were produced by the **basic fallback generator** because the publication engine failed. They will be lower quality (fewer slides, no design system, no native charts, simpler formatting) than intended:","");
+        engineDowngrades.list.forEach(d=>qaLines.push("- **"+d.deliverable+"** ("+d.format+") \u2014 engine failed: "+d.reason));
+        qaLines.push("","**Action:** send this reason to support so the engine failure can be fixed at source.");
+        try{showToast("\u26a0 "+engineDowngrades.list.length+" deliverable(s) used the basic fallback \u2014 see QA-Report.md for why","warning");}catch{}
+      }
       zip.file("QA-Report.md",qaLines.join("\n"));
       const sumLines=["# "+proj.name,"","Objective: "+proj.objective,"Generated: "+new Date().toLocaleString(),"Deliverables: "+done.length,"","## Modules",...(proj.modules||[]).map(m=>"- "+m.name+" ("+m.capabilityType+"): "+(m.deliverables||[]).length+" deliverables")];
       zip.file("Project-Summary.md",sumLines.join("\n"));
@@ -5354,7 +5436,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                         const _plan:ExecutionPlan={objectiveRestated:del.name,domain:"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
                                         await _bee.generatePDF(_plan,_spec,_pubCtx,cnt,()=>{});
                                         _pdfOk=_w;
-                                      }catch{}
+                                      }catch(_e:any){recordEngineDowngrade(del.name,"pdf",_e);}
                                       if(!_pdfOk)try{
                                       const jsPDF=await ensureJsPDF();const doc=new jsPDF({unit:"pt",format:"a4"});
                                       const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),M=48;let y=M;
@@ -5406,7 +5488,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                         const _plan:ExecutionPlan={objectiveRestated:del.name,domain:"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
                                         await _bee.generatePPTX(_plan,_spec,_pubCtx,cnt,()=>{});
                                         _pptxOk=_w;
-                                      }catch{}
+                                      }catch(_e:any){recordEngineDowngrade(del.name,"pptx",_e);}
                                       if(!_pptxOk)try{
                                       const PptxGenJS=await ensurePptx();const pptx=new PptxGenJS();
                                       pptx.defineLayout({name:"WIDE",width:13.333,height:7.5});pptx.layout="WIDE";
