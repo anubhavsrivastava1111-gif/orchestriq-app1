@@ -857,10 +857,37 @@ Assumptions to document: ${(workbookPlan.assumptionsNeeded || []).join(", ")}`
       if (!rows.length) continue;
 
       // ── Strip markdown from all cells before writing ─────────────────────
-      const cleanRows = rows.map((row: any[]) => row.map((cell: any) => {
+      // ── Markdown table row explosion ──────────────────────────────────────
+      // Root cause of the "workbook full of zeros" defect: the AI sometimes
+      // emits a whole markdown table row as a SINGLE cell string, e.g.
+      //   "| Monthly Sales Growth | 5% | Based on trend | [ESTIMATE] |"
+      // The old cleaner stripped bold/italic but had no rule for pipes, so the
+      // row survived intact inside one cell — real numbers trapped as text,
+      // and every downstream formula referencing them resolved to 0.
+      // Here we detect that shape and explode it into proper columns.
+      const isMarkdownTableRow = (s: string) =>
+        typeof s === "string" && /^\s*\|.*\|\s*$/.test(s) && (s.match(/\|/g) || []).length >= 3;
+      const isMarkdownSeparator = (s: string) =>
+        typeof s === "string" && /^\s*\|[\s:|-]+\|\s*$/.test(s);
+
+      const explodedRows: any[][] = [];
+      rows.forEach((row: any[]) => {
+        // Case: entire row collapsed into one cell as markdown
+        if (row.length === 1 && isMarkdownTableRow(String(row[0] ?? ""))) {
+          const raw = String(row[0]);
+          if (isMarkdownSeparator(raw)) return; // drop |---|---| separator rows
+          explodedRows.push(
+            raw.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(s => s.trim())
+          );
+          return;
+        }
+        explodedRows.push(row);
+      });
+
+      const cleanRows = explodedRows.map((row: any[]) => row.map((cell: any) => {
         if (typeof cell !== "string") return cell;
         if (cell.startsWith("=")) return cell; // preserve formula strings
-        return cell
+        const cleaned = cell
           .replace(/\*\*([^*]+)\*\*/g, "$1")  // **bold** → bold
           .replace(/\*([^*]+)\*/g, "$1")        // *italic* → italic
           .replace(/`([^`]+)`/g, "$1")           // `code` → code
@@ -868,6 +895,22 @@ Assumptions to document: ${(workbookPlan.assumptionsNeeded || []).join(", ")}`
           .replace(/^#+\s+/, "")                 // ## heading → heading
           .replace(/^[-*]\s+/, "")               // - bullet → text
           .trim();
+        // ── Numeric coercion ────────────────────────────────────────────────
+        // "5%" / "₹1,20,000" / "(2,500)" arrived as text, so Excel treated them
+        // as labels and every SUM over them returned 0. Convert real numbers to
+        // real numbers so formulas and charts actually work.
+        if (cleaned && !/^=/.test(cleaned)) {
+          const pctMatch = /^-?[\d,]+(\.\d+)?\s*%$/.test(cleaned);
+          const bare = cleaned
+            .replace(/^\((.*)\)$/, "-$1")        // (2,500) → -2500 (accounting negative)
+            .replace(/[₹$€£,\s]/g, "")
+            .replace(/%$/, "");
+          if (bare !== "" && /^-?\d+(\.\d+)?$/.test(bare)) {
+            const n = parseFloat(bare);
+            if (!isNaN(n)) return pctMatch ? n / 100 : n;
+          }
+        }
+        return cleaned;
       }));
 
       const ws = XLSX.utils.aoa_to_sheet(cleanRows);
