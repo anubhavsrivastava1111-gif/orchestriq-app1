@@ -3462,39 +3462,11 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
         }
 
         if(!genFailed&&rawContent){
-          // ── QUALITY GATE (blocking, one retry) ──────────────────────────
-          // Previously QA only SCORED bad content then shipped it anyway —
-          // which is how a workbook of all-zeros and a deck containing a raw
-          // [ASSUMPTION] reached the user looking finished. Now: detect the
-          // two fatal defects, regenerate once with explicit corrective
-          // instructions, and keep the better of the two attempts.
-          const isDeadNumbers=(t:string)=>{
-            const nums=t.match(/(?:^|[\s|₹$€£])(-?[\d,]+(?:\.\d+)?)(?=[\s|%]|$)/gm)||[];
-            if(nums.length<8)return false; // too few numbers to judge
-            const zeros=nums.filter(n=>parseFloat(n.replace(/[^\d.-]/g,""))===0).length;
-            return zeros/nums.length>0.8; // >80% of all figures are zero
-          };
-          const hasFatalPlaceholder=(t:string)=>/\[INSERT\]|\[TBD\]|PLACEHOLDER|Lorem ipsum|\[ASSUMPTION\]|\[X+\]|TODO:/i.test(t);
-          const needsRegen=(t:string)=>hasFatalPlaceholder(t)||isDeadNumbers(t);
-
-          if(needsRegen(rawContent)){
-            try{
-              const why=[hasFatalPlaceholder(rawContent)?"it contained unfilled placeholders":"",isDeadNumbers(rawContent)?"nearly every figure was zero":""].filter(Boolean).join(" and ");
-              setProjectExecPhase("\u26a0 Regenerating "+del.name+" \u2014 "+why);
-              // Re-run through generateDeliverable (which owns the prompt scope),
-              // passing the rejection reason so the model corrects course.
-              const retryDel={...del,description:(del.description||"")+
-                "\n\nCRITICAL \u2014 THE PREVIOUS ATTEMPT WAS REJECTED because "+why+
-                ". This version MUST contain concrete, realistic figures derived from the business context. "+
-                "Never emit [ASSUMPTION], [TBD], [INSERT] or similar markers as literal output text \u2014 if a "+
-                "figure is estimated, state the actual estimated number and note its basis alongside it. "+
-                "Never emit a table of zeros: every monetary and percentage value must be a real, defensible number."};
-              const retry=await generateDeliverable(currentProj,mod,retryDel);
-              // Keep the retry only if it is genuinely better
-              if(retry&&retry.length>200&&!needsRegen(retry))rawContent=retry;
-            }catch{/* keep original — a failed retry must never lose the first attempt */}
-          }
-
+          // ── QUALITY ANNOTATION ────────────────────────────────────────────
+          // Records what was requested vs what was delivered so the user can
+          // benchmark the output. No blocking, no retry loop — the prompt
+          // improvements are what drive quality, not retry gates.
+          const hasFatalPlaceholder=(t:string)=>/\[INSERT\]|\[TBD\]|PLACEHOLDER|Lorem ipsum|\[X+\]|TODO:/i.test(t);
           // Quick QA: detect placeholders
           const hasPlaceholders=/\[INSERT\]|\[TBD\]|PLACEHOLDER|Lorem ipsum/i.test(rawContent);
           const hasAssumptions=/\[ASSUMPTION\]|\[ESTIMATE\]/i.test(rawContent);
@@ -4230,15 +4202,24 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
       }
       if(mediaDels.length>0)zip.file("Media-Prompts.md",mediaPromptLines.join("\n"));
 
-      const qaLines=["# QA Report — "+proj.name,"Generated: "+new Date().toLocaleString(),"","## Deliverables",...done.map(d=>"- **"+d.name+"** ("+d.outputFormat+") QA:"+(d.qaResult?.passed?"✓":"⚠")+" "+( d.qaResult?.score||0)+"% — "+(d.qaResult?.summary||""))];
-      // Engine downgrade transparency: a file built by the basic fallback is
-      // visually indistinguishable from an engine-built one. Surface it here
-      // and on screen so a quality downgrade can never pass unnoticed.
+      const qaLines=[
+        "# QA Report \u2014 "+proj.name,
+        "Generated: "+new Date().toLocaleString(),"",
+        "## REQUESTED (your prompt)",
+        "**Objective:** "+proj.objective,"",
+        "## DELIVERED",
+        ...done.map(d=>{
+          const badge=d.qaResult?.passed?"\u2705":"\u26a0";
+          const score=d.qaResult?.score||0;
+          const summary=d.qaResult?.summary||"";
+          return badge+" **"+d.name+"** ("+d.outputFormat+") \u2014 "+score+"% \u2014 "+summary;
+        }),
+      ];
       if(engineDowngrades.list.length>0){
-        qaLines.push("","## \u26a0 PUBLICATION ENGINE DOWNGRADES","","The following deliverables were produced by the **basic fallback generator** because the publication engine failed. They will be lower quality (fewer slides, no design system, no native charts, simpler formatting) than intended:","");
-        engineDowngrades.list.forEach(d=>qaLines.push("- **"+d.deliverable+"** ("+d.format+") \u2014 engine failed: "+d.reason));
-        qaLines.push("","**Action:** send this reason to support so the engine failure can be fixed at source.");
-        try{showToast("\u26a0 "+engineDowngrades.list.length+" deliverable(s) used the basic fallback \u2014 see QA-Report.md for why","warning");}catch{}
+        qaLines.push("","## \u26a0 ENGINE DOWNGRADES (lower quality \u2014 fallback was used)","");
+        engineDowngrades.list.forEach(d=>qaLines.push("- **"+d.deliverable+"** ("+d.format+"): "+d.reason));
+        qaLines.push("","Fix: check Settings \u2192 API keys and retry.");
+        try{showToast("\u26a0 "+engineDowngrades.list.length+" deliverable(s) used the basic fallback \u2014 see QA-Report.md","warning");}catch{}
       }
       zip.file("QA-Report.md",qaLines.join("\n"));
       const sumLines=["# "+proj.name,"","Objective: "+proj.objective,"Generated: "+new Date().toLocaleString(),"Deliverables: "+done.length,"","## Modules",...(proj.modules||[]).map(m=>"- "+m.name+" ("+m.capabilityType+"): "+(m.deliverables||[]).length+" deliverables")];
