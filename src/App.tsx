@@ -3815,30 +3815,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
           }
         // ── PPTX: JSON-driven consulting-grade presentation ─────────────────
         } else if(fmt==="pptx"){
-          // Publication engine first (brand master slide, Calibri design system,
-          // 12-16 slide mandate, native editable charts); the inline PptxGenJS
-          // path below remains as the automatic fallback — same pattern already
-          // proven for PDF and Word in this exact function.
-          let _pptxDone=false;
           try{
-            const _pubCtx=["Company: "+(proj.context?.company?.name||co.name||""),"Industry: "+(proj.context?.company?.industry||co.industry||""),"Stage: "+(proj.context?.company?.stage||co.stage||"")].join("\n");
-            let _w=false;
-            const _bee=new BusinessExecutionEngine(
-              async(sys:any,msgs:any,maxT?:any,_es?:any,tt?:any)=>(await callMulti({...keys,...(EFF_CLAUDE?.trim()?{claude:EFF_CLAUDE}:{}),...(EFF_GEMINI?.trim()?{gemini:EFF_GEMINI}:{}),...(EFF_GROQ?.trim()?{groq:EFF_GROQ}:{})},defP,sys,msgs,maxT||6000,false,tt||"general")).primary,
-              ensureXLSX,ensurePptx,ensureJsPDF,
-              (name:any,buf:any)=>{zip.folder(folder).file(String(name).replace(/[^a-zA-Z0-9._-]/g,"-"),buf);_w=true;},
-              stripMd);
-            const _spec:DeliverableSpec={type:"pptx",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
-            const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
-            setProjectExecPhase("\ud83d\udcca Building publication-quality presentation: "+del.name);
-            const _beeRes:any=await _bee.generatePPTX(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
-            _pptxDone=_w;
-            if(!_w&&_beeRes?.error){throw new Error(_beeRes.error);}
-          }catch(_beeErr:any){
-            console.error("[OIQ] Publication engine (pptx) fell back:",_beeErr?.message||_beeErr);
-            try{const uf=WorkspaceMemory.get<any[]>("cos-unfulfilled-log")||[];uf.unshift({ts:new Date().toISOString(),project:"engine-diagnostic",deliverable:del.name,format:"pptx-engine",error:String(_beeErr?.message||_beeErr).slice(0,200)});WorkspaceMemory.set("cos-unfulfilled-log",uf.slice(0,50));}catch{}
-          }
-          if(!_pptxDone)try{
             const PptxGenJS=await ensurePptx();
             const pptx=new PptxGenJS();
             pptx.defineLayout({name:"WIDE",width:13.333,height:7.5}); pptx.layout="WIDE";
@@ -5362,7 +5339,23 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                     const lsC=(()=>{try{return localStorage.getItem("cos-rc-"+del.id)||"";}catch{return "";}})();
                                     const cnt=rawContentStore.current[del.id]||lsC||del.rawContent||"";
                                     const fmt=(del.outputFormat||"md").toLowerCase();
-                                    if(fmt==="pdf"){try{
+                                    if(fmt==="pdf"){
+                                      // Publication engine first; existing inline renderer stays as fallback.
+                                      let _pdfOk=false;
+                                      try{
+                                        const _pubCtx=[projectExecution?.context?.company?.name||co.name||"",projectExecution?.context?.company?.industry||co.industry||"",projectExecution?.context?.company?.stage||co.stage||""].filter(Boolean).join(" | ");
+                                        let _w=false;
+                                        const _bee=new BusinessExecutionEngine(
+                                          async(sys:any,msgs:any,maxT?:any,_es?:any,tt?:any)=>(await callMulti({...keys,...(EFF_CLAUDE?.trim()?{claude:EFF_CLAUDE}:{}),...(EFF_GEMINI?.trim()?{gemini:EFF_GEMINI}:{}),...(EFF_GROQ?.trim()?{groq:EFF_GROQ}:{})},defP,sys,msgs,maxT||6000,false,tt||"general")).primary,
+                                          ensureXLSX,ensurePptx,ensureJsPDF,
+                                          (_fname:any,buf:any)=>{dlFile(nm+".pdf",buf,"application/pdf");_w=true;},
+                                          stripMd);
+                                        const _spec:DeliverableSpec={type:"pdf",title:del.name,purpose:del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
+                                        const _plan:ExecutionPlan={objectiveRestated:del.name,domain:"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+                                        await _bee.generatePDF(_plan,_spec,_pubCtx,cnt,()=>{});
+                                        _pdfOk=_w;
+                                      }catch{}
+                                      if(!_pdfOk)try{
                                       const jsPDF=await ensureJsPDF();const doc=new jsPDF({unit:"pt",format:"a4"});
                                       const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),M=48;let y=M;
                                       doc.setFillColor(20,184,166);doc.rect(0,0,W,72,"F");
@@ -5398,7 +5391,23 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                       let html="<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:w=\"urn:schemas-microsoft-com:office:word\" xmlns=\"http://www.w3.org/TR/REC-html40\"><head><meta charset=\"UTF-8\"><style>@page{mso-page-orientation:portrait;margin:2.54cm;}body{font-family:Calibri,sans-serif;font-size:11pt;text-align:left;}h1{font-size:18pt;color:#14B8A6;}h2{font-size:13pt;}p{line-height:1.5;text-align:left;}table{border-collapse:collapse;width:100%;}th{background:#14B8A6;color:#fff;padding:5pt 8pt;}td{padding:4pt 8pt;border-bottom:1pt solid #ddd;}</style></head><body><h1>"+del.name+"</h1>";
                                       for(const sec of secs){html+="<h2>"+sec.title+"</h2>";sec.lines.forEach(ln=>{const t=stripMd(ln).trim();if(t)html+="<p>"+t+"</p>";});}
                                       html+="</body></html>";dlFile(nm+".doc",html,"application/msword");
-                                    } else if(fmt==="pptx"){try{
+                                    } else if(fmt==="pptx"){
+                                      // Publication engine first; existing inline renderer stays as fallback.
+                                      let _pptxOk=false;
+                                      try{
+                                        const _pubCtx=[projectExecution?.context?.company?.name||co.name||"",projectExecution?.context?.company?.industry||co.industry||"",projectExecution?.context?.company?.stage||co.stage||""].filter(Boolean).join(" | ");
+                                        let _w=false;
+                                        const _bee=new BusinessExecutionEngine(
+                                          async(sys:any,msgs:any,maxT?:any,_es?:any,tt?:any)=>(await callMulti({...keys,...(EFF_CLAUDE?.trim()?{claude:EFF_CLAUDE}:{}),...(EFF_GEMINI?.trim()?{gemini:EFF_GEMINI}:{}),...(EFF_GROQ?.trim()?{groq:EFF_GROQ}:{})},defP,sys,msgs,maxT||6000,false,tt||"general")).primary,
+                                          ensureXLSX,ensurePptx,ensureJsPDF,
+                                          (_fname:any,buf:any)=>{dlFile(nm+".pptx",buf,"application/vnd.openxmlformats-officedocument.presentationml.presentation");_w=true;},
+                                          stripMd);
+                                        const _spec:DeliverableSpec={type:"pptx",title:del.name,purpose:del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
+                                        const _plan:ExecutionPlan={objectiveRestated:del.name,domain:"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+                                        await _bee.generatePPTX(_plan,_spec,_pubCtx,cnt,()=>{});
+                                        _pptxOk=_w;
+                                      }catch{}
+                                      if(!_pptxOk)try{
                                       const PptxGenJS=await ensurePptx();const pptx=new PptxGenJS();
                                       pptx.defineLayout({name:"WIDE",width:13.333,height:7.5});pptx.layout="WIDE";
                                       const s0=pptx.addSlide();s0.background={color:"0A0E1A"};
