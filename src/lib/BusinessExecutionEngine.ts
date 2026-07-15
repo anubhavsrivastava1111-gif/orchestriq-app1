@@ -228,6 +228,53 @@ REASONING RULES:
 Output ONLY the JSON object. No preamble, no explanation, no markdown fences.`;
 }
 
+// Reasoning step (Excel Intelligence Engine, Phase 1): a fast, focused call
+// that decides WHAT the workbook should be before any formula gets written.
+// Mirrors the document generation pattern already proven for PDF/PPTX in this
+// same file, and the two-call architecture already recommended in an earlier
+// planning session for exactly this reason: separating "what should this
+// workbook contain" from "write every formula" produces a materially better
+// plan than asking an AI to invent both simultaneously.
+function buildExcelPlanningPrompt(
+  objective: string,
+  deliverable: DeliverableSpec,
+  companyContext: string,
+  data: string,
+): string {
+  return `You are a senior FP&A / Finance Systems architect. Before any workbook is
+built, decide its architecture. Do not write formulas or data yet \u2014 only plan.
+
+BUSINESS OBJECTIVE: ${objective}
+WORKBOOK PURPOSE: ${deliverable.purpose}
+STATED AUDIENCE: ${deliverable.audience}
+DATA AVAILABLE: ${data ? "Yes \u2014 real data provided below" : "No \u2014 generate representative professional data"}
+${data ? "DATA SAMPLE:\n" + data.slice(0, 800) : ""}
+
+Reason through, in order:
+1. What business problem is this workbook actually solving?
+2. Who precisely will use it \u2014 not just "board" or "manager", but the specific
+   role (CFO reviewing monthly close, Sales Manager tracking pipeline, HR
+   analysing attrition, etc.) \u2014 and what that role needs to see FIRST.
+3. What sheets does this specific problem require? (Not a generic template \u2014
+   the sheet list should follow from the objective. A cash flow forecast and
+   an attrition dashboard need different architectures.)
+4. What is the ONE most decision-relevant number or chart this audience will
+   look for first on the dashboard?
+5. What assumptions, if any, must be documented for this workbook to be
+   auditable by another analyst?
+
+Return ONLY this JSON, no prose:
+{
+  "businessProblem": "one sentence, specific to this objective",
+  "primaryAudience": "specific role, not a generic tier",
+  "sheetPlan": [
+    {"name": "sheet name", "purpose": "what this sheet does and why it's needed"}
+  ],
+  "keyMetric": "the single most important number/chart for the dashboard",
+  "assumptionsNeeded": ["assumption 1", "assumption 2"]
+}`;
+}
+
 function buildExcelGenPrompt(
   objective: string,
   deliverable: DeliverableSpec,
@@ -669,9 +716,33 @@ export class BusinessExecutionEngine {
     currencySymbol: string,
     onProgress: (msg: string) => void,
   ): Promise<ExecutionOutput> {
+    onProgress(`📊 Understanding the business problem...`);
+
+    // STEP 1 — reason about the workbook before building it. Fail-safe: if the
+    // planning call errors or returns unusable JSON, generation proceeds
+    // exactly as before (single-call), so this can never block a delivery.
+    let workbookPlan: any = null;
+    try {
+      const planSys = buildExcelPlanningPrompt(plan.objectiveRestated, del, companyContext, data);
+      const planRaw = await this.ask(planSys, [{ role: "user", content: "Plan the workbook now." }], 800, false, "excel_advanced");
+      const planText = typeof planRaw === "string" ? planRaw : planRaw?.text || "";
+      const planCleaned = planText.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+      const parsedPlan = JSON.parse(planCleaned);
+      if (parsedPlan?.sheetPlan?.length) workbookPlan = parsedPlan;
+    } catch { /* planning is additive — generation proceeds without it */ }
+
     onProgress(`📊 Designing workbook architecture for: ${del.title}...`);
 
-    const sys = buildExcelGenPrompt(plan.objectiveRestated, del, companyContext, data, currency, currencySymbol);
+    const planContext = workbookPlan
+      ? `\n\nWORKBOOK PLAN (already reasoned through \u2014 follow this architecture):
+Business problem: ${workbookPlan.businessProblem}
+Primary audience: ${workbookPlan.primaryAudience}
+Required sheets: ${workbookPlan.sheetPlan.map((s: any) => s.name + " \u2014 " + s.purpose).join("; ")}
+Key metric for dashboard: ${workbookPlan.keyMetric}
+Assumptions to document: ${(workbookPlan.assumptionsNeeded || []).join(", ")}`
+      : "";
+
+    const sys = buildExcelGenPrompt(plan.objectiveRestated, del, companyContext, data, currency, currencySymbol) + planContext;
     const raw = await this.ask(sys, [{
       role: "user",
       content: `Build the complete professional Excel workbook for: "${del.title}"\nPurpose: ${del.purpose}\nAudience: ${del.audience}`
