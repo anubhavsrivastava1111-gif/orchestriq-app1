@@ -368,6 +368,56 @@ ${deliverable.qualityStandard === "big4_audit" || deliverable.qualityStandard ==
 Output ONLY the JSON object. No preamble, no explanation, no markdown fences.`;
 }
 
+// Reasoning step (Presentation Intelligence Engine, Phase 1): commits to the
+// decision the audience must make BEFORE any slide gets written. This is the
+// core difference between a generic AI deck and a consulting-grade one \u2014
+// every slide downstream must trace back to supporting this one decision.
+// Same fail-safe two-call architecture as the Excel Intelligence Engine.
+function buildPPTXPlanningPrompt(
+  objective: string,
+  deliverable: DeliverableSpec,
+  companyContext: string,
+  data: string,
+): string {
+  return `You are a senior consulting Engagement Manager. Before any slide is
+designed, decide the presentation's purpose. Do not write slide content yet.
+
+BUSINESS OBJECTIVE: ${objective}
+STATED PURPOSE: ${deliverable.purpose}
+STATED AUDIENCE: ${deliverable.audience}
+DATA AVAILABLE: ${data ? "Yes" : "No \u2014 use professional industry estimates"}
+${data ? "DATA SAMPLE:\n" + data.slice(0, 800) : ""}
+
+Reason through, in order:
+1. What business problem is this presentation actually addressing?
+2. What TYPE of presentation is this, specifically? (Board Meeting, CEO
+   Update, CFO Review, Investor Pitch, Sales Pitch, Client Proposal, Due
+   Diligence, Strategy Deck, Transformation Plan, Quarterly Business Review,
+   Financial Results, Budget Review, Business Case, M&A Analysis, Risk
+   Assessment, HR Review, Product Launch, Marketing Strategy, or other \u2014
+   name the closest match.) Each type has a different structure; do not
+   default to a generic template.
+3. THE CENTRAL QUESTION: after reading this deck, what ONE decision must the
+   audience be ready to make? If you cannot state a single clear decision,
+   the presentation does not yet have a purpose \u2014 find one.
+4. What is the narrative arc that gets them there? (Problem \u2192 Evidence \u2192
+   Analysis \u2192 Insight \u2192 Recommendation \u2192 Implementation \u2192 Expected Impact
+   \u2192 Risks \u2192 Next Steps \u2014 adapt this skeleton to the presentation type.)
+5. For each planned slide, it must visibly serve the decision in step 3. If a
+   slide does not move the audience toward that decision, do not include it.
+
+Return ONLY this JSON, no prose:
+{
+  "businessProblem": "one sentence, specific to this objective",
+  "presentationType": "the specific type identified in step 2",
+  "decisionNeeded": "the ONE decision the audience must be ready to make",
+  "narrativeArc": "the sequence of story beats, adapted to this presentation type",
+  "slidePlan": [
+    {"title": "so-what headline, not a topic label", "servesDecisionBy": "one clause: how this slide moves the audience toward the decision"}
+  ]
+}`;
+}
+
 function buildPPTXGenPrompt(
   objective: string,
   deliverable: DeliverableSpec,
@@ -1179,9 +1229,34 @@ Assumptions to document: ${(workbookPlan.assumptionsNeeded || []).join(", ")}`
     data: string,
     onProgress: (msg: string) => void,
   ): Promise<ExecutionOutput> {
+    onProgress(`📊 Understanding the decision this deck must support...`);
+
+    // STEP 1 — commit to the decision and presentation type before designing
+    // slides. Fail-safe: any error here and generation proceeds exactly as
+    // before (single-call), so a delivery can never be blocked by this.
+    let deckPlan: any = null;
+    try {
+      const planSys = buildPPTXPlanningPrompt(plan.objectiveRestated, del, companyContext, data);
+      const planRaw = await this.ask(planSys, [{ role: "user", content: "Plan the presentation now." }], 900, false, "powerpoint");
+      const planText = typeof planRaw === "string" ? planRaw : planRaw?.text || "";
+      const planCleaned = planText.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+      const parsedPlan = JSON.parse(planCleaned);
+      if (parsedPlan?.decisionNeeded && parsedPlan?.slidePlan?.length) deckPlan = parsedPlan;
+    } catch { /* planning is additive — generation proceeds without it */ }
+
     onProgress(`📊 Designing presentation narrative for: ${del.title}...`);
 
-    const sys = buildPPTXGenPrompt(plan.objectiveRestated, del, companyContext, data, plan.domain);
+    const planContext = deckPlan
+      ? `\n\nDECISION-FIRST PLAN (already reasoned through \u2014 build the deck to serve this):
+Business problem: ${deckPlan.businessProblem}
+Presentation type: ${deckPlan.presentationType} \u2014 structure the deck for this specific type, not a generic template.
+THE DECISION this audience must be ready to make: ${deckPlan.decisionNeeded}
+Every slide must visibly serve this decision. If a planned slide below doesn't, you may drop it.
+Narrative arc: ${deckPlan.narrativeArc}
+Planned slide sequence: ${deckPlan.slidePlan.map((s: any) => s.title + " (" + s.servesDecisionBy + ")").join("; ")}`
+      : "";
+
+    const sys = buildPPTXGenPrompt(plan.objectiveRestated, del, companyContext, data, plan.domain) + planContext;
     const raw = await this.ask(sys, [{
       role: "user",
       content: `Build the complete consulting-grade presentation for: "${del.title}"\nPurpose: ${del.purpose}\nAudience: ${del.audience}`,
