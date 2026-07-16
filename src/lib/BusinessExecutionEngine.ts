@@ -257,15 +257,46 @@ function buildExcelPlanningPrompt(
     `objective, not from a fixed list.\n` +
     `2. What business or personal problem is this workbook actually solving?\n` +
     `3. Who precisely will use it, and what does THAT PERSON \u2014 in that field \u2014 need to see first? ` +
-    `(A wedding planner and a CFO need completely different dashboards.)\n` +
-    `4. What sheets does THIS SPECIFIC objective require? A cash flow forecast and a wedding budget ` +
-    `and a class attendance tracker all need different architectures \u2014 do not force a generic ` +
-    `finance template onto a non-financial request.\n` +
-    `5. What is the ONE most important number or view this audience needs first on the dashboard?\n` +
-    `6. What assumptions, if any, must be documented so someone else can understand and maintain it?\n\n` +
+    `(A wedding planner and a CFO need completely different dashboards.)\n\n` +
+    `4. IF \u2014 AND ONLY IF \u2014 this workbook is financial or business-analytical in nature, identify ` +
+    `which proven modeling PATTERN(S) it matches. These are not a menu to pick one from \u2014 combine ` +
+    `patterns freely when a request needs more than one, and use judgment for anything that doesn't ` +
+    `fit cleanly. This step does not apply to non-financial workbooks (a wedding budget or a class ` +
+    `gradebook does not need a "pattern" \u2014 skip straight to step 5 for those).\n\n` +
+    `  PATTERN A \u2014 Time-Series Projection (cash flow forecasts, revenue/income forecasts, budget ` +
+    `projections): rows are time periods (months/quarters). Needs a running/cumulative balance ` +
+    `column, and projections driven by growth-rate assumptions living in a separate Assumptions tab ` +
+    `\u2014 never hardcode a projected number, always derive it from a rate applied period over period.\n` +
+    `  PATTERN B \u2014 Categorisation & Tracking (expense trackers, income-source tracking, spend ` +
+    `analysis): rows are individual transactions/line items with an amount and a category. Needs a ` +
+    `category master list, SUMIFS/COUNTIFS rollups by category, and a category breakdown view \u2014 ` +
+    `the dashboard's job is to answer "where is the money actually going/coming from."\n` +
+    `  PATTERN C \u2014 Resource & Headcount Modeling (FTE/effort calculation, staffing cost, capacity ` +
+    `planning): rows are roles or people, with hours/cost/allocation percentage columns. Needs a ` +
+    `per-role cost formula and a total FTE/utilisation rollup \u2014 the dashboard's job is to answer ` +
+    `"how many people, doing what, costing how much."\n` +
+    `  PATTERN D \u2014 Comparison & Variance (budget vs actual, plan vs actual, period-over-period): two ` +
+    `parallel data sets that must be DIFFERENCED against each other. Needs a variance formula, a ` +
+    `variance percentage, and RAG (red/amber/green) conditional formatting on the gap \u2014 never just ` +
+    `show two numbers side by side without computing the difference.\n` +
+    `  PATTERN E \u2014 Reconciliation & Matching (bank reconciliation, account/ledger matching): two data ` +
+    `sets that must be MATCHED against each other, not just differenced. Needs matching logic and an ` +
+    `explicit "unreconciled/exceptions" view \u2014 the dashboard's job is to answer "what still doesn't ` +
+    `match, and by how much."\n` +
+    `  PATTERN F \u2014 Ratio & Health-Check Analysis (financial ratio analysis, business-health ` +
+    `dashboards, general "help me understand my business"): one dataset, multiple DERIVED ratios ` +
+    `computed from the raw inputs (margins, liquidity, efficiency), each benchmarked against a ` +
+    `sensible threshold \u2014 the dashboard's job is to flag which ratios are healthy vs. concerning.\n\n` +
+    `5. What sheets does THIS SPECIFIC objective require, given the pattern(s) identified above? Do ` +
+    `not force a generic finance template onto a non-financial request, and do not force a single ` +
+    `pattern's structure onto a request that genuinely needs two combined (e.g. a cash flow forecast ` +
+    `WITH variance vs. budget is Pattern A + Pattern D together).\n` +
+    `6. What is the ONE most important number or view this audience needs first on the dashboard?\n` +
+    `7. What assumptions, if any, must be documented so someone else can understand and maintain it?\n\n` +
     `Return ONLY this JSON, no prose:\n` +
     `{\n` +
     `  "fieldOrDomain": "the specific field identified in step 1 \u2014 be precise, not generic",\n` +
+    `  "financialArchetype": "which PATTERN(S) apply (e.g. \\"A\\", \\"A+D\\", \\"C\\") \u2014 or \\"N/A\\" if this is not a financial/analytical workbook",\n` +
     `  "businessProblem": "one sentence, specific to this objective",\n` +
     `  "primaryAudience": "specific role or person type, not a generic tier",\n` +
     `  "sheetPlan": [{"name": "sheet name", "purpose": "what this sheet does and why it is needed"}],\n` +
@@ -861,13 +892,26 @@ export class BusinessExecutionEngine {
 
     onProgress(`📊 Designing workbook architecture for: ${del.title}...`);
 
+    const archetypeGuide: Record<string, string> = {
+      A: "Time-series projection: build a running/cumulative balance column; every projected figure must derive from a growth-rate assumption, never a hardcoded guess.",
+      B: "Categorisation & tracking: build a category master list and SUMIFS/COUNTIFS rollups by category; the dashboard must show where money is actually going/coming from.",
+      C: "Resource & headcount modeling: build a per-role cost formula and a total FTE/utilisation rollup; the dashboard must show headcount, allocation, and total cost.",
+      D: "Comparison & variance: compute an explicit variance and variance % between the two data sets, with RAG conditional formatting on the gap \u2014 never show two numbers side by side unstudied.",
+      E: "Reconciliation & matching: build explicit matching logic between the two sources and a clear unreconciled/exceptions view.",
+      F: "Ratio & health-check: compute multiple derived ratios from the raw inputs, each benchmarked against a sensible threshold, and flag healthy vs. concerning.",
+    };
+    const archetypeNote = workbookPlan?.financialArchetype && workbookPlan.financialArchetype !== "N/A"
+      ? "\nFinancial pattern(s) identified (" + workbookPlan.financialArchetype + "): " +
+        String(workbookPlan.financialArchetype).split("+").map((k: string) => archetypeGuide[k.trim()] || "").filter(Boolean).join(" ")
+      : "";
+
     const planContext = workbookPlan
       ? `\n\nWORKBOOK PLAN (already reasoned through \u2014 follow this architecture):
 Business problem: ${workbookPlan.businessProblem}
 Primary audience: ${workbookPlan.primaryAudience}
 Required sheets: ${workbookPlan.sheetPlan.map((s: any) => s.name + " \u2014 " + s.purpose).join("; ")}
 Key metric for dashboard: ${workbookPlan.keyMetric}
-Assumptions to document: ${(workbookPlan.assumptionsNeeded || []).join(", ")}`
+Assumptions to document: ${(workbookPlan.assumptionsNeeded || []).join(", ")}${archetypeNote}`
       : "";
 
     const sys = buildExcelGenPrompt(plan.objectiveRestated, del, companyContext, data, currency, currencySymbol) + planContext;
