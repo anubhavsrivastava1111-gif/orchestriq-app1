@@ -2997,32 +2997,50 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
           (architectReasoning.keyAssumptions?.length?"Assumptions being made: "+architectReasoning.keyAssumptions.join("; ")+nl:"")
         :"";
       const architectSys="You are the Project Architect for "+co.name+". Decompose the objective into a structured Execution Plan."+nl+nl+"COMPANY: "+ctx.company.name+" | "+ctx.company.industry+" | "+ctx.company.stage+" | "+ctx.company.location+" | "+ctx.company.currencySymbol+ctx.company.currency+nl+(Object.keys(ctx.dataHub).length>0?"DATA HUB:"+nl+Object.entries(ctx.dataHub).map(function(e){return e[0]+": "+e[1];}).join(nl)+nl:"")+( ctx.boardroomDecisions.length>0?"RECENT BOARDROOM DECISIONS:"+nl+ctx.boardroomDecisions.map(function(d){return "Q: "+d.question+" -> "+d.decisionStatus;}).join(nl)+nl:"")+(ctx.timeMachineForecasts?"TIME MACHINE FORECAST ON RECORD:"+nl+ctx.timeMachineForecasts+nl:"")+(ctx.priorWorkflowOutputs.length>0?"RECENT APPROVED WORKFLOW OUTPUTS:"+nl+ctx.priorWorkflowOutputs.map(function(p){return p.task+" ("+p.category+"): "+p.output;}).join(nl)+nl:"")+(ctx.ledgerSummary?"GENERAL LEDGER (recent entries): "+ctx.ledgerSummary+nl:"")+(ctx.financeSummary?"FINANCE SUITE: "+ctx.financeSummary+nl:"")+(ctx.pulseSummary?"PULSE GOVERNANCE: "+ctx.pulseSummary+nl:"")+(ctx.actionsSummary?"OPEN ACTION ITEMS: "+ctx.actionsSummary+nl:"")+(ctx.autopilotSummary?"AUTOPILOT RECENT DECISION SCAN: "+ctx.autopilotSummary+nl:"")+(ctx.fundingSummary?"FUNDING STAGE: "+ctx.fundingSummary+nl:"")+nl+"OUTPUT: Return ONLY valid JSON (no markdown fences) matching this exact schema:"+nl+'{"name":"short project name","objective":"one sentence","complexity":"simple|moderate|complex","estimatedDuration":"e.g. 2-3 hours","modules":[{"id":"module_id","name":"Module Name","icon":"emoji","capabilityType":"marketing|design|content|finance|legal|management|engineering|research|compliance","primaryPersona":"cmo","rationale":"why needed","deliverables":[{"id":"del_moduleid_001","name":"Deliverable Name","description":"what it must contain","outputFormat":"docx|xlsx|pdf|pptx|md|txt|image|video|linkedin_post|facebook_post|instagram_post|whatsapp_message|email","dependsOn":[],"verificationStatus":"AI Generated","confidenceScore":0,"sourceReferences":[]}]}]}'+nl+nl+templateHint+nl+nl+"RULES:"+nl+"1. Every deliverable must be a real, immediately usable file — never a discussion, never instructions for the user to do it themselves."+nl+"2. Use only modules genuinely required by the objective."+nl+"3. Min 2 max 8 modules. Min 1 max 5 deliverables each."+nl+"4. dependsOn IDs must reference earlier deliverable ids."+nl+"5. Currency symbol: "+ctx.company.currencySymbol+"\n6. IMPORTANT — Use outputFormat=image for any visual deliverable (ad image, logo, banner, infographic, social creative). Platform generates the actual image automatically."+"\n7. IMPORTANT — Use outputFormat=video for any video deliverable (promo video, explainer, reel, ad video). Platform generates the actual video automatically."+"\n8. NEVER use image_prompt or video_prompt. These are deprecated. Always use image or video."+"\n9. CRITICAL — ONE FILE, NOT ONE DELIVERABLE PER SHEET: if the objective describes ONE workbook, document, or deck that should contain multiple SHEETS, TABS, or SECTIONS that reference or build on each other (e.g. \"the workbook should contain sheets for data input, reconciliation, calculations, and dashboard\"), this is exactly ONE deliverable — a single xlsx/docx/pptx file with that internal structure. Do NOT create a separate deliverable per named sheet/tab/section. Splitting a single interrelated workbook into many small files breaks cross-sheet formulas and produces disconnected, low-quality output. Only create multiple deliverables when the objective genuinely asks for multiple standalone files (e.g. \"a Word report AND a separate PowerPoint deck\", or \"one workbook per region\")."+"\n10. Do NOT invent an image/video/mockup deliverable unless the objective explicitly asks for a picture, graphic, banner, or video asset. A request for \"interactive charts\" or \"a dashboard\" inside a workbook means charts BUILT INTO that file — not a separate standalone image or video deliverable."+"\n11. Social/messaging formats (linkedin_post, facebook_post, instagram_post, whatsapp_message, email) are each ONE short, ready-to-post/ready-to-send deliverable — never bundle multiple platforms' copy into a single deliverable, and never use these formats unless the objective actually asks for marketing/outreach copy or correspondence."+reasoningContext;
-      let raw=await ask(architectSys,[{role:"user",content:"Objective: "+projectObjective}],4000,false,"general");
+      // Root-cause fix: a detailed, comprehensive objective (many worksheets,
+      // hundreds of sample rows, dozens of named formulas) needs real room to
+      // describe the plan — 4000 tokens was silently truncating large plans
+      // mid-generation, and the truncation-recovery below would keep only
+      // whatever modules were complete before the cut, with no signal that
+      // anything was missing. Raised substantially so a comprehensive request
+      // actually gets a comprehensive plan instead of a truncated fragment.
+      let raw=await ask(architectSys,[{role:"user",content:"Objective: "+projectObjective}],9000,false,"general");
       // Guard: empty or error-string responses (provider limit, consensus-merge
       // hiccup) are not plan failures — retry once, forcing a clean single call.
       const looksBad=(r:string)=>!r||r.trim().length<40||/^(error|rate limit|too many|unauthorized|invalid api)/i.test(r.trim());
       if(looksBad(raw)){
         await new Promise(r=>setTimeout(r,1500));
-        raw=await ask(architectSys,[{role:"user",content:"Objective: "+projectObjective+"\n\nReturn ONLY the JSON plan, no other text."}],4000,false,"general");
+        raw=await ask(architectSys,[{role:"user",content:"Objective: "+projectObjective+"\n\nReturn ONLY the JSON plan, no other text."}],9000,false,"general");
       }
       let plan=null;
+      let planWasTruncated=false; // surfaced to the user below — never silent again
       try{
         const cleaned=raw.trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/```\s*$/,"");
         try{plan=JSON.parse(cleaned);}catch{
           // Preamble tolerance: extract the first balanced JSON object
           const st=cleaned.indexOf("{");
           if(st>=0){try{plan=JSON.parse(cleaned.slice(st,cleaned.lastIndexOf("}")+1));}catch{}}
-          // Truncation tolerance: universal repair recovers all complete modules
-          if(!plan?.modules)plan=repairTruncatedJson(raw);
+          // Truncation tolerance: universal repair recovers all complete modules.
+          // Reaching this point at all means the response did not parse cleanly
+          // as-is — for a plan this is the concrete signal that it was cut off.
+          if(!plan?.modules){plan=repairTruncatedJson(raw);planWasTruncated=true;}
         }
         if(!plan||!plan.modules||!Array.isArray(plan.modules)||!plan.modules.length){
-          const retryRaw=await ask(architectSys+"\n\nCRITICAL: Your entire response must be ONLY the JSON object. Start with { and end with }. No prose, no fences, no explanation.",[{role:"user",content:"Objective: "+projectObjective}],4500,false,"general");
+          const retryRaw=await ask(architectSys+"\n\nCRITICAL: Your entire response must be ONLY the JSON object. Start with { and end with }. No prose, no fences, no explanation.",[{role:"user",content:"Objective: "+projectObjective}],9500,false,"general");
           const rc=retryRaw.trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/```\s*$/,"");
-          try{plan=JSON.parse(rc);}catch{const s2=rc.indexOf("{");if(s2>=0){try{plan=JSON.parse(rc.slice(s2,rc.lastIndexOf("}")+1));}catch{}}if(!plan?.modules)plan=repairTruncatedJson(retryRaw);}
+          try{plan=JSON.parse(rc);}catch{const s2=rc.indexOf("{");if(s2>=0){try{plan=JSON.parse(rc.slice(s2,rc.lastIndexOf("}")+1));}catch{}}if(!plan?.modules){plan=repairTruncatedJson(retryRaw);planWasTruncated=true;}}
         }
         if(!plan||!plan.modules||!Array.isArray(plan.modules)||!plan.modules.length)throw new Error("Invalid plan structure");
         plan.modules=plan.modules.filter((m)=>m&&m.name&&Array.isArray(m.deliverables)&&m.deliverables.length);
         if(!plan.modules.length)throw new Error("Invalid plan structure");
+        // Comprehensive objectives with a suspiciously thin result (1 module,
+        // or 1 deliverable total) are very likely truncated even if JSON.parse
+        // technically succeeded on a cleanly-closed-but-incomplete fragment.
+        const totalDels=plan.modules.reduce((s:number,m:any)=>s+(m.deliverables?.length||0),0);
+        if((planWasTruncated||plan.modules.length<2||totalDels<2)&&projectObjective.trim().length>400){
+          plan._possiblyIncomplete=true;
+          showToast("\u26a0 This plan may be incomplete \u2014 your objective was detailed and the response may have been cut short. Review the plan carefully before approving; you can also try splitting a very large request into smaller ones.","warning");
+        }
       }catch(parseErr:any){
         const reason=looksBad(raw)?"the AI provider returned an empty response (check API keys / usage limits, and turn OFF Multi-AI Consensus)":"the plan format could not be parsed";
         console.error("[OIQ] Plan generation failed:",reason,"| raw head:",String(raw||"").slice(0,300));
@@ -5598,7 +5616,29 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                       for(let p=1;p<=pg;p++){doc.setPage(p);doc.setFontSize(7);doc.setTextColor(150,150,150);doc.text("Page "+p+" of "+pg,M,H-18);}
                                       doc.save(nm+".pdf");
                                     }catch(e){showToast("PDF: "+e.message,"error");}}
-                                    else if(fmt==="xlsx"){try{
+                                    else if(fmt==="xlsx"){
+                                      // FIX: this path never called the real engine — it did a naive
+                                      // pipe-character split with zero formulas, zero styling, zero
+                                      // charts, none of the Excel Intelligence Engine work. It has been
+                                      // producing a worse file than the main package this whole time.
+                                      // Same publication-engine-first pattern as the pdf/pptx branches
+                                      // right next to it — inline is now only the last-resort fallback.
+                                      let _xlsxOk=false;
+                                      try{
+                                        const _pubCtx=[projectExecution?.context?.company?.name||co.name||"",projectExecution?.context?.company?.industry||co.industry||"",projectExecution?.context?.company?.stage||co.stage||""].filter(Boolean).join(" | ");
+                                        let _w=false;
+                                        const _bee=new BusinessExecutionEngine(
+                                          async(sys:any,msgs:any,maxT?:any,_es?:any,tt?:any)=>(await callMulti({...keys,...(EFF_CLAUDE?.trim()?{claude:EFF_CLAUDE}:{}),...(EFF_GEMINI?.trim()?{gemini:EFF_GEMINI}:{}),...(EFF_GROQ?.trim()?{groq:EFF_GROQ}:{})},defP,sys,msgs,maxT||6000,false,tt||"general")).primary,
+                                          ensureXLSX,ensurePptx,ensureJsPDF,
+                                          (_fname:any,buf:any)=>{dlFile(nm+".xlsx",buf,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");_w=true;},
+                                          stripMd);
+                                        const _spec:DeliverableSpec={type:"xlsx",title:del.name,purpose:del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
+                                        const _plan:ExecutionPlan={objectiveRestated:del.name,domain:"finance",persona:"Senior FP&A Director",audience:"board",qualityStandard:"cfo_model",decisionContext:del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+                                        const _res:any=await _bee.generateExcel(_plan,_spec,_pubCtx,cnt,projectExecution?.context?.company?.currency||"INR",projectExecution?.context?.company?.currencySymbol||"₹",()=>{});
+                                        _xlsxOk=_w;
+                                        if(!_w&&_res?.error)throw new Error(_res.error);
+                                      }catch(_e:any){recordEngineDowngrade(del.name,"xlsx",_e);}
+                                      if(!_xlsxOk)try{
                                       const XLSX=await ensureXLSX();const wb=XLSX.utils.book_new();
                                       const rows=cnt.split("\n").filter(Boolean).map(r=>r.split("|").filter((c,ii,a)=>ii>0&&ii<a.length-1).map(c=>c.trim())).filter(r=>r.length>1&&!r.every(c=>c.match(/^[-:]+$/)));
                                       const ws=rows.length>0?XLSX.utils.aoa_to_sheet(rows):XLSX.utils.aoa_to_sheet([[del.name],[""],[ cnt.slice(0,500)]]);
@@ -5608,7 +5648,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                       const u=URL.createObjectURL(blob);
                                       const a=document.createElement("a");a.href=u;a.download=nm+".xlsx";a.style.display="none";
                                       document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(u),200);
-                                    }catch(e){showToast("Excel: "+e.message,"error");}}
+                                    }catch(e:any){showToast("Excel: "+e.message,"error");}}
                                     else if(fmt==="docx"){
                                       const secs=parseSections(cnt);
                                       let html="<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:w=\"urn:schemas-microsoft-com:office:word\" xmlns=\"http://www.w3.org/TR/REC-html40\"><head><meta charset=\"UTF-8\"><style>@page{mso-page-orientation:portrait;margin:2.54cm;}body{font-family:Calibri,sans-serif;font-size:11pt;text-align:left;}h1{font-size:18pt;color:#14B8A6;}h2{font-size:13pt;}p{line-height:1.5;text-align:left;}table{border-collapse:collapse;width:100%;}th{background:#14B8A6;color:#fff;padding:5pt 8pt;}td{padding:4pt 8pt;border-bottom:1pt solid #ddd;}</style></head><body><h1>"+del.name+"</h1>";
