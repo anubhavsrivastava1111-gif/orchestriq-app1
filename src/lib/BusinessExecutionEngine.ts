@@ -537,6 +537,82 @@ function buildPDFDocxPrompt(
 }
 
 
+// ─── DETERMINISTIC CONTENT VALIDATION ────────────────────────────────────────
+// Checks facts a computer can verify with certainty — not an AI's opinion of
+// its own output. This is the difference between "the AI says it scored 85%"
+// (unreliable — this is what got removed) and "62% of the numeric cells in
+// this workbook are literally zero" (a fact, counted directly from the parsed
+// data before any file is built).
+//
+// Used by generateExcel and generatePPTX: parse the AI's JSON schema first,
+// run this check on the STRUCTURED data (not rendered text), and only then
+// decide whether to build the file, retry once with the exact violation
+// named, or ship with an honest warning attached.
+
+interface ContentCheck { passed: boolean; violations: string[] }
+
+function validateExcelSchema(schema: any): ContentCheck {
+  const violations: string[] = [];
+  let numericCells = 0, zeroCells = 0;
+  let placeholderHits = 0, markdownLeaks = 0;
+
+  const placeholderRe = /\[INSERT\]|\[TBD\]|PLACEHOLDER|\[ESTIMATE\]|\[ASSUMPTION\]|Lorem ipsum|TODO:/i;
+  const markdownRowRe = /^\s*\|.*\|.*\|\s*$/; // a cell that is itself a multi-column markdown row
+
+  (schema?.sheets || []).forEach((sheet: any) => {
+    (sheet.rows || []).forEach((row: any[]) => {
+      (row || []).forEach((cell: any) => {
+        if (typeof cell === "number") {
+          numericCells++;
+          if (cell === 0) zeroCells++;
+        } else if (typeof cell === "string") {
+          if (placeholderRe.test(cell)) placeholderHits++;
+          if (markdownRowRe.test(cell)) markdownLeaks++;
+          // A numeric-looking string (not a formula) is effectively a dead number —
+          // it will render as text and break any SUM/chart referencing it.
+          if (!cell.startsWith("=")) {
+            const bare = cell.replace(/^\((.*)\)$/, "-$1").replace(/[₹$€£,\s%]/g, "");
+            if (bare !== "" && /^-?\d+(\.\d+)?$/.test(bare)) {
+              numericCells++;
+              if (parseFloat(bare) === 0) zeroCells++;
+            }
+          }
+        }
+      });
+    });
+  });
+
+  if (numericCells >= 8 && zeroCells / numericCells > 0.8) {
+    violations.push(`${Math.round((zeroCells / numericCells) * 100)}% of all numeric values are zero (${zeroCells} of ${numericCells})`);
+  }
+  if (placeholderHits > 0) violations.push(`${placeholderHits} placeholder marker(s) found (e.g. [TBD], [ESTIMATE]) in cell content`);
+  if (markdownLeaks > 0) violations.push(`${markdownLeaks} cell(s) contain an un-exploded markdown table row`);
+
+  return { passed: violations.length === 0, violations };
+}
+
+function validatePptxSchema(schema: any, minSlides: number): ContentCheck {
+  const violations: string[] = [];
+  const slides = schema?.slides || [];
+  const placeholderRe = /\[INSERT\]|\[TBD\]|PLACEHOLDER|\[ESTIMATE\]|\[ASSUMPTION\]|Lorem ipsum|TODO:/i;
+
+  if (slides.length < minSlides) {
+    violations.push(`only ${slides.length} slides generated (minimum ${minSlides} required)`);
+  }
+  let placeholderSlides = 0, thinContentSlides = 0;
+  slides.forEach((s: any) => {
+    const text = String(s?.content || "") + " " + String(s?.title || "");
+    if (placeholderRe.test(text)) placeholderSlides++;
+    if (s?.layout !== "title" && s?.layout !== "section_divider" && (s?.content || "").length < 40) thinContentSlides++;
+  });
+  if (placeholderSlides > 0) violations.push(`${placeholderSlides} slide(s) contain an unfilled placeholder marker`);
+  if (thinContentSlides > slides.length * 0.3 && slides.length > 0) {
+    violations.push(`${thinContentSlides} of ${slides.length} slides have little to no real content`);
+  }
+
+  return { passed: violations.length === 0, violations };
+}
+
 // ─── BUSINESS EXECUTION ENGINE ───────────────────────────────────────────────
 
 export class BusinessExecutionEngine {
@@ -848,6 +924,40 @@ Assumptions to document: ${(workbookPlan.assumptionsNeeded || []).join(", ")}`
       return { deliverable: del, status: "failed", error: `Excel schema: could not extract valid workbook structure from AI response (${text.slice(0,100)})` };
     }
 
+    // ── DETERMINISTIC CONTENT CHECK ──────────────────────────────────────────
+    // Checks facts, not an AI's opinion: what % of numbers are actually zero,
+    // are there unfilled placeholders, did a markdown row survive un-exploded.
+    let check = validateExcelSchema(schema);
+    if (!check.passed) {
+      try {
+        onProgress(`⚠ Regenerating — ${check.violations[0]}`);
+        const retrySys = sys + `
+
+YOUR PREVIOUS ATTEMPT WAS REJECTED for these exact reasons:
+- ` +
+          check.violations.join("\n- ") +
+          `
+Fix every one of these specifically. Every numeric cell must be a real, non-zero value ` +
+          `unless zero is genuinely correct. Remove all placeholder markers. Never leave a markdown ` +
+          `table row un-split across columns.`;
+        const retryRaw = await this.ask(retrySys, [{ role: "user", content: `Rebuild the workbook for: "${del.title}", correcting the listed issues.` }], 6000, false, "excel_advanced");
+        const retryText = typeof retryRaw === "string" ? retryRaw : retryRaw?.text || "";
+        const retryCleaned = retryText.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+        let retrySchema = tryParseJSON(retryCleaned);
+        if (!retrySchema?.sheets) { const m = retryText.match(/\{[\s\S]*"sheets"[\s\S]*\}/); if (m) retrySchema = tryParseJSON(m[0]); }
+        if (!retrySchema?.sheets) retrySchema = repairTruncatedJson(retryText);
+        if (retrySchema?.sheets?.length) {
+          const retryCheck = validateExcelSchema(retrySchema);
+          // Keep the retry if it is strictly better, even if not perfect —
+          // a partial improvement is still worth keeping over the original.
+          if (retryCheck.violations.length < check.violations.length || retryCheck.passed) {
+            schema = retrySchema;
+            check = retryCheck;
+          }
+        }
+      } catch { /* keep original schema — a failed retry must never lose the first attempt */ }
+    }
+
     onProgress(`📊 Building workbook: ${schema.filename || del.title}...`);
 
     const XLSX = await this.ensureXLSX();
@@ -1104,6 +1214,10 @@ Assumptions to document: ${(workbookPlan.assumptionsNeeded || []).join(", ")}`
       filename,
       summary: schema.instructions || `${del.title} workbook generated with ${(schema.sheets || []).length} sheets.`,
       content: `Professional Excel workbook delivered: **${filename}**\n\n${schema.instructions || ""}`,
+      // Set only if the deterministic check still failed after the corrective
+      // retry — the file ships either way, but this makes the gap visible
+      // instead of a "finished-looking" file silently hiding it.
+      qualityWarning: check.passed ? undefined : `Shipped with unresolved issues after one correction attempt: ${check.violations.join("; ")}`,
     };
   }
 
@@ -1334,6 +1448,36 @@ Planned slide sequence: ${deckPlan.slidePlan.map((s: any) => s.title + " (" + s.
       if (!schema?.slides?.length) return { deliverable: del, status: "failed", error: "PPTX schema generation failed" };
     }
 
+    // ── DETERMINISTIC CONTENT CHECK ──────────────────────────────────────────
+    // Checks facts: actual slide count, actual placeholder markers, actual
+    // thin-content slides — counted directly from the parsed schema, not an
+    // AI's opinion of its own deck.
+    const minSlides = del.audience === "board" ? 12 : 8;
+    let pptxCheck = validatePptxSchema(schema, minSlides);
+    if (!pptxCheck.passed) {
+      try {
+        onProgress(`⚠ Regenerating — ${pptxCheck.violations[0]}`);
+        const retrySys = sys + `\n\nYOUR PREVIOUS ATTEMPT WAS REJECTED for these exact reasons:\n- ` +
+          pptxCheck.violations.join("\n- ") +
+          `\nFix every one of these specifically. Meet the minimum slide count. Remove all placeholder ` +
+          `markers. Give every slide (except title/section-divider layouts) substantive content.`;
+        const retryRaw = await this.ask(retrySys, [{ role: "user", content: `Rebuild the presentation for: "${del.title}", correcting the listed issues.` }], 6000, false, "powerpoint");
+        const retryText = typeof retryRaw === "string" ? retryRaw : retryRaw?.text || "";
+        const retryCleaned = retryText.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+        let retrySchema: any = null;
+        try { retrySchema = JSON.parse(retryCleaned); } catch { /* fall through */ }
+        if (!retrySchema?.slides) { const m = retryText.match(/\{[\s\S]*"slides"[\s\S]*\}/); if (m) { try { retrySchema = JSON.parse(m[0]); } catch { /* skip */ } } }
+        if (!retrySchema?.slides) { const repaired = repairTruncatedJson(retryText); if (repaired?.slides?.length) retrySchema = repaired; }
+        if (retrySchema?.slides?.length) {
+          const retryCheck = validatePptxSchema(retrySchema, minSlides);
+          if (retryCheck.violations.length < pptxCheck.violations.length || retryCheck.passed) {
+            schema = retrySchema;
+            pptxCheck = retryCheck;
+          }
+        }
+      } catch { /* keep original schema — a failed retry must never lose the first attempt */ }
+    }
+
     onProgress(`📊 Building ${(schema.slides || []).length} slides...`);
 
     const PptxGenJS = await this.ensurePptx();
@@ -1412,6 +1556,7 @@ Planned slide sequence: ${deckPlan.slidePlan.map((s: any) => s.title + " (" + s.
       filename,
       summary: `${slides.length} slides | ${schema.narrativeArc || ""}`,
       content: `Consulting-grade presentation delivered: **${filename}**\n\nNarrative: ${schema.narrativeArc || ""}`,
+      qualityWarning: pptxCheck.passed ? undefined : `Shipped with unresolved issues after one correction attempt: ${pptxCheck.violations.join("; ")}`,
     };
   }
 
@@ -2326,6 +2471,11 @@ export interface ExecutionOutput {
   content?: string;
   summary?: string;
   error?: string;
+  // Set when the deliverable was DELIVERED but failed a deterministic content
+  // check after one corrective retry (e.g. still mostly-zero, or fewer slides
+  // than mandated). The file ships — silently blocking a "good enough" result
+  // is worse than telling the user exactly what to double-check.
+  qualityWarning?: string;
 }
 
 // ─── CONVENIENCE EXPORT ───────────────────────────────────────────────────────
