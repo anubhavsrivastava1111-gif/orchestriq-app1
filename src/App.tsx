@@ -172,7 +172,7 @@ const TASK_ROUTING: Record<string,string[]> = {
   video_gen:      ["fal"],                                  // fal.ai: Kling, Seedance, Wan, Veo, Sora
   diagram:        ["fal","openai"],                         // Ideogram v3 via fal for text-accurate diagrams
   // ── SPECIALIST TEXT (Claude Sonnet = best quality) ───────────────────────
-  excel_advanced: ["claude","openai","deepseek","gemini","groq"],  // Complex formulas, VBA, multi-tab
+  excel_advanced: ["deepseek","claude","openai","gemini","groq"],  // Phase 5: DeepSeek first (~20x cheaper for this structured/formula task), Claude as automatic fallback/upgrade
   powerpoint:     ["claude","openai","deepseek","gemini","groq"],  // Structured decks, slide content
   research:       ["claude","gemini","openai","deepseek","groq"],  // Claude has built-in web search
   financial:      ["claude","deepseek","openai","gemini","groq"],  // P&L, forecast, variance, audit
