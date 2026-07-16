@@ -2193,6 +2193,9 @@ export default function App(){
   const [projectPackaging,setProjectPackaging]=useState(false);
   const [projectReviewMode,setProjectReviewMode]=useState(false);
   const [projectExcluded,setProjectExcluded]=useState({});
+  // Phase 6: user-driven iteration state — replaces the automated QA gate.
+  const [projectFeedback,setProjectFeedback]=useState<Record<string,string>>({});
+  const [projectRegeneratingId,setProjectRegeneratingId]=useState<string|null>(null);
   const [projectDashboardOpen,setProjectDashboardOpen]=useState(false);
   const [projectArchiveView,setProjectArchiveView]=useState("recent");
   const [projectSearchQ,setProjectSearchQ]=useState("");
@@ -3431,6 +3434,16 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
         const isLargeDeliverable=["xlsx","pptx","pdf","docx"].includes(del.outputFormat?.toLowerCase()||"")||del.description.length>200;
       const delTask=({xlsx:"excel_advanced",pptx:"powerpoint",pdf:"financial",docx:"financial"})[del.outputFormat]||"general";
       if(del.outputFormat==="pptx")userMsg+="\n\nThe deck MUST contain 12-16 substantive slides covering the full narrative arc (title, executive summary, agenda, 6-10 content/analysis slides with data, recommendations, next steps, closing).";
+      // Phase 4: platform-specific writing conventions for social/messaging deliverables —
+      // each platform has a genuinely different register; write to that convention, not a generic post.
+      const SOCIAL_GUIDANCE:Record<string,string>={
+        linkedin_post:"\n\nWrite ONE ready-to-post LinkedIn post. Professional register, short paragraphs (1-2 sentences each) with line breaks for readability, a strong opening hook line, 150-300 words, end with 3-5 relevant hashtags on their own line. No markdown formatting symbols — this gets copy-pasted directly into LinkedIn's editor.",
+        facebook_post:"\n\nWrite ONE ready-to-post Facebook post. Warmer and more conversational than LinkedIn, storytelling angle, 80-200 words, can include 1-2 emojis naturally, end with a clear call to action. No markdown formatting symbols.",
+        instagram_post:"\n\nWrite ONE ready-to-post Instagram caption. Punchy opening line, short and scannable, emoji-friendly throughout, 50-150 words, end with a block of 8-15 relevant hashtags on their own line separated by spaces. No markdown formatting symbols.",
+        whatsapp_message:"\n\nWrite ONE ready-to-send WhatsApp business message. Very short (under 60 words), direct and conversational, no hashtags, no formal structure, one clear call to action, sounds like a real person typing on their phone.",
+        email:"\n\nWrite ONE ready-to-send email. First line must be exactly \"Subject: \" followed by a compelling subject line, then a blank line, then the email body with a professional greeting, clear body paragraphs, and a signed closing. No markdown formatting symbols.",
+      };
+      if(SOCIAL_GUIDANCE[del.outputFormat])userMsg+=SOCIAL_GUIDANCE[del.outputFormat];
       return await callDelAI(sys,userMsg,del.outputFormat==="pptx"?6500:isLargeDeliverable?4500:2500,del.name,delTask);
       }
 
@@ -3590,12 +3603,47 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
     setProjects(prev=>{const ns=prev.map(p=>p.id===currentProj.id?currentProj:p);sv("cos-projects",ns);return ns;});
     setProjectExecuting(false);
     setProjectExecPhase("");
-    if(completedCount>0)setTimeout(()=>runProjectQA(currentProj),500);
-    else showToast("⚠ No deliverables completed","warning");
+    // Phase 6: the automated post-execution QA pass is removed entirely — it was
+    // a second AI call per deliverable asking the AI to grade its own work, and
+    // could flip an already-successful deliverable to "qa_failed" on nothing
+    // more than its own unreliable self-assessment. The instant, fact-based
+    // per-deliverable label computed above (placeholders/assumptions detected
+    // directly from the content) already gives an honest signal without a
+    // slow, blocking, self-grading extra pass. Quality now improves through
+    // your own review and specific feedback below, not an automated gate.
+    if(completedCount===0)showToast("⚠ No deliverables completed","warning");
 
   },[projectExecuting,keys,buildProjectContext,showToast,sv,isRateLimit,markProviderExhausted,waitWithCountdown,stripMd,callAI]);
   // Keep ref current so approveProjectPlan can call it without dep ordering issues
   runProjectExecutionRef.current=runProjectExecution;
+
+  // Phase 6: user-driven iteration — replaces the automated self-grading QA
+  // pass. You review what was generated; if something needs changing, say
+  // exactly what and this makes ONLY that change, leaving everything else
+  // that already worked untouched. Self-contained: does not depend on any
+  // function scoped inside runProjectExecution, so it is safe to call from
+  // the review panel independently of an active execution run.
+  const regenerateDeliverableWithFeedback=useCallback(async(modId:string,delId:string,delName:string,currentContent:string)=>{
+    const feedback=(projectFeedback[delId]||"").trim();
+    if(!feedback){showToast("Enter what you'd like changed first","warning");return;}
+    setProjectRegeneratingId(delId);
+    try{
+      const sys="You are revising a business deliverable based on specific user feedback. Make ONLY the change the feedback asks for \u2014 keep everything else that already works exactly as it is. Output ONLY the complete revised content: no preamble, no explanation of what changed, no markdown fences.";
+      const msg="DELIVERABLE: "+delName+"\n\nCURRENT CONTENT:\n"+currentContent.slice(0,4000)+"\n\nUSER FEEDBACK \u2014 apply this specific change:\n"+feedback;
+      const revised=await ask(sys,[{role:"user",content:msg}],3000,false,"general");
+      const revisedText=(typeof revised==="string"?revised:(revised as any)?.text||"").trim();
+      if(!revisedText){showToast("Regeneration returned nothing \u2014 try again","error");setProjectRegeneratingId(null);return;}
+      rawContentStore.current[delId]=revisedText;
+      try{localStorage.setItem("cos-rc-"+delId,revisedText);}catch{}
+      const preview=revisedText.slice(0,800)+(revisedText.length>800?"\n\n[...full content in export backup...]":"");
+      setProjectExecution((prev:any)=>prev?{...prev,modules:(prev.modules||[]).map((m:any)=>m.id!==modId?m:{...m,deliverables:(m.deliverables||[]).map((d:any)=>d.id!==delId?d:{...d,rawContent:preview})})}:prev);
+      setProjectFeedback(prev=>({...prev,[delId]:""}));
+      showToast("\u2713 Updated: "+delName,"success");
+    }catch(e:any){
+      showToast("Regeneration failed: "+(e?.message||"unknown error"),"error");
+    }
+    setProjectRegeneratingId(null);
+  },[projectFeedback,ask,showToast]);
 
   const runProjectQA=useCallback(async(proj)=>{
     if(projectQARunning||!proj)return;
@@ -4179,15 +4227,36 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             zip.folder(folder).file(fname+"."+ext,blob);
             zip.folder(folder).file(fname+(fmt==="video"?"-script.md":"-brief.md"),(fmt==="video"?"## Video Script\n\n":"## Image Brief\n\n")+content);
           }catch(mediaErr:any){
+            // Phase 5: graceful capability-limit fallback. Rather than just
+            // naming the error, use the Research Desk (already live-web-search
+            // capable) to find CURRENT tools and real pricing, and hand back a
+            // clear, non-technical, step-by-step alternative — never leave the
+            // user with only a raw error and no path forward.
+            let alternativeGuide="";
+            try{
+              setProjectExecPhase("\ud83d\udd0d "+(fmt==="video"?"Video":"Image")+" generation unavailable \u2014 researching alternatives...");
+              const researchQ="current best "+(fmt==="video"?"AI video generation tools 2026 with pricing (e.g. Runway, Pika, Kling, Luma)":"AI image generation tools 2026 with pricing (e.g. Midjourney, DALL-E, Ideogram)")+" for a "+(del.description||del.name).slice(0,150);
+              alternativeGuide=await runResearchDesk((s,m,t)=>ask(s,m,t,true),co,compData,researchQ,showToast);
+            }catch{/* research is best-effort — the honest error below always ships regardless */}
             zip.folder(folder).file(fname+"-GENERATION-FAILED.md",
-              "\u26a0 "+fmt.toUpperCase()+" GENERATION FAILED\n\nERROR: "+(mediaErr?.message||String(mediaErr))+
-              "\n\nDALL\u00b7E fallback: "+(fmt==="image"?(((keys as any).openai||"").trim()?"attempted (see error above)":"NOT attempted \u2014 no OpenAI key saved in Settings"):"not applicable (video)")+
-              "\n\nFIX: Verify the fal.ai API key (Settings \u2192 fal.ai), account credits, and network access to fal.run.\n\n## Prompt (retry after fixing)\n\n"+content);
+              "\u26a0 "+fmt.toUpperCase()+" COULD NOT BE GENERATED\n\n"+
+              "WHY: "+(mediaErr?.message||String(mediaErr))+"\n\n"+
+              "DALL\u00b7E fallback: "+(fmt==="image"?(((keys as any).openai||"").trim()?"attempted (see error above)":"NOT attempted \u2014 no OpenAI key saved in Settings"):"not applicable (video)")+"\n\n"+
+              "TO FIX IT ON THIS PLATFORM: verify the fal.ai API key (Settings \u2192 fal.ai), account credits, and network access to fal.run, then re-run this deliverable.\n\n"+
+              (alternativeGuide?"## Or Get It Done Right Now, Elsewhere\n\n"+alternativeGuide+"\n\nCopy the prompt below into whichever tool you choose above.\n\n":"")+
+              "## Prompt (use on this platform after fixing, or on an alternative tool above)\n\n"+content);
           }
         } else if(fmt==="svg"){
           // SVG diagrams — save as proper .svg file that opens in browsers
           const svgContent=content.includes("<svg")?content:"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 800 500\">\n"+content+"\n</svg>";
           zip.folder(folder).file(fname+".svg",svgContent);
+        } else if(["linkedin_post","facebook_post","instagram_post","whatsapp_message","email"].includes(fmt)){
+          // Phase 4: social/messaging deliverables — plain, clean text, ready to
+          // copy-paste straight into the target app. No markdown syntax, no
+          // file-format complexity needed for these.
+          const platformLabel:Record<string,string>={linkedin_post:"LinkedIn Post",facebook_post:"Facebook Post",instagram_post:"Instagram Caption",whatsapp_message:"WhatsApp Message",email:"Email"}[fmt]||fmt;
+          const cleanText=stripMd(content).trim();
+          zip.folder(folder).file(fname+".txt","── "+platformLabel+" — ready to copy and paste ──\n\n"+cleanText);
         } else {
           zip.folder(folder).file(fname+"."+(fmt||"txt"),content);
         }
@@ -5575,7 +5644,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                       });
                                       await pptx.writeFile({fileName:nm+".pptx"});
                                     }catch(e){showToast("PPT: "+e.message,"error");}}
-                                    else{dlFile(nm+"."+(fmt||"txt"),cnt,"text/plain");}
+                                    else if(["linkedin_post","facebook_post","instagram_post","whatsapp_message","email"].includes(fmt)){dlFile(nm+".txt",stripMd(cnt).trim(),"text/plain");} else{dlFile(nm+"."+(fmt||"txt"),cnt,"text/plain");}
                                   }} style={{...S.hBtn,fontSize:8}}>↓</button>
                                 </div>
                                 {del.qaResult&&(
@@ -5587,6 +5656,21 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                     ))}
                                   </div>
                                 )}
+                                {/* Phase 6: user-driven iteration — say what you'd like changed, get exactly that change */}
+                                <div style={{display:"flex",gap:4,marginTop:5,alignItems:"center"}}>
+                                  <input
+                                    value={projectFeedback[del.id]||""}
+                                    onChange={e=>setProjectFeedback(prev=>({...prev,[del.id]:e.target.value}))}
+                                    placeholder="What would you like changed? (optional)"
+                                    disabled={projectRegeneratingId===del.id}
+                                    style={{...S.inp,flex:1,fontSize:9,padding:"4px 8px"}}
+                                  />
+                                  <button
+                                    onClick={()=>regenerateDeliverableWithFeedback(del.moduleId,del.id,del.name,rawContentStore.current[del.id]||del.rawContent||"")}
+                                    disabled={projectRegeneratingId===del.id||!(projectFeedback[del.id]||"").trim()}
+                                    style={{...S.hBtn,fontSize:8,opacity:(projectRegeneratingId===del.id||!(projectFeedback[del.id]||"").trim())?0.4:1,whiteSpace:"nowrap"}}
+                                  >{projectRegeneratingId===del.id?"Updating...":"Apply"}</button>
+                                </div>
                               </div>
                             ))}
                           </div>
