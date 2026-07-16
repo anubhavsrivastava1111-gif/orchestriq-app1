@@ -241,39 +241,40 @@ function buildExcelPlanningPrompt(
   companyContext: string,
   data: string,
 ): string {
-  return `You are a senior FP&A / Finance Systems architect. Before any workbook is
-built, decide its architecture. Do not write formulas or data yet \u2014 only plan.
-
-BUSINESS OBJECTIVE: ${objective}
-WORKBOOK PURPOSE: ${deliverable.purpose}
-STATED AUDIENCE: ${deliverable.audience}
-DATA AVAILABLE: ${data ? "Yes \u2014 real data provided below" : "No \u2014 generate representative professional data"}
-${data ? "DATA SAMPLE:\n" + data.slice(0, 800) : ""}
-
-Reason through, in order:
-1. What business problem is this workbook actually solving?
-2. Who precisely will use it \u2014 not just "board" or "manager", but the specific
-   role (CFO reviewing monthly close, Sales Manager tracking pipeline, HR
-   analysing attrition, etc.) \u2014 and what that role needs to see FIRST.
-3. What sheets does this specific problem require? (Not a generic template \u2014
-   the sheet list should follow from the objective. A cash flow forecast and
-   an attrition dashboard need different architectures.)
-4. What is the ONE most decision-relevant number or chart this audience will
-   look for first on the dashboard?
-5. What assumptions, if any, must be documented for this workbook to be
-   auditable by another analyst?
-
-Return ONLY this JSON, no prose:
-{
-  "businessProblem": "one sentence, specific to this objective",
-  "primaryAudience": "specific role, not a generic tier",
-  "sheetPlan": [
-    {"name": "sheet name", "purpose": "what this sheet does and why it's needed"}
-  ],
-  "keyMetric": "the single most important number/chart for the dashboard",
-  "assumptionsNeeded": ["assumption 1", "assumption 2"]
-}`;
+  return (
+    `You are a world-class expert who adapts to ANY field \u2014 finance, HR, healthcare, ` +
+    `education, construction, event planning, logistics, science, retail, law, sports, ` +
+    `personal projects, or anything else. Before any workbook is built, decide its architecture.\n\n` +
+    `OBJECTIVE: ${objective}\n` +
+    `STATED PURPOSE: ${deliverable.purpose}\n` +
+    `STATED AUDIENCE: ${deliverable.audience}\n` +
+    `DATA AVAILABLE: ${data ? "Yes \u2014 real data provided below" : "No \u2014 generate representative data for this specific field"}\n` +
+    `${data ? "DATA SAMPLE:\n" + data.slice(0, 800) : ""}\n\n` +
+    `Reason through, in order:\n` +
+    `1. WHAT FIELD IS THIS IN? Do not assume finance/business by default. It could be a wedding ` +
+    `budget, a class gradebook, a construction schedule, a research dataset, a fitness log, a ` +
+    `non-profit donor tracker, a recipe cost calculator \u2014 identify the actual field from the ` +
+    `objective, not from a fixed list.\n` +
+    `2. What business or personal problem is this workbook actually solving?\n` +
+    `3. Who precisely will use it, and what does THAT PERSON \u2014 in that field \u2014 need to see first? ` +
+    `(A wedding planner and a CFO need completely different dashboards.)\n` +
+    `4. What sheets does THIS SPECIFIC objective require? A cash flow forecast and a wedding budget ` +
+    `and a class attendance tracker all need different architectures \u2014 do not force a generic ` +
+    `finance template onto a non-financial request.\n` +
+    `5. What is the ONE most important number or view this audience needs first on the dashboard?\n` +
+    `6. What assumptions, if any, must be documented so someone else can understand and maintain it?\n\n` +
+    `Return ONLY this JSON, no prose:\n` +
+    `{\n` +
+    `  "fieldOrDomain": "the specific field identified in step 1 \u2014 be precise, not generic",\n` +
+    `  "businessProblem": "one sentence, specific to this objective",\n` +
+    `  "primaryAudience": "specific role or person type, not a generic tier",\n` +
+    `  "sheetPlan": [{"name": "sheet name", "purpose": "what this sheet does and why it is needed"}],\n` +
+    `  "keyMetric": "the single most important number/view for the dashboard",\n` +
+    `  "assumptionsNeeded": ["assumption 1", "assumption 2"]\n` +
+    `}`
+  );
 }
+
 
 function buildExcelGenPrompt(
   objective: string,
@@ -285,47 +286,61 @@ function buildExcelGenPrompt(
 ): string {
   const noData = !data || data.trim().length < 20;
   return (
-    `You are a Big4 Partner / Senior FP\u0026A Director. Build a production-grade Excel workbook for a CFO.` +
-    `\n\nBUSINESS OBJECTIVE: ${objective}` +
-    `\nWORKBOOK PURPOSE: ${deliverable.purpose}` +
-    `\nAUDIENCE: ${deliverable.audience}` +
-    `\nCURRENCY: ${currencySymbol} (${currency})` +
-    `\nCOMPANY CONTEXT:\n${companyContext}` +
-    `\nINPUT DATA:\n${noData ? "No data provided. Generate realistic professional sample data (see DATA RULES)." : data}` +
-    `\n\n` +
-    `=== THE MOST IMPORTANT RULE ===\n` +
-    `ZERO IS NEVER AN ACCEPTABLE FINANCIAL FIGURE. A workbook of zeros is worthless.\n` +
-    `Every revenue, expense, and balance cell MUST contain a real number.\n` +
-    `If no data is provided, INVENT realistic industry-appropriate figures. That is your job.\n` +
+    `You are a world-class practitioner in whatever field this workbook belongs to \u2014 not ` +
+    `necessarily finance. Adopt the expertise, terminology, and structure a genuine expert in ` +
+    `THAT field would use (a wedding planner for a wedding budget, a teacher for a gradebook, ` +
+    `a site manager for a construction tracker, a scientist for a research log, a Big4 partner ` +
+    `only if this genuinely is a financial/audit workbook). Build a production-grade workbook ` +
+    `the intended person can use immediately, with no manual editing.\n\n` +
+    `OBJECTIVE: ${objective}\n` +
+    `WORKBOOK PURPOSE: ${deliverable.purpose}\n` +
+    `AUDIENCE: ${deliverable.audience}\n` +
+    `CURRENCY (only relevant if the workbook involves money): ${currencySymbol} (${currency})\n` +
+    `COMPANY/PROJECT CONTEXT:\n${companyContext}\n` +
+    `INPUT DATA:\n${noData ? "No data provided. Generate realistic sample data appropriate to the identified field \u2014 see DATA RULES." : data}\n\n` +
+    `=== THE MOST IMPORTANT RULE \u2014 APPLIES TO EVERY FIELD ===\n` +
+    `A PLACEHOLDER VALUE IS NEVER ACCEPTABLE. Whatever the unit of measurement in this field \u2014 ` +
+    `money, hours, guests, students, tasks, samples, points \u2014 every quantitative cell must contain ` +
+    `a real, usable value. A workbook full of zeros or blanks is worthless regardless of domain.\n` +
+    `If no data is provided, INVENT realistic figures appropriate to the specific field identified. ` +
+    `That is your job.\n` +
     `=== END MOST IMPORTANT RULE ===\n\n` +
-    `DATA RULES (non-negotiable):\n` +
-    `1. ALL numeric cells must be real numbers, never 0 unless 0 is genuinely correct.\n` +
-    `2. Data must be internally consistent (monthly x 12 = annual).\n` +
-    `3. Every formula must reference cells that contain populated data in this workbook.\n` +
-    `4. Dashboard KPIs must be formula-driven from data sheets, never hardcoded.\n` +
-    `5. Time series must cover at least 6 periods.\n` +
-    `6. Sample data must be realistic for the industry and objective stated.\n\n` +
-    `FORMULA RULES:\n` +
-    `- Use real Excel formula strings: =SUM(B2:B13), =IFERROR(C5/B5-1,"N/A"), =IF(D2>E2,"Over Budget","OK")\n` +
-    `- Cross-sheet: =Data!C2, ='Bank Transactions'!B15\n` +
-    `- A formula cell must start with "=" — it will be promoted to a real Excel formula.\n` +
-    `- NEVER write a formula referencing an empty cell. Populate the source cell first.\n\n` +
-    `CORRECT row example (P&L data sheet):\n` +
-    `["Jan 2024", 1250000, 840000, "=B2-C2", "=D2/B2"]\n` +
-    `CORRECT row example (assumptions sheet):\n` +
-    `["Revenue Growth Rate", 0.08, "Annual rate — update this cell only"]\n` +
-    `CORRECT row example (dashboard KPI):\n` +
-    `["Total Revenue", "=SUM(Data!B2:B13)", "currency", "YTD"]\n\n` +
-    `WRONG — will produce a zero workbook (NEVER DO THIS):\n` +
-    `["Total Revenue", 0, null, "currency"]  <- zero is wrong\n` +
-    `["Total Revenue", null, null, "currency"] <- null is wrong\n` +
-    `["Total Revenue", "VALUE", null] <- string placeholder is wrong\n\n` +
-    `SHEET BUILD ORDER (build Assumptions first, reference it from all later sheets):\n` +
-    `1. Assumptions — all input variables (growth: 0.08, tax: 0.25). Data sheets reference these.\n` +
-    `2. Data sheet(s) — populated rows with real numbers.\n` +
-    `3. Calculations — derived metrics, all formula-driven from Data.\n` +
-    `4. Dashboard — KPI tiles formula-driven from Calculations. Charts from Data.\n` +
-    `5. Instructions — how to use the workbook.\n\n` +
+    `DATA RULES (apply to any field):\n` +
+    `1. ALL quantitative cells must contain real values, never a fake zero or blank placeholder.\n` +
+    `2. Data must be internally consistent (if a total is derived from parts, the parts must sum to it).\n` +
+    `3. Every formula must reference cells that actually contain populated data in this workbook.\n` +
+    `4. Dashboard/summary metrics must be formula-driven from the data sheets, never hardcoded.\n` +
+    `5. Any recurring series (dates, periods, categories) should cover enough points to show a real pattern.\n` +
+    `6. Sample data must be realistic and specific to the field identified \u2014 not generic filler.\n\n` +
+    `FORMULA RULES (universal \u2014 Excel formulas work the same regardless of domain):\n` +
+    `- Write real Excel formula strings ONLY: =SUM(B2:B13), =IFERROR(C5/B5-1,"N/A"), =IF(D2>E2,"Over","OK")\n` +
+    `- Cross-sheet references: =Data!C2, ='Guest List'!B15\n` +
+    `- NEVER write a formula referencing an empty cell \u2014 populate the source cell first.\n` +
+    `- A formula cell must start with "=" \u2014 it will be promoted to a real Excel formula.\n\n` +
+    `WORKED EXAMPLE OF THE MECHANIC (adapt the actual content to this workbook's real field \u2014 ` +
+    `this is a structural example only, not a template to copy literally):\n` +
+    `A data row: ["Item A", 42, 18, "=B2-C2", "=D2/B2"]  \u2014 category, quantity in, quantity out, formula, formula\n` +
+    `An assumptions row: ["Growth or usage rate", 0.08, "One-line note on where this number comes from \u2014 edit here only"]\n` +
+    `A dashboard KPI row: ["Total for the period", "=SUM(Data!B2:B13)", "number|currency|percentage", "context note"]\n\n` +
+    `NEVER DO THIS (produces a broken workbook regardless of field):\n` +
+    `["Total", 0, null, "currency"]        \u2190 fake zero is wrong\n` +
+    `["Total", null, null, "currency"]     \u2190 blank is wrong\n` +
+    `["Total", "TBD", null]                \u2190 text placeholder is wrong\n\n` +
+    `COLUMN WIDTH: do not specify colWidths unless you have a specific reason \u2014 the platform ` +
+    `automatically sizes every column to fit its actual content, so omit this field and let it ` +
+    `auto-fit unless a fixed narrow or wide column is genuinely required.\n\n` +
+    `SHEET BUILD ORDER (build Assumptions/inputs first, reference them from later sheets):\n` +
+    `1. Assumptions/inputs \u2014 all input variables for this specific field, with real values. Later sheets reference these.\n` +
+    `2. Data sheet(s) \u2014 populated rows with real values, structured for this field.\n` +
+    `3. Calculations \u2014 derived metrics, all formula-driven from the data sheet.\n` +
+    `4. Dashboard \u2014 the summary/KPI view formula-driven from Calculations. Charts from Data.\n` +
+    `5. Instructions \u2014 how to use the workbook, what to update, what each formula does.\n\n` +
+    `CHART RULES:\n` +
+    `- Include 2-4 charts visualising the most decision-relevant data.\n` +
+    `- Limit each chart to a readable number of categories (roughly 12 or fewer). If the underlying ` +
+    `data has more points than that, aggregate (e.g. daily \u2192 weekly, or show the most recent N) ` +
+    `rather than cramming every point in \u2014 an unreadable chart is worse than a simplified one.\n` +
+    `- Values must be plain numbers (no currency symbols embedded); labels short enough to display fully.\n\n` +
     `OUTPUT FORMAT (JSON only, no fences, no preamble):\n` +
     `{\n` +
     `  "filename": "descriptive-filename.xlsx",\n` +
@@ -334,27 +349,26 @@ function buildExcelGenPrompt(
     `    {\n` +
     `      "name": "Tab name max 31 chars",\n` +
     `      "type": "assumptions|data|calculations|dashboard|instructions",\n` +
-    `      "rows": [["Header","Value","Notes"],["Revenue Growth",0.08,"Annual rate"]],\n` +
-    `      "colWidths": [28,16,12],\n` +
+    `      "rows": [["Header","Value","Notes"],["Example item",0.08,"Real note"]],\n` +
     `      "frozenRows": 1,\n` +
     `      "headerRow": 0,\n` +
     `      "autoFilter": "A1:D1",\n` +
     `      "conditionalCols": [2],\n` +
     `      "conditionalType": "positive_green|rag|negative_red",\n` +
-    `      "namedRanges": {"GrowthRate": "B2"},\n` +
+    `      "namedRanges": {"KeyRate": "B2"},\n` +
     `      "merges": ["A1:D1"],\n` +
-    `      "summaryKPIs": [{"label":"Net Revenue","value":"=SUM(Data!C2:C13)","format":"currency"}]\n` +
+    `      "summaryKPIs": [{"label":"Key total","value":"=SUM(Data!C2:C13)","format":"currency|number|percentage"}]\n` +
     `    }\n` +
     `  ],\n` +
     `  "charts": [\n` +
-    `    {"type":"bar","title":"Monthly Revenue vs Cost","seriesName":"Revenue","labels":["Jan","Feb","Mar","Apr","May","Jun"],"values":[1250000,1310000,1280000,1420000,1380000,1510000]},\n` +
-    `    {"type":"line","title":"Net Cash Flow Trend","seriesName":"Net CF","labels":["Jan","Feb","Mar","Apr","May","Jun"],"values":[410000,470000,440000,580000,540000,670000]}\n` +
+    `    {"type":"bar","title":"Descriptive chart title","seriesName":"Series name","labels":["A","B","C","D","E","F"],"values":[10,14,12,18,16,20]}\n` +
     `  ],\n` +
-    `  "vbaCode": "Sub RefreshAll()\\\\nActiveWorkbook.RefreshAll\\\\nMsgBox \\"Done!\\"\\\\nEnd Sub",\n` +
-    `  "instructions": "Update Assumptions to change projections. All sheets auto-update."\n` +
+    `  "vbaCode": "Sub RefreshAll()\\nActiveWorkbook.RefreshAll\\nMsgBox \\"Done!\\"\\nEnd Sub",\n` +
+    `  "instructions": "Update the inputs sheet to change the workbook. Other sheets auto-update."\n` +
     `}`
   );
 }
+
 
 function buildPPTXPlanningPrompt(
   objective: string,
@@ -362,44 +376,44 @@ function buildPPTXPlanningPrompt(
   companyContext: string,
   data: string,
 ): string {
-  return `You are a senior consulting Engagement Manager. Before any slide is
-designed, decide the presentation's purpose. Do not write slide content yet.
-
-BUSINESS OBJECTIVE: ${objective}
-STATED PURPOSE: ${deliverable.purpose}
-STATED AUDIENCE: ${deliverable.audience}
-DATA AVAILABLE: ${data ? "Yes" : "No \u2014 use professional industry estimates"}
-${data ? "DATA SAMPLE:\n" + data.slice(0, 800) : ""}
-
-Reason through, in order:
-1. What business problem is this presentation actually addressing?
-2. What TYPE of presentation is this, specifically? (Board Meeting, CEO
-   Update, CFO Review, Investor Pitch, Sales Pitch, Client Proposal, Due
-   Diligence, Strategy Deck, Transformation Plan, Quarterly Business Review,
-   Financial Results, Budget Review, Business Case, M&A Analysis, Risk
-   Assessment, HR Review, Product Launch, Marketing Strategy, or other \u2014
-   name the closest match.) Each type has a different structure; do not
-   default to a generic template.
-3. THE CENTRAL QUESTION: after reading this deck, what ONE decision must the
-   audience be ready to make? If you cannot state a single clear decision,
-   the presentation does not yet have a purpose \u2014 find one.
-4. What is the narrative arc that gets them there? (Problem \u2192 Evidence \u2192
-   Analysis \u2192 Insight \u2192 Recommendation \u2192 Implementation \u2192 Expected Impact
-   \u2192 Risks \u2192 Next Steps \u2014 adapt this skeleton to the presentation type.)
-5. For each planned slide, it must visibly serve the decision in step 3. If a
-   slide does not move the audience toward that decision, do not include it.
-
-Return ONLY this JSON, no prose:
-{
-  "businessProblem": "one sentence, specific to this objective",
-  "presentationType": "the specific type identified in step 2",
-  "decisionNeeded": "the ONE decision the audience must be ready to make",
-  "narrativeArc": "the sequence of story beats, adapted to this presentation type",
-  "slidePlan": [
-    {"title": "so-what headline, not a topic label", "servesDecisionBy": "one clause: how this slide moves the audience toward the decision"}
-  ]
-}`;
+  return (
+    `You are a world-class presentation expert who adapts to ANY field \u2014 business, academic, ` +
+    `medical, legal, event planning, education, non-profit, personal projects, or anything else. ` +
+    `Before any slide is designed, decide the presentation's purpose. Do not write slide content yet.\n\n` +
+    `OBJECTIVE: ${objective}\n` +
+    `STATED PURPOSE: ${deliverable.purpose}\n` +
+    `STATED AUDIENCE: ${deliverable.audience}\n` +
+    `DATA AVAILABLE: ${data ? "Yes" : "No \u2014 use realistic content appropriate to the identified field"}\n` +
+    `${data ? "DATA SAMPLE:\n" + data.slice(0, 800) : ""}\n\n` +
+    `Reason through, in order:\n` +
+    `1. WHAT FIELD AND WHAT PRESENTATION TYPE IS THIS, SPECIFICALLY? Do not default to a business ` +
+    `template. Business examples: Board Meeting, Investor Pitch, QBR, Financial Results. Equally ` +
+    `valid non-business examples: academic lecture, wedding proposal, medical case review, class ` +
+    `curriculum overview, construction project update, non-profit grant application, research ` +
+    `findings, travel itinerary, personal project plan, product demo for consumers, training ` +
+    `workshop. Identify the actual type freely \u2014 this list is illustrative, not exhaustive.\n` +
+    `2. THE CENTRAL QUESTION: after this presentation, what should the audience know, decide, or be ` +
+    `ready to do? For a business deck this is often a decision; for a lecture it may be understanding; ` +
+    `for a proposal it may be agreement; for a report it may be awareness of findings. State it plainly ` +
+    `for what this specific presentation actually is.\n` +
+    `3. What is the narrative arc that gets them there, adapted to this presentation type? (A business ` +
+    `deck might use Problem\u2192Evidence\u2192Analysis\u2192Recommendation. An academic talk might use ` +
+    `Background\u2192Method\u2192Findings\u2192Discussion. A wedding deck might use Story\u2192Details\u2192Logistics\u2192` +
+    `Excitement. Use whichever arc genuinely fits.)\n` +
+    `4. For each planned slide, it must visibly serve the goal in step 2. If a slide does not move the ` +
+    `audience toward it, do not include it.\n\n` +
+    `Return ONLY this JSON, no prose:\n` +
+    `{\n` +
+    `  "fieldOrDomain": "the specific field identified in step 1",\n` +
+    `  "businessProblem": "one sentence, specific to this objective \u2014 use whatever framing fits the field",\n` +
+    `  "presentationType": "the specific type identified in step 1",\n` +
+    `  "decisionNeeded": "what the audience should know/decide/do after this deck, per step 2",\n` +
+    `  "narrativeArc": "the sequence of story beats, adapted to this presentation type",\n` +
+    `  "slidePlan": [{"title": "so-what headline, not a topic label", "servesDecisionBy": "how this slide serves step 2"}]\n` +
+    `}`
+  );
 }
+
 
 function buildPPTXGenPrompt(
   objective: string,
@@ -409,49 +423,60 @@ function buildPPTXGenPrompt(
   domain: Domain,
 ): string {
   return (
-    `You are a McKinsey Senior Partner. Build a consulting-grade PowerPoint deck.\n\n` +
+    `You are a world-class presentation expert in whatever field this deck belongs to \u2014 a McKinsey ` +
+    `Senior Partner only if this genuinely is a strategy/consulting deck; otherwise adopt the ` +
+    `expertise a real expert in that field would bring (a professor for a lecture, an event planner ` +
+    `for a wedding deck, a physician for a case review, a teacher for a curriculum overview).\n\n` +
     `OBJECTIVE: ${objective}\n` +
     `PURPOSE: ${deliverable.purpose}\n` +
     `AUDIENCE: ${deliverable.audience}\n` +
-    `COMPANY CONTEXT: ${companyContext}\n` +
-    `SUPPORTING DATA: ${data || "Use professional industry estimates."}\n\n` +
-    `=== SLIDE COUNT RULE — NON-NEGOTIABLE ===\n` +
-    `A board deck MUST have 12-16 slides. An operational deck up to 20.\n` +
+    `COMPANY/PROJECT CONTEXT: ${companyContext}\n` +
+    `SUPPORTING DATA: ${data || "Use realistic content appropriate to the identified field."}\n\n` +
+    `=== SLIDE COUNT RULE \u2014 NON-NEGOTIABLE, APPLIES TO ANY FIELD ===\n` +
+    `A board-level or formal deck MUST have 12-16 slides. An operational or casual deck up to 20.\n` +
     `A deck with fewer than 10 slides is REJECTED and regenerated.\n` +
     `EVERY slide must have a "so what" title, real content, and speaker notes.\n` +
     `=== END SLIDE COUNT RULE ===\n\n` +
-    `MANDATORY SLIDE SEQUENCE:\n` +
-    `1. Title slide\n` +
-    `2. Executive Summary (3 key takeaways, each a one-sentence insight with a number)\n` +
-    `3. Agenda (list all major sections)\n` +
-    `4-5. Situation / Context (what is happening, with data)\n` +
-    `6-7. Analysis (what the data means, charts required here)\n` +
-    `8-9. Implications / So What (what this means for the business)\n` +
-    `10-11. Recommendations (specific, actionable, numbered)\n` +
-    `12. Implementation / Next Steps (who does what by when)\n` +
-    `13. Financial Impact (numbers required — revenue, cost, margin)\n` +
-    `14. Risk Register (top 3-5 risks with mitigation)\n` +
+    `NARRATIVE STRUCTURE \u2014 ADAPT TO WHAT THIS PRESENTATION ACTUALLY IS. The sequence below is a ` +
+    `business-deck default; if the field/type identified upstream is different, use the equivalent ` +
+    `structure for that field instead (see examples in brackets):\n` +
+    `1. Title slide \u2014 always first\n` +
+    `2. Executive Summary / Key Takeaways (3 headline points, whatever field this is)\n` +
+    `3. Agenda \u2014 list the major sections\n` +
+    `4-5. Situation / Context / Background [academic: literature context; wedding: the couple's story]\n` +
+    `6-7. Analysis / Method / Details [academic: methodology; event: the plan itself]\n` +
+    `8-9. Implications / Findings / So What [academic: results; event: what this means logistically]\n` +
+    `10-11. Recommendations / Conclusions / Decisions [academic: conclusions; event: choices to confirm]\n` +
+    `12. Implementation / Next Steps \u2014 who does what by when\n` +
+    `13. Impact \u2014 quantify it if the field has a natural metric (financial, time, guests, outcomes)\n` +
+    `14. Risks / Open Questions / Considerations \u2014 top 3-5, whatever \\"risk\\" means in this field\n` +
     `15. Closing / Call to Action\n` +
     `A1, A2... Appendix slides (supporting detail)\n\n` +
-    `CONTENT RULES:\n` +
-    `- Titles must be "so what" headlines with a number: "Revenue up 23% — driven by enterprise"\n` +
-    `- NOT topic labels like "Revenue Analysis" — those will be rejected\n` +
+    `CONTENT RULES (universal \u2014 apply regardless of field):\n` +
+    `- Titles must be "so what" headlines with a concrete point: not "Budget" but "Venue costs run ` +
+    `12% over initial estimate \u2014 three ways to close the gap"\n` +
     `- Content must have 4-6 substantive bullets per slide, not 1-2 vague ones\n` +
-    `- Every chart must have realistic data (no zeros, no placeholders)\n` +
-    `- Speaker notes must be 3-5 sentences of what a senior presenter would actually say\n` +
+    `- Every chart/table must use realistic data appropriate to the field (no zeros, no placeholders)\n` +
+    `- Speaker notes must be 3-5 sentences of what a real presenter in this field would actually say\n` +
     `- NO slide may contain [PLACEHOLDER], [TBD], [INSERT], or similar\n\n` +
+    `CHART AND TABLE OVERFLOW RULE \u2014 a slide is a fixed physical size, content must fit it:\n` +
+    `- Charts: limit to a readable number of categories (roughly 8, at most 12). If the underlying ` +
+    `data has more points, aggregate rather than cramming every point onto one axis.\n` +
+    `- Tables: limit to 6 columns and 8 data rows per slide. If more detail exists, summarise on the ` +
+    `slide and move the full detail to an appendix slide.\n` +
+    `- Never let a bullet list exceed 6 items \u2014 group or summarise instead.\n\n` +
     `JSON FORMAT:\n` +
     `{\n` +
     `  "title": "Deck title",\n` +
-    `  "narrativeArc": "One paragraph describing the story and why in this sequence",\n` +
+    `  "narrativeArc": "One paragraph describing the story and why in this sequence, for this field",\n` +
     `  "slides": [\n` +
     `    {\n` +
     `      "layout": "title|exec_summary|agenda|section_divider|chart_narrative|two_column|data_table|full_text|closing",\n` +
-    `      "title": "So-what headline with a number",\n` +
+    `      "title": "So-what headline with a concrete point",\n` +
     `      "content": "Bullet 1\\nBullet 2\\nBullet 3\\nBullet 4",\n` +
-    `      "speakerNotes": "3-5 sentences the presenter would actually say",\n` +
+    `      "speakerNotes": "3-5 sentences a real presenter in this field would say",\n` +
     `      "chartType": "bar|line|pie (only for chart_narrative layout)",\n` +
-    `      "chartData": {"labels":["Q1","Q2","Q3","Q4"],"series":[{"name":"Revenue","values":[1250,1380,1290,1520]}]}\n` +
+    `      "chartData": {"labels":["A","B","C","D"],"series":[{"name":"Series name","values":[10,14,12,18]}]}\n` +
     `    }\n` +
     `  ]\n` +
     `}\n\n` +
@@ -459,57 +484,58 @@ function buildPPTXGenPrompt(
   );
 }
 
+
 function buildPDFDocxPrompt(
   objective: string,
   deliverable: DeliverableSpec,
   companyContext: string,
   data: string,
 ): string {
-  return `You are a ${deliverable.qualityStandard === "big4_audit" ? "Big4 Senior Manager" : "Senior Consultant"}
-producing a publication-quality business document.
-
-BUSINESS OBJECTIVE: ${objective}
-DOCUMENT PURPOSE: ${deliverable.purpose}
-AUDIENCE: ${deliverable.audience}
-FORMAT: ${deliverable.type.toUpperCase()}
-
-COMPANY CONTEXT:
-${companyContext}
-
-DATA / INPUTS:
-${data || "Generate professional content based on the objective and industry context."}
-
-Produce a JSON object:
-{
-  "title": "Document title",
-  "classification": "Confidential|Internal|Client-Facing|Public",
-  "executiveSummary": "3-5 sentence executive summary for the cover/opening",
-  "sections": [
-    {
-      "level": 1,
-      "title": "Section title",
-      "content": "Full section content in markdown — use ## for subsections, **bold** for key terms, tables with | syntax"
-    }
-  ],
-  "appendices": [
-    {"title": "Appendix title", "content": "Appendix content"}
-  ],
-  "keyFindings": ["Finding 1", "Finding 2"],
-  "recommendations": ["Recommendation 1", "Recommendation 2"]
+  return (
+    `You are a world-class writer in whatever field this document belongs to \u2014 a Big4 Senior ` +
+    `Manager only if this genuinely is a financial/audit document; otherwise adopt the voice a real ` +
+    `expert in that field would use (an academic for a research paper, an event planner for a wedding ` +
+    `guide, a physician for a case summary, a teacher for a course handbook).\n\n` +
+    `OBJECTIVE: ${objective}\n` +
+    `DOCUMENT PURPOSE: ${deliverable.purpose}\n` +
+    `AUDIENCE: ${deliverable.audience}\n` +
+    `FORMAT: ${deliverable.type.toUpperCase()}\n` +
+    `COMPANY/PROJECT CONTEXT:\n${companyContext}\n` +
+    `DATA / INPUTS:\n${data || "Generate realistic, well-informed content appropriate to the identified field."}\n\n` +
+    `Produce a JSON object:\n` +
+    `{\n` +
+    `  "title": "Document title",\n` +
+    `  "classification": "Confidential|Internal|Client-Facing|Public (omit or use \\"N/A\\" if not applicable to this field)",\n` +
+    `  "executiveSummary": "3-5 sentence opening summary \u2014 adapt the label mentally to \\"Overview\\" or \\"Abstract\\" if that fits the field better, but always open with a summary",\n` +
+    `  "sections": [\n` +
+    `    {"level": 1, "title": "Section title", "content": "Full section content in markdown \u2014 use ## for subsections, **bold** for key terms, tables with | syntax"}\n` +
+    `  ],\n` +
+    `  "appendices": [{"title": "Appendix title", "content": "Supporting detail that does not belong in the main body"}],\n` +
+    `  "keyFindings": ["Finding 1", "Finding 2"],\n` +
+    `  "recommendations": ["Recommendation or conclusion 1", "Recommendation or conclusion 2"]\n` +
+    `}\n\n` +
+    `DOCUMENT QUALITY RULES (universal, apply to any field):\n` +
+    `1. Begin with a summary \u2014 always, whatever it is called for this field.\n` +
+    `2. Use numbered or clearly titled sections that follow logically for this specific document type.\n` +
+    `3. Every section must advance the document. No padding, no filler paragraphs.\n` +
+    `4. Findings/claims must be specific and grounded, not generic statements that could apply to anything.\n` +
+    `5. Recommendations or conclusions must be concrete \u2014 a reader should know exactly what to do or ` +
+    `understand with the information given, not receive vague generalities.\n` +
+    `6. Tables must have proper headers and aligned data \u2014 no more than 6-7 columns per table; split ` +
+    `wide tables into multiple smaller ones rather than cramming, since an overly wide table will not ` +
+    `fit the printed page.\n` +
+    `7. Appendices contain supporting detail that would clutter the main body.\n` +
+    `8. The document must be usable directly by the stated audience without further editing.\n\n` +
+    `TEXT FORMATTING (critical \u2014 this becomes a real Word/PDF document, not a chat message):\n` +
+    `- Write clean, natural paragraphs. Do not manually insert extra spaces to align or justify text \u2014 ` +
+    `the document renderer handles spacing and alignment automatically.\n` +
+    `- Do not pad or stretch sentences with unnecessary words merely to fill a line or column.\n` +
+    `- Keep paragraphs a natural length (roughly 3-6 sentences) \u2014 avoid single giant blocks of text.\n` +
+    `- Use "## Heading" syntax for real section breaks only, not for emphasis within a paragraph.\n\n` +
+    `Output ONLY the JSON object. No preamble, no explanation, no markdown fences.`
+  );
 }
 
-DOCUMENT QUALITY RULES:
-1. Begin with Executive Summary — always.
-2. Use numbered sections (1.0 Introduction, 2.0 Analysis, etc.)
-3. Every section must advance the narrative. No padding.
-4. Key findings must be evidence-based, not generic.
-5. Recommendations must be specific and actionable.
-6. Tables must have proper headers and aligned data.
-7. Appendices contain supporting data that supports but does not belong in the main body.
-8. The document must be submittable directly to the stated audience without editing.
-
-Output ONLY the JSON object. No preamble, no explanation, no markdown fences.`;
-}
 
 // ─── BUSINESS EXECUTION ENGINE ───────────────────────────────────────────────
 
@@ -904,11 +930,27 @@ Assumptions to document: ${(workbookPlan.assumptionsNeeded || []).join(", ")}`
         }
       });
 
-      // ── Column widths ─────────────────────────────────────────────────────
+      // ── Column widths: content-aware auto-fit ──────────────────────────────
+      // Previous behaviour: every column defaulted to a flat 18 characters
+      // regardless of actual content, so long headers were cut off and short
+      // columns wasted space. Now: measure the actual longest value in each
+      // column (capped to a sane range) so every column fits what it holds.
       if (sheet.colWidths?.length) {
         ws["!cols"] = sheet.colWidths.map((w: number) => ({ wch: w }));
       } else {
-        ws["!cols"] = (rows[0] || []).map(() => ({ wch: 18 }));
+        const colCount = Math.max(...cleanRows.map(r => r.length), 1);
+        const widths: number[] = [];
+        for (let ci = 0; ci < colCount; ci++) {
+          let maxLen = 8; // sensible floor so number-only columns aren't too cramped
+          cleanRows.forEach(row => {
+            const cell = row[ci];
+            if (cell === undefined || cell === null) return;
+            const s = typeof cell === "number" ? String(cell) : String(cell).replace(/^=/, "");
+            if (s.length > maxLen) maxLen = s.length;
+          });
+          widths.push(Math.min(Math.max(maxLen + 2, 8), 45)); // +2 padding, capped 8–45
+        }
+        ws["!cols"] = widths.map(w => ({ wch: w }));
       }
 
       // ── Freeze panes ──────────────────────────────────────────────────────
