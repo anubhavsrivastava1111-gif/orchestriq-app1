@@ -2890,6 +2890,41 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       task:w.task,category:w.chainLabel,
       output:stripMd(w.steps?.[w.steps.length-1]?.output||"").slice(0,400),
     }));
+    // ── Cross-module summaries (Project Engine redesign, Phase 2) ────────────
+    // Each source is condensed to a few lines, never dumped in full — same
+    // discipline already proven for Boardroom decisions above. Every read is
+    // wrapped so a missing/empty module can never break plan generation.
+    let ledgerSummary="";
+    try{
+      const entries=(ledgerEntries||[]).slice(-8);
+      if(entries.length)ledgerSummary=entries.map((e:any)=>(e.date||"")+" "+(e.description||e.memo||"")+" "+(e.debit||e.credit||"")).join("; ").slice(0,500);
+    }catch{}
+    let financeSummary="";
+    try{
+      const apOpen=(WorkspaceMemory.get<any[]>("cos-fin-ap")||[]).filter((x:any)=>(Number(x.amount)||0)-(Number(x.settled)||0)>0);
+      const arOpen=(WorkspaceMemory.get<any[]>("cos-fin-ar")||[]).filter((x:any)=>(Number(x.amount)||0)-(Number(x.settled)||0)>0);
+      if(apOpen.length||arOpen.length)financeSummary=apOpen.length+" open payables, "+arOpen.length+" open receivables.";
+    }catch{}
+    let pulseSummary="";
+    try{
+      const openTickets=(WorkspaceMemory.get<any[]>("cos-pulse-sn")||[]).filter((t:any)=>String(t?.status||"").toLowerCase()!=="closed"&&String(t?.status||"").toLowerCase()!=="resolved");
+      if(openTickets.length)pulseSummary=openTickets.length+" open governance tickets.";
+    }catch{}
+    let actionsSummary="";
+    try{
+      const openActions=(WorkspaceMemory.get<any[]>("cos-actions")||[]).filter((a:any)=>a.status!=="complete"&&a.status!=="done");
+      if(openActions.length)actionsSummary=openActions.slice(0,5).map((a:any)=>a.title||a.name||"").filter(Boolean).join("; ").slice(0,300);
+    }catch{}
+    let autopilotSummary="";
+    try{
+      const apDec=WorkspaceMemory.get<string>("cos-ap-live");
+      if(apDec)autopilotSummary=stripMd(String((apDec as any)?.res||apDec||"")).slice(0,400);
+    }catch{}
+    let fundingSummary="";
+    try{
+      const fundStage=WorkspaceMemory.get<string>("cos-funding-stage");
+      if(fundStage)fundingSummary=String(fundStage);
+    }catch{}
     return {
       company:{name:co.name,industry:co.industry,stage:co.stage,
         location:co.location,currency:projCur.code,
@@ -2900,14 +2935,20 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       boardroomDecisions,
       timeMachineForecasts:tmRes?stripMd(tmRes).slice(0,600):"",
       priorWorkflowOutputs:priorOutputs,
-      requiredFormats:["docx","xlsx","pdf","md","pptx"],
+      ledgerSummary,
+      financeSummary,
+      pulseSummary,
+      actionsSummary,
+      autopilotSummary,
+      fundingSummary,
+      requiredFormats:["docx","xlsx","pdf","md","pptx","linkedin_post","facebook_post","instagram_post","whatsapp_message","email"],
       mediaGeneration:{
-        imageEnabled:!!(keys.openai?.trim()),
-        videoEnabled:false,
-        promptsOnly:true,
+        imageEnabled:!!(keys.openai?.trim()||keys.fal?.trim()),
+        videoEnabled:!!(keys.fal?.trim()),
+        promptsOnly:false,
       },
     };
-  },[co,compData,brSessions,tmRes,workflows,keys]);
+  },[co,compData,brSessions,tmRes,workflows,keys,ledgerEntries]);
 
   const runProjectPlanning=useCallback(async()=>{
     if(!projectObjective.trim()||projectPlanning)return;
@@ -2918,7 +2959,41 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       const templateHint=detectedTemplate?'\nDETECTED TEMPLATE: This objective matches the "'+detectedTemplate+'" template. Structure modules accordingly: '+( PROJECT_TEMPLATES[detectedTemplate]?.modules||[]).join(', ')+'.':'';
       const ctx=buildProjectContext();
       const nl="\n";
-      const architectSys="You are the Project Architect for "+co.name+". Decompose the objective into a structured Execution Plan."+nl+nl+"COMPANY: "+ctx.company.name+" | "+ctx.company.industry+" | "+ctx.company.stage+" | "+ctx.company.location+" | "+ctx.company.currencySymbol+ctx.company.currency+nl+(Object.keys(ctx.dataHub).length>0?"DATA HUB:"+nl+Object.entries(ctx.dataHub).map(function(e){return e[0]+": "+e[1];}).join(nl)+nl:"")+( ctx.boardroomDecisions.length>0?"RECENT DECISIONS:"+nl+ctx.boardroomDecisions.map(function(d){return "Q: "+d.question+" -> "+d.decisionStatus;}).join(nl)+nl:"")+nl+"OUTPUT: Return ONLY valid JSON (no markdown fences) matching this exact schema:"+nl+'{"name":"short project name","objective":"one sentence","complexity":"simple|moderate|complex","estimatedDuration":"e.g. 2-3 hours","modules":[{"id":"module_id","name":"Module Name","icon":"emoji","capabilityType":"marketing|design|content|finance|legal|management|engineering|research|compliance","primaryPersona":"cmo","rationale":"why needed","deliverables":[{"id":"del_moduleid_001","name":"Deliverable Name","description":"what it must contain","outputFormat":"docx|xlsx|pdf|pptx|md|txt|image|video","dependsOn":[],"verificationStatus":"AI Generated","confidenceScore":0,"sourceReferences":[]}]}]}'+nl+nl+templateHint+nl+nl+"RULES:"+nl+"1. Every deliverable must be a real file not a discussion."+nl+"2. Use only modules genuinely required."+nl+"3. Min 2 max 8 modules. Min 1 max 5 deliverables each."+nl+"4. dependsOn IDs must reference earlier deliverable ids."+nl+"5. Currency symbol: "+ctx.company.currencySymbol+"\n6. IMPORTANT — Use outputFormat=image for any visual deliverable (ad image, logo, banner, infographic, social creative). Platform generates the actual image via fal.ai automatically."+"\n7. IMPORTANT — Use outputFormat=video for any video deliverable (promo video, explainer, reel, ad video). Platform generates the actual video via fal.ai automatically."+"\n8. NEVER use image_prompt or video_prompt. These are deprecated. Always use image or video.";
+      // ── Pre-planning reasoning step (Project Engine redesign, Phase 3) ──────
+      // Understand the goal and what data actually applies BEFORE deciding file
+      // structure — same principle already proven for Excel and PowerPoint.
+      // Fully fail-safe: any error here and planning proceeds exactly as
+      // before, so a run can never be blocked by this step.
+      let architectReasoning:any=null;
+      try{
+        const reasonSys="You are a senior business analyst preparing to plan a piece of work. Do not design the deliverables yet — first make sure you actually understand the request."+nl+
+          "OBJECTIVE: "+projectObjective+nl+nl+
+          "AVAILABLE CONTEXT FROM THIS COMPANY'S PLATFORM (use only what is genuinely relevant):"+nl+
+          "Company: "+ctx.company.name+" ("+ctx.company.industry+", "+ctx.company.stage+")"+nl+
+          (Object.keys(ctx.dataHub).length>0?"Data Hub has "+Object.keys(ctx.dataHub).length+" fields on record.\n":"")+
+          (ctx.boardroomDecisions.length>0?ctx.boardroomDecisions.length+" recent Boardroom decisions on record.\n":"")+
+          (ctx.ledgerSummary?"Ledger has recent activity on record.\n":"")+
+          (ctx.financeSummary?"Finance: "+ctx.financeSummary+"\n":"")+
+          (ctx.pulseSummary?"Governance: "+ctx.pulseSummary+"\n":"")+
+          (ctx.actionsSummary?"Open actions on record.\n":"")+nl+
+          "Reason through, briefly:"+nl+
+          "1. Restate what this person actually wants, in plain language \u2014 the real business outcome, not just the literal words."+nl+
+          "2. Which of the available context above is genuinely relevant to this specific request (name it specifically; do not claim relevance for everything just because it exists)."+nl+
+          "3. Is there ONE piece of information that is genuinely necessary and cannot be reasonably assumed? If so, state the single clearest assumption you will make instead of asking \u2014 this platform delivers finished work, not a form, so prefer a sensible stated assumption over a blocking question whenever a reasonable one exists."+nl+nl+
+          "Return ONLY this JSON, no prose: {\"goalRestated\":\"...\",\"relevantDataUsed\":[\"...\"],\"keyAssumptions\":[\"...\"]}";
+        const reasonRaw=await ask(reasonSys,[{role:"user",content:"Analyse this request now."}],500,false,"general");
+        const reasonText=typeof reasonRaw==="string"?reasonRaw:(reasonRaw as any)?.text||"";
+        const reasonCleaned=reasonText.trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/```\s*$/,"");
+        const parsedReasoning=JSON.parse(reasonCleaned);
+        if(parsedReasoning?.goalRestated)architectReasoning=parsedReasoning;
+      }catch{/* reasoning is additive — planning proceeds without it */}
+      const reasoningContext=architectReasoning
+        ?nl+"CONFIRMED UNDERSTANDING (already reasoned through \u2014 build the plan to serve this):"+nl+
+          "Goal: "+architectReasoning.goalRestated+nl+
+          (architectReasoning.relevantDataUsed?.length?"Relevant existing data to use: "+architectReasoning.relevantDataUsed.join("; ")+nl:"")+
+          (architectReasoning.keyAssumptions?.length?"Assumptions being made: "+architectReasoning.keyAssumptions.join("; ")+nl:"")
+        :"";
+      const architectSys="You are the Project Architect for "+co.name+". Decompose the objective into a structured Execution Plan."+nl+nl+"COMPANY: "+ctx.company.name+" | "+ctx.company.industry+" | "+ctx.company.stage+" | "+ctx.company.location+" | "+ctx.company.currencySymbol+ctx.company.currency+nl+(Object.keys(ctx.dataHub).length>0?"DATA HUB:"+nl+Object.entries(ctx.dataHub).map(function(e){return e[0]+": "+e[1];}).join(nl)+nl:"")+( ctx.boardroomDecisions.length>0?"RECENT BOARDROOM DECISIONS:"+nl+ctx.boardroomDecisions.map(function(d){return "Q: "+d.question+" -> "+d.decisionStatus;}).join(nl)+nl:"")+(ctx.timeMachineForecasts?"TIME MACHINE FORECAST ON RECORD:"+nl+ctx.timeMachineForecasts+nl:"")+(ctx.priorWorkflowOutputs.length>0?"RECENT APPROVED WORKFLOW OUTPUTS:"+nl+ctx.priorWorkflowOutputs.map(function(p){return p.task+" ("+p.category+"): "+p.output;}).join(nl)+nl:"")+(ctx.ledgerSummary?"GENERAL LEDGER (recent entries): "+ctx.ledgerSummary+nl:"")+(ctx.financeSummary?"FINANCE SUITE: "+ctx.financeSummary+nl:"")+(ctx.pulseSummary?"PULSE GOVERNANCE: "+ctx.pulseSummary+nl:"")+(ctx.actionsSummary?"OPEN ACTION ITEMS: "+ctx.actionsSummary+nl:"")+(ctx.autopilotSummary?"AUTOPILOT RECENT DECISION SCAN: "+ctx.autopilotSummary+nl:"")+(ctx.fundingSummary?"FUNDING STAGE: "+ctx.fundingSummary+nl:"")+nl+"OUTPUT: Return ONLY valid JSON (no markdown fences) matching this exact schema:"+nl+'{"name":"short project name","objective":"one sentence","complexity":"simple|moderate|complex","estimatedDuration":"e.g. 2-3 hours","modules":[{"id":"module_id","name":"Module Name","icon":"emoji","capabilityType":"marketing|design|content|finance|legal|management|engineering|research|compliance","primaryPersona":"cmo","rationale":"why needed","deliverables":[{"id":"del_moduleid_001","name":"Deliverable Name","description":"what it must contain","outputFormat":"docx|xlsx|pdf|pptx|md|txt|image|video|linkedin_post|facebook_post|instagram_post|whatsapp_message|email","dependsOn":[],"verificationStatus":"AI Generated","confidenceScore":0,"sourceReferences":[]}]}]}'+nl+nl+templateHint+nl+nl+"RULES:"+nl+"1. Every deliverable must be a real, immediately usable file — never a discussion, never instructions for the user to do it themselves."+nl+"2. Use only modules genuinely required by the objective."+nl+"3. Min 2 max 8 modules. Min 1 max 5 deliverables each."+nl+"4. dependsOn IDs must reference earlier deliverable ids."+nl+"5. Currency symbol: "+ctx.company.currencySymbol+"\n6. IMPORTANT — Use outputFormat=image for any visual deliverable (ad image, logo, banner, infographic, social creative). Platform generates the actual image automatically."+"\n7. IMPORTANT — Use outputFormat=video for any video deliverable (promo video, explainer, reel, ad video). Platform generates the actual video automatically."+"\n8. NEVER use image_prompt or video_prompt. These are deprecated. Always use image or video."+"\n9. CRITICAL — ONE FILE, NOT ONE DELIVERABLE PER SHEET: if the objective describes ONE workbook, document, or deck that should contain multiple SHEETS, TABS, or SECTIONS that reference or build on each other (e.g. \"the workbook should contain sheets for data input, reconciliation, calculations, and dashboard\"), this is exactly ONE deliverable — a single xlsx/docx/pptx file with that internal structure. Do NOT create a separate deliverable per named sheet/tab/section. Splitting a single interrelated workbook into many small files breaks cross-sheet formulas and produces disconnected, low-quality output. Only create multiple deliverables when the objective genuinely asks for multiple standalone files (e.g. \"a Word report AND a separate PowerPoint deck\", or \"one workbook per region\")."+"\n10. Do NOT invent an image/video/mockup deliverable unless the objective explicitly asks for a picture, graphic, banner, or video asset. A request for \"interactive charts\" or \"a dashboard\" inside a workbook means charts BUILT INTO that file — not a separate standalone image or video deliverable."+"\n11. Social/messaging formats (linkedin_post, facebook_post, instagram_post, whatsapp_message, email) are each ONE short, ready-to-post/ready-to-send deliverable — never bundle multiple platforms' copy into a single deliverable, and never use these formats unless the objective actually asks for marketing/outreach copy or correspondence."+reasoningContext;
       let raw=await ask(architectSys,[{role:"user",content:"Objective: "+projectObjective}],4000,false,"general");
       // Guard: empty or error-string responses (provider limit, consensus-merge
       // hiccup) are not plan failures — retry once, forcing a clean single call.
@@ -2959,6 +3034,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       plan.status="planning";
       plan.createdAt=new Date().toISOString();
       plan.context=ctx;
+      plan.architectReasoning=architectReasoning;
       // Initialise all deliverable lifecycle fields
       (plan.modules||[]).forEach(mod=>{
         (mod.deliverables||[]).forEach(del=>{
@@ -5627,6 +5703,18 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                           <span style={{marginLeft:"auto",fontSize:8,padding:"3px 8px",borderRadius:8,background:"rgba(245,158,11,0.1)",color:"#F59E0B",fontWeight:700}}>AWAITING APPROVAL</span>
                         </div>
                         <div style={{fontSize:10,color:"#8892B0",lineHeight:1.6,marginBottom:10,fontStyle:"italic"}}>Objective: "{projectPlan.objective}"</div>
+                        {projectPlan.architectReasoning&&(
+                          <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:6,padding:"9px 11px",marginBottom:10}}>
+                            <div style={{fontSize:9,fontWeight:700,color:"#14B8A6",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:4}}>Here's what I understood</div>
+                            <div style={{fontSize:10.5,color:"#C5CCDC",lineHeight:1.6}}>{projectPlan.architectReasoning.goalRestated}</div>
+                            {projectPlan.architectReasoning.relevantDataUsed?.length>0&&(
+                              <div style={{fontSize:9,color:"#8892B0",marginTop:5}}>📎 Used: {projectPlan.architectReasoning.relevantDataUsed.join(" · ")}</div>
+                            )}
+                            {projectPlan.architectReasoning.keyAssumptions?.length>0&&(
+                              <div style={{fontSize:9,color:"#F59E0B",marginTop:4}}>⚠ Assuming: {projectPlan.architectReasoning.keyAssumptions.join(" · ")} — edit your objective above and regenerate if this isn't right.</div>
+                            )}
+                          </div>
+                        )}
                         {(projectPlan.modules||[]).map((mod,mi)=>(
                           <div key={mi} style={{marginBottom:8,background:"#0a0e1a",borderRadius:6,padding:"10px 12px",border:"1px solid #1a2030"}}>
                             <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
