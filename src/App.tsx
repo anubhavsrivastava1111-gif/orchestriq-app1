@@ -2060,6 +2060,11 @@ function renderStructuredDeck(pptx,slides,A,pal=QE_PAL){
 // becomes impossible.
 type EngineDowngrade={deliverable:string;format:string;reason:string;ts:string};
 const engineDowngrades:{list:EngineDowngrade[]}={list:[]};
+// Deterministic content-check warnings (zero-heavy data, under-count slides,
+// leftover placeholders) — set by BEE after generation when a deliverable
+// shipped despite failing its fact-based check even after one retry.
+type QualityWarning={deliverable:string;warning:string};
+const qualityWarnings:{list:QualityWarning[]}={list:[]};
 function recordEngineDowngrade(deliverable:string,format:string,err:unknown){
   const reason=String((err as any)?.message||err||"unknown error").slice(0,180);
   try{
@@ -3662,6 +3667,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
       // Execute deliverables serially — yield UI between each to prevent blocking
       const yieldUI=()=>new Promise<void>(r=>setTimeout(r,0));
       engineDowngrades.list=[]; // reset per packaging run
+      qualityWarnings.list=[]; // reset per packaging run
       for(const del of done){
         if(projectExecCancelRef.current)break;
         await yieldUI(); // Release UI thread before each deliverable
@@ -3797,7 +3803,8 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               validationCriteria: [],
             };
             setProjectExecPhase("📊 Building professional Excel workbook: "+del.name);
-            await _xlsxBEE.generateExcel(_xlsxPlan, _xlsxDel, _xlsxCoCtx, content, _xlsxCurrency, _xlsxSymbol, (msg:string)=>setProjectExecPhase(msg));
+            const _xlsxRes:any=await _xlsxBEE.generateExcel(_xlsxPlan, _xlsxDel, _xlsxCoCtx, content, _xlsxCurrency, _xlsxSymbol, (msg:string)=>setProjectExecPhase(msg));
+            if(_xlsxRes?.qualityWarning)qualityWarnings.list.push({deliverable:del.name,warning:_xlsxRes.qualityWarning});
             if(!_xlsxWritten){
               // BEE fallback: write basic structured XLSX
               throw new Error("BEE did not write file");
@@ -3858,6 +3865,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             const _beeRes:any=await _bee.generatePPTX(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
             _pptxDone=_w;
             if(!_w&&_beeRes?.error){throw new Error(_beeRes.error);}
+            if(_beeRes?.qualityWarning)qualityWarnings.list.push({deliverable:del.name,warning:_beeRes.qualityWarning});
           }catch(_beeErr:any){
             recordEngineDowngrade(del.name,"pptx",_beeErr);
           }
@@ -4219,7 +4227,14 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
         qaLines.push("","## \u26a0 ENGINE DOWNGRADES (lower quality \u2014 fallback was used)","");
         engineDowngrades.list.forEach(d=>qaLines.push("- **"+d.deliverable+"** ("+d.format+"): "+d.reason));
         qaLines.push("","Fix: check Settings \u2192 API keys and retry.");
-        try{showToast("\u26a0 "+engineDowngrades.list.length+" deliverable(s) used the basic fallback \u2014 see QA-Report.md","warning");}catch{}
+      }
+      if(qualityWarnings.list.length>0){
+        qaLines.push("","## \u26a0 CONTENT CHECK WARNINGS (shipped, but flagged \u2014 verify before use)","");
+        qaLines.push("These deliverables were regenerated once to fix the issue, but still had it after the retry. They were shipped anyway rather than blocked \u2014 double-check the flagged area before relying on the file.","");
+        qualityWarnings.list.forEach(d=>qaLines.push("- **"+d.deliverable+"**: "+d.warning));
+      }
+      if(engineDowngrades.list.length>0||qualityWarnings.list.length>0){
+        try{showToast("\u26a0 "+(engineDowngrades.list.length+qualityWarnings.list.length)+" deliverable(s) flagged \u2014 see QA-Report.md","warning");}catch{}
       }
       zip.file("QA-Report.md",qaLines.join("\n"));
       const sumLines=["# "+proj.name,"","Objective: "+proj.objective,"Generated: "+new Date().toLocaleString(),"Deliverables: "+done.length,"","## Modules",...(proj.modules||[]).map(m=>"- "+m.name+" ("+m.capabilityType+"): "+(m.deliverables||[]).length+" deliverables")];
