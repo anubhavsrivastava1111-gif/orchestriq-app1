@@ -360,6 +360,23 @@ function buildExcelGenPrompt(
     `     row. Any other label is left as-is, so only use this pattern for labels that should count up.\n` +
     `  5. Do NOT use rowTemplate for a handful of rows (under ~15) \u2014 just write them directly; this\n` +
     `     exists specifically so you are never forced to invent hundreds of fake data points by hand.\n\n` +
+    `DROPDOWN RULE \u2014 whenever a column should only ever contain one of a fixed set of choices\n` +
+    `(a category, a status, a yes/no-style flag, a department name), add a\n` +
+    `"dataValidations": [{"col": N, "options": ["Choice A", "Choice B", ...]}] entry to that sheet,\n` +
+    `where N is the zero-based column index. The platform writes this as a real Excel dropdown \u2014\n` +
+    `the user clicks the cell and picks from your list rather than typing free text, which is the\n` +
+    `single biggest thing that makes a workbook feel professional rather than improvised.\n\n` +
+    `CATEGORY RULE \u2014 whenever rows have a free-text description that should be automatically\n` +
+    `classified into a category (an expense description, an income source, a ticket type): do NOT\n` +
+    `categorise each row yourself. Instead add ONE "categoryRules" object to that sheet:\n` +
+    `"categoryRules": {"sourceCol": N, "targetCol": M, "fallback": "Uncategorized",\n` +
+    `"rules": [{"keywords": ["rent","lease"], "category": "Facilities"}, ...]}. The platform reads\n` +
+    `the free text in column N, matches it against your keyword rules, and writes the matched\n` +
+    `category into column M for every row automatically \u2014 including any rows produced by a\n` +
+    `rowTemplate above. It also builds the column M dropdown for you from your category list, so you\n` +
+    `do not need to also add a separate dataValidations entry for that same column. Write enough\n` +
+    `keywords per category (3-6) to catch realistic real-world wording, and always end with a\n` +
+    `sensible fallback category for anything that matches nothing.\n\n` +
     `FORMULA RULES (universal \u2014 Excel formulas work the same regardless of domain):\n` +
     `- Write real Excel formula strings ONLY: =SUM(B2:B13), =IFERROR(C5/B5-1,"N/A"), =IF(D2>E2,"Over","OK")\n` +
     `- Cross-sheet references: =Data!C2, ='Guest List'!B15\n` +
@@ -405,7 +422,10 @@ function buildExcelGenPrompt(
     `      "conditionalType": "positive_green|rag|negative_red",\n` +
     `      "namedRanges": {"KeyRate": "B2"},\n` +
     `      "merges": ["A1:D1"],\n` +
-    `      "summaryKPIs": [{"label":"Key total","value":"=SUM(Data!C2:C13)","format":"currency|number|percentage"}]\n` +
+    `      "summaryKPIs": [{"label":"Key total","value":"=SUM(Data!C2:C13)","format":"currency|number|percentage"}],\n` +
+    `      "rowTemplate": {"fromRowIndex": 2, "repeatCount": 22, "__comment": "OPTIONAL \u2014 see MANY-ROW RULE"},\n` +
+    `      "dataValidations": [{"col": 2, "options": ["Rent","Utilities","Marketing","Other"], "__comment": "OPTIONAL \u2014 see DROPDOWN RULE"}],\n` +
+    `      "categoryRules": {"sourceCol": 0, "targetCol": 2, "fallback": "Uncategorized", "rules": [{"keywords":["rent","lease"],"category":"Rent"}], "__comment": "OPTIONAL \u2014 see CATEGORY RULE"}\n` +
     `    }\n` +
     `  ],\n` +
     `  "charts": [\n` +
@@ -645,6 +665,33 @@ function expandRowTemplate(rows: any[][], rowTemplate: any): any[][] {
     expanded.push(newRow);
   }
   return expanded;
+}
+
+// ─── CATEGORY AUTO-MATCHING (Excel Intelligence Engine, Phase 4) ─────────────
+// Same principle as the row template engine: the AI designs the RULES once
+// (which keywords map to which category), and this code applies them to
+// every row deterministically — no AI call per row, no drift, works whether
+// there are 5 rows or 5,000. First matching rule wins; anything unmatched
+// falls back to a safe, explicit default rather than being left blank.
+
+interface CategoryRule { keywords: string[]; category: string }
+
+function applyCategoryRules(
+  rows: any[][],
+  sourceCol: number,
+  targetCol: number,
+  rules: CategoryRule[],
+  fallback: string,
+): any[][] {
+  return rows.map((row, ri) => {
+    if (ri === 0) return row; // header row untouched
+    const sourceText = String(row[sourceCol] ?? "").toLowerCase();
+    const newRow = row.slice();
+    while (newRow.length <= targetCol) newRow.push("");
+    const matched = rules.find(r => r.keywords.some(kw => sourceText.includes(String(kw).toLowerCase())));
+    newRow[targetCol] = matched ? matched.category : fallback;
+    return newRow;
+  });
 }
 
 // ─── DETERMINISTIC CONTENT VALIDATION ────────────────────────────────────────
@@ -1091,8 +1138,22 @@ Fix every one of these specifically. Every numeric cell must be a real, non-zero
       // Expand any AI-provided row template BEFORE the existing cleanup
       // pipeline runs, so exploded/expanded rows get the same markdown and
       // numeric-coercion treatment as any literal row would.
-      const rows: any[][] = expandRowTemplate(sheet.rows || [], (sheet as any).rowTemplate);
+      // NOTE: declared "let" (not "const") because auto-categorisation below
+      // reassigns it after applying the AI's keyword rules to every row.
+      let rows: any[][] = expandRowTemplate(sheet.rows || [], (sheet as any).rowTemplate);
       if (!rows.length) continue;
+
+      // ── Category auto-matching ────────────────────────────────────────────
+      // If the AI defined category rules for this sheet, apply them to every
+      // row now — deterministically, before any other cleanup — so a large
+      // stamped-out transaction log (Phase 3) arrives already categorised.
+      const catRules = (sheet as any).categoryRules;
+      if (catRules && Array.isArray(catRules.rules) && catRules.rules.length &&
+          typeof catRules.sourceCol === "number" && typeof catRules.targetCol === "number") {
+        try {
+          rows = applyCategoryRules(rows, catRules.sourceCol, catRules.targetCol, catRules.rules, catRules.fallback || "Uncategorized");
+        } catch { /* categorisation optional — ship rows unchanged on any error */ }
+      }
 
       // ── Strip markdown from all cells before writing ─────────────────────
       // ── Markdown table row explosion ──────────────────────────────────────
@@ -1331,6 +1392,33 @@ Fix every one of these specifically. Every numeric cell must be a real, non-zero
         buf = await this.embedChartsSheet(buf, schema.charts, palette);
       } catch (chartErr) { /* charts optional — ship the workbook regardless */ }
     }
+    // ── Dropdown-list data validation (Phase 4) ──────────────────────────────
+    // Collect every sheet's AI-specified dropdown columns and apply them in
+    // one pass. Proven against a raw-XML check before being wired in here.
+    const validationSpecs: { sheetName: string; col: number; options: string[] }[] = [];
+    for (const sh of (schema.sheets || [])) {
+      const dvs = (sh as any).dataValidations;
+      if (Array.isArray(dvs)) {
+        for (const dv of dvs) {
+          if (typeof dv?.col === "number" && Array.isArray(dv?.options) && dv.options.length) {
+            validationSpecs.push({ sheetName: sh.name, col: dv.col, options: dv.options });
+          }
+        }
+      }
+      // A category column with rules automatically gets its own dropdown too,
+      // so the values a user sees always match what they can pick from.
+      const catRules = (sh as any).categoryRules;
+      if (catRules && Array.isArray(catRules.rules) && typeof catRules.targetCol === "number") {
+        const cats = [...new Set([...catRules.rules.map((r: any) => r.category), catRules.fallback || "Uncategorized"])];
+        validationSpecs.push({ sheetName: sh.name, col: catRules.targetCol, options: cats as string[] });
+      }
+    }
+    if (validationSpecs.length) {
+      try {
+        onProgress("\ud83d\udccb Adding dropdown menus (" + validationSpecs.length + ")...");
+        buf = await this.applyDataValidations(buf, validationSpecs);
+      } catch { /* dropdowns optional — ship the workbook regardless */ }
+    }
     const filename = (schema.filename || `${del.title.replace(/\s+/g, "-")}-${Date.now()}.xlsx`);
     this.dlFile(filename, buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
@@ -1430,6 +1518,39 @@ Fix every one of these specifically. Every numeric cell must be a real, non-zero
       });
     }
     return cv.toDataURL("image/png").split(",")[1];
+  }
+
+  // Applies dropdown-list data validation to specified columns on specified
+  // sheets — proven against a raw-XML inspection before being wired in here
+  // (a real <dataValidation type="list"> element, not silently ignored).
+  // Same fail-safe round-trip pattern as embedChartsSheet: any error here
+  // ships the workbook exactly as it was, dropdown-free but otherwise intact.
+  private async applyDataValidations(xlsxBuf: any, sheetValidations: { sheetName: string; col: number; options: string[] }[]): Promise<any> {
+    if (!sheetValidations.length) return xlsxBuf;
+    try {
+      const ExcelJS = await this.ensureExcelJS();
+      const wb2 = new ExcelJS.Workbook();
+      await wb2.xlsx.load(xlsxBuf);
+      for (const v of sheetValidations) {
+        const ws = wb2.getWorksheet(v.sheetName);
+        if (!ws) continue;
+        const colLetter = String.fromCharCode(65 + v.col); // 0=A, 1=B, ... (26-col ceiling, matches realistic sheet widths)
+        const optionList = v.options.slice(0, 200).join(","); // Excel list-validation practical ceiling
+        const lastRow = Math.max(ws.rowCount, 2);
+        for (let r = 2; r <= lastRow; r++) {
+          ws.getCell(colLetter + r).dataValidation = {
+            type: "list",
+            allowBlank: true,
+            formulae: [`"${optionList}"`],
+            showErrorMessage: true,
+            errorStyle: "stop",
+            errorTitle: "Invalid entry",
+            error: "Please choose from the dropdown list.",
+          };
+        }
+      }
+      return await wb2.xlsx.writeBuffer();
+    } catch { return xlsxBuf; } // dropdowns are additive polish — never block a delivery
   }
 
   private async embedChartsSheet(xlsxBuf: any, charts: any[], pal: any): Promise<any> {
