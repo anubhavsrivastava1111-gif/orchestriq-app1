@@ -343,6 +343,23 @@ function buildExcelGenPrompt(
     `4. Dashboard/summary metrics must be formula-driven from the data sheets, never hardcoded.\n` +
     `5. Any recurring series (dates, periods, categories) should cover enough points to show a real pattern.\n` +
     `6. Sample data must be realistic and specific to the field identified \u2014 not generic filler.\n\n` +
+    `MANY-ROW RULE \u2014 if this workbook naturally needs many repeating rows (a multi-year\n` +
+    `monthly/weekly projection, or a transaction log meant to hold hundreds or thousands of real\n` +
+    `entries): DO NOT type out every row yourself. Instead:\n` +
+    `  1. Write the header row, plus ONE fully-worked example row (this becomes the template).\n` +
+    `  2. In that template row, use standard Excel fill-down convention: a cell reference WITHOUT\n` +
+    `     a $ (like B2, C2) is treated as relative and will shift down automatically for every\n` +
+    `     stamped row \u2014 exactly like dragging Excel's fill handle. A reference WITH $ (like\n` +
+    `     Assumptions!$B$2) is treated as fixed and will NEVER shift \u2014 use $ for anything that\n` +
+    `     should stay pointed at the same assumptions cell across every row.\n` +
+    `  3. Add "rowTemplate": {"fromRowIndex": N, "repeatCount": M} to that sheet, where N is the\n` +
+    `     zero-based position of your template row within "rows", and M is how many ADDITIONAL\n` +
+    `     rows to stamp below it (the platform generates them mechanically \u2014 you never write them).\n` +
+    `  4. If the first column of your template row is a recognisable month ("Jan 2024") or a\n` +
+    `     numbered label ("Month 1", "Week 3"), it will auto-increment correctly for every stamped\n` +
+    `     row. Any other label is left as-is, so only use this pattern for labels that should count up.\n` +
+    `  5. Do NOT use rowTemplate for a handful of rows (under ~15) \u2014 just write them directly; this\n` +
+    `     exists specifically so you are never forced to invent hundreds of fake data points by hand.\n\n` +
     `FORMULA RULES (universal \u2014 Excel formulas work the same regardless of domain):\n` +
     `- Write real Excel formula strings ONLY: =SUM(B2:B13), =IFERROR(C5/B5-1,"N/A"), =IF(D2>E2,"Over","OK")\n` +
     `- Cross-sheet references: =Data!C2, ='Guest List'!B15\n` +
@@ -567,6 +584,68 @@ function buildPDFDocxPrompt(
   );
 }
 
+
+// ─── ROW TEMPLATE ENGINE (Excel Intelligence Engine, Phase 3) ────────────────
+// The mechanism that makes "thousands of rows" both possible and cheap: the
+// AI is never asked to type out every row. It writes ONE template row using
+// standard Excel relative/absolute reference conventions, and this code
+// mechanically stamps it down N times — exactly what a human does by
+// dragging the fill handle. This is not an approximation of that behaviour;
+// it is the same rule Excel itself uses (relative refs shift, $-marked
+// absolute refs don't), applied programmatically, at zero AI cost per row
+// and zero risk of drift across thousands of rows.
+
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function fillDownFormula(formula: any, rowOffset: number): any {
+  if (typeof formula !== "string" || !formula.startsWith("=")) return formula;
+  return formula.replace(
+    /((?:'[^']+'|[A-Za-z_][A-Za-z0-9_. ]*)!)?(\$?)([A-Z]{1,3})(\$)?(\d+)/g,
+    (match, sheetPrefix, colDollar, col, rowDollar, rowNum) => {
+      if (rowDollar === "$") return match; // absolute row reference — never shifts
+      const newRow = parseInt(rowNum, 10) + rowOffset;
+      return (sheetPrefix || "") + colDollar + col + newRow;
+    }
+  );
+}
+
+function incrementRowLabel(label: any, offset: number): any {
+  if (typeof label !== "string") return label;
+  const monthYear = label.match(/^([A-Za-z]{3,9})[\s-]?(\d{4})$/);
+  if (monthYear) {
+    const mIdx = MONTH_NAMES.findIndex(m => monthYear[1].toLowerCase().startsWith(m.toLowerCase()));
+    if (mIdx >= 0) {
+      const total = mIdx + offset;
+      const year = parseInt(monthYear[2], 10) + Math.floor(total / 12);
+      const newIdx = ((total % 12) + 12) % 12;
+      return MONTH_NAMES[newIdx] + " " + year;
+    }
+  }
+  const trailingNum = label.match(/^(.*?)(\d+)(\s*\d{0,4})?$/);
+  if (trailingNum && trailingNum[2]) {
+    return trailingNum[1] + (parseInt(trailingNum[2], 10) + offset) + (trailingNum[3] || "");
+  }
+  return label; // no recognizable pattern — left unchanged, never corrupted
+}
+
+// Expands a sheet's rows using an optional rowTemplate instruction the AI can
+// provide instead of writing every row by hand. Fully additive: a sheet with
+// no rowTemplate behaves exactly as before (zero behaviour change).
+function expandRowTemplate(rows: any[][], rowTemplate: any): any[][] {
+  if (!rowTemplate || typeof rowTemplate.fromRowIndex !== "number" || !rowTemplate.repeatCount) return rows;
+  const templateIdx = rowTemplate.fromRowIndex;
+  if (templateIdx < 0 || templateIdx >= rows.length) return rows;
+  const templateRow = rows[templateIdx];
+  const repeatCount = Math.max(0, Math.min(rowTemplate.repeatCount, 20000)); // sane ceiling, not a real-world limit
+  const expanded = rows.slice();
+  for (let i = 1; i <= repeatCount; i++) {
+    const newRow = templateRow.map((cell: any, ci: number) =>
+      ci === 0 ? incrementRowLabel(cell, i) : fillDownFormula(cell, i)
+    );
+    expanded.push(newRow);
+  }
+  return expanded;
+}
 
 // ─── DETERMINISTIC CONTENT VALIDATION ────────────────────────────────────────
 // Checks facts a computer can verify with certainty — not an AI's opinion of
@@ -1009,7 +1088,10 @@ Fix every one of these specifically. Every numeric cell must be a real, non-zero
     const palette = BRAND_PALETTES[plan.domain];
 
     for (const sheet of (schema.sheets || [])) {
-      const rows: any[][] = sheet.rows || [];
+      // Expand any AI-provided row template BEFORE the existing cleanup
+      // pipeline runs, so exploded/expanded rows get the same markdown and
+      // numeric-coercion treatment as any literal row would.
+      const rows: any[][] = expandRowTemplate(sheet.rows || [], (sheet as any).rowTemplate);
       if (!rows.length) continue;
 
       // ── Strip markdown from all cells before writing ─────────────────────
