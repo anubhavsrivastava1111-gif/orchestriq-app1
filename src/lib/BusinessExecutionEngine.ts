@@ -1040,7 +1040,7 @@ Key metric for dashboard: ${workbookPlan.keyMetric}
 Assumptions to document: ${(workbookPlan.assumptionsNeeded || []).join(", ")}${archetypeNote}`
       : "";
 
-    const sys = EXCEL_SPEC_SYSTEM_PROMPT;
+    const sys = EXCEL_SPEC_SYSTEM_PROMPT + planContext;
 
 
 
