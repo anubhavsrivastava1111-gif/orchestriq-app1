@@ -4161,8 +4161,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               stripMd);
             const _spec:DeliverableSpec={type:"pdf",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
             const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
-            setProjectExecPhase("\ud83d\udcd1 Building publication-quality PDF report: "+del.name);
-            const _beeRes:any=await _bee.generatePDF(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
+            await _bee.generatePDF(_plan,_spec,_pubCtx,cnt,()=>{});
             _pdfDone=_w;
             if(!_w&&_beeRes?.error){throw new Error(_beeRes.error);}
           }catch(_beeErr:any){
@@ -5633,8 +5632,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                           ensureXLSX,ensurePptx,ensureJsPDF,
                                           (_fname:any,buf:any)=>{dlFile(nm+".xlsx",buf,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");_w=true;},
                                           stripMd);
-                                        const _spec:DeliverableSpec={type:"xlsx",title:del.name,purpose:del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
-                                        const _plan:ExecutionPlan={objectiveRestated:del.name,domain:"finance",persona:"Senior FP&A Director",audience:"board",qualityStandard:"cfo_model",decisionContext:del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+                                        const _spec:DeliverableSpec={type:"xlsx",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
+                                        const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"finance",persona:"Senior FP&A Director",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
                                         const _res:any=await _bee.generateExcel(_plan,_spec,_pubCtx,cnt,projectExecution?.context?.company?.currency||"INR",projectExecution?.context?.company?.currencySymbol||"₹",()=>{});
                                         _xlsxOk=_w;
                                         if(!_w&&_res?.error)throw new Error(_res.error);
@@ -5666,8 +5665,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                           ensureXLSX,ensurePptx,ensureJsPDF,
                                           (_fname:any,buf:any)=>{dlFile(nm+".pptx",buf,"application/vnd.openxmlformats-officedocument.presentationml.presentation");_w=true;},
                                           stripMd);
-                                        const _spec:DeliverableSpec={type:"pptx",title:del.name,purpose:del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
-                                        const _plan:ExecutionPlan={objectiveRestated:del.name,domain:"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+                                        const _spec:DeliverableSpec={type:"pptx",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
+                                        const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
                                         await _bee.generatePPTX(_plan,_spec,_pubCtx,cnt,()=>{});
                                         _pptxOk=_w;
                                       }catch(_e:any){recordEngineDowngrade(del.name,"pptx",_e);}
