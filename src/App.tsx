@@ -12,6 +12,7 @@ import AgenticWorkflows from "./AgenticWorkflows";
 import { getExecutivesCached } from "./lib/executives";
 import { supabase } from "./lib/supabase";
 import { WorkspaceMemory } from "./lib/WorkspaceMemory";
+import { generateExcel, generatePptx, generatePdf, generateDocx } from "./lib/GenerationService";
 import { ENGINE_ENABLED, runPipeline, classifyDomain, selectFramework, selfReview, classifyEvidence } from "./lib/IntelligenceEngine";
 
 // Intelligence Engine — evidence audit line appended to final deliverables (no AI call, fail-safe)
