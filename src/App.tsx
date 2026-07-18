@@ -5962,6 +5962,21 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                             <button onClick={()=>{const note=prompt("Reason for rejection?");rejectWF(note||"");}} style={{flex:1,background:"transparent",color:"#EF4444",border:"1px solid #EF444444",borderRadius:7,padding:"11px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>Send Back</button>
                           </div>
                           <button onClick={()=>dlFile("Workflow-"+wfActive.id+".md",wfActive.steps.map(s=>"## Level "+s.level+": "+s.role.t+"\n"+s.output).join("\n\n---\n\n"),"text/markdown")} style={{...S.hBtn,width:"100%",marginTop:8,textAlign:"center"}}>Export Full Chain as Markdown</button>
+<div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #1a2030"}}>
+  <div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:0.8,marginBottom:6}}>⚡ Generate CFO-Grade File (Python Service)</div>
+  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+    {[["📊 Excel","excel"],["📑 PPT","pptx"],["📄 PDF","pdf"],["📝 Word","docx"]].map(([lb,type])=>(
+      <button key={type} onClick={async()=>{
+        const body=wfActive.steps.map(s=>s.output).join("\n\n");
+        const fn=type==="excel"?generateExcel:type==="pptx"?generatePptx:type==="pdf"?generatePdf:generateDocx;
+        showToast("Building "+lb.replace(/[^\w]/g,"")+"…","info");
+        const r=await fn({objective:wfActive.task,company_context:co.name+" | "+co.industry+" | "+co.stage+" | "+co.location,available_data:body,currency:co.currency,currency_symbol:cur.sym,api_key:keys.claude||keys.openai||keys.gemini||keys.groq||""});
+        if(!r.success)showToast(r.error||"Generation failed","error");
+      }} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633",flex:1,textAlign:"center"}}>{lb}</button>
+    ))}
+  </div>
+  <div style={{fontSize:8,color:"#5A6480",marginTop:5}}>Uses Railway Python service → CFO-grade Excel with formulas, consulting-grade PPT/PDF/Word</div>
+</div>
                         </div>
                       )}
                     </div>
