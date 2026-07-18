@@ -3832,8 +3832,8 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               ensureXLSX,ensurePptx,ensureJsPDF,
               (name:any,buf:any)=>{zip.folder(folder).file(String(name).replace(/[^a-zA-Z0-9._-]/g,"-"),buf);_w=true;},
               stripMd);
-            const _spec:DeliverableSpec={type:"docx",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
-            const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+            const _spec:DeliverableSpec={type:"excel",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
+    const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"finance",persona:"Senior FP&A Director",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
             setProjectExecPhase("\ud83d\udcc4 Building publication-quality Word document: "+del.name);
             const _beeRes:any=await _bee.generateDocx(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
             _docDone=_w;
