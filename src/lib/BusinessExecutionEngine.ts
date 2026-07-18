@@ -12,7 +12,9 @@
 // Nothing generates documents without passing through this engine first.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { ExcelStyleEngine, EXCEL_SPEC_SYSTEM_PROMPT } from "./ExcelStyleEngine"; // ─── TYPES ───────────────────────────────────────────────────────────────────
+import { ExcelStyleEngine, EXCEL_SPEC_SYSTEM_PROMPT } from "./ExcelStyleEngine"; 
+
+// ─── TYPES ───────────────────────────────────────────────────────────────────
 
 export type Domain =
   | "finance" | "audit" | "strategy" | "marketing" | "operations"
