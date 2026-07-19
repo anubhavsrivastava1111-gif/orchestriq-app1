@@ -4175,14 +4175,14 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               stripMd);
             const _spec:DeliverableSpec={type:"pdf",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
             const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
-            await _bee.generatePDF(_plan,_spec,_pubCtx,cnt,()=>{});
-            _pdfDone=_w;
-            if(!_w&&_beeRes?.error){throw new Error(_beeRes.error);}
-          }catch(_beeErr:any){
-            recordEngineDowngrade(del.name,"pdf",_beeErr);
-          }
-          if(!_pdfDone)try{
-            var _pdfContentSafe=pdfSafeText((content||"").replace(/^\s*---+\s*$/gm,""));const pdfBuf=await(async()=>{
+            await _bee.generatePDF(_plan,_spec,_pubCtx,content,()=>{});
+    _pdfDone=_w;
+    if(!_w&&_beeRes?.error){throw new Error(_beeRes.error);}
+  }catch(_beeErr:any){
+    recordEngineDowngrade(del.name,"pdf",_beeErr);
+  }
+  if(!_pdfDone)try{
+    var _pdfContentSafe=pdfSafeText((content||"").replace(/^\s*---+\s*$/gm,""));const pdfBuf=await(async()=>{
               const content=_pdfContentSafe; // shadow: entire inline renderer uses sanitized text
             const jsPDF=await ensureJsPDF();const doc=new jsPDF({orientation:"portrait",unit:"pt",format:"a4"});
             const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),ML=54,MR=54,MT=54,MB=54,CW=W-ML-MR;
