@@ -3865,7 +3865,6 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
           if(!_docDone)try{
           // Publication engine first (branded typography, TOC, callouts);
           // the inline Word-HTML path below remains as automatic fallback.
-          let _docDone=false;
           try{
             const _pubCtx=["Company: "+(proj.context?.company?.name||co.name||""),"Industry: "+(proj.context?.company?.industry||co.industry||""),"Stage: "+(proj.context?.company?.stage||co.stage||"")].join("\n");
             let _w=false;
