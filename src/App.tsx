@@ -4240,6 +4240,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
           }catch(pptxErr:any){
             zip.folder(folder).file(fname+"-pptx-error.md","PPTX generation error: "+pptxErr.message+"\n\nRaw content:\n"+content);
           }
+        }catch(e:any){zip.folder(folder).file(fname+"-pptx-error.md","PPTX fallback error: "+(e?.message||"").slice(0,80));}
         } else if(fmt==="pdf"){
           // ── RAILWAY PYTHON SERVICE: Board-grade PDF ──────────────────────
           let _pdfDone=false;
