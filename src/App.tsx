@@ -4052,8 +4052,9 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               const buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
               zip.folder(folder).file(fname+".xlsx",buf);
             }catch{zip.folder(folder).file(fname+".md",content);}
+            }
           }
-        // ── PPTX: JSON-driven consulting-grade presentation ─────────────────
+          // ── PPTX: JSON-driven consulting-grade presentation ─────────────
         } else if(fmt==="pptx"){
           // ── RAILWAY PYTHON SERVICE: McKinsey-grade PPTX ─────────────────
           let _pptxDone=false;
