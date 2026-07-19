@@ -4271,9 +4271,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             recordEngineDowngrade(del.name,"pdf",_beeErr);
           }
           if(!_pdfDone)try{
-            var _pdfContentSafe=pdfSafeText((content||"").replace
           // the inline jsPDF path below remains as automatic fallback.
-          let _pdfDone=false;
           try{
             const _pubCtx=["Company: "+(proj.context?.company?.name||co.name||""),"Industry: "+(proj.context?.company?.industry||co.industry||""),"Stage: "+(proj.context?.company?.stage||co.stage||"")].join("\n");
             let _w=false;
