@@ -4328,6 +4328,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             return doc.output("arraybuffer");
           })();zip.folder(folder).file(fname+".pdf",pdfBuf);
           }catch(pdfErr:any){zip.folder(folder).file(fname+"-error.md","PDF error: "+(pdfErr?.message||String(pdfErr))+"\n\n"+content.slice(0,2000));}
+        }catch(e:any){zip.folder(folder).file(fname+"-pdf-error.md","PDF outer error: "+(e?.message||"").slice(0,80));}
         } else if(fmt==="image"||fmt==="video"){
           // REAL media generation — deliver the actual PNG/MP4, never a prompt file.
           // Script/brief is included alongside as reference. A prompt file is written
