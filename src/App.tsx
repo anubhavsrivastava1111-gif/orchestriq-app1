@@ -831,12 +831,12 @@ async function callKimi(key,sys,msgs,maxT){
 // Kling, Seedance, Wan, Veo, Sora, and more. Pay per output, no subscription.
 // Sign up: https://fal.ai/dashboard/keys — $20 free credits on signup.
 
-async function callFalImage(key:string, prompt:string, model="fal-ai/flux-pro"):Promise<string>{
+async function callFalImage(key:string, prompt:string, model="fal-ai/flux-pro", imageSize="landscape_4_3"):Promise<string>{
   if(!key?.trim()) throw new Error("fal.ai key required for image generation. Add it in Settings → fal.ai.");
   const r = await fetch(`https://fal.run/${model}`, {
     method:"POST",
     headers:{"Authorization":`Key ${key.trim()}`,"Content-Type":"application/json"},
-    body:JSON.stringify({prompt, image_size:"landscape_4_3", num_images:1, enable_safety_checker:true}),
+    body:JSON.stringify({prompt, image_size:imageSize, num_images:1, enable_safety_checker:true}),
     signal:AbortSignal.timeout(90000), // hard 90s cap — a stalled connection can never hang the pipeline
   });
   if(!r.ok){
