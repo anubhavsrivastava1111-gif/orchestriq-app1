@@ -3217,6 +3217,8 @@ FORMULA REQUIREMENTS:
 
         pptx:`
 POWERPOINT OUTPUT RULES (CRITICAL — follow exactly):
+⛔ DO NOT write a slide design specification, blueprint, or brief. DO NOT write tables like "Element | Specification | Notes" describing what slides should contain. DO NOT write section headers like "SLIDE 1: COVER SLIDE" followed by specifications.
+✅ Write ACTUAL slide content: real numbers, real headlines, real bullet points — content a CEO sees ON the slide itself, not instructions about how to build the slide.
 You are creating a CONSULTING-GRADE PRESENTATION (McKinsey/BCG standard).
 Output as structured JSON inside a code block:
 
