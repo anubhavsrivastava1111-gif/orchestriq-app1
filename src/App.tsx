@@ -4335,9 +4335,13 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
           if(falKey&&!imgGenerated){
             try{
               setProjectExecPhase("🖼 Generating image via fal.ai: "+del.name);
-              const imgModel=del.name.toLowerCase().includes("diagram")||del.name.toLowerCase().includes("infographic")
-                ?"fal-ai/ideogram/v3":"fal-ai/flux-pro";
-              const imgPromptText=prompts.dalle||prompts.stability||del.description||(rawContentStore.current[del.id]||del.rawContent||"").slice(0,600)||del.name;const imgUrl=await callFalImage(falKey,imgPromptText,imgModel);
+              const _isLinkedIn=del.name.toLowerCase().includes("linkedin")||(del.description||"").toLowerCase().includes("linkedin");
+              const imgModel=del.name.toLowerCase().includes("diagram")||del.name.toLowerCase().includes("infographic")?"fal-ai/ideogram/v3":_isLinkedIn?"fal-ai/ideogram/v3":"fal-ai/flux-pro";
+              const _imgSize=_isLinkedIn?"landscape_16_9":"landscape_4_3";
+              const _coName=proj.context?.company?.name||co.name||"Company";
+              const _coIndustry=proj.context?.company?.industry||co.industry||"AI SaaS";
+              const imgPromptText=_isLinkedIn?`Professional LinkedIn announcement banner for ${_coName}, a ${_coIndustry} company. Deep navy blue background. Bold white headline text on left side showing business achievement. Three teal-accented metric cards showing growth KPIs. Abstract upward data visualization on right side. Premium executive brand design. Clean minimalist corporate aesthetic. Text readable at thumbnail size. 16:9 landscape. No people. No stock photos. Fortune 500 quality.`:(prompts.dalle||prompts.stability||del.description||(rawContentStore.current[del.id]||del.rawContent||"").slice(0,600)||del.name);
+              const imgUrl=await callFalImage(falKey,imgPromptText,imgModel,_imgSize);
               if(imgUrl){
                 const ir=await fetch(imgUrl);
                 const ib=await ir.blob();
