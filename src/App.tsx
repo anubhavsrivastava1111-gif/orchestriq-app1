@@ -4027,7 +4027,35 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
           }
         // ── PPTX: JSON-driven consulting-grade presentation ─────────────────
         } else if(fmt==="pptx"){
-          // Publication engine first (brand master, Calibri design system,
+          // ── RAILWAY PYTHON SERVICE: McKinsey-grade PPTX ─────────────────
+          let _pptxDone=false;
+          try{
+            const _railwayUrl="https://orchestriq-gen-service-production.up.railway.app";
+            const _allContent=(rawContentStore.current[del.id]||del.rawContent||"").replace(/^\s*(Here is|Here's)[^\n]*\n+/i,"");
+            const _coCtx=[proj.context?.company?.name||co.name||"",proj.context?.company?.industry||co.industry||"",proj.context?.company?.stage||co.stage||""].filter(Boolean).join(" | ");
+            setProjectExecPhase("📊 Building McKinsey-grade PPTX via Python engine: "+del.name+"...");
+            const _r=await fetch(_railwayUrl+"/generate/pptx",{
+              method:"POST",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({
+                objective:del.description||del.name,
+                company_context:_coCtx,
+                available_data:_allContent.slice(0,8000),
+                currency:proj.context?.company?.currency||co.currency||"INR",
+                currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
+                api_key:keys.claude||keys.openai||keys.gemini||keys.groq||""
+              }),
+              signal:AbortSignal.timeout(120000)
+            });
+            if(!_r.ok)throw new Error("Railway PPTX: HTTP "+_r.status);
+            const _buf=await _r.arrayBuffer();
+            if(_buf.byteLength<5000)throw new Error("Railway returned empty file");
+            zip.folder(folder).file(fname+".pptx",_buf);
+            _pptxDone=true;
+          }catch(_beeErr:any){
+            recordEngineDowngrade(del.name,"pptx",_beeErr);
+          }
+          if(!_pptxDone)try{
           // 12-16 slide mandate, decision-first planning, native charts).
           // The inline PptxGenJS path below stays as the automatic fallback —
           // and any use of it is now recorded and surfaced to the user.
