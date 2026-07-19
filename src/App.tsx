@@ -3343,7 +3343,8 @@ QUALITY STANDARD:
 Could this output be presented directly to a CFO, Board, or senior client WITHOUT manual editing?
 If no, it is not complete. Do not submit incomplete work.
 Every number must be sourced or labeled. Every recommendation must be specific and actionable.
-This is McKinsey/Deloitte standard — not a draft, not a template, not a starting point.`;
+This is McKinsey/Deloitte standard — not a draft, not a template, not a starting point.
+ANTI-PLACEHOLDER RULE: NEVER write [X], [XXXX], [TBD], [INSERT], [PENDING], [UNKNOWN], [DATA GAP], [MISSING DATA], [CRITICAL GAP], [UNDEFINED], [ESTIMATE PENDING], [NOT FOUND], [Current Month/Year], or ANY bracket placeholder for any number, name, date, or value. If exact data is unavailable, INVENT a specific plausible value for a ${co.industry} ${co.stage}-stage company and label it (A: assumed). A placeholder is a failure. An invented labeled assumption is always preferred.`;
 
       // ── BUILD THE FULL SYSTEM PROMPT ─────────────────────────────────────
       return `You are a ${persona}.
