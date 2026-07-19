@@ -3902,8 +3902,32 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
           }catch{zip.folder(folder).file(fname+".md",content);}
         // ── IMPROVED 2: Enterprise multi-sheet XLSX ──
         } else if(fmt==="xlsx"){
+          // ── RAILWAY PYTHON SERVICE: CFO-grade Excel ──────────────────────
           try{
-            // ── BEE-POWERED EXCEL: Professional workbook with formulas ──────
+            const _railwayUrl="https://orchestriq-gen-service-production.up.railway.app";
+            const _allContent=(rawContentStore.current[del.id]||del.rawContent||"").replace(/^\s*(Here is|Here's|Below is)[^\n]*\n+/i,"");
+            const _coCtx=[proj.context?.company?.name||co.name||"",proj.context?.company?.industry||co.industry||"",proj.context?.company?.stage||co.stage||"",proj.context?.company?.location||co.location||""].filter(Boolean).join(" | ");
+            setProjectExecPhase("📊 Building CFO-grade Excel via Python engine: "+del.name+"...");
+            const _r=await fetch(_railwayUrl+"/generate/excel",{
+              method:"POST",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({
+                objective:del.description||del.name,
+                company_context:_coCtx,
+                available_data:_allContent.slice(0,8000),
+                currency:proj.context?.company?.currency||co.currency||"INR",
+                currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
+                api_key:keys.claude||keys.openai||keys.gemini||keys.groq||""
+              }),
+              signal:AbortSignal.timeout(120000)
+            });
+            if(!_r.ok)throw new Error("Railway Excel: HTTP "+_r.status);
+            const _buf=await _r.arrayBuffer();
+            if(_buf.byteLength<1000)throw new Error("Railway returned empty file");
+            zip.folder(folder).file(fname+".xlsx",_buf);
+          }catch(xlsxErr:any){
+            // Fallback: SheetJS basic
+            try{
             // BusinessExecutionEngine generates: Dashboard tab, formula cells,
             // conditional formatting, freeze panes, auto-filter, named ranges.
             const _xlsxCurrency = proj.context?.company?.currency||co.currency||"INR";
