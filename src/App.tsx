@@ -3770,8 +3770,11 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
     const colorMatch = rawContent.match(/#[0-9A-Fa-f]{6}/g);
     const colors = colorMatch?colorMatch.slice(0,3).join(", "):"deep navy, teal, white";
     const visualSpec = rawContent.split("\n").filter((l:string)=>l.length>20&&["visual","style","color","design","image","show","background"].some(kw=>l.toLowerCase().includes(kw))).slice(0,4).join(". ").slice(0,300);
+    const isLinkedInDel=del.name.toLowerCase().includes("linkedin")||(del.description||"").toLowerCase().includes("linkedin");
     let dalle = "";
-    if(isComparison){
+    if(isLinkedInDel){
+      dalle=`Professional LinkedIn post banner for ${company}, ${industry} company. Deep navy background. Bold white headline text showing key business metric. Teal accent cards with growth KPIs. Abstract upward data visualization. Premium executive brand. Clean minimalist. Highly legible at small size. No people. 16:9 landscape 1200x627. Corporate premium quality.`;
+    } else if(isComparison){
       dalle = `Clean professional infographic comparison for ${company}. Split: left=old manual workflow (warm reds/grays), right=AI-automated workflow (cool teals/white). Central transition arrow. McKinsey consulting aesthetic. ${colors} palette. Abstract icons only, no real text. White background. 16:9.`;
     } else if(isHero){
       dalle = `Premium hero image for ${company}, an AI ${industry} platform. ${visualSpec||"Futuristic glowing AI interface connected to business workflows."}. Professional aspirational enterprise aesthetic. ${colors}. Cinematic lighting, depth of field. No text overlays. 16:9 landscape.`;
