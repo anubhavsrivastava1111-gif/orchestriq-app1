@@ -3335,6 +3335,8 @@ Produce a COMPLETE, professional business document.
 - Minimum 800 words for any analytical deliverable`,
       };
 
+      const needsFictional=(del.description||"").toLowerCase().includes("fictional")||(del.name||"").toLowerCase().includes("fictional")||(priorDepContent||"").toLowerCase().includes("fictional data");
+      const fictionalNote=needsFictional?`\n\n⚠ FICTIONAL DATA MANDATE: This deliverable requires invented realistic data. DO NOT use this company's real figures which may be ₹0. Invent specific, plausible, internally consistent numbers for a ${co.industry} company at ${co.stage} stage. Example ranges: MRR ₹18L–₹85L, customers 25–180, gross margin 55–75%, burn ₹12L–₹35L/month, runway 12–24 months. Every cell, every slide, every table must have a specific invented number — never a placeholder.\n\n`:"";
       const formatRules=FORMAT_RULES[fmt]||FORMAT_RULES.md;
 
       // ── QUALITY STANDARD ─────────────────────────────────────────────────
