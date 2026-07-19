@@ -4087,7 +4087,6 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
           // 12-16 slide mandate, decision-first planning, native charts).
           // The inline PptxGenJS path below stays as the automatic fallback —
           // and any use of it is now recorded and surfaced to the user.
-          let _pptxDone=false;
           try{
             const _pubCtx=["Company: "+(proj.context?.company?.name||co.name||""),"Industry: "+(proj.context?.company?.industry||co.industry||""),"Stage: "+(proj.context?.company?.stage||co.stage||"")].join("\n");
             let _w=false;
