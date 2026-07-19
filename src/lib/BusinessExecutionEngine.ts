@@ -1136,7 +1136,82 @@ Fix every one of these specifically. Every numeric cell must be a real, non-zero
 
     onProgress(`📊 Building workbook: ${schema.filename || del.title}...`);
 
-const styleSpec = ExcelStyleEngine.parseWorkbookSpec(text, del.title); const exportBlob = await ExcelStyleEngine.exportWorkbook(styleSpec); const exportBuf = await exportBlob.arrayBuffer(); const filename = `${del.title.replace(/\s+/g, "-")}-${Date.now()}.xlsx`; this.dlFile(filename, exportBuf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); return { deliverable: del, status: "complete", filename, summary: styleSpec.subtitle || `${styleSpec.sheets.length} sheets — benchmark styling applied.`, content: `Professional Excel workbook delivered: **${filename}**`, qualityWarning: check.passed ? undefined : `Note: content check flagged — ${check.violations.join("; ")}`, }; }
+onProgress(`📊 Building ${schema.sheets?.length || 0}-sheet workbook: ${del.title}...`);
+    const XLSX = await this.ensureXLSX();
+    const wb = XLSX.utils.book_new();
+    const sheetDropdowns: { sheetName: string; col: number; options: string[] }[] = [];
+
+    for (const sheet of (schema.sheets || [])) {
+      let rows: any[][] = expandRowTemplate(sheet.rows || [], (sheet as any).rowTemplate);
+
+      if ((sheet as any).categoryRules?.rules?.length) {
+        const cr = (sheet as any).categoryRules;
+        rows = applyCategoryRules(rows, cr.sourceCol, cr.targetCol, cr.rules, cr.fallback || "Other");
+        const cats = [...new Set(cr.rules.map((r: CategoryRule) => r.category)), cr.fallback || "Other"].filter(Boolean) as string[];
+        if (cats.length) sheetDropdowns.push({ sheetName: String(sheet.name || "Sheet").slice(0, 31), col: cr.targetCol, options: cats });
+      }
+
+      if ((sheet as any).dataValidations?.length) {
+        for (const dv of (sheet as any).dataValidations) {
+          if (dv.options?.length && typeof dv.col === "number") {
+            sheetDropdowns.push({ sheetName: String(sheet.name || "Sheet").slice(0, 31), col: dv.col, options: dv.options });
+          }
+        }
+      }
+
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+
+      Object.keys(ws).filter(k => !k.startsWith("!")).forEach(k => {
+        const cell = ws[k];
+        if (cell && typeof cell.v === "string" && cell.v.startsWith("=")) {
+          cell.f = cell.v.slice(1); cell.t = "n"; delete cell.v;
+        }
+      });
+
+      if (rows.length) {
+        const maxCols = Math.max(...rows.map((r: any[]) => r.length), 1);
+        ws["!cols"] = Array.from({ length: maxCols }, (_: any, ci: number) => ({
+          wch: Math.min(42, Math.max(10, ...rows.map((r: any[]) => String(r[ci] ?? "").length + 2)))
+        }));
+      }
+
+      if (sheet.frozenRows || sheet.frozenCols) {
+        ws["!freeze"] = { xSplit: sheet.frozenCols || 0, ySplit: sheet.frozenRows || 0 };
+      }
+      if (sheet.autoFilter) ws["!autofilter"] = { ref: sheet.autoFilter };
+
+      const safeName = String(sheet.name || "Sheet").slice(0, 31).replace(/[:\\\/\?\*\[\]]/g, "");
+      try { XLSX.utils.book_append_sheet(wb, ws, safeName || "Sheet"); } catch {}
+    }
+
+    if ((schema.charts || []).length) {
+      const chartRows: any[][] = [["Chart Title", "Label", "Value", "Series"]];
+      for (const c of schema.charts) {
+        (c.labels || []).forEach((lbl: any, i: number) => {
+          chartRows.push([c.title || "", lbl, c.values?.[i] ?? 0, c.seriesName || ""]);
+        });
+      }
+      try { XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(chartRows), "Chart Data"); } catch {}
+    }
+
+    let buf: any = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+
+    if (sheetDropdowns.length) {
+      try { buf = await this.applyDataValidations(buf, sheetDropdowns); } catch {}
+    }
+
+    const filename = `${del.title.replace(/\s+/g, "-")}-${Date.now()}.xlsx`;
+    this.dlFile(filename, buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+    return {
+      deliverable: del,
+      status: "complete",
+      filename,
+      summary: `${schema.sheets?.length || 0} sheets with real data and formulas`,
+      content: `Professional Excel workbook delivered: **${filename}**`,
+      qualityWarning: check.passed ? undefined : `Content check: ${check.violations.join("; ")}`,
+    };
+  }
   
   // EXCEL CHARTS ENGINE — canvas-rendered chart images embedded via ExcelJS.
   // Browser spreadsheet libraries cannot write native Excel charts; this engine
