@@ -3174,10 +3174,16 @@ Structure your output as SHEETS separated by === SHEET: [Name] ===
 Required sheets:
 === SHEET: Dashboard ===
 (KPI summary: key metrics with formula references to data sheets)
-KEY METRICS: label | value | formula | format | trend
-Example rows:
-Revenue | ${sym}0 | =Data!B${15} | currency | ▼
-Burn Rate | ${sym}0 | =Data!C${8} | currency | ▲
+KEY METRICS: label | value | vs_target | trend
+CRITICAL: Use realistic invented numbers. NEVER write 0 or placeholder.
+MRR | ${sym}42,50,000 | ${sym}38,00,000 | ▲ 11.8%
+ARR | ${sym}5,10,00,000 | ${sym}4,56,00,000 | ▲
+Gross Margin | 67% | 65% | ▲
+Burn Rate | ${sym}18,50,000 | ${sym}20,00,000 | ✓
+Cash Runway | 16 months | 18 months | ⚠
+CAC | ${sym}48,500 | ${sym}45,000 | ▼
+NRR | 118% | 110% | ▲
+Customers | 87 | 80 | ▲
 
 === SHEET: Data ===
 (Structured data table with headers in row 1)
