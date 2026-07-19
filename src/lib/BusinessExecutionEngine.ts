@@ -12,7 +12,7 @@
 // Nothing generates documents without passing through this engine first.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { ExcelStyleEngine, EXCEL_SPEC_SYSTEM_PROMPT } from "./ExcelStyleEngine"; 
+// ExcelStyleEngine removed — workbook built directly via SheetJS 
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
