@@ -3927,6 +3927,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             // Word HTML saved as .doc opens natively in Microsoft Word
             zip.folder(folder).file(fname+".doc",html);
           }catch{zip.folder(folder).file(fname+".md",content);}
+        }catch(e:any){zip.folder(folder).file(fname+".md",content);}
         // ── IMPROVED 2: Enterprise multi-sheet XLSX ──
         } else if(fmt==="xlsx"){
           // ── RAILWAY PYTHON SERVICE: CFO-grade Excel ──────────────────────
