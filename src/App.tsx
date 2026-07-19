@@ -3359,7 +3359,7 @@ DELIVERABLE TO PRODUCE:
 Name: ${del.name}
 Purpose: ${del.description}
 Output Format: ${fmt.toUpperCase()}
-${formatRules}
+${fictionalNote}${formatRules}
 
 DATA LABELING:
 - [VERIFIED]: confirmed data from provided sources
