@@ -3833,8 +3833,36 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
         const fmt=(del.outputFormat||"md").toLowerCase();
         const lsContent=(()=>{try{return localStorage.getItem("cos-rc-"+del.id)||"";}catch{return "";}})();
         const content=(rawContentStore.current[del.id]||lsContent||del.rawContent||"").replace(/^\s*(Here is|Here's|Below is|I've created|I have created|I'll create)[^\n]*\n+/i,"").replace(/^\s*(Here is|Here's) SECTION[^\n]*$/gmi,"").replace(/^\s*Here is Section \d+[^\n]*$/gmi,"").replace(/^\s*Here is the (complete|final)[^\n]*$/gmi,"");
-        // ── IMPROVED 1: Native DOCX via Word HTML (opens natively in Word) ──
         if(fmt==="docx"){
+          // ── RAILWAY PYTHON SERVICE: Real .docx binary ────────────────────
+          let _docDone=false;
+          try{
+            const _railwayUrl="https://orchestriq-gen-service-production.up.railway.app";
+            const _allContent=(rawContentStore.current[del.id]||del.rawContent||"").replace(/^\s*(Here is|Here's)[^\n]*\n+/i,"");
+            const _coCtx=[proj.context?.company?.name||co.name||"",proj.context?.company?.industry||co.industry||"",proj.context?.company?.stage||co.stage||""].filter(Boolean).join(" | ");
+            setProjectExecPhase("📝 Building submission-ready DOCX via Python engine: "+del.name+"...");
+            const _r=await fetch(_railwayUrl+"/generate/docx",{
+              method:"POST",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({
+                objective:del.description||del.name,
+                company_context:_coCtx,
+                available_data:_allContent.slice(0,8000),
+                currency:proj.context?.company?.currency||co.currency||"INR",
+                currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
+                api_key:keys.claude||keys.openai||keys.gemini||keys.groq||""
+              }),
+              signal:AbortSignal.timeout(120000)
+            });
+            if(!_r.ok)throw new Error("Railway DOCX: HTTP "+_r.status);
+            const _buf=await _r.arrayBuffer();
+            if(_buf.byteLength<5000)throw new Error("Railway returned empty file");
+            zip.folder(folder).file(fname+".docx",_buf);
+            _docDone=true;
+          }catch(_beeErr:any){
+            recordEngineDowngrade(del.name,"docx",_beeErr);
+          }
+          if(!_docDone)try{
           // Publication engine first (branded typography, TOC, callouts);
           // the inline Word-HTML path below remains as automatic fallback.
           let _docDone=false;
