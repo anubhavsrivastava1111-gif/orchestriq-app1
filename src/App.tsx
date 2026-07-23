@@ -2476,11 +2476,15 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     try{
       if(cancelRef.current.tm)return;
       setTmPh("📡 Research Desk is gathering current data…");
-      const researchBrief=await runResearchDesk(ask,co,compData,tmDec,showToast);
+      const rdTM=await runResearchDesk(ask,co,compData,tmDec,showToast,keys);
+      const researchBrief=rdTM.brief;
+      const rdGroundedTM=rdTM.grounded;
       if(cancelRef.current.tm)return;
       setTmResearchBrief(researchBrief);
       setTmPh("Running simulation…");
-      const researchContext="\nVERIFIED RESEARCH BRIEF (current data for this simulation - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n";
+      const researchContext=(rdGroundedTM
+        ?"\nVERIFIED RESEARCH BRIEF (current data for this simulation - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n"
+        :"\nRESEARCH DESK UNAVAILABLE FOR THIS SIMULATION:\n"+researchBrief+"\n\nMANDATORY: No live figure was retrieved. Every price, cost, rate, salary, or market figure you produce MUST carry the tag [ESTIMATE - UNVERIFIED]. Do not present any number as fact. Open your response with a one-line warning that this simulation is ungrounded.\n");
       const sys="You are a Business Simulation Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nSimulate TWO parallel 12-month timelines. ALL figures in "+tmCur.sym+tmCur.code+".\nSections: Decision, Baseline Assumptions, TIMELINE A PROCEED (table: Month/Revenue/OpEx/Cash/Key Event), TIMELINE B DO NOT PROCEED (same table), Divergence Summary, Best/Worst/Black Swan scenarios, Verdict table (Expected Value A&B, Cost of Waiting per week, Reversibility, Recommendation with confidence %), First 30 Days Action Plan, Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled [Assumption]. Figures taken from the VERIFIED RESEARCH BRIEF must be labeled [Retrieved Evidence]. Derived figures must show the formula and be labeled [Calculation]. Do not present invented numbers as fact.";
       const res=await ask(sys,[{role:"user",content:"Simulate: \""+tmDec+"\""}],4500);
       if(!cancelRef.current.tm){
@@ -2512,11 +2516,14 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       if(cancelRef.current.ap)return;
       setApPh("📡 Research Desk is gathering current data…");
       const researchQuestion="What decisions should "+co.name+" ("+co.industry+", "+co.location+", stage: "+co.stage+") be making right now to grow and protect the business?";
-      const researchBrief=await runResearchDesk(ask,co,compData,researchQuestion,showToast);
+      const rdAP=await runResearchDesk(ask,co,compData,researchQuestion,showToast,keys);
+      const researchBrief=rdAP.brief;
       if(cancelRef.current.ap)return;
       setApResearchBrief(researchBrief);
       setApPh("Scanning all decision vectors…");
-      const researchContext="\nVERIFIED RESEARCH BRIEF (current data for this scan - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n";
+      const researchContext=(rdAP.grounded
+        ?"\nVERIFIED RESEARCH BRIEF (current data for this scan - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n"
+        :"\nRESEARCH DESK UNAVAILABLE FOR THIS SCAN:\n"+researchBrief+"\n\nMANDATORY: No live figure was retrieved. Every price, cost, rate, salary, or market figure you produce MUST carry the tag [ESTIMATE - UNVERIFIED]. Do not present any number as fact. Open your response with a one-line warning that this scan is ungrounded.\n");
       const sys="You are the Decision Intelligence Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nIdentify 6 CRITICAL decisions the founder should make RIGHT NOW. ALL figures in "+apCur.sym+apCur.code+".\nFor each: Title, Urgency, Owner, Decide By, Cost of delay/week (with calculation), Options 1/2/3 with outcomes, Recommendation, "+co.location+" Context, Data Needed. End with: THE ONE DECISION THAT MATTERS MOST THIS WEEK. Then a final section: Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled [Assumption]. Figures taken from the VERIFIED RESEARCH BRIEF must be labeled [Retrieved Evidence]. Derived figures must show the formula and be labeled [Calculation]. Do not present invented numbers as fact.";
       let res=await ask(sys,[{role:"user",content:"Run complete decision scan."}],4500);
       res+=ieEvidenceAudit(res);
@@ -2547,6 +2554,7 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     const res=[];
     const synCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
     let researchBrief="";
+    let brGrounded=false;
     const domain=classifyDomain(brQ);
     const frameworks=selectFramework(domain,"decide");
     try{
@@ -2556,13 +2564,19 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       if(!cancelRef.current.br){
         setBrResearching(true);
         setBrPh("📡 Research Desk is gathering current data…");
-        researchBrief=await runResearchDesk(ask,co,compData,brQ,showToast);
-        setBrCur(prev=>({...prev,researchBrief}));
+        const rdBR=await runResearchDesk(ask,co,compData,brQ,showToast,keys);
+        researchBrief=rdBR.brief;
+        brGrounded=rdBR.grounded;
+        setBrCur(prev=>({...prev,researchBrief,grounded:rdBR.grounded}));
         setBrResearching(false);
       }
-      const researchContext=(researchBrief
-        ?"\nVERIFIED RESEARCH BRIEF (current data gathered for this debate - use these figures and cite this brief as your source; do not re-search):\n"+researchBrief+"\n"
-        :"")+buildDecisionHistoryContext(brQ);
+      const researchContext=(brGrounded
+        ?"\nVERIFIED RESEARCH BRIEF (current data gathered for this debate - use these figures and cite this brief as your source; do not re-search):\n"
+          +researchBrief
+          +"\n\nEVIDENCE BINDING RULE (non-negotiable): The brief above is the ONLY source of verified external figures in this debate. Any price, cost, rate, salary benchmark, valuation multiple, or market size you state must either (a) come from the brief - cite it as 'per Research Brief' - or (b) carry the tag [ESTIMATE - UNVERIFIED]. An untagged number presented as fact is a failure of your role. If a prior speaker stated an untagged number not in the brief, your first duty is to challenge it.\n"
+        :"\nRESEARCH DESK UNAVAILABLE FOR THIS DEBATE:\n"+researchBrief
+          +"\n\nMANDATORY: No live figure was retrieved for this session. Every price, cost, rate, salary, valuation, or market figure in this debate MUST carry the tag [ESTIMATE - UNVERIFIED]. Do not present any number as fact. If a prior speaker presented an untagged number, challenge it explicitly before continuing.\n"
+        )+buildDecisionHistoryContext(brQ);
       for(let i=0;i<agents.length;i++){
         if(cancelRef.current.br){showToast("Boardroom cancelled","warning");break;}
         const ag=agents[i];const p=EP[ag.id]||{};
