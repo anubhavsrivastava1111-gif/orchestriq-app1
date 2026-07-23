@@ -5115,6 +5115,18 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         :"Produce a "+tLabel+" as a slide deck. Each ## heading = one slide title. Under each, 3-6 short punchy bullet points (slide-ready, not paragraphs) OR a markdown table. Aim for 8-12 slides. Structure for a "+tLabel+": "+(dtype==="investor"?"Title, Problem, Solution, Market, Traction, Business Model, Competition, Financials, Team, The Ask.":dtype==="pitch"?"Hook, Problem, Solution, Why Now, Market, Product, Traction, Ask.":dtype==="roadmap"?"Vision, Now, Next, Later, Milestones, Metrics.":dtype==="research"?"Objective, Method, Findings, Analysis, Implications, Next Steps.":dtype==="operational"?"Overview, KPIs, Wins, Issues, Actions, Outlook.":dtype==="strategy"?"Context, Strategic Goals, Initiatives, Roadmap, Risks, Metrics.":"Agenda, Key Themes, Insights, Recommendations, Risks, Next Steps.");
       const userTitle=expTitle.trim()||(tLabel+" — "+co.name);
 
+      // RAILWAY FIRST — everything below only runs as a backup if this fails.
+      let usedRailway=false;
+      try{
+        const railFmt=isPdf?"pdf":"pptx";
+        await railwayGenerate(railFmt,{title:userTitle,objective:userTitle,body:corpus,currency:co.currency,currencySymbol:cur.sym});
+        usedRailway=true;
+        showToast((isPdf?"PDF":"PowerPoint")+" generated via Python engine ✓","success");
+      }catch(railErr:any){
+        recordEngineDowngrade(userTitle,isPdf?"pdf":"pptx",railErr);
+        showToast("Python engine unavailable — using backup renderer. Quality may be lower.","warning");
+      }
+      if(!usedRailway){
       // QUALITY ENGINE: for PPTX only, try the structured archetype pipeline first.
       // Falls back to the original markdown pipeline if the AI response doesn't
       // parse as valid structured JSON — this can never make PPTX generation worse,
@@ -5153,21 +5165,63 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         setExpStep(isPdf?"📄 Rendering PDF…":"📊 Building PowerPoint…");
         if(isPdf)await generatePDFv2(dtype,userTitle,synth,co,cur);
         else await generatePPTX(dtype,userTitle,synth,co,cur);
+        showToast((isPdf?"PDF":"PowerPoint")+" generated (backup renderer)","success");
       }
-      showToast((isPdf?"PDF":"PowerPoint")+" generated and downloaded ✓","success");
+      }
       setExpStep("");
     }catch(e){showToast("Export failed: "+e.message,"error");setExpStep("");}
     finally{setExpGenerating(false);}
-  },[expGenerating,expMode,expDocType,expPptType,expSources,expTitle,co,compData,chats,brSessions,workflows,tQueue,tmRes,apRes,cur,keys,defP,showToast,expStyleResult]);
+  },[expGenerating,expMode,expDocType,expPptType,expSources,expTitle,co,compData,chats,brSessions,workflows,tQueue,tmRes,apRes,cur,keys,defP,showToast,expStyleResult,railwayGenerate]);
+
+  // ─── RAILWAY DOCUMENT ENGINE — the ONLY document generator in the app ───
+  const railwayGenerate=useCallback(async(format:string,opts:{title?:string;objective?:string;body?:string;currency?:string;currencySymbol?:string})=>{
+    const RAILWAY_URL="https://orchestriq-gen-service-production.up.railway.app";
+    const apiKey=(keys.claude||EFF_CLAUDE||keys.openai||keys.gemini||EFF_GEMINI||keys.groq||EFF_GROQ||"").trim();
+    if(!apiKey)throw new Error("No API key configured — add one in Settings to generate documents.");
+    const coCtx=[co.name||"",co.industry||"",co.stage||"",co.location||""].filter(Boolean).join(" | ");
+    showToast("Building "+format.toUpperCase()+" via Python engine — first request may take up to 60s…","info");
+    const r=await fetch(RAILWAY_URL+"/generate/"+format,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        objective:opts.objective||opts.title||"Document",
+        company_context:coCtx,
+        available_data:(opts.body||"").slice(0,8000),
+        currency:opts.currency||co.currency||"INR",
+        currency_symbol:opts.currencySymbol||cur.sym||"₹",
+        api_key:apiKey
+      }),
+      signal:AbortSignal.timeout(120000)
+    });
+    if(!r.ok)throw new Error("Railway "+format+": HTTP "+r.status);
+    const buf=await r.arrayBuffer();
+    const MIN_SIZE:{[k:string]:number}={xlsx:1000,pdf:2000,pptx:5000,docx:5000};
+    if(buf.byteLength<(MIN_SIZE[format]||1000))throw new Error("Railway returned an empty/incomplete file");
+    const MIME:{[k:string]:string}={xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",pdf:"application/pdf",pptx:"application/vnd.openxmlformats-officedocument.presentationml.presentation",docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"};
+    const blob=new Blob([buf],{type:MIME[format]||"application/octet-stream"});
+    const fname=(opts.title||"Document").replace(/[^a-zA-Z0-9]/g,"-")+"-"+Date.now()+"."+format;
+    const u=URL.createObjectURL(blob);
+    const a=document.createElement("a");a.href=u;a.download=fname;a.style.display="none";
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(u),200);
+  },[keys,co,cur,showToast]);
 
   // Quick single-source export (used inline in chat/boardroom/etc.)
   const quickExport=useCallback(async(mode,dtype,title,body)=>{
-    try{showToast("Generating "+(mode==="pdf"?"PDF":"PowerPoint")+"…","info");
-      if(mode==="pdf")await generatePDFv2(dtype,title,body,co,cur);
-      else await generatePPTX(dtype,title,body,co,cur);
-      showToast("Downloaded ✓","success");
-    }catch(e){showToast("Export failed: "+e.message,"error");}
-  },[co,cur,showToast]);
+    const fmt=mode==="pdf"?"pdf":"pptx";
+    try{
+      await railwayGenerate(fmt,{title,objective:title,body,currency:co.currency,currencySymbol:cur.sym});
+      showToast("Downloaded ✓ (Python engine)","success");
+    }catch(railErr:any){
+      recordEngineDowngrade(title,fmt,railErr);
+      showToast("Python engine unavailable ("+String(railErr?.message||railErr).slice(0,60)+") — using backup renderer. Quality may be lower.","warning");
+      try{
+        if(mode==="pdf")await generatePDFv2(dtype,title,body,co,cur);
+        else await generatePPTX(dtype,title,body,co,cur);
+        showToast("Downloaded (backup renderer)","success");
+      }catch(e:any){showToast("Export failed: "+e.message,"error");}
+    }
+  },[co,cur,showToast,railwayGenerate]);
 
   const curRole=AR.find(r=>r.id===selRole);
   const curMsgs=selRole?(chats[selRole]||[]):[];
