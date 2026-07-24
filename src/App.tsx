@@ -196,6 +196,15 @@ const CLAUDE_TASK_MODEL: Record<string,string> = {
   research:       "claude-sonnet-4-5-20250929",
 };
 
+// When DeepSeek handles one of these task types, use the stronger Pro model
+// instead of the default Flash model. Everything else stays on Flash (cheap, fast).
+const DEEPSEEK_TASK_MODEL: Record<string,string> = {
+  excel_advanced: "deepseek-v4-pro",
+  financial:      "deepseek-v4-pro",
+  audit:          "deepseek-v4-pro",
+  code:           "deepseek-v4-pro",
+};
+
 // Auto-classify the task type from prompt + system context.
 // Called automatically inside callMulti — no change needed at call sites.
 // ─── PROVIDER CAPABILITY REGISTRY ────────────────────────────────────────────
@@ -815,8 +824,8 @@ async function callGemini(key,sys,msgs,maxT){
 }
 
 // FIX BUG 2,3,5: universal 60s timeout on every AI call
-async function callDeepSeek(key,sys,msgs,maxT){
-  const r=await fetch("https://api.deepseek.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.deepseek.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
+async function callDeepSeek(key,sys,msgs,maxT,modelOverride=""){
+  const r=await fetch("https://api.deepseek.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:(modelOverride||MODELS.deepseek.model),max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("DeepSeek: Invalid API key.");if(r.status===429)throw new Error("DeepSeek: Rate limit. Wait a moment.");throw new Error("DeepSeek "+r.status+": "+(m||r.statusText));}
   const d=await r.json();return d.choices?.[0]?.message?.content||"";
 }
@@ -915,7 +924,7 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,mode
     timerId=setTimeout(()=>rej(new Error("Request timed out after "+(timeoutMs/1000)+"s. The AI provider may be busy — try switching to Gemini (free tier).")),timeoutMs);
   });
   const callP=(async()=>{
-    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT):provider==="kimi"?await callKimi(key,sys,msgs,maxT):provider==="fal"?await(async()=>{const prompt=rawMsgs?.find((m:any)=>m.role==="user")?.content||"generate image";const url=await callFalImage(key,prompt);return{text:`🖼️ Image URL: ${url}`,truncated:false};})():provider==="nvidia"?{text:await callNvidia(sys,msgs,maxT),truncated:false}:Promise.reject(new Error("Unknown provider: "+provider));
+    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT,modelOverride):provider==="kimi"?await callKimi(key,sys,msgs,maxT):provider==="fal"?await(async()=>{const prompt=rawMsgs?.find((m:any)=>m.role==="user")?.content||"generate image";const url=await callFalImage(key,prompt);return{text:`🖼️ Image URL: ${url}`,truncated:false};})():provider==="nvidia"?{text:await callNvidia(sys,msgs,maxT),truncated:false}:Promise.reject(new Error("Unknown provider: "+provider));
     if(raw&&typeof raw==="object"&&"text" in raw)return raw as {text:string;truncated:boolean};
     return {text:raw as string,truncated:false};
   })();
@@ -941,10 +950,12 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
     if(effectiveKeys[p]?.trim()){taskRoutedProvider=p;break;}
   }
 
-  // Model upgrade: use Claude Sonnet instead of Haiku for premium reasoning tasks
-  const modelOverride = (taskRoutedProvider==="claude" && CLAUDE_TASK_MODEL[resolvedTask])
-    ? CLAUDE_TASK_MODEL[resolvedTask]
-    : "";
+  // Model upgrade: use Claude Sonnet instead of Haiku, or DeepSeek Pro instead
+  // of Flash, for tasks that need stronger reasoning.
+  const modelOverride =
+    (taskRoutedProvider==="claude" && CLAUDE_TASK_MODEL[resolvedTask]) ? CLAUDE_TASK_MODEL[resolvedTask] :
+    (taskRoutedProvider==="deepseek" && DEEPSEEK_TASK_MODEL[resolvedTask]) ? DEEPSEEK_TASK_MODEL[resolvedTask] :
+    "";
 
   // Fall back to legacy provider selection logic if routing didn't find a key
   const paidConfigured=["claude","openai"].filter(p=>effectiveKeys[p]?.trim());
