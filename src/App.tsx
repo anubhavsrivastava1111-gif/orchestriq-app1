@@ -169,8 +169,8 @@ const DEFAULT_QR = "";
 const NVIDIA_FALLBACK=["nvidia"];
 const TASK_ROUTING: Record<string,string[]> = {
   // ── MEDIA (non-text — fal.ai is the exclusive gateway) ──────────────────
-  image_gen:      ["fal"],                                  // fal.ai: Flux, Seedream, Imagen, Ideogram
-  video_gen:      ["fal"],                                  // fal.ai: Kling, Seedance, Wan, Veo, Sora
+  image_gen:      ["fal","openai","stability"],             // fal.ai first; OpenAI DALL-E then Stability AI if fal is missing, out of credits, or fails
+  video_gen:      ["fal"],                                  // fal.ai: Kling, Seedance, Wan, Veo, Sora — no second video provider wired in yet
   diagram:        ["fal","openai"],                         // Ideogram v3 via fal for text-accurate diagrams
   // ── SPECIALIST TEXT (Claude Sonnet = best quality) ───────────────────────
   excel_advanced: ["deepseek","claude","openai","gemini","groq"],  // Phase 5: DeepSeek first (~20x cheaper for this structured/formula task), Claude as automatic fallback/upgrade
@@ -205,6 +205,43 @@ const DEEPSEEK_TASK_MODEL: Record<string,string> = {
   code:           "deepseek-v4-pro",
 };
 
+// ─── RESPONSE QUALITY TIER ───────────────────────────────────────────────
+// User-selected in Settings → API. Module-scoped (like LIVE_RATES elsewhere
+// in this file) so the plain routing functions below can read it without
+// needing React state threaded through every call site.
+let RESPONSE_QUALITY: "standard"|"professional"|"excellent" = "professional";
+
+// Provider priority PER QUALITY TIER, for the task types where quality tier
+// genuinely changes which provider should lead. Tasks not listed here keep
+// using TASK_ROUTING exactly as before (unchanged, zero risk).
+const QUALITY_TIER_ROUTING: Record<string,Record<string,string[]>> = {
+  standard: {
+    general:  ["nvidia","deepseek","groq","gemini"],
+    creative: ["nvidia","deepseek","groq","gemini"],
+    research: ["gemini","claude","groq"],
+  },
+  professional: {
+    excel_advanced: ["deepseek","claude","openai","gemini"],
+    powerpoint:     ["claude","deepseek","openai","gemini"],
+    financial:      ["deepseek","claude","openai","gemini"],
+    audit:          ["deepseek","claude","openai","gemini"],
+    research:       ["claude","gemini","openai"],
+    code:           ["deepseek","claude","groq"],
+    general:        ["deepseek","claude","gemini"],
+    creative:       ["deepseek","claude","gemini"],
+  },
+  excellent: {
+    excel_advanced: ["claude","openai","deepseek"],
+    powerpoint:     ["claude","openai","deepseek"],
+    financial:      ["claude","openai","deepseek"],
+    audit:          ["claude","openai","deepseek"],
+    research:       ["claude","openai","gemini"],
+    code:           ["claude","deepseek","openai"],
+    general:        ["claude","openai","deepseek"],
+    creative:       ["claude","openai","deepseek"],
+  },
+};
+
 // Auto-classify the task type from prompt + system context.
 // Called automatically inside callMulti — no change needed at call sites.
 // ─── PROVIDER CAPABILITY REGISTRY ────────────────────────────────────────────
@@ -224,8 +261,11 @@ const PRIMARY_LED_TASKS=["general","creative","code","research"];
 // then the user's Primary AI, then the remaining chain. The user's model
 // choice is honored for orchestration; capability quality for specialists.
 function resolveRoute(task:string,primary:string):string[]{
-  const chain=TASK_ROUTING[task]||TASK_ROUTING.general;
-  const ordered=PRIMARY_LED_TASKS.includes(task)
+  const tierChain=QUALITY_TIER_ROUTING[RESPONSE_QUALITY]?.[task];
+  const chain=tierChain||TASK_ROUTING[task]||TASK_ROUTING.general;
+  const ordered=tierChain
+    ? chain
+    : PRIMARY_LED_TASKS.includes(task)
     ? [primary,...chain]
     : [...chain.slice(0,2),primary,...chain];
   const withFallback=(task==="image_gen"||task==="video_gen")?ordered:[...ordered,...NVIDIA_FALLBACK];
@@ -912,6 +952,30 @@ async function callFalVideo(key:string, prompt:string, durationSec=5, _model="fa
   }
 }
 
+// DALL-E and Stability AI — the fallback chain for images when fal.ai is
+// missing a key, out of credits, or fails for any other reason.
+async function callDallEImage(key:string, prompt:string):Promise<string>{
+  const r=await fetch("https://api.openai.com/v1/images/generations",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},
+    body:JSON.stringify({model:"dall-e-3",prompt:prompt.slice(0,3900),n:1,size:"1792x1024",quality:"standard"})
+  });
+  if(!r.ok){const t=await r.text().catch(()=>"");throw new Error("DALL-E: "+r.status+" "+t.slice(0,150));}
+  const d=await r.json();
+  return d.data?.[0]?.url||"";
+}
+async function callStabilityImage(key:string, prompt:string):Promise<string>{
+  const r=await fetch("https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim(),"Accept":"application/json"},
+    body:JSON.stringify({text_prompts:[{text:prompt.slice(0,2000),weight:1}],cfg_scale:7,height:1024,width:1024,samples:1,steps:30})
+  });
+  if(!r.ok){const t=await r.text().catch(()=>"");throw new Error("Stability: "+r.status+" "+t.slice(0,150));}
+  const d=await r.json();
+  const b64=d.artifacts?.[0]?.base64;
+  return b64?("data:image/png;base64,"+b64):"";
+}
+
 async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,modelOverride=""){
   if(!key?.trim())throw new Error("No API key for "+(MODELS[provider]?.name||provider)+". Add it in Settings.");
   const msgs=rawMsgs.map(m=>({role:m.role==="user"?"user":"assistant",content:m.content}));
@@ -951,10 +1015,12 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
   }
 
   // Model upgrade: use Claude Sonnet instead of Haiku, or DeepSeek Pro instead
-  // of Flash, for tasks that need stronger reasoning.
+  // of Flash, whenever the task demands it OR the user's chosen quality tier
+  // demands it (Excellent always asks Claude for Sonnet; Professional and
+  // Excellent both ask DeepSeek for Pro).
   const modelOverride =
-    (taskRoutedProvider==="claude" && CLAUDE_TASK_MODEL[resolvedTask]) ? CLAUDE_TASK_MODEL[resolvedTask] :
-    (taskRoutedProvider==="deepseek" && DEEPSEEK_TASK_MODEL[resolvedTask]) ? DEEPSEEK_TASK_MODEL[resolvedTask] :
+    (taskRoutedProvider==="claude" && (RESPONSE_QUALITY==="excellent" || CLAUDE_TASK_MODEL[resolvedTask])) ? "claude-sonnet-4-5-20250929" :
+    (taskRoutedProvider==="deepseek" && (RESPONSE_QUALITY!=="standard" || DEEPSEEK_TASK_MODEL[resolvedTask])) ? "deepseek-v4-pro" :
     "";
 
   // Fall back to legacy provider selection logic if routing didn't find a key
@@ -971,40 +1037,60 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
   }
   const key=effectiveKeys[active]?.trim();
 
+  // ── MEDIA INTERCEPT: image_gen / diagram / video_gen ────────────────────
+  // These tasks return image/video URLs, not chat text — the normal text
+  // endpoints below can't produce them. Walk the resolved route in order,
+  // trying each provider's real media endpoint (fal.ai → DALL-E → Stability
+  // for images). Only falls back to a written description if every visual
+  // provider is missing a key or genuinely fails.
+  if(resolvedTask==="image_gen"||resolvedTask==="diagram"||resolvedTask==="video_gen"){
+    const mediaPrompt=msgs?.find((m:any)=>m.role==="user")?.content||sys||"generate image";
+    const isVideo=resolvedTask==="video_gen";
+    const mediaRoute=isVideo?["fal"]:routeOrder.filter(p=>["fal","openai","stability"].includes(p));
+    let lastMediaErr:any=null;
+    for(const mp of mediaRoute){
+      const mKey=effectiveKeys[mp]?.trim();
+      if(!mKey)continue;
+      try{
+        if(mp==="fal"){
+          if(isVideo){
+            const videoUrl=await callFalVideo(mKey,mediaPrompt,5);
+            return{primary:`✅ Video generated successfully.\n\n🎬 **Video URL:** ${videoUrl}\n\nCopy the URL above to view or download your video. You can also paste it into any video player.`,usedProvider:"fal"};
+          }
+          const imgModel = resolvedTask==="diagram" ? "fal-ai/ideogram/v3" : "fal-ai/flux-pro";
+          const imageUrl=await callFalImage(mKey,mediaPrompt,imgModel);
+          return{primary:`✅ Image generated successfully.\n\n🖼️ **Image URL:** ${imageUrl}\n\n![Generated Image](${imageUrl})\n\nRight-click the image URL to save. Use this in your presentations, documents, or social media.`,usedProvider:"fal"};
+        }
+        if(mp==="openai"){
+          const imageUrl=await callDallEImage(mKey,mediaPrompt);
+          if(!imageUrl)throw new Error("DALL-E returned no image URL");
+          return{primary:`✅ Image generated successfully (DALL-E).\n\n🖼️ **Image URL:** ${imageUrl}\n\n![Generated Image](${imageUrl})\n\nRight-click the image URL to save. Use this in your presentations, documents, or social media.`,usedProvider:"openai"};
+        }
+        if(mp==="stability"){
+          const imageUrl=await callStabilityImage(mKey,mediaPrompt);
+          if(!imageUrl)throw new Error("Stability AI returned no image");
+          return{primary:`✅ Image generated successfully (Stability AI).\n\n🖼️ **Image:** embedded as a data URL — right-click to save.\n\n![Generated Image](${imageUrl})`,usedProvider:"stability"};
+        }
+      }catch(mErr:any){
+        lastMediaErr=mErr;
+        continue;
+      }
+    }
+    const textFallback=["claude","openai","deepseek","gemini","groq"].find(p=>effectiveKeys[p]?.trim());
+    if(textFallback){
+      const fbKey=effectiveKeys[textFallback]?.trim();
+      const fbr=await callAI(textFallback,fbKey,sys,msgs,maxT,false);
+      return{primary:`⚠️ Image/video generation unavailable (${lastMediaErr?.message||"no visual provider configured"}). Here is a text description instead:\n\n${fbr.text}`,usedProvider:textFallback};
+    }
+    throw lastMediaErr||new Error("No media-capable provider configured. Add a fal.ai, OpenAI, or Stability AI key in Settings.");
+  }
+
   if(!key){
     const fallback=active==="groq"?"gemini":"groq";
     const fallbackKey=effectiveKeys[fallback]?.trim();
     if(!fallbackKey)throw new Error("No API keys available. Check Cloudflare environment variables.");
     const r=await callAI(fallback,fallbackKey,sys,msgs,maxT,false);
     return{primary:r.text,usedProvider:fallback};
-  }
-
-  // ── fal.ai media intercept ───────────────────────────────────────────────
-  // image_gen / video_gen / diagram route to fal.ai directly — NOT through callAI.
-  // callAI is text-only; fal.ai returns image/video URLs.
-  if(active==="fal"){
-    const falKey=key;
-    const mediaPrompt=msgs?.find((m:any)=>m.role==="user")?.content||sys||"generate image";
-    try{
-      if(resolvedTask==="video_gen"){
-        const videoUrl=await callFalVideo(falKey,mediaPrompt,5);
-        return{primary:`✅ Video generated successfully.\n\n🎬 **Video URL:** ${videoUrl}\n\nCopy the URL above to view or download your video. You can also paste it into any video player.`,usedProvider:"fal"};
-      } else {
-        // image_gen and diagram both generate images (Ideogram for diagrams, Flux for images)
-        const imgModel = resolvedTask==="diagram" ? "fal-ai/ideogram/v3" : "fal-ai/flux-pro";
-        const imageUrl=await callFalImage(falKey,mediaPrompt,imgModel);
-        return{primary:`✅ Image generated successfully.\n\n🖼️ **Image URL:** ${imageUrl}\n\n![Generated Image](${imageUrl})\n\nRight-click the image URL to save. Use this in your presentations, documents, or social media.`,usedProvider:"fal"};
-      }
-    }catch(falErr:any){
-      // fal failed — fall back to best available text provider for description
-      const textFallback=["claude","openai","deepseek","gemini","groq"].find(p=>effectiveKeys[p]?.trim());
-      if(textFallback){
-        const fbKey=effectiveKeys[textFallback]?.trim();
-        const fbr=await callAI(textFallback,fbKey,sys,msgs,maxT,false);
-        return{primary:`⚠️ fal.ai media generation failed (${falErr.message}). Here is a text description instead:\n\n${fbr.text}`,usedProvider:textFallback};
-      }
-      throw falErr;
-    }
   }
 
   try{
@@ -2130,6 +2216,7 @@ export default function App(){
   const [showMediaPicker,setShowMediaPicker]=useState(false);
   const [defP,setDefP]=useState("nvidia"); // free, zero-setup default
   const [multiAI,setMultiAI]=useState(false);
+  const [respQuality,setRespQuality]=useState<"standard"|"professional"|"excellent">("professional");
   const [co,setCo]=useState({name:"",industry:"",stage:"idea",location:"",markets:"",currency:"INR"});
   const [selRole,setSelRole]=useState(null);
   const [chats,setChats]=useState({});
@@ -2300,6 +2387,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
       }
     }}catch{}
     try{const vl=WorkspaceMemory.get<string>("cos-vl");if(vl)setVLang(vl);}catch{}
+    try{const rq=WorkspaceMemory.get<string>("cos-quality");if(rq==="standard"||rq==="professional"||rq==="excellent"){setRespQuality(rq);RESPONSE_QUALITY=rq;}}catch{}
     try{const h=WorkspaceMemory.get<any>("cos-ch");if(h)setChats(h);}catch{}
     try{const d=WorkspaceMemory.get<any>("cos-dp");if(d)setExpD(d);}catch{}
     try{const cd=WorkspaceMemory.get<any>("cos-cd");if(cd)setCompData(cd);}catch{}
@@ -2354,6 +2442,10 @@ useEffect(()=>{
 
   const changeTheme=useCallback((id)=>{
     setTheme(id);applyTheme(id);sv("cos-theme",id);
+  },[]);
+
+  const changeQuality=useCallback((tier:"standard"|"professional"|"excellent")=>{
+    setRespQuality(tier);RESPONSE_QUALITY=tier;sv("cos-quality",tier);
   },[]);
 
   useEffect(()=>{chatEnd.current?.scrollIntoView({behavior:"smooth"});},[chats,selRole,loading]);
@@ -6714,6 +6806,18 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
             </div>
             {sTab==="api"&&(
               <div>
+                <div style={{padding:"10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:12}}>
+                  <label style={{...S.lbl,marginBottom:2}}>Response Quality</label>
+                  <div style={{fontSize:8.5,color:"#5A6480",marginBottom:8,lineHeight:1.5}}>Controls which provider leads for demanding tasks (Excel, financial reports, audits, PowerPoint, research). The app always tries your best available key first and falls back automatically if it's missing or fails — this setting only changes what "best" means.</div>
+                  <div style={{display:"flex",gap:4}}>
+                    {[["standard","Standard","Free/cheapest first — everyday chat and drafts"],["professional","Professional","DeepSeek Pro / Claude — board-ready documents"],["excellent","Excellent","Claude / OpenAI lead — highest-stakes deliverables"]].map(([id,lb,desc])=>(
+                      <button key={id} onClick={()=>changeQuality(id as any)} style={{flex:1,padding:"7px 6px",borderRadius:5,border:"1px solid "+(respQuality===id?"#14B8A6":"#1a2030"),background:respQuality===id?"rgba(20,184,166,0.1)":"transparent",cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"left"}}>
+                        <div style={{fontSize:10,fontWeight:700,color:respQuality===id?"#14B8A6":"#A0AAC0"}}>{lb}{respQuality===id?" ✓":""}</div>
+                        <div style={{fontSize:7.5,color:"#5A6480",marginTop:2,lineHeight:1.4}}>{desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div style={{background:"rgba(16,185,129,0.05)",border:"1px solid rgba(16,185,129,0.2)",borderRadius:6,padding:"8px 10px",marginBottom:12,fontSize:10,color:"#10B981"}}>
                   Gemini is free — no billing needed. Get key at <a href={MODELS.gemini.keyUrl} target="_blank" rel="noopener noreferrer" style={{color:"#4285F4"}}>aistudio.google.com</a>
                 </div>
