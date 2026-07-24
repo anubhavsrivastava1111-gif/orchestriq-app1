@@ -5095,6 +5095,39 @@ if(d.autopilotLive?.res){setApRes(d.autopilotLive.res);setApResearchBrief(d.auto
 setResumeInfo(null);
 showToast("Workspace loaded — all modules restored","success");}catch{showToast("Invalid workspace file","error");}};r.readAsText(file);};
 
+  // ─── RAILWAY DOCUMENT ENGINE — the ONLY document generator in the app ───
+  const railwayGenerate=useCallback(async(format:string,opts:{title?:string;objective?:string;body?:string;currency?:string;currencySymbol?:string})=>{
+    const RAILWAY_URL="https://orchestriq-gen-service-production.up.railway.app";
+    const apiKey=(keys.claude||EFF_CLAUDE||keys.openai||keys.gemini||EFF_GEMINI||keys.groq||EFF_GROQ||"").trim();
+    if(!apiKey)throw new Error("No API key configured — add one in Settings to generate documents.");
+    const coCtx=[co.name||"",co.industry||"",co.stage||"",co.location||""].filter(Boolean).join(" | ");
+    showToast("Building "+format.toUpperCase()+" via Python engine — first request may take up to 60s…","info");
+    const r=await fetch(RAILWAY_URL+"/generate/"+format,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        objective:opts.objective||opts.title||"Document",
+        company_context:coCtx,
+        available_data:(opts.body||"").slice(0,8000),
+        currency:opts.currency||co.currency||"INR",
+        currency_symbol:opts.currencySymbol||cur.sym||"₹",
+        api_key:apiKey
+      }),
+      signal:AbortSignal.timeout(120000)
+    });
+    if(!r.ok)throw new Error("Railway "+format+": HTTP "+r.status);
+    const buf=await r.arrayBuffer();
+    const MIN_SIZE:{[k:string]:number}={xlsx:1000,pdf:2000,pptx:5000,docx:5000};
+    if(buf.byteLength<(MIN_SIZE[format]||1000))throw new Error("Railway returned an empty/incomplete file");
+    const MIME:{[k:string]:string}={xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",pdf:"application/pdf",pptx:"application/vnd.openxmlformats-officedocument.presentationml.presentation",docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"};
+    const blob=new Blob([buf],{type:MIME[format]||"application/octet-stream"});
+    const fname=(opts.title||"Document").replace(/[^a-zA-Z0-9]/g,"-")+"-"+Date.now()+"."+format;
+    const u=URL.createObjectURL(blob);
+    const a=document.createElement("a");a.href=u;a.download=fname;a.style.display="none";
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(u),200);
+  },[keys,co,cur,showToast]);
+
   // FEATURE 4 & 5: Export Studio generation
   const runExport=useCallback(async()=>{
     if(expGenerating)return;
@@ -5172,39 +5205,6 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     }catch(e){showToast("Export failed: "+e.message,"error");setExpStep("");}
     finally{setExpGenerating(false);}
   },[expGenerating,expMode,expDocType,expPptType,expSources,expTitle,co,compData,chats,brSessions,workflows,tQueue,tmRes,apRes,cur,keys,defP,showToast,expStyleResult,railwayGenerate]);
-
-  // ─── RAILWAY DOCUMENT ENGINE — the ONLY document generator in the app ───
-  const railwayGenerate=useCallback(async(format:string,opts:{title?:string;objective?:string;body?:string;currency?:string;currencySymbol?:string})=>{
-    const RAILWAY_URL="https://orchestriq-gen-service-production.up.railway.app";
-    const apiKey=(keys.claude||EFF_CLAUDE||keys.openai||keys.gemini||EFF_GEMINI||keys.groq||EFF_GROQ||"").trim();
-    if(!apiKey)throw new Error("No API key configured — add one in Settings to generate documents.");
-    const coCtx=[co.name||"",co.industry||"",co.stage||"",co.location||""].filter(Boolean).join(" | ");
-    showToast("Building "+format.toUpperCase()+" via Python engine — first request may take up to 60s…","info");
-    const r=await fetch(RAILWAY_URL+"/generate/"+format,{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({
-        objective:opts.objective||opts.title||"Document",
-        company_context:coCtx,
-        available_data:(opts.body||"").slice(0,8000),
-        currency:opts.currency||co.currency||"INR",
-        currency_symbol:opts.currencySymbol||cur.sym||"₹",
-        api_key:apiKey
-      }),
-      signal:AbortSignal.timeout(120000)
-    });
-    if(!r.ok)throw new Error("Railway "+format+": HTTP "+r.status);
-    const buf=await r.arrayBuffer();
-    const MIN_SIZE:{[k:string]:number}={xlsx:1000,pdf:2000,pptx:5000,docx:5000};
-    if(buf.byteLength<(MIN_SIZE[format]||1000))throw new Error("Railway returned an empty/incomplete file");
-    const MIME:{[k:string]:string}={xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",pdf:"application/pdf",pptx:"application/vnd.openxmlformats-officedocument.presentationml.presentation",docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"};
-    const blob=new Blob([buf],{type:MIME[format]||"application/octet-stream"});
-    const fname=(opts.title||"Document").replace(/[^a-zA-Z0-9]/g,"-")+"-"+Date.now()+"."+format;
-    const u=URL.createObjectURL(blob);
-    const a=document.createElement("a");a.href=u;a.download=fname;a.style.display="none";
-    document.body.appendChild(a);a.click();document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(u),200);
-  },[keys,co,cur,showToast]);
 
   // Quick single-source export (used inline in chat/boardroom/etc.)
   const quickExport=useCallback(async(mode,dtype,title,body)=>{
