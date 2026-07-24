@@ -142,7 +142,7 @@ const MODELS = {
   openai:{name:"ChatGPT",company:"OpenAI",model:"gpt-4o",placeholder:"sk-...",color:"#10A37F",keyUrl:"https://platform.openai.com/api-keys"},
   gemini:{name:"Gemini",company:"Google",model:"gemini-1.5-flash",placeholder:"AIza...",color:"#4285F4",keyUrl:"https://aistudio.google.com/app/apikey"},
   groq:{name:"Groq",company:"Groq",model:"llama-3.3-70b-versatile",placeholder:"gsk_...",color:"#F97316",keyUrl:"https://console.groq.com/keys"},
-  deepseek:{name:"DeepSeek",company:"DeepSeek AI",model:"deepseek-chat",placeholder:"sk-...",color:"#2563EB",keyUrl:"https://platform.deepseek.com/api_keys",note:"Low cost · Strong reasoning · Available in India"},
+  deepseek:{name:"DeepSeek",company:"DeepSeek AI",model:"deepseek-v4-flash",placeholder:"sk-...",color:"#2563EB",keyUrl:"https://platform.deepseek.com/api_keys",note:"Low cost · Strong reasoning · Available in India"},
   kimi:{name:"Kimi",company:"Moonshot AI",model:"moonshot-v1-8k",placeholder:"sk-...",color:"#8B5CF6",keyUrl:"https://platform.moonshot.cn/console/api-keys",note:"Fast · Affordable · Strong multilingual"},
   stability:{name:"Stability AI",company:"Stability AI",model:"stable-diffusion-xl-1024-v1-0",placeholder:"sk-...",color:"#EC4899",keyUrl:"https://platform.stability.ai/account/credits",note:"Image generation · ~₹3/image · Optional"},
   fal:{name:"fal.ai",company:"fal.ai",placeholder:"key-...",color:"#7C3AED",keyUrl:"https://fal.ai/dashboard/keys"},
