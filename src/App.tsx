@@ -5201,8 +5201,12 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
   // ─── RAILWAY DOCUMENT ENGINE — the ONLY document generator in the app ───
   const railwayGenerate=useCallback(async(format:string,opts:{title?:string;objective?:string;body?:string;currency?:string;currencySymbol?:string})=>{
     const RAILWAY_URL="https://orchestriq-gen-service-production.up.railway.app";
-    const apiKey=(keys.claude||EFF_CLAUDE||keys.openai||keys.gemini||EFF_GEMINI||keys.groq||EFF_GROQ||"").trim();
-    if(!apiKey)throw new Error("No API key configured — add one in Settings to generate documents.");
+    const claudeKey=(keys.claude||EFF_CLAUDE||"").trim();
+    const openaiKey=(keys.openai||"").trim();
+    const deepseekKey=(keys.deepseek||"").trim();
+    if(!claudeKey&&!openaiKey&&!deepseekKey)throw new Error("No API key configured — add a Claude, OpenAI, or DeepSeek key in Settings to generate documents.");
+    // Excellent tier prefers Claude first (highest quality); Standard/Professional prefer DeepSeek first (cheaper).
+    const providerOrder = RESPONSE_QUALITY==="excellent" ? "claude,openai,deepseek" : "deepseek,claude,openai";
     const coCtx=[co.name||"",co.industry||"",co.stage||"",co.location||""].filter(Boolean).join(" | ");
     showToast("Building "+format.toUpperCase()+" via Python engine — first request may take up to 60s…","info");
     const r=await fetch(RAILWAY_URL+"/generate/"+format,{
@@ -5214,7 +5218,10 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         available_data:(opts.body||"").slice(0,8000),
         currency:opts.currency||co.currency||"INR",
         currency_symbol:opts.currencySymbol||cur.sym||"₹",
-        api_key:apiKey
+        claude_key:claudeKey,
+        openai_key:openaiKey,
+        deepseek_key:deepseekKey,
+        provider_order:providerOrder
       }),
       signal:AbortSignal.timeout(120000)
     });
