@@ -2597,7 +2597,9 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     try{
       const sys="You are an execution analyst. "+EXTRACTION_PROMPT;
       const result=await ask(sys,[{role:"user",content:"STRATEGIC OUTPUT:\n\n"+content}],800);
+      console.log("[OIQ-ACTIONS] Raw AI response for action extraction:", result);
       const items=parseActionItemsResilient(result);
+      console.log("[OIQ-ACTIONS] Parsed items count:", items?.length||0);
       if(!items||!items.length){showToast("Could not extract action items from this output","error");return;}
       setExtractModal({items,sourceType,sourceLabel});
     }catch(e:any){
