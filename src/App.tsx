@@ -2550,13 +2550,54 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   },[keys]);
 
   // Extracts candidate action items from a Boardroom/Autopilot/TimeMachine output and opens the review modal
+  // Resilient action-item parser: tries JSON, fenced JSON, embedded JSON,
+// and finally plain bullet/numbered lists — so a usable answer is almost
+// never thrown away as "could not extract".
+const parseActionItemsResilient=(raw:string):ActionItem[]=>{
+  if(!raw)return [];
+  let text=String(raw).trim();
+  const fence=text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if(fence)text=fence[1].trim();
+  const shape=(p:any):ActionItem[]|null=>{
+    if(Array.isArray(p))return p as ActionItem[];
+    if(p&&Array.isArray(p.items))return p.items;
+    if(p&&Array.isArray(p.actionItems))return p.actionItems;
+    if(p&&Array.isArray(p.actions))return p.actions;
+    return null;
+  };
+  const normalize=(arr:any[]):ActionItem[]=>arr.map((it:any)=>{
+    if(typeof it==="string")return {title:it.trim(),owner:"",deadline:"",priority:"medium"} as ActionItem;
+    return {
+      title:(it.title||it.task||it.action||it.name||it.description||"").toString().trim(),
+      owner:(it.owner||it.assignee||it.who||"").toString().trim(),
+      deadline:(it.deadline||it.due||it.date||it.when||"").toString().trim(),
+      priority:(it.priority||"medium").toString().trim().toLowerCase(),
+    } as ActionItem;
+  }).filter(x=>x.title&&x.title.length>2);
+  // 1: direct JSON
+  try{const s=shape(JSON.parse(text));if(s)return normalize(s);}catch{}
+  // 2: first [...] array anywhere in the text
+  const a1=text.indexOf("["),a2=text.lastIndexOf("]");
+  if(a1!==-1&&a2>a1){try{const s=shape(JSON.parse(text.slice(a1,a2+1)));if(s)return normalize(s);}catch{}}
+  // 3: first {...} object anywhere in the text
+  const o1=text.indexOf("{"),o2=text.lastIndexOf("}");
+  if(o1!==-1&&o2>o1){try{const s=shape(JSON.parse(text.slice(o1,o2+1)));if(s)return normalize(s);}catch{}}
+  // 4: plain bullet / numbered lines
+  const bullets=text.split("\n").map(l=>l.trim()).filter(Boolean)
+    .filter(l=>/^[-•*]|^\d+[.)]/.test(l))
+    .map(l=>l.replace(/^[-•*]\s*|^\d+[.)]\s*/,"").trim())
+    .filter(l=>l.length>2)
+    .map(l=>({title:l,owner:"",deadline:"",priority:"medium"} as ActionItem));
+  if(bullets.length)return bullets;
+  return [];
+};
   const extractActionItems=async(sourceType:ActionItem["source"],sourceLabel:string,content:string)=>{
     if(!content?.trim())return;
     setExtracting(sourceType);
     try{
       const sys="You are an execution analyst. "+EXTRACTION_PROMPT;
       const result=await ask(sys,[{role:"user",content:"STRATEGIC OUTPUT:\n\n"+content}],800);
-      const items=extractItemsFromJSON(result);
+      const items=parseActionItemsResilient(result);
       if(!items||!items.length){showToast("Could not extract action items from this output","error");return;}
       setExtractModal({items,sourceType,sourceLabel});
     }catch(e:any){
