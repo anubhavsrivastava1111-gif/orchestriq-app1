@@ -2596,8 +2596,19 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     setExtracting(sourceType);
     try{
       const sys="You are an execution analyst. "+EXTRACTION_PROMPT;
-      const result=await ask(sys,[{role:"user",content:"STRATEGIC OUTPUT:\n\n"+content}],800);
+      // Cap the input so the model isn't overwhelmed, and give it enough
+      // output room to actually return the list. DeepSeek returns an empty
+      // completion (not an error) when the output budget is too tight for
+      // the input size — which is why this silently failed.
+      const trimmedContent=content.length>6000?content.slice(0,6000):content;
+      let result=await ask(sys,[{role:"user",content:"STRATEGIC OUTPUT:\n\n"+trimmedContent}],2500);
       console.log("[OIQ-ACTIONS] Raw AI response for action extraction:", result);
+      // Retry once if the first call came back empty (transient with some providers).
+      if(!result||!result.trim()){
+        console.log("[OIQ-ACTIONS] Empty response — retrying once.");
+        result=await ask(sys,[{role:"user",content:"List the action items from this as a JSON array:\n\n"+trimmedContent.slice(0,4000)}],2500);
+        console.log("[OIQ-ACTIONS] Retry response:", result);
+      }
       const items=parseActionItemsResilient(result);
       console.log("[OIQ-ACTIONS] Parsed items count:", items?.length||0);
       if(!items||!items.length){showToast("Could not extract action items from this output","error");return;}
