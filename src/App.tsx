@@ -427,15 +427,69 @@ function badgeBrief(brief){
   }).join("\n");
 }
 
-async function runResearchDesk(ask,co,compData,question,showToast){
-  try{
-    let brief=await ask(researchDeskPrompt(co,compData,question),[{role:"user",content:"Generate the research brief."}],1200,true);
-    const bulletStart=brief.search(/^[•\-\*]/m);
-    if(bulletStart>0)brief=brief.slice(bulletStart);
-    return badgeBrief(brief);
-  }catch(err:any){
-    return "(Research Desk unavailable this session: "+err.message+". Treat any figures below as ESTIMATE (unverified).)";
+// Only Claude and Gemini can genuinely search the live web from this app.
+// OpenAI, DeepSeek, and Groq have no real-time search access on the plans
+// used here — routing research to them would produce confident-sounding
+// fabrication, not real research. This is a deliberate, honest limit.
+function resolveSearchProvider(keys){
+  const claudeKey=(keys?.claude||EFF_CLAUDE||"").trim();
+  if(claudeKey)return {provider:"claude",key:claudeKey};
+  const geminiKey=(keys?.gemini||EFF_GEMINI||"").trim();
+  if(geminiKey)return {provider:"gemini",key:geminiKey};
+  return null;
+}
+
+// Deep Research Desk v2 — decomposes the question into 6 angles the
+// executives actually need beyond the literal question, runs a real
+// search per angle, and requires every fact to carry a source-reliability
+// tag and a date. Slower (30-90s) by design, in exchange for depth.
+const RESEARCH_ANGLES=[
+  {id:"market",label:"Market size, growth rate, and demand trends"},
+  {id:"competitors",label:"Direct and indirect competitors, their pricing and positioning"},
+  {id:"pricing",label:"Industry pricing benchmarks and unit economics"},
+  {id:"regulatory",label:"Regulatory, compliance, or legal factors relevant to this business"},
+  {id:"news",label:"Recent news from the last 6-12 months directly relevant to this question"},
+  {id:"customer",label:"Customer adoption trends, buyer behavior, and sentiment"},
+];
+
+async function runResearchDesk(ask,co,compData,question,showToast,keys){
+  const route=resolveSearchProvider(keys);
+  if(!route){
+    try{showToast&&showToast("Research Desk OFFLINE — no Claude or Gemini key. Executives will debate UNVERIFIED figures. Add a key in Settings.","warning");}catch{}
+    return {
+      brief:"⚠ **RESEARCH DESK OFFLINE — NO SEARCH-CAPABLE PROVIDER**\n\nNo Claude or Gemini API key is configured, so no live figure could be retrieved for this question.\n\n**Every number produced below is model-generated and UNVERIFIED.** Do not use any figure in this session for a real decision, valuation, budget, or external document until independently confirmed.\n\nFix: Settings → API Keys → add a Claude key (preferred) or Gemini key, then re-run.",
+      grounded:false,provider:"none"
+    };
   }
+  try{showToast&&showToast("Research Desk running deep multi-angle search via "+route.provider+"… this can take up to 60-90s.","info");}catch{}
+  const sections=[];
+  let anyFail=false;
+  for(const angle of RESEARCH_ANGLES){
+    try{
+      const anglePrompt=researchDeskPrompt(co,compData,question)+
+        "\n\nFOCUS SPECIFICALLY on this angle: "+angle.label+
+        ". Search the live web for CURRENT information — prefer sources from the last 6-12 months and explicitly flag anything older. "+
+        "For EVERY fact you state, tag its source reliability as [TIER 1: Official/Filing], [TIER 2: Reputable News/Analyst], or [TIER 3: Blog/Forum - Low Confidence], and include the source name and date. "+
+        "If you cannot find real information for this angle, say so explicitly rather than inventing a figure. Keep this section to 4-6 bullet points.";
+      const raw=await callAI(route.provider,route.key,anglePrompt,[{role:"user",content:"Research this angle now."}],900,true);
+      const text=(raw&&typeof raw==="object"&&"text" in raw)?raw.text:String(raw||"");
+      sections.push("### "+angle.label+"\n"+text.trim());
+    }catch(angleErr:any){
+      anyFail=true;
+      sections.push("### "+angle.label+"\n⚠ Could not retrieve: "+String(angleErr?.message||angleErr));
+    }
+  }
+  let brief=sections.join("\n\n");
+  const urlCount=(brief.match(/https?:\/\//g)||[]).length;
+  const grounded=urlCount>0;
+  if(!grounded){
+    try{showToast&&showToast("Research Desk returned no source URLs — session is UNGROUNDED.","warning");}catch{}
+    brief="⚠ **RESEARCH DESK RETURNED NO VERIFIABLE SOURCES**\n\nSearch ran via "+route.provider+" but produced no source URL across any angle, so nothing below can be verified.\n\n---\n"+brief;
+  }else{
+    brief=badgeBrief(brief);
+    if(anyFail)brief="⚠ Some research angles could not be completed — see notes below.\n\n"+brief;
+  }
+  return {brief,grounded,provider:route.provider};
 }
 
 // ── FINANCIAL LIVE FEED ─────────────────────────────────────────────────────
@@ -4494,7 +4548,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             try{
               setProjectExecPhase("\ud83d\udd0d "+(fmt==="video"?"Video":"Image")+" generation unavailable \u2014 researching alternatives...");
               const researchQ="current best "+(fmt==="video"?"AI video generation tools 2026 with pricing (e.g. Runway, Pika, Kling, Luma)":"AI image generation tools 2026 with pricing (e.g. Midjourney, DALL-E, Ideogram)")+" for a "+(del.description||del.name).slice(0,150);
-              alternativeGuide=await runResearchDesk((s,m,t)=>ask(s,m,t,true),co,compData,researchQ,showToast);
+              alternativeGuide=await runResearchDesk((s,m,t)=>ask(s,m,t,true),co,compData,researchQ,showToast,keys);
             }catch{/* research is best-effort — the honest error below always ships regardless */}
             zip.folder(folder).file(fname+"-GENERATION-FAILED.md",
               "\u26a0 "+fmt.toUpperCase()+" COULD NOT BE GENERATED\n\n"+
