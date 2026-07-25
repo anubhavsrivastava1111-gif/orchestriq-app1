@@ -2566,14 +2566,18 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     return null;
   };
   const normalize=(arr:any[]):ActionItem[]=>arr.map((it:any)=>{
-    if(typeof it==="string")return {title:it.trim(),owner:"",deadline:"",priority:"medium"} as ActionItem;
+    if(typeof it==="string")return {text:it.trim(),ownerRoleId:"",dueHint:"",priority:"medium"} as any;
+    const label=(it.text||it.title||it.task||it.action||it.name||it.description||"").toString().trim();
     return {
-      title:(it.title||it.task||it.action||it.name||it.description||"").toString().trim(),
-      owner:(it.owner||it.assignee||it.who||"").toString().trim(),
-      deadline:(it.deadline||it.due||it.date||it.when||"").toString().trim(),
+      text:label,
+      title:label,
+      ownerRoleId:(it.ownerRoleId||it.owner||it.assignee||it.who||"").toString().trim(),
+      owner:(it.ownerRoleId||it.owner||it.assignee||it.who||"").toString().trim(),
+      dueHint:(it.dueHint||it.deadline||it.due||it.date||it.when||"").toString().trim(),
+      deadline:(it.dueHint||it.deadline||it.due||it.date||it.when||"").toString().trim(),
       priority:(it.priority||"medium").toString().trim().toLowerCase(),
-    } as ActionItem;
-  }).filter(x=>x.title&&x.title.length>2);
+    } as any;
+  }).filter((x:any)=>x.text&&x.text.length>2);
   // 1: direct JSON
   try{const s=shape(JSON.parse(text));if(s)return normalize(s);}catch{}
   // 2: first [...] array anywhere in the text
