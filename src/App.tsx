@@ -5379,7 +5379,9 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         showToast((isPdf?"PDF":"PowerPoint")+" generated via Python engine ✓","success");
       }catch(railErr:any){
         recordEngineDowngrade(userTitle,isPdf?"pdf":"pptx",railErr);
-        showToast("Python engine unavailable — using backup renderer. Quality may be lower.","warning");
+        showToast("We couldn't generate this "+(isPdf?"PDF":"PowerPoint")+" at the quality standard required right now. Please try again in a little while.","error");
+        setExpStep("");setExpGenerating(false);
+        return;
       }
       if(!usedRailway){
       // QUALITY ENGINE: for PPTX only, try the structured archetype pipeline first.
@@ -5429,19 +5431,16 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
   },[expGenerating,expMode,expDocType,expPptType,expSources,expTitle,co,compData,chats,brSessions,workflows,tQueue,tmRes,apRes,cur,keys,defP,showToast,expStyleResult,railwayGenerate]);
 
   // Quick single-source export (used inline in chat/boardroom/etc.)
+  // RAILWAY ONLY. We never emit a browser-rendered (lower-quality) file.
+  // If the Python engine is unavailable, the user gets a clear retry message.
   const quickExport=useCallback(async(mode,dtype,title,body)=>{
     const fmt=mode==="pdf"?"pdf":"pptx";
     try{
       await railwayGenerate(fmt,{title,objective:title,body,currency:co.currency,currencySymbol:cur.sym});
-      showToast("Downloaded ✓ (Python engine)","success");
+      showToast("Downloaded ✓","success");
     }catch(railErr:any){
       recordEngineDowngrade(title,fmt,railErr);
-      showToast("Python engine unavailable ("+String(railErr?.message||railErr).slice(0,60)+") — using backup renderer. Quality may be lower.","warning");
-      try{
-        if(mode==="pdf")await generatePDFv2(dtype,title,body,co,cur);
-        else await generatePPTX(dtype,title,body,co,cur);
-        showToast("Downloaded (backup renderer)","success");
-      }catch(e:any){showToast("Export failed: "+e.message,"error");}
+      showToast("We couldn't generate this "+(mode==="pdf"?"PDF":"PowerPoint")+" at the quality standard required right now. Please try again in a little while.","error");
     }
   },[co,cur,showToast,railwayGenerate]);
 
