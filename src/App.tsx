@@ -5320,11 +5320,13 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     // Excellent tier prefers Claude first (highest quality); Standard/Professional prefer DeepSeek first (cheaper).
     const providerOrder = RESPONSE_QUALITY==="excellent" ? "claude,openai,deepseek" : "deepseek,claude,openai";
     const coCtx=[co.name||"",co.industry||"",co.stage||"",co.location||""].filter(Boolean).join(" | ");
-    showToast("Building "+format.toUpperCase()+" via Python engine — first request may take up to 60s…","info");
-    const r=await fetch(RAILWAY_URL+"/generate/"+format,{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({
+    // PPTX/DOCX need the largest AI blueprint + slowest render, so they get a
+    // longer budget and one automatic retry (Railway cold starts + slow provider
+    // responses were causing PPT to abort at 120s while faster PDF succeeded).
+    const TIMEOUT_MS:{[k:string]:number}={pptx:220000,docx:200000,pdf:180000,xlsx:180000};
+    const budget=TIMEOUT_MS[format]||150000;
+    const MIN_SIZE:{[k:string]:number}={xlsx:1000,pdf:2000,pptx:5000,docx:5000};
+    const _payload=JSON.stringify({
         objective:opts.objective||opts.title||"Document",
         company_context:coCtx,
         available_data:(opts.body||"").slice(0,8000),
@@ -5334,13 +5336,29 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         openai_key:openaiKey,
         deepseek_key:deepseekKey,
         provider_order:providerOrder
-      }),
-      signal:AbortSignal.timeout(120000)
     });
-    if(!r.ok)throw new Error("Railway "+format+": HTTP "+r.status);
-    const buf=await r.arrayBuffer();
-    const MIN_SIZE:{[k:string]:number}={xlsx:1000,pdf:2000,pptx:5000,docx:5000};
-    if(buf.byteLength<(MIN_SIZE[format]||1000))throw new Error("Railway returned an empty/incomplete file");
+    const _attempt=async()=>{
+      const r=await fetch(RAILWAY_URL+"/generate/"+format,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:_payload,
+        signal:AbortSignal.timeout(budget)
+      });
+      if(!r.ok)throw new Error("Railway "+format+": HTTP "+r.status);
+      const b=await r.arrayBuffer();
+      if(b.byteLength<(MIN_SIZE[format]||1000))throw new Error("Railway returned an empty/incomplete file");
+      return b;
+    };
+    showToast("Building "+format.toUpperCase()+" via Python engine — this can take up to 3 minutes…","info");
+    let buf:ArrayBuffer;
+    try{
+      buf=await _attempt();
+    }catch(firstErr:any){
+      // One retry: cold-start/transient timeouts usually succeed on the second try
+      // because the Railway container is now warm.
+      showToast("Still working — retrying once…","info");
+      buf=await _attempt();
+    }
     const MIME:{[k:string]:string}={xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",pdf:"application/pdf",pptx:"application/vnd.openxmlformats-officedocument.presentationml.presentation",docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"};
     const blob=new Blob([buf],{type:MIME[format]||"application/octet-stream"});
     const fname=(opts.title||"Document").replace(/[^a-zA-Z0-9]/g,"-")+"-"+Date.now()+"."+format;
