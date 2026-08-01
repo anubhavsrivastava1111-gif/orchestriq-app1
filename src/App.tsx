@@ -1036,9 +1036,9 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,mode
   const msgs=rawMsgs.map(m=>({role:m.role==="user"?"user":"assistant",content:m.content}));
   let timerId;
   // Search-enabled calls take longer (multiple search round-trips inside one request) - extend timeout.
-  // Non-search calls raised to 120s: dense long-form completions (4000+ tokens) under provider load
-  // can legitimately take >60s, and the timeout only exists as a safety net against truly stuck requests.
-  const timeoutMs=enableSearch?100000:120000;
+  // Non-search calls raised to 240s: dense multi-executive boardroom completions
+  // under provider load were crossing the old 120s cap and throwing timeouts.
+  const timeoutMs=enableSearch?180000:240000;
   const timeout=new Promise((_,rej)=>{
     timerId=setTimeout(()=>rej(new Error("Request timed out after "+(timeoutMs/1000)+"s. The AI provider may be busy — try switching to Gemini (free tier).")),timeoutMs);
   });
