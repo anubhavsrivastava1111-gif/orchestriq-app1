@@ -1,162 +1,84 @@
-// ReadAloudEngine — the single platform-wide narration controller.
-// Only ONE narration plays at a time; starting a new one stops the previous.
-// Modules never touch this directly — they use the useReadAloud() hook.
+// ReadAloudButton — the universal, drop-in Read Aloud control.
+import React, { useState } from "react";
+import { Volume2, Pause, Play, Square, RotateCcw, ChevronsRight, ChevronsLeft } from "lucide-react";
+import { useReadAloud } from "../lib/audio/useReadAloud";
+import { SPEED_OPTIONS } from "../lib/audio/VoiceManager";
 
-import { ISpeechProvider, WebSpeechProvider, SpeakOptions } from "./SpeechService";
-import { chunkText, estimateSeconds, TextChunk } from "./AudioQueue";
-import { VoiceManager } from "./VoiceManager";
-
-export type PlaybackState = "idle" | "playing" | "paused";
-
-export interface EngineStatus {
-  state: PlaybackState;
-  sessionId: string | null;
-  charTotal: number;
-  charSpoken: number;       // approx chars spoken so far (for progress)
-  currentSentence: [number, number] | null; // [start,end] in full text
-  etaSeconds: number;
-  error: string | null;
+interface Props {
+  text: string;
+  id: string;
+  compact?: boolean;
+  className?: string;
 }
 
-type Listener = (s: EngineStatus) => void;
+export const ReadAloudButton: React.FC<Props> = ({ text, id, compact = true, className }) => {
+  const ra = useReadAloud();
+  const [open, setOpen] = useState(false);
+  const clean = (text || "").trim();
+  if (!clean) return null;
+  if (!ra.isAvailable) return null;
 
-const SKIP_CHARS = 220; // ~ one chunk ≈ 10–15s of speech
+  const active = ra.status.sessionId === id;
+  const playing = active && ra.status.state === "playing";
+  const paused = active && ra.status.state === "paused";
+  const pct = active && ra.status.charTotal
+    ? Math.min(100, Math.round((ra.status.charSpoken / ra.status.charTotal) * 100))
+    : 0;
+  const eta = active ? ra.status.etaSeconds : 0;
+  const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-class Engine {
-  private provider: ISpeechProvider = new WebSpeechProvider();
-  voices: VoiceManager = new VoiceManager(this.provider);
-  private listeners = new Set<Listener>();
+  const onPrimary = () => {
+    if (playing) ra.pause();
+    else if (paused) ra.resume();
+    else { ra.play(clean, id); setOpen(true); }
+  };
 
-  private sessionId: string | null = null;
-  private chunks: TextChunk[] = [];
-  private idx = 0;
-  private state: PlaybackState = "idle";
-  private handle: { cancel(): void } | null = null;
-  private rate = 1;
-  private voiceURI = "";
-  private charTotal = 0;
-  private error: string | null = null;
-  private curSentence: [number, number] | null = null;
+  const iconBtn: React.CSSProperties = {
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    width: 28, height: 28, borderRadius: 6, border: "1px solid #1a2030",
+    background: "transparent", color: "#94A3B8", cursor: "pointer",
+  };
 
-  isAvailable() { return this.provider.isAvailable(); }
-  async init() { await this.voices.loadVoices(); }
+  return (
+    <span className={className} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <button
+        onClick={onPrimary}
+        aria-label={playing ? "Pause narration" : "Read aloud"}
+        title={playing ? "Pause" : "Read aloud"}
+        style={{ ...iconBtn, color: active ? "#14B8A6" : "#94A3B8",
+                 borderColor: active ? "#14B8A6" : "#1a2030" }}
+      >
+        {playing ? <Pause size={15} /> : paused ? <Play size={15} /> : <Volume2 size={15} />}
+      </button>
 
-  subscribe(l: Listener) { this.listeners.add(l); l(this.snapshot()); return () => this.listeners.delete(l); }
-  private emit() { const s = this.snapshot(); this.listeners.forEach((l) => l(s)); }
+      {active && (open || playing || paused) && (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4,
+                       padding: "3px 6px", borderRadius: 8, background: "#0a0e1a",
+                       border: "1px solid #1a2030" }}>
+          <button onClick={ra.skipBack} aria-label="Back 12 seconds" title="Back 12s" style={iconBtn}><ChevronsLeft size={14} /></button>
+          <button onClick={ra.restart} aria-label="Restart" title="Restart" style={iconBtn}><RotateCcw size={13} /></button>
+          <button onClick={ra.skipForward} aria-label="Forward 12 seconds" title="Forward 12s" style={iconBtn}><ChevronsRight size={14} /></button>
+          <button onClick={ra.stop} aria-label="Stop" title="Stop" style={iconBtn}><Square size={12} /></button>
+          <span style={{ fontSize: 10, color: "#64748B", minWidth: 66, textAlign: "center" }}>
+            {pct}% · {mmss(eta)} left
+          </span>
+          <select
+            onChange={(e) => ra.setRate(parseFloat(e.target.value))}
+            defaultValue={String(ra.prefs.getRate())}
+            aria-label="Playback speed"
+            title="Speed"
+            style={{ fontSize: 10, background: "#0a0e1a", color: "#A0AAC0",
+                     border: "1px solid #1a2030", borderRadius: 5, padding: "2px 4px", cursor: "pointer" }}
+          >
+            {SPEED_OPTIONS.map((s) => <option key={s} value={s}>{s}x</option>)}
+          </select>
+        </span>
+      )}
+      {active && ra.status.error && (
+        <span style={{ fontSize: 10, color: "#DC2626" }}>{ra.status.error}</span>
+      )}
+    </span>
+  );
+};
 
-  private snapshot(): EngineStatus {
-    const spoken = this.chunks.slice(0, this.idx).reduce((a, c) => a + c.text.length, 0);
-    const remainingChars = Math.max(0, this.charTotal - spoken);
-    return {
-      state: this.state,
-      sessionId: this.sessionId,
-      charTotal: this.charTotal,
-      charSpoken: spoken,
-      currentSentence: this.curSentence,
-      etaSeconds: estimateSeconds(remainingChars, this.rate),
-      error: this.error,
-    };
-  }
-
-  start(text: string, sessionId: string, opts?: { rate?: number; voiceURI?: string }) {
-    this.stop(); // one session at a time
-    if (!this.provider.isAvailable()) {
-      this.error = "Read Aloud isn't supported in this browser.";
-      this.emit();
-      return;
-    }
-    this.error = null;
-    this.sessionId = sessionId;
-    this.chunks = chunkText(text);
-    this.charTotal = text.length;
-    this.idx = 0;
-    this.rate = opts?.rate ?? this.voices.getRate();
-    this.voiceURI = opts?.voiceURI ?? this.voices.getPreferredVoiceURI();
-    if (!this.chunks.length) { this.error = "Nothing to read."; this.emit(); return; }
-    this.state = "playing";
-    this.speakCurrent();
-    this.emit();
-  }
-
-  private speakCurrent() {
-    if (this.idx >= this.chunks.length) { this.finish(); return; }
-    const chunk = this.chunks[this.idx];
-    this.curSentence = [chunk.start, chunk.end];
-    const so: SpeakOptions = { rate: this.rate, voiceURI: this.voiceURI };
-    this.handle = this.provider.speak(chunk.text, so, {
-      onEnd: () => {
-        if (this.state !== "playing") return; // paused/stopped mid-chunk
-        this.idx += 1;
-        if (this.idx >= this.chunks.length) this.finish();
-        else { this.speakCurrent(); this.emit(); }
-      },
-      onError: (err) => { this.error = err; this.finish(); },
-    });
-    this.emit();
-  }
-
-  private finish() {
-    this.state = "idle";
-    this.curSentence = null;
-    this.handle = null;
-    this.emit();
-  }
-
-  pause() {
-    if (this.state !== "playing") return;
-    this.state = "paused";
-    try { (window as any).speechSynthesis?.pause?.(); } catch {}
-    this.emit();
-  }
-  resume() {
-    if (this.state !== "paused") return;
-    this.state = "playing";
-    try { (window as any).speechSynthesis?.resume?.(); } catch {}
-    this.emit();
-  }
-  stop() {
-    this.state = "idle";
-    this.curSentence = null;
-    try { this.provider.stop(); } catch {}
-    this.handle = null;
-    this.sessionId = null;
-    this.chunks = [];
-    this.idx = 0;
-    this.charTotal = 0;
-    this.emit();
-  }
-  restart() {
-    if (!this.chunks.length) return;
-    this.provider.stop();
-    this.idx = 0;
-    this.state = "playing";
-    this.speakCurrent();
-    this.emit();
-  }
-  skip(seconds: number) {
-    if (!this.chunks.length) return;
-    // approximate: move whole chunks based on ~SKIP_CHARS per 12s
-    const chunksToMove = Math.max(1, Math.round((Math.abs(seconds) / 12)));
-    this.provider.stop();
-    this.idx = Math.min(this.chunks.length, Math.max(0, this.idx + Math.sign(seconds) * chunksToMove));
-    if (this.idx >= this.chunks.length) { this.finish(); return; }
-    this.state = "playing";
-    this.speakCurrent();
-    this.emit();
-  }
-  setRate(r: number) {
-    this.rate = Math.min(2, Math.max(0.5, r));
-    this.voices.setRate(this.rate);
-    // apply mid-playback by restarting current chunk
-    if (this.state === "playing") { this.provider.stop(); this.speakCurrent(); }
-    this.emit();
-  }
-  setVoice(uri: string) {
-    this.voiceURI = uri; this.voices.setPreferredVoiceURI(uri);
-    if (this.state === "playing") { this.provider.stop(); this.speakCurrent(); }
-    this.emit();
-  }
-}
-
-// Singleton — shared across the whole app.
-export const ReadAloud = new Engine();
+export default ReadAloudButton;
