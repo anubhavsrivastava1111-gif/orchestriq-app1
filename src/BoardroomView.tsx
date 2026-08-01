@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import ReadAloudButton from "./components/ReadAloudButton";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BOARDROOM VIEW — Enterprise Redesign
@@ -456,6 +457,9 @@ function SynthesisCard({ synthesis, question, tok, isDark, onCopy, onExportPDF, 
 
       {/* Body */}
       <div style={{ padding: "24px 28px" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+          <ReadAloudButton text={typeof synthesis === "string" ? synthesis.replace(/[#*`_>|]/g, "") : ""} id={"boardroom-synth-" + (question || "").slice(0, 24)} />
+        </div>
         <RenderedMd text={synthesis} tok={tok} isDark={isDark} />
       </div>
     </div>
