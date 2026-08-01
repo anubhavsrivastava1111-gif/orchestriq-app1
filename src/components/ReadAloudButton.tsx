@@ -1,6 +1,5 @@
-// ReadAloudButton — the universal, drop-in Read Aloud control.
+// ReadAloudButton — the universal, drop-in Read Aloud control (no icon library).
 import React, { useState } from "react";
-import { Volume2, Pause, Play, Square, RotateCcw, ChevronsRight, ChevronsLeft } from "lucide-react";
 import { useReadAloud } from "../lib/audio/useReadAloud";
 import { SPEED_OPTIONS } from "../lib/audio/VoiceManager";
 
@@ -11,7 +10,7 @@ interface Props {
   className?: string;
 }
 
-export const ReadAloudButton: React.FC<Props> = ({ text, id, compact = true, className }) => {
+export const ReadAloudButton: React.FC<Props> = ({ text, id, className }) => {
   const ra = useReadAloud();
   const [open, setOpen] = useState(false);
   const clean = (text || "").trim();
@@ -33,10 +32,11 @@ export const ReadAloudButton: React.FC<Props> = ({ text, id, compact = true, cla
     else { ra.play(clean, id); setOpen(true); }
   };
 
-  const iconBtn: React.CSSProperties = {
+  const btn: React.CSSProperties = {
     display: "inline-flex", alignItems: "center", justifyContent: "center",
-    width: 28, height: 28, borderRadius: 6, border: "1px solid #1a2030",
-    background: "transparent", color: "#94A3B8", cursor: "pointer",
+    minWidth: 28, height: 28, padding: "0 8px", borderRadius: 6,
+    border: "1px solid #1a2030", background: "transparent",
+    color: "#94A3B8", cursor: "pointer", fontSize: 13,
   };
 
   return (
@@ -45,20 +45,20 @@ export const ReadAloudButton: React.FC<Props> = ({ text, id, compact = true, cla
         onClick={onPrimary}
         aria-label={playing ? "Pause narration" : "Read aloud"}
         title={playing ? "Pause" : "Read aloud"}
-        style={{ ...iconBtn, color: active ? "#14B8A6" : "#94A3B8",
+        style={{ ...btn, color: active ? "#14B8A6" : "#94A3B8",
                  borderColor: active ? "#14B8A6" : "#1a2030" }}
       >
-        {playing ? <Pause size={15} /> : paused ? <Play size={15} /> : <Volume2 size={15} />}
+        {playing ? "⏸" : paused ? "▶" : "🔊"}
       </button>
 
       {active && (open || playing || paused) && (
         <span style={{ display: "inline-flex", alignItems: "center", gap: 4,
                        padding: "3px 6px", borderRadius: 8, background: "#0a0e1a",
                        border: "1px solid #1a2030" }}>
-          <button onClick={ra.skipBack} aria-label="Back 12 seconds" title="Back 12s" style={iconBtn}><ChevronsLeft size={14} /></button>
-          <button onClick={ra.restart} aria-label="Restart" title="Restart" style={iconBtn}><RotateCcw size={13} /></button>
-          <button onClick={ra.skipForward} aria-label="Forward 12 seconds" title="Forward 12s" style={iconBtn}><ChevronsRight size={14} /></button>
-          <button onClick={ra.stop} aria-label="Stop" title="Stop" style={iconBtn}><Square size={12} /></button>
+          <button onClick={ra.skipBack} aria-label="Back 12 seconds" title="Back 12s" style={btn}>⏪</button>
+          <button onClick={ra.restart} aria-label="Restart" title="Restart" style={btn}>↺</button>
+          <button onClick={ra.skipForward} aria-label="Forward 12 seconds" title="Forward 12s" style={btn}>⏩</button>
+          <button onClick={ra.stop} aria-label="Stop" title="Stop" style={btn}>⏹</button>
           <span style={{ fontSize: 10, color: "#64748B", minWidth: 66, textAlign: "center" }}>
             {pct}% · {mmss(eta)} left
           </span>
