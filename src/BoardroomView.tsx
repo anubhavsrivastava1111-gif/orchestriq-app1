@@ -334,6 +334,9 @@ function ExecutiveCard({
 
       {/* Response Body */}
       <div style={{ padding: "20px 24px" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+          <ReadAloudButton text={typeof entry.text === "string" ? entry.text.replace(/[#*`_>|]/g, "") : ""} id={"br-exec-" + (entry.ag?.t || "exec") + "-" + index} />
+        </div>
         <RenderedMd text={entry.text} tok={tok} isDark={isDark} />
       </div>
 
