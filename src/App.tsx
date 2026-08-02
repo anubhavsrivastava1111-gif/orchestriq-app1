@@ -905,12 +905,17 @@ async function callOpenAI(key,sys,msgs,maxT){
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("OpenAI: Invalid API key.");if(r.status===429)throw new Error("OpenAI: Quota exceeded. Add billing credits.");throw new Error("OpenAI "+r.status+": "+(m||r.statusText));}
   const d=await r.json();return d.choices?.[0]?.message?.content||"";
 }
-async function callGemini(key,sys,msgs,maxT){
+async function callGemini(key,sys,msgs,maxT,enableSearch=false){
   const models=["gemini-2.0-flash"];
   let lastErr=null;
   for(const model of models){
     try{
-      const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent?key="+key.trim(),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:msgs.map(m=>({role:m.role==="user"?"user":"model",parts:[{text:m.content}]})),tools:[{google_search:{}}],generationConfig:{maxOutputTokens:maxT,temperature:0.7}})});
+      // Google Search is only attached when the task genuinely needs live web
+      // data (research). Forcing search on EVERY call made Gemini slow enough to
+      // hit the request timeout — this restores normal-speed Gemini responses.
+      const _body:any={systemInstruction:{parts:[{text:sys}]},contents:msgs.map(m=>({role:m.role==="user"?"user":"model",parts:[{text:m.content}]})),generationConfig:{maxOutputTokens:maxT,temperature:0.7}};
+      if(enableSearch)_body.tools=[{google_search:{}}];
+      const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent?key="+key.trim(),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(_body)});
       if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===403)throw new Error("Gemini: API key invalid.");if(r.status===429){lastErr=new Error("Gemini: Free quota exceeded.");continue;}if(r.status===400&&(m.includes("not found")||m.includes("deprecated"))){lastErr=new Error("Gemini model "+model+" unavailable");continue;}lastErr=new Error("Gemini/"+model+" "+r.status+": "+(m||r.statusText));continue;}
       const d=await r.json();const text=d.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("\n")||"";if(!text){lastErr=new Error("Gemini/"+model+": empty response");continue;}return text;
     }catch(e){if(e.message.includes("Failed to fetch")||e.message.includes("NetworkError"))throw new Error("Gemini: Network error.");if(e.message.includes("Invalid")||e.message.includes("quota"))throw e;lastErr=e;}
@@ -1043,7 +1048,7 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,mode
     timerId=setTimeout(()=>rej(new Error("Request timed out after "+(timeoutMs/1000)+"s. The AI provider may be busy — try switching to Gemini (free tier).")),timeoutMs);
   });
   const callP=(async()=>{
-    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT,modelOverride):provider==="kimi"?await callKimi(key,sys,msgs,maxT):provider==="fal"?await(async()=>{const prompt=rawMsgs?.find((m:any)=>m.role==="user")?.content||"generate image";const url=await callFalImage(key,prompt);return{text:`🖼️ Image URL: ${url}`,truncated:false};})():provider==="nvidia"?{text:await callNvidia(sys,msgs,maxT),truncated:false}:Promise.reject(new Error("Unknown provider: "+provider));
+    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT,enableSearch):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT,modelOverride):provider==="kimi"?await callKimi(key,sys,msgs,maxT):provider==="fal"?await(async()=>{const prompt=rawMsgs?.find((m:any)=>m.role==="user")?.content||"generate image";const url=await callFalImage(key,prompt);return{text:`🖼️ Image URL: ${url}`,truncated:false};})():provider==="nvidia"?{text:await callNvidia(sys,msgs,maxT),truncated:false}:Promise.reject(new Error("Unknown provider: "+provider));
     if(raw&&typeof raw==="object"&&"text" in raw)return raw as {text:string;truncated:boolean};
     return {text:raw as string,truncated:false};
   })();
