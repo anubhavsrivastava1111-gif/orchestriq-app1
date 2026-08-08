@@ -5606,7 +5606,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
   }
 
   return(
-    <div id="oiq-root" style={{display:"flex",flexDirection:"column",width:"100vw",height:"100vh",background:"#0a0e1a",fontFamily:"Manrope,sans-serif",color:"#A0AAC0",overflow:"hidden"}}>
+    <div id="oiq-root" style={{display:"flex",flexDirection:"column",width:"100vw",height:"100vh",background:"#EDEAE3",fontFamily:"Inter,system-ui,sans-serif",color:"#4A453D",overflow:"hidden"}}>
       <a href="#oiq-main" className="skip-link">Skip to main content</a>
       <div id="oiq-live" aria-live="polite" aria-atomic="false" className="sr-only"/>
       <header id="oiq-header" role="banner" aria-label="OrchestrIQ navigation">
