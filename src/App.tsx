@@ -2432,6 +2432,20 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
   (async()=>{
     try{const th=WorkspaceMemory.get<string>("cos-theme");const tid=th&&THEMES[th]?th:"dark";setTheme(tid);applyTheme(tid);}catch{applyTheme("dark");}
     try{const c=WorkspaceMemory.get<typeof co>("cos-co");if(c)setCo(p=>({...p,...c}));}catch{}
+    // SUPER_ADMIN: auto-load API keys from Supabase on every login/refresh
+    // so you never need to re-enter them. Other users unchanged.
+    try{
+      const {data:{user}}=await supabase.auth.getUser();
+      if(user){
+        const {data:prof}=await supabase.from("profiles").select("role,admin_api_keys").eq("id",user.id).single();
+        if(prof?.role==="super_admin"&&prof?.admin_api_keys){
+          const ak=prof.admin_api_keys;
+          setKeys(k=>({...k,...(ak.keys||ak)}));
+          if(ak.defaultProvider)setDefP(ak.defaultProvider);
+          if(ak.multiAI!==undefined)setMultiAI(ak.multiAI);
+        }
+      }
+    }catch{}
     try{const k=WorkspaceMemory.get<any>("cos-keys");if(k){
       const p=JSON.parse(k);
       const loadedKeys={claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",...(p.keys||{})};
@@ -2530,6 +2544,19 @@ useEffect(()=>{
     const hasAnyKey=Object.values(keys).some(k=>k?.trim())||!!EFF_GEMINI;
 if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     sv("cos-keys",{keys,defaultProvider:defP,multiAI});sv("cos-co",co);
+    // SUPER_ADMIN: persist keys to Supabase so they survive page refresh,
+    // code deploys, and new devices automatically.
+    try{
+      const {data:{user}}=await supabase.auth.getUser();
+      if(user){
+        const {data:prof}=await supabase.from("profiles").select("role").eq("id",user.id).single();
+        if(prof?.role==="super_admin"){
+          await supabase.from("profiles").update({
+            admin_api_keys:{keys,defaultProvider:defP,multiAI}
+          }).eq("id",user.id);
+        }
+      }
+    }catch{}
     const e={};DEPTS.forEach(d=>e[d.id]=true);setExpD(e);sv("cos-dp",e);
     setPage("app");
   };
