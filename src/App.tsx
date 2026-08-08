@@ -2439,8 +2439,18 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
       if(user){
         const {data:prof}=await supabase.from("profiles").select("role,admin_api_keys").eq("id",user.id).single();
         if(prof?.role==="super_admin"&&prof?.admin_api_keys){
-          const ak=prof.admin_api_keys;
-          setKeys(k=>({...k,...(ak.keys||ak)}));
+          const ak=prof.admin_api_keys as any;
+          const loadedKeys=ak.keys||ak;
+          setKeys(prev=>({
+            claude:loadedKeys.claude||prev.claude||"",
+            openai:loadedKeys.openai||prev.openai||"",
+            gemini:loadedKeys.gemini||prev.gemini||"",
+            groq:loadedKeys.groq||prev.groq||"",
+            deepseek:loadedKeys.deepseek||prev.deepseek||"",
+            kimi:loadedKeys.kimi||prev.kimi||"",
+            stability:loadedKeys.stability||prev.stability||"",
+            fal:loadedKeys.fal||prev.fal||"",
+          }));
           if(ak.defaultProvider)setDefP(ak.defaultProvider);
           if(ak.multiAI!==undefined)setMultiAI(ak.multiAI);
         }
