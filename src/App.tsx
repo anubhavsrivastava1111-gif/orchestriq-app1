@@ -7013,7 +7013,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                       <a href={m.keyUrl} target="_blank" rel="noopener noreferrer" style={{marginLeft:"auto",fontSize:9,color:m.color,textDecoration:"none"}}>Get key ↗</a>
                       {keys[id]?.trim()&&<button onClick={()=>testKey(id)} style={{...S.iBtn,fontSize:9,padding:"1px 6px"}}>{testSt[id]==="testing"?"…":testSt[id]==="ok"?"✓ OK":testSt[id]?.startsWith("fail:")?"✗ Fail":"Test"}</button>}
                     </div>
-                    <input style={{...S.inp,fontSize:11}} type="password" value={keys[id]} onChange={e=>{const nk={...keys,[id]:e.target.value};setKeys(nk);sv("cos-keys",{keys:nk,defaultProvider:defP,multiAI});setTestSt(p=>({...p,[id]:undefined}));if(id==="claude"||id==="openai")saveBYOKeyToSupabase(e.target.value);}} placeholder={m.placeholder}/>
+                    <input style={{...S.inp,fontSize:11}} type="password" value={keys[id]} onChange={e=>{const nk={...keys,[id]:e.target.value};setKeys(nk);sv("cos-keys",{keys:nk,defaultProvider:defP,multiAI});setTestSt(p=>({...p,[id]:undefined}));if(id==="claude"||id==="openai")saveBYOKeyToSupabase(e.target.value);supabase.auth.getUser().then(({data:{user}})=>{if(user)supabase.from("profiles").select("role").eq("id",user.id).single().then(({data:prof})=>{if(prof?.role==="super_admin")supabase.from("profiles").update({admin_api_keys:{...nk,defaultProvider:defP,multiAI}}).eq("id",user.id).catch(()=>{});});}).catch(()=>{});}} placeholder={m.placeholder}/>
                     {testSt[id]?.startsWith("fail:")&&<div style={{fontSize:9,color:"#EF4444",marginTop:2,lineHeight:1.4}}>{testSt[id].slice(5)}</div>}
                   </div>
                 ))}
