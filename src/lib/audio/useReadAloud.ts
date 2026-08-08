@@ -28,9 +28,17 @@ export function useReadAloud() {
     ensureInit().then(() => ReadAloud.start(text, sessionId));
   }, []);
 
+  const [isAvailable, setIsAvailable] = useState(false);
+  useEffect(() => {
+    // Check after mount — window.speechSynthesis only exists in the browser,
+    // not during SSR/initial render. This delay ensures the check runs
+    // after hydration when the API is actually accessible.
+    setIsAvailable(ReadAloud.isAvailable());
+  }, []);
+
   return {
     status,
-    isAvailable: ReadAloud.isAvailable(),
+    isAvailable,
     play,
     pause: useCallback(() => ReadAloud.pause(), []),
     resume: useCallback(() => ReadAloud.resume(), []),
