@@ -293,6 +293,10 @@ const DONATION_PRESETS = [10,50,100,500,1000];
 // ─── FEATURE 1: THEME SYSTEM ────────────────────────────────────────────────
 // Each theme maps to CSS custom properties. Dark is default and untouched.
 const THEMES = {
+  editorial:{name:"Executive Editorial",ic:"📜",vars:{
+    "--bg":"#EDEAE3","--bg2":"#FBFAF8","--panel":"#FFFFFF","--panel2":"#F7F5F1","--border":"#E4E0D8","--border2":"#EFEBE4",
+    "--text":"#1C2A24","--text2":"#4A453D","--text3":"#6B6459","--muted":"#8A8378","--muted2":"#B5AEA2",
+    "--accent":"#C9A961","--code":"#F7F5F1","--scroll":"#DDD8CE"}},
   dark:{name:"Dark Mode",ic:"🌙",default:true,vars:{
     "--bg":"#0a0e1a","--bg2":"#0c1120","--panel":"#131825","--panel2":"#0a0e1a","--border":"#1a2030","--border2":"#14192a",
     "--text":"#F1F5F9","--text2":"#A0AAC0","--text3":"#8892B0","--muted":"#5A6480","--muted2":"#3A4060",
