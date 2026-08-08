@@ -44,6 +44,7 @@ export class WebSpeechProvider implements ISpeechProvider {
     typeof window !== "undefined" && "speechSynthesis" in window ? window.speechSynthesis : null;
 
   isAvailable(): boolean {
+    if (typeof window === "undefined") return false;
     return !!this.synth && typeof SpeechSynthesisUtterance !== "undefined";
   }
 
