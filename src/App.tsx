@@ -2550,7 +2550,7 @@ useEffect(()=>{
     catch(e){setTestSt(p=>({...p,[provider]:"fail:"+e.message}));showToast(MODELS[provider].name+": "+e.message,"error");}
   };
 
-  const completeOnboard=()=>{
+  const completeOnboard=async()=>{
     const hasAnyKey=Object.values(keys).some(k=>k?.trim())||!!EFF_GEMINI;
 if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     sv("cos-keys",{keys,defaultProvider:defP,multiAI});sv("cos-co",co);
