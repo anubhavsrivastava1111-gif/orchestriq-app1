@@ -2281,6 +2281,25 @@ export default function App(){
   const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return WorkspaceMemory.get<string>("oiq-sb-col")==="1";}catch{return false;}});
   const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:""});
 
+  // Save API keys to the signed-in user's own profile row. This MUST sit below
+  // the keys declaration — referencing it earlier throws "Cannot access before
+  // initialization" and takes the whole app down. Debounced so typing a key
+  // doesn't write per keystroke; skipped on first pass so the empty initial
+  // state can never wipe keys already saved.
+  useEffect(()=>{
+    if(!keysHydrated){ setKeysHydrated(true); return; }
+    const t=setTimeout(async()=>{
+      try{
+        const {data:{user}}=await supabase.auth.getUser();
+        if(!user)return;
+        const clean:any={};
+        Object.entries(keys||{}).forEach(([k,v])=>{ if(typeof v==="string"&&v.trim())clean[k]=v.trim(); });
+        await supabase.from("profiles").update({user_api_keys:clean}).eq("id",user.id);
+      }catch{}
+    },1500);
+    return ()=>clearTimeout(t);
+  },[keys]);
+
   // Save API keys to the signed-in user's own profile row. Declared AFTER the
   // keys state — referencing it any earlier throws "Cannot access before
   // initialization" and takes the whole app down. Debounced so typing a key
