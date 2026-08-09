@@ -308,136 +308,142 @@ function ExecutiveCard({
   showDrillClose: () => void;
 }) {
   const ag = entry.ag;
-  const [hovered, setHovered] = useState(false);
+  const [open, setOpen] = useState(false);
+  const raw = typeof entry.text === "string" ? entry.text : "";
+
+  // Headline: first bold line, else first real sentence.
+  const bold = raw.match(/\*\*(.+?)\*\*/);
+  const firstPara = raw.split("\n").map(l => l.replace(/^[#>\-*\s]+/, "").trim())
+    .find(l => l.length > 40 && !l.startsWith("|")) || "";
+  const headline = (bold ? bold[1] : firstPara).replace(/[*`_]/g, "").slice(0, 190);
+
+  // Key figures the executive actually cited — currency, percentages, horizons.
+  const figures = Array.from(new Set(
+    (raw.match(/(?:₹|\$)\s?[\d,]+(?:\.\d+)?\s?(?:Cr|L|lakh|K|M|B|bn|mn)?|\b\d+(?:\.\d+)?%|\bMonth\s\d+|\b\d+(?:\.\d+)?x\b/gi) || [])
+      .map(s => s.trim())
+  )).slice(0, 4);
+
+  const verified = /\[Verified Fact|TIER 1|Verified\]/i.test(raw);
 
   return (
-    <div
-      style={{
-        marginBottom: 20,
-        borderRadius: 14,
-        border: `1px solid ${tok.border}`,
-        background: hovered ? tok.cardHover : tok.surface,
-        boxShadow: hovered ? tok.shadowMd : tok.shadow,
-        overflow: "hidden",
-        transition: "box-shadow 0.15s, background 0.15s",
-        animation: "fadeInUp 0.3s ease",
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}>
-
-      {/* Executive Header */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 12, padding: "16px 20px",
-        borderBottom: `1px solid ${tok.border}`,
-        background: isDark ? ag.dc + "08" : ag.dc + "05",
-      }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: 10,
-          background: ag.dc + "15",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 20, flexShrink: 0,
-          border: `1px solid ${ag.dc}25`,
+    <>
+      {/* ── COMPACT ROW ── */}
+      <div
+        onClick={() => setOpen(true)}
+        style={{
+          marginBottom: 10, borderRadius: 10, border: `1px solid ${tok.border}`,
+          background: tok.surface, boxShadow: tok.shadow, cursor: "pointer",
+          padding: "15px 18px", display: "flex", gap: 13, alignItems: "flex-start",
         }}>
-          {ag.ic}
-        </div>
+        <div style={{
+          width: 34, height: 34, borderRadius: 8, background: ag.dc + "15",
+          border: `1px solid ${ag.dc}25`, display: "flex", alignItems: "center",
+          justifyContent: "center", fontSize: 16, flexShrink: 0,
+        }}>{ag.ic}</div>
+
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: ag.dc, lineHeight: 1.2 }}>{ag.t}</div>
-          <div style={{ fontSize: 12, color: tok.text3, marginTop: 2 }}>{ag.d || "Executive Perspective"}</div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {entry.truncated && (
-            <span style={{ fontSize: 11, background: tok.warnBg, color: tok.warn, padding: "3px 8px", borderRadius: 6, fontWeight: 600 }}>
-              Response cut short
-            </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13.5, fontWeight: 700, color: tok.text }}>{ag.t}</span>
+            <span style={{
+              fontSize: 9.5, fontWeight: 800, padding: "2px 7px", borderRadius: 4, letterSpacing: ".04em",
+              background: verified ? tok.successBg : tok.warnBg,
+              color: verified ? tok.success : tok.warn,
+            }}>{verified ? "Verified" : "Estimate"}</span>
+            {entry.truncated && (
+              <span style={{ fontSize: 9.5, fontWeight: 800, padding: "2px 7px", borderRadius: 4, background: tok.dangerBg, color: tok.danger }}>Cut short</span>
+            )}
+          </div>
+          <div style={{ fontSize: 11.5, color: tok.text3, marginTop: 2 }}>{ag.d || "Executive Perspective"}</div>
+
+          <div style={{
+            fontSize: 13.5, lineHeight: 1.65, color: tok.text2, marginTop: 7,
+            display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any, overflow: "hidden",
+          }}>{headline}</div>
+
+          {figures.length > 0 && (
+            <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 9 }}>
+              {figures.map((f, i) => (
+                <span key={i} style={{
+                  fontFamily: "var(--font-head)", fontSize: 13, fontWeight: 700, color: tok.text,
+                  background: tok.surface2, border: `1px solid ${tok.border}`,
+                  padding: "3px 9px", borderRadius: 5, fontVariantNumeric: "tabular-nums",
+                }}>{f}</span>
+              ))}
+            </div>
           )}
-          <span style={{ fontSize: 12, color: tok.muted, background: tok.surface2, padding: "3px 8px", borderRadius: 6 }}>
-            #{index + 1}
-          </span>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+          <ReadAloudButton text={raw.replace(/[#*`_>|]/g, "")} id={"br-exec-" + (ag?.t || "exec") + "-" + index} />
+          <span style={{ fontSize: 11, color: tok.muted }}>#{index + 1}</span>
         </div>
       </div>
 
-      {/* Response Body */}
-      <div style={{ padding: "20px 24px" }}>
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-          <ReadAloudButton text={typeof entry.text === "string" ? entry.text.replace(/[#*`_>|]/g, "") : ""} id={"br-exec-" + (entry.ag?.t || "exec") + "-" + index} />
-        </div>
-        <RenderedMd text={entry.text} tok={tok} isDark={isDark} />
-      </div>
+      {/* ── FULL DETAIL ── */}
+      {open && (
+        <div onClick={() => setOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(10,14,26,0.62)", zIndex: 9995, display: "flex", alignItems: "center", justifyContent: "center", padding: 26 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: "min(1080px,100%)", maxHeight: "90vh", background: tok.surface, borderRadius: 12, border: `1px solid ${tok.border}`, boxShadow: tok.shadowLg, display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
-      {/* Drilldown Q&A history */}
-      {entry.drilldown && Object.entries(entry.drilldown).map(([, qas]: any, di) =>
-        (Array.isArray(qas) ? qas : []).map((qa: any, qi: number) => (
-          <div key={`${di}-${qi}`} style={{ margin: "0 24px 16px", padding: "16px", background: tok.surface2, borderRadius: 10, border: `1px solid ${tok.border}` }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: ag.dc, marginBottom: 10, display: "flex", gap: 8, alignItems: "flex-start" }}>
-              <span style={{ fontSize: 16, flexShrink: 0 }}>💬</span>
-              <span>{qa.q}</span>
+            <div style={{ padding: "15px 22px", borderBottom: `1px solid ${tok.border}`, display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 9, background: ag.dc + "15", border: `1px solid ${ag.dc}25`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>{ag.ic}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: "var(--font-head)", fontSize: 17, fontWeight: 600, color: tok.text }}>{ag.t}</div>
+                <div style={{ fontSize: 11.5, color: tok.text3, marginTop: 1 }}>{ag.d || "Executive Perspective"} · ~{Math.max(1, Math.round(raw.split(" ").length / 200))} min read</div>
+              </div>
+              <ReadAloudButton text={raw.replace(/[#*`_>|]/g, "")} id={"br-modal-" + (ag?.t || "exec") + "-" + index} />
+              <button onClick={() => setOpen(false)}
+                style={{ background: "none", border: `1px solid ${tok.border}`, borderRadius: 7, width: 30, height: 30, cursor: "pointer", color: tok.text3, fontSize: 15, fontFamily: "inherit", flexShrink: 0 }}>✕</button>
             </div>
-            <div style={{ fontSize: 14, lineHeight: 1.7, color: tok.text2 }}>
-              <RenderedMd text={qa.a} tok={tok} isDark={isDark} />
+
+            <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
+              <RenderedMd text={entry.text} tok={tok} isDark={isDark} />
+
+              {entry.drilldown && Object.entries(entry.drilldown).map(([, qas]: any, di) =>
+                (Array.isArray(qas) ? qas : []).map((qa: any, qi: number) => (
+                  <div key={`${di}-${qi}`} style={{ marginTop: 16, padding: 16, background: tok.surface2, borderRadius: 10, border: `1px solid ${tok.border}` }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: ag.dc, marginBottom: 10, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                      <span style={{ fontSize: 16, flexShrink: 0 }}>💬</span><span>{qa.q}</span>
+                    </div>
+                    <RenderedMd text={qa.a} tok={tok} isDark={isDark} />
+                  </div>
+                ))
+              )}
+
+              {drillRole === ag.id && (
+                <div style={{ marginTop: 18, padding: 16, background: tok.accentBg, borderRadius: 10, border: `1px solid ${tok.accent}33` }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: tok.accent, marginBottom: 10 }}>Ask {ag.t} a follow-up</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input value={drillQ} onChange={e => setDrillQ(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && runDrill()}
+                      placeholder="e.g. What's your biggest concern about the financial risk?"
+                      disabled={drillRun}
+                      style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: `1px solid ${tok.accent}44`, background: tok.inputBg, color: tok.text, fontSize: 14, outline: "none", fontFamily: "inherit" }} />
+                    <button onClick={runDrill} disabled={drillRun || !drillQ.trim()}
+                      style={{ padding: "10px 16px", borderRadius: 8, background: ag.dc, color: "#fff", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>
+                      {drillRun ? "Thinking…" : "Ask"}
+                    </button>
+                    <button onClick={showDrillClose}
+                      style={{ padding: "10px", borderRadius: 8, background: tok.surface2, color: tok.text3, border: `1px solid ${tok.border}`, cursor: "pointer" }}>✕</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 22px", borderTop: `1px solid ${tok.border}`, background: tok.surface2, flexWrap: "wrap", flexShrink: 0 }}>
+              <button onClick={onDrill} style={{ ...btnBase(tok, drillRole === ag.id, tok.accent), fontSize: 12, padding: "6px 12px" }}>💬 Drill Down</button>
+              <button onClick={onCopy} style={{ ...btnBase(tok, false), fontSize: 12, padding: "6px 12px" }}>📋 Copy</button>
+              {entry.truncated && (
+                <button onClick={onContinue} style={{ ...btnBase(tok, false, tok.warn), fontSize: 12, padding: "6px 12px" }}>▶ Continue Response</button>
+              )}
             </div>
           </div>
-        ))
-      )}
-
-      {/* Drilldown Input */}
-      {drillRole === ag.id && (
-        <div style={{ margin: "0 24px 20px", padding: "16px", background: tok.accentBg, borderRadius: 10, border: `1px solid ${tok.accent}33` }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: tok.accent, marginBottom: 10 }}>Ask {ag.t} a follow-up</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              value={drillQ}
-              onChange={e => setDrillQ(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && runDrill()}
-              placeholder={`e.g. What's your biggest concern about the financial risk?`}
-              disabled={drillRun}
-              style={{
-                flex: 1, padding: "10px 14px", borderRadius: 8,
-                border: `1px solid ${tok.accent}44`, background: tok.inputBg,
-                color: tok.text, fontSize: 14, outline: "none",
-                fontFamily: "Inter, sans-serif",
-              }} />
-            <button onClick={runDrill} disabled={drillRun || !drillQ.trim()}
-              style={{ padding: "10px 16px", borderRadius: 8, background: ag.dc, color: "#fff", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>
-              {drillRun ? "Thinking…" : "Ask"}
-            </button>
-            <button onClick={showDrillClose}
-              style={{ padding: "10px", borderRadius: 8, background: tok.surface2, color: tok.text3, border: `1px solid ${tok.border}`, cursor: "pointer" }}>
-              ✕
-            </button>
-          </div>
         </div>
       )}
-
-      {/* Card Footer Actions */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 8, padding: "12px 20px",
-        borderTop: `1px solid ${tok.border}`,
-        background: tok.surface2,
-        flexWrap: "wrap",
-      }}>
-        <button onClick={onDrill}
-          style={{ ...btnBase(tok, drillRole === ag.id, tok.accent), fontSize: 12, padding: "6px 12px" }}>
-          💬 Drill Down
-        </button>
-        <button onClick={onCopy}
-          style={{ ...btnBase(tok, false), fontSize: 12, padding: "6px 12px" }}>
-          📋 Copy
-        </button>
-        {entry.truncated && (
-          <button onClick={onContinue}
-            style={{ ...btnBase(tok, false, tok.warn), fontSize: 12, padding: "6px 12px" }}>
-            ▶ Continue Response
-          </button>
-        )}
-        <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: tok.muted }}>
-          ~{Math.round((entry.text || "").split(" ").length / 200)} min read
-        </span>
-      </div>
-    </div>
+    </>
   );
 }
-
 // ─── SYNTHESIS CARD ───────────────────────────────────────────────────────────
 function SynthesisCard({ synthesis, question, tok, isDark, onCopy, onExportPDF, onExportPPT, onExportMD, onExtractActions, extracting }: any) {
   return (
