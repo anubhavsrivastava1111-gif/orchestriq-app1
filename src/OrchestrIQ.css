@@ -901,3 +901,26 @@
 #oiq-root {
   padding-top: calc(var(--oiq-tick-h) + var(--hdr-h)) !important;
 }
+
+/* ── RETIRE THE LEGACY HEADER ──────────────────────────────────────────────
+   Every control it held now lives in the sidebar wordmark, the sidebar
+   footer, or Settings. Its children were stacking vertically and pushing
+   the app down by ~170px. The hamburger stays on mobile.                   */
+
+#oiq-header { display: none !important; }
+
+#oiq-root { padding-top: var(--oiq-tick-h) !important; }
+
+@media (max-width: 767px) {
+  #oiq-header {
+    display: flex !important;
+    top: var(--oiq-tick-h) !important;
+    height: var(--hdr-h) !important;
+    align-items: center !important;
+    gap: 10px !important;
+    padding: 0 14px !important;
+  }
+  #oiq-header-logo, #oiq-header-workspace, #oiq-header-actions { display: none !important; }
+  #oiq-hamburger { display: flex !important; }
+  #oiq-root { padding-top: calc(var(--oiq-tick-h) + var(--hdr-h)) !important; }
+}
