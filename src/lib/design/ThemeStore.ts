@@ -172,14 +172,38 @@ export function getTheme(id: string): Theme {
   return THEMES.find(t => t.id === id) || THEMES.find(t => t.id === "midnight")!;
 }
 
-// Applies the theme as CSS variables on <html>. Every module reads these.
+// Applies the theme. Writes BOTH variable sets:
+//  1. --oiq-*  for new components
+//  2. --bg/--panel/--text/... which App.tsx's existing applyTheme engine reads,
+//     so every module restyles through the mechanism already in the app.
 export function applyDesign(p: Prefs) {
   const t = getTheme(p.themeId);
   const d = DENSITY[p.density], cr = CORNERS[p.corners], ts = TEXT_SIZE[p.textSize];
   const r = document.documentElement;
   const set = (k: string, v: string) => r.style.setProperty(k, v);
 
+  // New-style tokens
   Object.entries(t.c).forEach(([k, v]) => set(`--oiq-${k}`, v as string));
+
+  // Bridge to the app's existing theme variables
+  set("--bg",      t.c.bg);
+  set("--bg2",     t.c.surface2);
+  set("--panel",   t.c.surface);
+  set("--panel2",  t.c.surface2);
+  set("--border",  t.c.border);
+  set("--border2", t.c.border);
+  set("--text",    t.c.ink);
+  set("--text2",   t.c.body);
+  set("--text3",   t.c.body);
+  set("--muted",   t.c.muted);
+  set("--muted2",  t.c.faint);
+  set("--accent",  t.c.accent);
+  set("--code",    t.c.surface2);
+  set("--scroll",  t.c.border);
+  // Sidebar-specific
+  set("--sb-bg",   t.c.sbBg);
+  set("--sb-bdr",  t.c.sbBorder);
+
   set("--oiq-radius", cr.r + "px");
   set("--oiq-gap", d.gap + "px");
   set("--oiq-pad", d.pad + "px");
@@ -189,11 +213,43 @@ export function applyDesign(p: Prefs) {
   r.setAttribute("data-oiq-theme", t.id);
   r.setAttribute("data-oiq-mode", t.mode);
 
-  // Load the theme's Google Fonts once
-  const id = "oiq-font-link";
+  // Remap the app's hardcoded inline hex colours to the active theme.
+  // Covers App.tsx AND every module file (CommandCenter, AgenticWorkflows,
+  // AIAgents, Ledger, Dispatch, Funding, ActionTracker, Pulse, etc.).
+  const map: Array<[string, string]> = [
+    ["#0a0e1a", t.c.bg],   ["#0c1120", t.c.surface2], ["#131825", t.c.surface],
+    ["#1a2030", t.c.border], ["#14192a", t.c.border], ["#080c18", t.c.surface2],
+    ["#0B1120", t.c.bg],   ["#070C18", t.c.bg],       ["#0d1829", t.c.surface2],
+    ["#111827", t.c.surface], ["#0F1829", t.c.surface], ["#141F33", t.c.surface2],
+    ["#1C2A40", t.c.border], ["#1E2D3D", t.c.border],  ["#243044", t.c.border],
+    ["#F1F5F9", t.c.ink],  ["#F0F4FF", t.c.ink],      ["#E8EFF8", t.c.ink],
+    ["#A0AAC0", t.c.body], ["#8FA8CC", t.c.body],     ["#8892B0", t.c.body],
+    ["#94A3B8", t.c.body], ["#5A6480", t.c.muted],    ["#4D6A8A", t.c.muted],
+    ["#64748B", t.c.muted],["#3A4060", t.c.faint],
+  ];
+
+  let css = "";
+  const sel = "#oiq-root";
+  map.forEach(([from, to]) => {
+    const f = from.toLowerCase(), F = from.toUpperCase();
+    [f, F, from].forEach(v => {
+      css += `${sel} [style*="background:${v}"],${sel} [style*="background: ${v}"],${sel} [style*="background-color:${v}"],${sel} [style*="backgroundColor:${v}"]{background-color:${to}!important}`;
+      css += `${sel} [style*="color:${v}"]:not([style*="background"]){color:${to}!important}`;
+      css += `${sel} [style*="1px solid ${v}"],${sel} [style*="borderColor:${v}"],${sel} [style*="border-color:${v}"]{border-color:${to}!important}`;
+    });
+  });
+  css += `${sel}{background:${t.c.bg};color:${t.c.body};font-family:'${t.fonts.body}',system-ui,sans-serif}`;
+  css += `${sel} input,${sel} textarea,${sel} select{background:${t.c.surface}!important;color:${t.c.ink}!important;border-color:${t.c.border}!important}`;
+
+  let el = document.getElementById("oiq-design-override") as HTMLStyleElement | null;
+  if (!el) { el = document.createElement("style"); el.id = "oiq-design-override"; document.head.appendChild(el); }
+  el.textContent = css;
+
+  // Fonts
+  const fid = "oiq-font-link";
   const fam = [t.fonts.heading, t.fonts.body].filter((v, i, a) => a.indexOf(v) === i)
     .map(f => "family=" + f.replace(/ /g, "+") + ":wght@400;500;600;700;800").join("&");
-  let link = document.getElementById(id) as HTMLLinkElement | null;
-  if (!link) { link = document.createElement("link"); link.id = id; link.rel = "stylesheet"; document.head.appendChild(link); }
+  let link = document.getElementById(fid) as HTMLLinkElement | null;
+  if (!link) { link = document.createElement("link"); link.id = fid; link.rel = "stylesheet"; document.head.appendChild(link); }
   link.href = `https://fonts.googleapis.com/css2?${fam}&display=swap`;
 }
