@@ -449,30 +449,28 @@ function SynthesisCard({ synthesis, question, tok, isDark, onCopy, onExportPDF, 
   const [open, setOpen] = useState(false);
   const raw = typeof synthesis === "string" ? synthesis : "";
 
-  // Board-level KPIs, read from the consolidated synthesis — not one executive.
-  const FIG = "(?:₹|\\$)\\s?[\\d,]+(?:\\.\\d+)?\\s?(?:Cr|crore|L|lakh|K|M|bn|mn)?|\\d+(?:\\.\\d+)?%|Month\\s\\d+|\\d+(?:\\.\\d+)?x";
-  const kpis: { label: string; value: string }[] = [];
-  const seen = new Set<string>();
-  const re = new RegExp("([A-Za-z][A-Za-z \\-&/]{2,26}?)\\s*[:\\u2014-]\\s*\\*{0,2}(" + FIG + ")", "g");
-  let m: RegExpExecArray | null;
-  const flat = raw.replace(/\n/g, " ");
-  while ((m = re.exec(flat)) !== null && kpis.length < 4) {
-    const label = m[1].replace(/[*#>]/g, "").trim();
-    const value = m[2].trim();
-    if (label.length < 3 || seen.has(value)) continue;
-    seen.add(value);
-    kpis.push({ label, value });
-  }
-  if (kpis.length < 4) {
-    (flat.match(new RegExp(FIG, "g")) || []).forEach(v => {
-      if (kpis.length < 4 && !seen.has(v.trim())) { seen.add(v.trim()); kpis.push({ label: "Key figure", value: v.trim() }); }
-    });
-  }
+  // Board KPIs and crux come from the synthesis itself, declared in structured
+  // blocks. Nothing is scraped out of prose — a figure only appears here if the
+  // board explicitly nominated it, with its reason.
+  let kpis: { label: string; value: string; why?: string }[] = [];
+  try {
+    const b = raw.match(/===BOARD_KPIS===([\s\S]*?)===END_KPIS===/);
+    if (b) {
+      const parsed = JSON.parse(b[1].trim());
+      if (Array.isArray(parsed)) {
+        kpis = parsed
+          .filter((k: any) => k && typeof k.label === "string" && typeof k.value === "string")
+          .slice(0, 4);
+      }
+    }
+  } catch { kpis = []; }
 
+  const cruxMatch = raw.match(/===CRUX===([\s\S]*?)===END_CRUX===/);
   const bold = raw.match(/\*\*(.+?)\*\*/);
   const firstPara = raw.split("\n").map(l => l.replace(/^[#>\-*\s]+/, "").trim())
     .find(l => l.length > 50 && !l.startsWith("|")) || "";
-  const headline = (bold ? bold[1] : firstPara).replace(/[*`_]/g, "").slice(0, 240);
+  const headline = (cruxMatch ? cruxMatch[1] : (bold ? bold[1] : firstPara))
+    .replace(/[*`_]/g, "").trim().slice(0, 420);
 
   const actions = (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} onClick={e => e.stopPropagation()}>
@@ -499,6 +497,7 @@ function SynthesisCard({ synthesis, question, tok, isDark, onCopy, onExportPDF, 
             <div key={i} style={{ padding: "16px 19px", borderLeft: i ? `1px solid ${tok.border}` : "none" }}>
               <div style={{ fontSize: 10.5, fontWeight: 700, color: tok.text3, textTransform: "uppercase", letterSpacing: ".09em", marginBottom: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k.label}</div>
               <div style={{ fontFamily: "var(--font-head)", fontSize: 26, fontWeight: 700, color: tok.text, lineHeight: 1.1, fontVariantNumeric: "tabular-nums" }}>{k.value}</div>
+              {k.why && <div style={{ fontSize: 11.5, fontWeight: 600, color: tok.text3, marginTop: 6, lineHeight: 1.35 }}>{k.why}</div>}
             </div>
           ))}
         </div>
@@ -536,7 +535,7 @@ function SynthesisCard({ synthesis, question, tok, isDark, onCopy, onExportPDF, 
                 style={{ background: "none", border: `1px solid ${tok.border}`, borderRadius: 7, width: 30, height: 30, cursor: "pointer", color: tok.text3, fontSize: 15, fontFamily: "inherit", flexShrink: 0 }}>✕</button>
             </div>
             <div style={{ padding: "20px 26px", overflowY: "auto", flex: 1 }}>
-              <RenderedMd text={synthesis} tok={tok} isDark={isDark} />
+              <RenderedMd text={raw.replace(/===BOARD_KPIS===[\s\S]*?===END_KPIS===/, "").replace(/===CRUX===[\s\S]*?===END_CRUX===/, "").trim()} tok={tok} isDark={isDark} />
             </div>
           </div>
         </div>
