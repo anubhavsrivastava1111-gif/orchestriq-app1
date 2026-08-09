@@ -33,7 +33,7 @@ interface ActionTrackerProps{
 const PRIORITY_COLORS:Record<string,string>={high:"#EF4444",medium:"#F59E0B",low:"#10B981"};
 const SOURCE_LABELS:Record<string,string>={boardroom:"🏛️ Boardroom",autopilot:"🤖 Autopilot",timemachine:"⏳ Time Machine",workflow:"⚡ Workflow",manual:"✍️ Manual"};
 const COLUMNS:{id:ActionItem["status"];label:string;color:string}[]=[
-  {id:"not_started",label:"Not Started",color:"#5A6480"},
+  {id:"not_started",label:"Not Started",color:"var(--oiq-muted)"},
   {id:"in_progress",label:"In Progress",color:"#3B82F6"},
   {id:"done",label:"Done",color:"#10B981"},
 ];
@@ -78,21 +78,21 @@ export default function ActionTracker({items,setItems,sv,S,showToast,AR}:ActionT
 
   return(
     <div style={{flex:1,padding:"14px 18px",overflowY:"auto"}}>
-      <h2 style={{fontSize:15,fontWeight:800,color:"#F1F5F9",marginBottom:2}}>Action Tracker</h2>
-      <p style={{fontSize:10,color:"#5A6480",marginBottom:10}}>Action items extracted from Boardroom, Autopilot, and Time Machine - track what's been decided and what's actually getting done.</p>
+      <h2 style={{fontSize:15,fontWeight:800,color:"var(--oiq-ink)",marginBottom:2}}>Action Tracker</h2>
+      <p style={{fontSize:10,color:"var(--oiq-muted)",marginBottom:10}}>Action items extracted from Boardroom, Autopilot, and Time Machine - track what's been decided and what's actually getting done.</p>
 
       <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
         <select style={{...S.inp,width:"auto",padding:"6px 8px",fontSize:10}} value={filterOwner} onChange={e=>setFilterOwner(e.target.value)}>
-          <option value="all" style={{background:"#0a0e1a"}}>All Owners</option>
-          {owners.map(o=>{const r=getRole(o);return <option key={o} value={o} style={{background:"#0a0e1a"}}>{r?r.ic+" "+r.t:o}</option>;})}
+          <option value="all" style={{background:"var(--oiq-bg)"}}>All Owners</option>
+          {owners.map(o=>{const r=getRole(o);return <option key={o} value={o} style={{background:"var(--oiq-bg)"}}>{r?r.ic+" "+r.t:o}</option>;})}
         </select>
         <select style={{...S.inp,width:"auto",padding:"6px 8px",fontSize:10}} value={filterPriority} onChange={e=>setFilterPriority(e.target.value)}>
-          <option value="all" style={{background:"#0a0e1a"}}>All Priorities</option>
-          <option value="high" style={{background:"#0a0e1a"}}>High</option>
-          <option value="medium" style={{background:"#0a0e1a"}}>Medium</option>
-          <option value="low" style={{background:"#0a0e1a"}}>Low</option>
+          <option value="all" style={{background:"var(--oiq-bg)"}}>All Priorities</option>
+          <option value="high" style={{background:"var(--oiq-bg)"}}>High</option>
+          <option value="medium" style={{background:"var(--oiq-bg)"}}>Medium</option>
+          <option value="low" style={{background:"var(--oiq-bg)"}}>Low</option>
         </select>
-        <button onClick={()=>setShowAdd(!showAdd)} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633",marginLeft:"auto"}}>+ Add Manually</button>
+        <button onClick={()=>setShowAdd(!showAdd)} style={{...S.hBtn,color:"var(--oiq-accent)",borderColor:"var(--oiq-accent)33",marginLeft:"auto"}}>+ Add Manually</button>
       </div>
 
       {showAdd&&(
@@ -104,7 +104,7 @@ export default function ActionTracker({items,setItems,sv,S,showToast,AR}:ActionT
 
       {!items.length?(
         <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"16px",textAlign:"center"}}>
-          <div style={{fontSize:12,color:"#A0AAC0",lineHeight:1.7}}>
+          <div style={{fontSize:12,color:"var(--oiq-body)",lineHeight:1.7}}>
             No action items yet. Run a Boardroom session, Autopilot scan, or Time Machine simulation, then click "Extract Action Items" on the result to populate this tracker - or add items manually above.
           </div>
         </div>
@@ -116,20 +116,20 @@ export default function ActionTracker({items,setItems,sv,S,showToast,AR}:ActionT
               <div key={col.id}>
                 <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,padding:"6px 8px",background:col.color+"10",borderRadius:6,border:"1px solid "+col.color+"33"}}>
                   <span style={{fontSize:11,fontWeight:700,color:col.color}}>{col.label}</span>
-                  <span style={{fontSize:10,color:"#5A6480",marginLeft:"auto"}}>{colItems.length}</span>
+                  <span style={{fontSize:10,color:"var(--oiq-muted)",marginLeft:"auto"}}>{colItems.length}</span>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:6,minHeight:60}}>
                   {colItems.map(item=>{
                     const role=getRole(item.ownerRoleId);
                     return(
-                      <div key={item.id} style={{background:"#131825",border:"1px solid #1a2030",borderRadius:7,padding:"9px 10px"}}>
-                        <div style={{fontSize:11,color:"#F1F5F9",lineHeight:1.5,marginBottom:6}}>{item.text}</div>
+                      <div key={item.id} style={{background:"var(--oiq-surface)",border:"1px solid var(--oiq-border)",borderRadius:7,padding:"9px 10px"}}>
+                        <div style={{fontSize:11,color:"var(--oiq-ink)",lineHeight:1.5,marginBottom:6}}>{item.text}</div>
                         <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap",marginBottom:6}}>
                           <span style={{fontSize:8,fontWeight:700,color:PRIORITY_COLORS[item.priority],background:PRIORITY_COLORS[item.priority]+"15",padding:"2px 6px",borderRadius:8,textTransform:"uppercase"}}>{item.priority}</span>
                           {role&&<span style={{fontSize:9,color:role.dc,background:role.dc+"12",padding:"2px 6px",borderRadius:8}}>{role.ic} {role.t}</span>}
-                          {item.dueHint&&<span style={{fontSize:8,color:"#5A6480"}}>{item.dueHint}</span>}
+                          {item.dueHint&&<span style={{fontSize:8,color:"var(--oiq-muted)"}}>{item.dueHint}</span>}
                         </div>
-                        <div style={{fontSize:8,color:"#3A4060",marginBottom:6}}>{SOURCE_LABELS[item.source]} · {item.sourceLabel}</div>
+                        <div style={{fontSize:8,color:"var(--oiq-faint)",marginBottom:6}}>{SOURCE_LABELS[item.source]} · {item.sourceLabel}</div>
                         <div style={{display:"flex",gap:4}}>
                           {COLUMNS.filter(c=>c.id!==col.id).map(c=>(
                             <button key={c.id} onClick={()=>advance(item.id,c.id)} style={{...S.hBtn,fontSize:8,padding:"2px 6px",color:c.color,borderColor:c.color+"33"}}>→ {c.label}</button>
@@ -139,7 +139,7 @@ export default function ActionTracker({items,setItems,sv,S,showToast,AR}:ActionT
                       </div>
                     );
                   })}
-                  {!colItems.length&&<div style={{fontSize:10,color:"#3A4060",textAlign:"center",padding:"16px 0"}}>—</div>}
+                  {!colItems.length&&<div style={{fontSize:10,color:"var(--oiq-faint)",textAlign:"center",padding:"16px 0"}}>—</div>}
                 </div>
               </div>
             );
@@ -188,22 +188,22 @@ export function ExtractReviewModal({
     <div style={S.modalBg} onClick={onCancel}>
       <div style={{...S.modal,maxWidth:520}} onClick={e=>e.stopPropagation()}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-          <h2 style={{fontSize:15,fontWeight:800,color:"#F1F5F9"}}>Review Action Items</h2>
+          <h2 style={{fontSize:15,fontWeight:800,color:"var(--oiq-ink)"}}>Review Action Items</h2>
           <button onClick={onCancel} style={S.iBtn}>×</button>
         </div>
-        <p style={{fontSize:11,color:"#8892B0",marginBottom:12,lineHeight:1.6}}>The AI suggests these action items from this session. Uncheck any you don't want, then add the rest to your tracker.</p>
+        <p style={{fontSize:11,color:"var(--oiq-body)",marginBottom:12,lineHeight:1.6}}>The AI suggests these action items from this session. Uncheck any you don't want, then add the rest to your tracker.</p>
         <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:14,maxHeight:320,overflowY:"auto"}}>
           {items.map((item,i)=>{
             const role=item.ownerRoleId?AR.find(r=>r.id===item.ownerRoleId):null;
             return(
-              <label key={i} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"8px 10px",background:item.selected?"#131825":"#0a0e1a",border:"1px solid "+(item.selected?"#14B8A633":"#1a2030"),borderRadius:6,cursor:"pointer"}}>
-                <input type="checkbox" checked={item.selected} onChange={()=>toggle(i)} style={{accentColor:"#14B8A6",marginTop:2}}/>
+              <label key={i} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"8px 10px",background:item.selected?"var(--oiq-surface)":"var(--oiq-bg)",border:"1px solid "+(item.selected?"var(--oiq-accent)33":"var(--oiq-border)"),borderRadius:6,cursor:"pointer"}}>
+                <input type="checkbox" checked={item.selected} onChange={()=>toggle(i)} style={{accentColor:"var(--oiq-accent)",marginTop:2}}/>
                 <div style={{flex:1}}>
-                  <div style={{fontSize:11,color:"#F1F5F9",lineHeight:1.5,marginBottom:4}}>{item.text}</div>
+                  <div style={{fontSize:11,color:"var(--oiq-ink)",lineHeight:1.5,marginBottom:4}}>{item.text}</div>
                   <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                     <span style={{fontSize:8,fontWeight:700,color:PRIORITY_COLORS[item.priority],background:PRIORITY_COLORS[item.priority]+"15",padding:"2px 6px",borderRadius:8,textTransform:"uppercase"}}>{item.priority}</span>
                     {role&&<span style={{fontSize:9,color:role.dc,background:role.dc+"12",padding:"2px 6px",borderRadius:8}}>{role.ic} {role.t}</span>}
-                    {item.dueHint&&<span style={{fontSize:8,color:"#5A6480"}}>{item.dueHint}</span>}
+                    {item.dueHint&&<span style={{fontSize:8,color:"var(--oiq-muted)"}}>{item.dueHint}</span>}
                   </div>
                 </div>
               </label>
@@ -244,4 +244,3 @@ export const EXTRACTION_PROMPT=
   "- priority: \"high\", \"medium\", or \"low\"\n"+
   "- dueHint: a short timeframe like \"0-30 days\", \"this week\", \"3-6 months\" if mentioned or implied, otherwise null\n\n"+
   "Output ONLY a valid JSON array of objects with these exact fields (text, ownerRoleId, priority, dueHint). No preamble, no markdown, no explanation.";
-
