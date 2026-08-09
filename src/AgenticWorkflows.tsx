@@ -375,7 +375,7 @@ ${result.output}`;
     // Fallback: basic DOCX generation
 
     const secs = this.parseSections(content);
-    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><style>@page{mso-page-orientation:portrait;margin:2.54cm;}body{font-family:Calibri,sans-serif;font-size:11pt;text-align:left;}h1{font-size:18pt;color:#14B8A6;}h2{font-size:13pt;color:#0D6EFD;}p{line-height:1.5;text-align:left;}table{border-collapse:collapse;width:100%;}th{background:#14B8A6;color:#fff;padding:5pt 8pt;}td{padding:4pt 8pt;border-bottom:1pt solid #ddd;}</style></head><body><h1>${title}</h1>`;
+    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><style>@page{mso-page-orientation:portrait;margin:2.54cm;}body{font-family:Calibri,sans-serif;font-size:11pt;text-align:left;}h1{font-size:18pt;color:var(--oiq-accent);}h2{font-size:13pt;color:#0D6EFD;}p{line-height:1.5;text-align:left;}table{border-collapse:collapse;width:100%;}th{background:var(--oiq-accent);color:#fff;padding:5pt 8pt;}td{padding:4pt 8pt;border-bottom:1pt solid #ddd;}</style></head><body><h1>${title}</h1>`;
     for (const sec of secs) {
       html += `<h2>${sec.title}</h2>`;
       sec.lines.forEach(ln => { const t = this.stripMd(ln).trim(); if (t) html += `<p>${t}</p>`; });
@@ -454,7 +454,7 @@ export const WORKFLOW_REGISTRY: WorkflowDef[] = [
   // ── 1. TICKET MANAGEMENT & SLA MONITORING ─────────────────────────────────
   {
     id: "ticket_sla", name: "Ticket Management & SLA Monitoring",
-    category: "Operations", icon: "🎫", color: "#14B8A6",
+    category: "Operations", icon: "🎫", color: "var(--oiq-accent)",
     description: "Monitor operational tickets end-to-end: ingest → validate → SLA calculation → breach identification → workload summary → dashboard → management report.",
     businessObjective: "Ensure zero SLA breaches go undetected. Every ticket is tracked, every breach is escalated, every manager is informed before it is too late.",
     industries: ["shared_services", "it_operations", "consulting", "government", "banking"],
@@ -1544,15 +1544,15 @@ ${csv}
 
   // ─── STYLES ─────────────────────────────────────────────────────────────────
   const S = {
-    page:  { flex: 1, overflowY: "auto" as const, background: "#070C18", fontFamily: "'Inter',-apple-system,sans-serif", color: "#F0F4FF" },
-    hdr:   { padding: "16px 24px 12px", borderBottom: "1px solid #1C2A40", marginBottom: 14 },
-    card:  { background: "#0F1829", border: "1px solid #1C2A40", borderRadius: 8, padding: "14px 16px", marginBottom: 10 },
-    inp:   { width: "100%", background: "#141F33", border: "1px solid #1C2A40", borderRadius: 6, padding: "9px 12px", color: "#F0F4FF", fontSize: 12, fontFamily: "inherit", boxSizing: "border-box" as const, outline: "none" },
-    btn:   { background: "linear-gradient(135deg,#14B8A6,#6366F1)", border: "none", borderRadius: 6, padding: "10px 18px", color: "#fff", fontSize: 12, fontWeight: 700 as const, cursor: "pointer" as const, fontFamily: "inherit" },
-    hBtn:  { background: "none", border: "1px solid #1C2A40", borderRadius: 5, padding: "5px 12px", color: "#8FA8CC", fontSize: 11, cursor: "pointer" as const, fontFamily: "inherit" },
+    page:  { flex: 1, overflowY: "auto" as const, background: "var(--oiq-bg)", fontFamily: "'Inter',-apple-system,sans-serif", color: "var(--oiq-ink)" },
+    hdr:   { padding: "16px 24px 12px", borderBottom: "1px solid var(--oiq-border)", marginBottom: 14 },
+    card:  { background: "var(--oiq-surface)", border: "1px solid var(--oiq-border)", borderRadius: 8, padding: "14px 16px", marginBottom: 10 },
+    inp:   { width: "100%", background: "var(--oiq-surface2)", border: "1px solid var(--oiq-border)", borderRadius: 6, padding: "9px 12px", color: "var(--oiq-ink)", fontSize: 12, fontFamily: "inherit", boxSizing: "border-box" as const, outline: "none" },
+    btn:   { background: "linear-gradient(135deg,var(--oiq-accent),#6366F1)", border: "none", borderRadius: 6, padding: "10px 18px", color: "#fff", fontSize: 12, fontWeight: 700 as const, cursor: "pointer" as const, fontFamily: "inherit" },
+    hBtn:  { background: "none", border: "1px solid var(--oiq-border)", borderRadius: 5, padding: "5px 12px", color: "var(--oiq-body)", fontSize: 11, cursor: "pointer" as const, fontFamily: "inherit" },
     badge: (c: string) => ({ fontSize: 8, padding: "2px 7px", borderRadius: 10, background: c + "22", color: c, fontWeight: 700 as const }),
-    modeBtn: (active: boolean, c: string) => ({ padding: "8px 16px", borderRadius: 7, border: "1px solid " + (active ? c : "#1C2A40"), background: active ? c + "18" : "transparent", color: active ? c : "#4D6A8A", cursor: "pointer" as const, fontFamily: "inherit", fontSize: 11, fontWeight: (active ? 700 : 400) as any }),
-    tab: (a: boolean) => ({ padding: "5px 14px", borderRadius: 6, fontSize: 10, fontWeight: 600 as const, border: "1px solid " + (a ? "#14B8A6" : "#1C2A40"), background: a ? "rgba(20,184,166,0.1)" : "transparent", color: a ? "#14B8A6" : "#4D6A8A", cursor: "pointer" as const, fontFamily: "inherit" }),
+    modeBtn: (active: boolean, c: string) => ({ padding: "8px 16px", borderRadius: 7, border: "1px solid " + (active ? c : "var(--oiq-border)"), background: active ? c + "18" : "transparent", color: active ? c : "var(--oiq-muted)", cursor: "pointer" as const, fontFamily: "inherit", fontSize: 11, fontWeight: (active ? 700 : 400) as any }),
+    tab: (a: boolean) => ({ padding: "5px 14px", borderRadius: 6, fontSize: 10, fontWeight: 600 as const, border: "1px solid " + (a ? "var(--oiq-accent)" : "var(--oiq-border)"), background: a ? "rgba(20,184,166,0.1)" : "transparent", color: a ? "var(--oiq-accent)" : "var(--oiq-muted)", cursor: "pointer" as const, fontFamily: "inherit" }),
   };
 
   const categories = [...new Set(WORKFLOW_REGISTRY.map(w => w.category))];
@@ -1564,8 +1564,8 @@ ${csv}
       <div style={S.hdr}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: "#F0F4FF", marginBottom: 2 }}>🔄 Agentic Workflows</div>
-            <div style={{ fontSize: 11, color: "#4D6A8A" }}>Complete business process automation · intelligent step-by-step execution · three working modes</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "var(--oiq-ink)", marginBottom: 2 }}>🔄 Agentic Workflows</div>
+            <div style={{ fontSize: 11, color: "var(--oiq-muted)" }}>Complete business process automation · intelligent step-by-step execution · three working modes</div>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={() => { setRuns(loadRuns()); setView("history"); }} style={S.hBtn}>History</button>
@@ -1588,16 +1588,16 @@ ${csv}
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
                   <span style={{ fontSize: 26 }}>{wf.icon}</span>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: "#F0F4FF" }}>{wf.name}</div>
-                    <div style={{ fontSize: 9, color: "#4D6A8A" }}>{wf.category} · {wf.steps.length} steps · {wf.estimatedTime}</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "var(--oiq-ink)" }}>{wf.name}</div>
+                    <div style={{ fontSize: 9, color: "var(--oiq-muted)" }}>{wf.category} · {wf.steps.length} steps · {wf.estimatedTime}</div>
                   </div>
-                  {hasMemory && <span style={S.badge("#14B8A6")}>Memory</span>}
+                  {hasMemory && <span style={S.badge("var(--oiq-accent)")}>Memory</span>}
                 </div>
-                <div style={{ fontSize: 10, color: "#8FA8CC", lineHeight: 1.5, marginBottom: 8 }}>{wf.description}</div>
-                <div style={{ fontSize: 10, color: "#14B8A6", fontStyle: "italic", marginBottom: 10, lineHeight: 1.4 }}>"{wf.businessObjective}"</div>
+                <div style={{ fontSize: 10, color: "var(--oiq-body)", lineHeight: 1.5, marginBottom: 8 }}>{wf.description}</div>
+                <div style={{ fontSize: 10, color: "var(--oiq-accent)", fontStyle: "italic", marginBottom: 10, lineHeight: 1.4 }}>"{wf.businessObjective}"</div>
                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap" as const }}>
                   {wf.steps.map(s => (
-                    <span key={s.id} style={{ fontSize: 7, padding: "2px 5px", borderRadius: 4, background: "#141F33", color: "#4D6A8A" }}>{s.icon} {s.name}</span>
+                    <span key={s.id} style={{ fontSize: 7, padding: "2px 5px", borderRadius: 4, background: "var(--oiq-surface2)", color: "var(--oiq-muted)" }}>{s.icon} {s.name}</span>
                   ))}
                 </div>
               </div>
@@ -1613,76 +1613,76 @@ ${csv}
     <div style={S.page}>
       <div style={S.hdr}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-          <button onClick={() => setView("library")} style={{ ...S.hBtn, color: "#14B8A6", borderColor: "#14B8A633" }}>← Workflows</button>
+          <button onClick={() => setView("library")} style={{ ...S.hBtn, color: "var(--oiq-accent)", borderColor: "var(--oiq-accent)33" }}>← Workflows</button>
           <span style={{ fontSize: 22 }}>{selectedWF.icon}</span>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 800, color: "#F0F4FF" }}>{selectedWF.name}</div>
-            <div style={{ fontSize: 10, color: "#4D6A8A" }}>{selectedWF.steps.length} steps · {selectedWF.estimatedTime}</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "var(--oiq-ink)" }}>{selectedWF.name}</div>
+            <div style={{ fontSize: 10, color: "var(--oiq-muted)" }}>{selectedWF.steps.length} steps · {selectedWF.estimatedTime}</div>
           </div>
         </div>
-        <div style={{ fontSize: 11, color: "#8FA8CC", marginBottom: 14, lineHeight: 1.6, padding: "10px 12px", background: "rgba(20,184,166,0.05)", border: "1px solid rgba(20,184,166,0.15)", borderRadius: 6 }}>
-          🎯 <strong style={{ color: "#14B8A6" }}>Objective:</strong> {selectedWF.businessObjective}
+        <div style={{ fontSize: 11, color: "var(--oiq-body)", marginBottom: 14, lineHeight: 1.6, padding: "10px 12px", background: "rgba(20,184,166,0.05)", border: "1px solid rgba(20,184,166,0.15)", borderRadius: 6 }}>
+          🎯 <strong style={{ color: "var(--oiq-accent)" }}>Objective:</strong> {selectedWF.businessObjective}
         </div>
         {/* Mode selection */}
-        <div style={{ fontSize: 10, fontWeight: 700, color: "#4D6A8A", textTransform: "uppercase" as const, letterSpacing: "0.08em", marginBottom: 8 }}>Select Working Mode</div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--oiq-muted)", textTransform: "uppercase" as const, letterSpacing: "0.08em", marginBottom: 8 }}>Select Working Mode</div>
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          <div onClick={() => setMode("auto")} style={{ ...S.modeBtn(mode === "auto", "#14B8A6"), flex: 1, textAlign: "center" as const, cursor: "pointer" }}>
+          <div onClick={() => setMode("auto")} style={{ ...S.modeBtn(mode === "auto", "var(--oiq-accent)"), flex: 1, textAlign: "center" as const, cursor: "pointer" }}>
             <div style={{ fontSize: 18, marginBottom: 4 }}>⚡</div>
             <div style={{ fontWeight: 700, marginBottom: 2 }}>Automatic</div>
-            <div style={{ fontSize: 9, color: "#4D6A8A" }}>AI executes every possible step automatically. Stops only when data is missing.</div>
+            <div style={{ fontSize: 9, color: "var(--oiq-muted)" }}>AI executes every possible step automatically. Stops only when data is missing.</div>
           </div>
           <div onClick={() => setMode("guided")} style={{ ...S.modeBtn(mode === "guided", "#8B5CF6"), flex: 1, textAlign: "center" as const, cursor: "pointer" }}>
             <div style={{ fontSize: 18, marginBottom: 4 }}>🧭</div>
             <div style={{ fontWeight: 700, marginBottom: 2 }}>Guided</div>
-            <div style={{ fontSize: 9, color: "#4D6A8A" }}>AI explains and assists each step. You confirm before proceeding.</div>
+            <div style={{ fontSize: 9, color: "var(--oiq-muted)" }}>AI explains and assists each step. You confirm before proceeding.</div>
           </div>
           <div onClick={() => setMode("manual")} style={{ ...S.modeBtn(mode === "manual", "#F59E0B"), flex: 1, textAlign: "center" as const, cursor: "pointer" }}>
             <div style={{ fontSize: 18, marginBottom: 4 }}>🔒</div>
             <div style={{ fontWeight: 700, marginBottom: 2 }}>Manual</div>
-            <div style={{ fontSize: 9, color: "#4D6A8A" }}>AI analyses only files you supply. No autonomous requests. Best for confidential data.</div>
+            <div style={{ fontSize: 9, color: "var(--oiq-muted)" }}>AI analyses only files you supply. No autonomous requests. Best for confidential data.</div>
           </div>
         </div>
         {/* Configuration */}
         <div style={S.card}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#F0F4FF", marginBottom: 10 }}>⚙ Workflow Configuration</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--oiq-ink)", marginBottom: 10 }}>⚙ Workflow Configuration</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div>
-              <label style={{ fontSize: 9, fontWeight: 700, color: "#4D6A8A", textTransform: "uppercase" as const, display: "block", marginBottom: 4 }}>System / Platform</label>
+              <label style={{ fontSize: 9, fontWeight: 700, color: "var(--oiq-muted)", textTransform: "uppercase" as const, display: "block", marginBottom: 4 }}>System / Platform</label>
               <input value={config.system} onChange={e => setConfig(c => c ? { ...c, system: e.target.value } : c)} style={{ ...S.inp, marginBottom: 0 }} placeholder="SAP / ServiceNow / Jira / Concur..." />
             </div>
             <div>
-              <label style={{ fontSize: 9, fontWeight: 700, color: "#4D6A8A", textTransform: "uppercase" as const, display: "block", marginBottom: 4 }}>Expected Report Names</label>
+              <label style={{ fontSize: 9, fontWeight: 700, color: "var(--oiq-muted)", textTransform: "uppercase" as const, display: "block", marginBottom: 4 }}>Expected Report Names</label>
               <input value={config.reportNames.join(", ")} onChange={e => setConfig(c => c ? { ...c, reportNames: e.target.value.split(",").map(s => s.trim()) } : c)} style={{ ...S.inp, marginBottom: 0 }} placeholder="report.xlsx, extract.csv" />
             </div>
           </div>
           <div style={{ marginTop: 10 }}>
-            <label style={{ fontSize: 9, fontWeight: 700, color: "#4D6A8A", textTransform: "uppercase" as const, display: "block", marginBottom: 4 }}>SLA Definitions</label>
+            <label style={{ fontSize: 9, fontWeight: 700, color: "var(--oiq-muted)", textTransform: "uppercase" as const, display: "block", marginBottom: 4 }}>SLA Definitions</label>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 6 }}>
               {config.slaDefs.map((sla, i) => (
                 <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <span style={{ fontSize: 10, color: sla.color, minWidth: 100 }}>{sla.priority}</span>
                   <input type="number" value={sla.hours} onChange={e => { const d = [...config.slaDefs]; d[i] = { ...d[i], hours: Number(e.target.value) }; setConfig(c => c ? { ...c, slaDefs: d } : c); }} style={{ ...S.inp, width: 70, marginBottom: 0, padding: "5px 8px" }} />
-                  <span style={{ fontSize: 9, color: "#4D6A8A" }}>hrs</span>
+                  <span style={{ fontSize: 9, color: "var(--oiq-muted)" }}>hrs</span>
                 </div>
               ))}
             </div>
           </div>
           <div style={{ marginTop: 10 }}>
-            <label style={{ fontSize: 9, fontWeight: 700, color: "#4D6A8A", textTransform: "uppercase" as const, display: "block", marginBottom: 4 }}>Custom Rules (one per line)</label>
+            <label style={{ fontSize: 9, fontWeight: 700, color: "var(--oiq-muted)", textTransform: "uppercase" as const, display: "block", marginBottom: 4 }}>Custom Rules (one per line)</label>
             <textarea value={config.customRules.join("\n")} onChange={e => setConfig(c => c ? { ...c, customRules: e.target.value.split("\n").filter(Boolean) } : c)} rows={3} style={{ ...S.inp, resize: "vertical" as const }} placeholder="e.g. Meal cap: &#8377;500 per person" />
           </div>
-          <button onClick={() => { if (config) memoryManager.saveConfig(selectedWF.id, config); showToast("Configuration saved — will be remembered for future runs", "success"); }} style={{ ...S.hBtn, marginTop: 8, color: "#14B8A6", borderColor: "#14B8A633" }}>💾 Save Configuration</button>
+          <button onClick={() => { if (config) memoryManager.saveConfig(selectedWF.id, config); showToast("Configuration saved — will be remembered for future runs", "success"); }} style={{ ...S.hBtn, marginTop: 8, color: "var(--oiq-accent)", borderColor: "var(--oiq-accent)33" }}>💾 Save Configuration</button>
         </div>
         {/* Step overview */}
         <div style={S.card}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#F0F4FF", marginBottom: 10 }}>📋 Workflow Steps ({selectedWF.steps.length})</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--oiq-ink)", marginBottom: 10 }}>📋 Workflow Steps ({selectedWF.steps.length})</div>
           {selectedWF.steps.map((step, idx) => (
-            <div key={step.id} style={{ display: "flex", gap: 10, padding: "8px 0", borderBottom: "1px solid #111827", alignItems: "flex-start" }}>
-              <div style={{ width: 24, height: 24, borderRadius: "50%", background: "#141F33", border: "1px solid #1C2A40", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#14B8A6", flexShrink: 0 }}>{idx + 1}</div>
+            <div key={step.id} style={{ display: "flex", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--oiq-surface)", alignItems: "flex-start" }}>
+              <div style={{ width: 24, height: 24, borderRadius: "50%", background: "var(--oiq-surface2)", border: "1px solid var(--oiq-border)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "var(--oiq-accent)", flexShrink: 0 }}>{idx + 1}</div>
               <span style={{ fontSize: 14, flexShrink: 0 }}>{step.icon}</span>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#F0F4FF" }}>{step.name}</div>
-                <div style={{ fontSize: 9, color: "#4D6A8A", lineHeight: 1.4 }}>{step.description}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--oiq-ink)" }}>{step.name}</div>
+                <div style={{ fontSize: 9, color: "var(--oiq-muted)", lineHeight: 1.4 }}>{step.description}</div>
                 {step.inputs.filter(i => i.required).length > 0 && (
                   <div style={{ fontSize: 8, color: "#F59E0B", marginTop: 2 }}>Requires: {step.inputs.filter(i => i.required).map(i => i.label).join(", ")}</div>
                 )}
@@ -1709,8 +1709,8 @@ ${csv}
             <button onClick={() => { setCurrentRun(r => r ? { ...r, status: "cancelled" } : null); setView("library"); }} style={{ ...S.hBtn, color: "#EF4444", borderColor: "#EF444433" }}>✕ Cancel</button>
             <span style={{ fontSize: 18 }}>{wf.icon}</span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: "#F0F4FF" }}>{wf.name}</div>
-              <div style={{ fontSize: 9, color: "#4D6A8A" }}>{mode} mode · {new Date(currentRun.startedAt).toLocaleTimeString()}</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "var(--oiq-ink)" }}>{wf.name}</div>
+              <div style={{ fontSize: 9, color: "var(--oiq-muted)" }}>{mode} mode · {new Date(currentRun.startedAt).toLocaleTimeString()}</div>
             </div>
             <span
   style={S.badge(
@@ -1720,7 +1720,7 @@ ${csv}
       ? "#F59E0B"
       : currentRun.status === "blocked"
       ? "#EF4444"
-      : "#14B8A6"
+      : "var(--oiq-accent)"
   )}
 >
   {currentRun.status.replace("_", " ")}
@@ -1730,7 +1730,7 @@ ${csv}
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" as const }}>
             {wf.steps.map(step => {
               const sr = stepStatuses[step.id];
-              const c = sr?.status === "done" ? "#10B981" : sr?.status === "running" ? "#14B8A6" : sr?.status === "blocked" ? "#EF4444" : sr?.status === "waiting_input" ? "#F59E0B" : "#1C2A40";
+              const c = sr?.status === "done" ? "#10B981" : sr?.status === "running" ? "var(--oiq-accent)" : sr?.status === "blocked" ? "#EF4444" : sr?.status === "waiting_input" ? "#F59E0B" : "var(--oiq-border)";
               return (
                 <button key={step.id} onClick={() => setActiveStepId(step.id)} title={step.name}
                   style={{ fontSize: 8, padding: "3px 8px", borderRadius: 4, border: `1px solid ${c}44`, background: c + "18", color: c, cursor: "pointer", fontFamily: "inherit" }}>
@@ -1744,10 +1744,10 @@ ${csv}
         <div style={{ padding: "0 24px 24px" }}>
           {/* Progress log */}
           <div style={{ ...S.card, marginBottom: 12 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#4D6A8A", marginBottom: 6 }}>Activity Log</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--oiq-muted)", marginBottom: 6 }}>Activity Log</div>
             <div style={{ maxHeight: 140, overflowY: "auto" as const }}>
               {progressLog.map((entry, i) => (
-                <div key={i} style={{ fontSize: 10, color: entry.startsWith("✓") || entry.startsWith("✅") || entry.startsWith("🎉") ? "#10B981" : entry.startsWith("❌") ? "#EF4444" : entry.startsWith("⏸") ? "#F59E0B" : "#8FA8CC", padding: "2px 0", lineHeight: 1.4 }}>{entry}</div>
+                <div key={i} style={{ fontSize: 10, color: entry.startsWith("✓") || entry.startsWith("✅") || entry.startsWith("🎉") ? "#10B981" : entry.startsWith("❌") ? "#EF4444" : entry.startsWith("⏸") ? "#F59E0B" : "var(--oiq-body)", padding: "2px 0", lineHeight: 1.4 }}>{entry}</div>
               ))}
             </div>
           </div>
@@ -1758,8 +1758,8 @@ ${csv}
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                 <span style={{ fontSize: 18 }}>{activeStep.icon}</span>
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: "#F0F4FF" }}>{activeStep.name}</div>
-                  <div style={{ fontSize: 10, color: "#4D6A8A" }}>{activeStep.description}</div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: "var(--oiq-ink)" }}>{activeStep.name}</div>
+                  <div style={{ fontSize: 10, color: "var(--oiq-muted)" }}>{activeStep.description}</div>
                 </div>
               </div>
               {mode === "guided" && activeStep.aiPrompt && (
@@ -1773,10 +1773,10 @@ ${csv}
                 return (
                   <div key={inp.id} style={{ marginBottom: 10 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                      <label style={{ fontSize: 10, fontWeight: 700, color: inp.required ? "#F59E0B" : "#4D6A8A" }}>{inp.label} {inp.required ? "* Required" : "(optional)"}</label>
-                      {hasMemory && <span style={{ ...S.badge("#14B8A6"), fontSize: 8 }}>💾 Loaded from memory</span>}
+                      <label style={{ fontSize: 10, fontWeight: 700, color: inp.required ? "#F59E0B" : "var(--oiq-muted)" }}>{inp.label} {inp.required ? "* Required" : "(optional)"}</label>
+                      {hasMemory && <span style={{ ...S.badge("var(--oiq-accent)"), fontSize: 8 }}>💾 Loaded from memory</span>}
                     </div>
-                    <div style={{ fontSize: 9, color: "#4D6A8A", marginBottom: 4 }}>{inp.description}</div>
+                    <div style={{ fontSize: 9, color: "var(--oiq-muted)", marginBottom: 4 }}>{inp.description}</div>
                     <textarea value={stepInputs[inp.id] || (hasMemory ? mem.uploadedData[inp.memoryKey!] : "")} onChange={e => setStepInputs(p => ({ ...p, [inp.id]: e.target.value }))} placeholder={`Paste ${inp.label} data here, or upload a file below...`} rows={5} style={{ ...S.inp, resize: "vertical" as const, minHeight: 100 }} />
                     <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" as const, alignItems: "center" }}>
                       {/* Any file type — CSV, Excel, JPG, PNG, PDF */}
@@ -1794,7 +1794,7 @@ ${csv}
                         onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f, inp.id); e.target.value = ""; }} />
                       <button onClick={() => document.getElementById(`photo-${inp.id}`)?.click()}
                         disabled={photoExtracting[inp.id]}
-                        style={{ ...S.hBtn, fontSize: 9, color: "#14B8A6", borderColor: "#14B8A644", opacity: photoExtracting[inp.id] ? 0.6 : 1 }}>
+                        style={{ ...S.hBtn, fontSize: 9, color: "var(--oiq-accent)", borderColor: "var(--oiq-accent)44", opacity: photoExtracting[inp.id] ? 0.6 : 1 }}>
                         {photoExtracting[inp.id] ? "⏳ Extracting..." : "📸 Photo / Screenshot"}
                       </button>
 
@@ -1809,7 +1809,7 @@ ${csv}
                       </button>
                     </div>
                     {photoExtracting[inp.id] && (
-                      <div style={{ marginTop: 5, fontSize: 9, color: "#14B8A6", background: "rgba(20,184,166,0.06)", border: "1px solid rgba(20,184,166,0.15)", borderRadius: 5, padding: "6px 10px", lineHeight: 1.5 }}>
+                      <div style={{ marginTop: 5, fontSize: 9, color: "var(--oiq-accent)", background: "rgba(20,184,166,0.06)", border: "1px solid rgba(20,184,166,0.15)", borderRadius: 5, padding: "6px 10px", lineHeight: 1.5 }}>
                         🔍 Extracting data with AI vision — tables, numbers, and text will appear in the box above for your review.
                       </div>
                     )}
@@ -1828,13 +1828,13 @@ ${csv}
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <span style={{ fontSize: 14 }}>{step.icon}</span>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#10B981" }}>✓ {step.name}</div>
-                <div style={{ fontSize: 9, color: "#4D6A8A" }}>{stepStatuses[step.id]?.completedAt ? new Date(stepStatuses[step.id].completedAt!).toLocaleTimeString() : ""}</div>
+                <div style={{ fontSize: 9, color: "var(--oiq-muted)" }}>{stepStatuses[step.id]?.completedAt ? new Date(stepStatuses[step.id].completedAt!).toLocaleTimeString() : ""}</div>
                 <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
                   <button onClick={() => navigator.clipboard.writeText(stepStatuses[step.id]?.output || "")} style={{ ...S.hBtn, fontSize: 9 }}>📋 Copy</button>
                   <button onClick={() => executorRef.current?.generateDocx(stepStatuses[step.id]?.output || "", step.name, step.name.replace(/\s+/g,"-")+".doc")} style={{ ...S.hBtn, fontSize: 9 }}>↓ DOCX</button>
                 </div>
               </div>
-              <div style={{ fontSize: 10, color: "#8FA8CC", lineHeight: 1.5, maxHeight: 120, overflow: "hidden", cursor: "pointer" }} onClick={() => { setCurrentRun(r => r ? { ...r } : null); }}>{stepStatuses[step.id]?.output?.slice(0, 500)}...</div>
+              <div style={{ fontSize: 10, color: "var(--oiq-body)", lineHeight: 1.5, maxHeight: 120, overflow: "hidden", cursor: "pointer" }} onClick={() => { setCurrentRun(r => r ? { ...r } : null); }}>{stepStatuses[step.id]?.output?.slice(0, 500)}...</div>
             </div>
           ))}
 
@@ -1843,7 +1843,7 @@ ${csv}
             <div style={{ ...S.card, border: "1px solid #10B98144", background: "rgba(16,185,129,0.05)", textAlign: "center" as const, padding: 24 }}>
               <div style={{ fontSize: 32, marginBottom: 8 }}>🎉</div>
               <div style={{ fontSize: 16, fontWeight: 800, color: "#10B981", marginBottom: 4 }}>Workflow Complete</div>
-              <div style={{ fontSize: 11, color: "#4D6A8A", marginBottom: 16 }}>{wf.steps.filter(s => stepStatuses[s.id]?.status === "done").length} of {wf.steps.length} steps completed</div>
+              <div style={{ fontSize: 11, color: "var(--oiq-muted)", marginBottom: 16 }}>{wf.steps.filter(s => stepStatuses[s.id]?.status === "done").length} of {wf.steps.length} steps completed</div>
               <button onClick={() => setView("library")} style={{ ...S.hBtn, marginRight: 8 }}>← Back to Workflows</button>
               <button onClick={() => { setRuns(loadRuns()); setView("history"); }} style={S.hBtn}>View History</button>
             </div>
@@ -1858,14 +1858,14 @@ ${csv}
     <div style={S.page}>
       <div style={S.hdr}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={() => setView("library")} style={{ ...S.hBtn, color: "#14B8A6", borderColor: "#14B8A633" }}>← Workflows</button>
-          <div style={{ fontSize: 14, fontWeight: 800, color: "#F0F4FF" }}>Workflow History ({runs.length})</div>
+          <button onClick={() => setView("library")} style={{ ...S.hBtn, color: "var(--oiq-accent)", borderColor: "var(--oiq-accent)33" }}>← Workflows</button>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "var(--oiq-ink)" }}>Workflow History ({runs.length})</div>
           <button onClick={() => { if (confirm("Clear all history?")) { WorkspaceMemory.set("oiq-wf-runs",[]); setRuns([]); } }} style={{ ...S.hBtn, color: "#EF4444", borderColor: "#EF444433", marginLeft: "auto" }}>Clear</button>
         </div>
       </div>
       <div style={{ padding: "0 24px 24px" }}>
         {runs.length === 0 ? (
-          <div style={{ ...S.card, textAlign: "center" as const, padding: 40, color: "#4D6A8A" }}>No workflow runs yet.</div>
+          <div style={{ ...S.card, textAlign: "center" as const, padding: 40, color: "var(--oiq-muted)" }}>No workflow runs yet.</div>
         ) : runs.map(run => {
           const wf = WORKFLOW_REGISTRY.find(w => w.id === run.workflowId);
           const doneSteps = Object.values(run.steps).filter(s => s.status === "done").length;
@@ -1874,8 +1874,8 @@ ${csv}
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
                 <span style={{ fontSize: 18 }}>{wf?.icon || "🔄"}</span>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#F0F4FF" }}>{run.workflowName}</div>
-                  <div style={{ fontSize: 9, color: "#4D6A8A" }}>{new Date(run.startedAt).toLocaleString()} · {run.mode} · {doneSteps}/{Object.keys(run.steps).length} steps</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--oiq-ink)" }}>{run.workflowName}</div>
+                  <div style={{ fontSize: 9, color: "var(--oiq-muted)" }}>{new Date(run.startedAt).toLocaleString()} · {run.mode} · {doneSteps}/{Object.keys(run.steps).length} steps</div>
                 </div>
                 <span style={S.badge(run.status === "complete" ? "#10B981" : run.status === "cancelled" ? "#EF4444" : "#F59E0B")}>{run.status}</span>
               </div>
@@ -1891,23 +1891,23 @@ ${csv}
     <div style={S.page}>
       <div style={S.hdr}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={() => setView("library")} style={{ ...S.hBtn, color: "#14B8A6", borderColor: "#14B8A633" }}>← Workflows</button>
-          <div style={{ fontSize: 14, fontWeight: 800, color: "#F0F4FF" }}>⚙ Workflow Builder</div>
+          <button onClick={() => setView("library")} style={{ ...S.hBtn, color: "var(--oiq-accent)", borderColor: "var(--oiq-accent)33" }}>← Workflows</button>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "var(--oiq-ink)" }}>⚙ Workflow Builder</div>
         </div>
       </div>
       <div style={{ padding: "0 24px 24px" }}>
         <div style={{ ...S.card, textAlign: "center" as const, padding: 40 }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>⚙️</div>
-          <div style={{ fontSize: 14, fontWeight: 800, color: "#F0F4FF", marginBottom: 8 }}>Custom Workflow Builder</div>
-          <div style={{ fontSize: 11, color: "#4D6A8A", lineHeight: 1.7, maxWidth: 480, margin: "0 auto 16px" }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "var(--oiq-ink)", marginBottom: 8 }}>Custom Workflow Builder</div>
+          <div style={{ fontSize: 11, color: "var(--oiq-muted)", lineHeight: 1.7, maxWidth: 480, margin: "0 auto 16px" }}>
             Define your own workflows without writing code.<br />
             Configure: Steps → Inputs → Validations → AI Prompts → Outputs → Dependencies.<br /><br />
-            <strong style={{ color: "#14B8A6" }}>Coming in Phase 2.</strong><br />
+            <strong style={{ color: "var(--oiq-accent)" }}>Coming in Phase 2.</strong><br />
             For now, use the 10 industry templates above — all are fully configurable.
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, maxWidth: 480, margin: "0 auto" }}>
             {["Define Steps","Set Dependencies","Configure Inputs","Add Validations","Write AI Prompts","Set Outputs"].map(f => (
-              <div key={f} style={{ background: "#141F33", borderRadius: 6, padding: "8px 10px", fontSize: 9, color: "#4D6A8A" }}>📋 {f}</div>
+              <div key={f} style={{ background: "var(--oiq-surface2)", borderRadius: 6, padding: "8px 10px", fontSize: 9, color: "var(--oiq-muted)" }}>📋 {f}</div>
             ))}
           </div>
         </div>
