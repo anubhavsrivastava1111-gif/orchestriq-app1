@@ -646,6 +646,37 @@ function PhaseIndicator({ phase, tok }: { phase: string; tok: typeof T.light }) 
 
 // ─── HISTORY PANEL ────────────────────────────────────────────────────────────
 function HistoryPanel({ sessions, onReopen, onDelete, tok }: { sessions: any[]; onReopen: (s: any) => void; onDelete: (id: number) => void; tok: typeof T.light }) {
+  const [compare, setCompare] = useState<any[] | null>(null);
+  if (compare) return (
+    <div onClick={() => setCompare(null)}
+      style={{ position: "fixed", inset: 0, background: "rgba(10,14,26,0.62)", zIndex: 9996, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ width: "min(1400px,100%)", maxHeight: "90vh", background: tok.surface, borderRadius: 12, border: `1px solid ${tok.border}`, boxShadow: tok.shadowLg, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ padding: "15px 22px", borderBottom: `1px solid ${tok.border}`, display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ fontFamily: "var(--font-head)", fontSize: 17, fontWeight: 600, color: tok.text, flex: 1 }}>Compare sessions · {compare.length}</div>
+          <button onClick={() => setCompare(null)}
+            style={{ background: "none", border: `1px solid ${tok.border}`, borderRadius: 7, width: 30, height: 30, cursor: "pointer", color: tok.text3, fontSize: 15, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(compare.length, 3)}, minmax(0,1fr))`, gap: 16, padding: 20, overflowY: "auto" }}>
+          {compare.map((s: any, i: number) => {
+            const syn = s.synthesis || (Array.isArray(s.stages) ? s.stages.map((st: any) => st.synthesis).filter(Boolean).join("\n\n") : "");
+            const clean = syn.replace(/===BOARD_KPIS===[\s\S]*?===END_KPIS===/, "").replace(/===CRUX===|===END_CRUX===/g, "").replace(/[*`_#>]/g, "").trim();
+            return (
+              <div key={i} style={{ border: `1px solid ${tok.border}`, borderRadius: 10, background: tok.surface2, padding: 16, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: tok.text, lineHeight: 1.4 }}>{s.q}</div>
+                <div style={{ fontSize: 11, color: tok.text3, margin: "5px 0 10px" }}>
+                  {(s.agents || []).length || s.execCount || "—"} executives · {s.ts ? new Date(s.ts).toLocaleDateString() : ""}
+                </div>
+                <div style={{ fontSize: 12.5, lineHeight: 1.65, color: tok.text2, whiteSpace: "pre-wrap" }}>{clean.slice(0, 2200) || "No synthesis saved for this session."}</div>
+                <button onClick={() => { setCompare(null); onReopen(s); }}
+                  style={{ marginTop: 12, padding: "6px 12px", borderRadius: 7, border: `1px solid ${tok.border}`, background: tok.surface, color: tok.text2, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>Open this one</button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
   if (!sessions.length) return null;
   return (
     <div style={{ marginBottom: 24, borderRadius: 12, border: `1px solid ${tok.border}`, overflow: "hidden" }}>
@@ -663,7 +694,9 @@ function HistoryPanel({ sessions, onReopen, onDelete, tok }: { sessions: any[]; 
                 <span>· {new Date(s.ts).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
               </div>
             </div>
-            <button onClick={() => onReopen(s)}
+            <button onClick={() => setCompare(sessions.slice(0, 3))} title="Open the latest sessions side by side"
+                style={{ padding: "6px 12px", borderRadius: 7, border: `1px solid ${tok.accent}55`, background: "none", color: tok.accent, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", marginRight: 6 }}>Compare</button>
+              <button onClick={() => onReopen(s)} title="Open this session on its own"
               style={{ ...actionBtn(tok, true), color: tok.accent, whiteSpace: "nowrap" }}>
               Reopen
             </button>
@@ -944,7 +977,17 @@ export default function BoardroomView(props: BoardroomViewProps) {
             sessions={brSessions}
             tok={tok}
             onReopen={s => {
-              const restored = { q: s.q, debate: s.debate || [], synthesis: s.synthesis || "", drilldown: {}, researchBrief: s.researchBrief || "" };
+              // Sessions are saved threaded ({format,stages}). The old code
+                // only looked for the flat {debate,synthesis} shape, so nothing
+                // was restored. Carry both, and rebuild stages if a legacy
+                // session is opened.
+                const restored: any = Array.isArray(s.stages) && s.stages.length
+                  ? { format: "threaded", stages: s.stages, q: s.q, drilldown: {}, researchBrief: s.researchBrief || "" }
+                  : (s.debate?.length || s.synthesis)
+                    ? { format: "threaded", q: s.q, drilldown: {}, researchBrief: s.researchBrief || "",
+                        stages: [{ question: s.q, debate: s.debate || [], synthesis: s.synthesis || "",
+                                   decisionStatus: s.decisionStatus || "", completedAt: s.ts || Date.now() }] }
+                    : { q: s.q, debate: [], synthesis: "", drilldown: {}, researchBrief: s.researchBrief || "" };
               setBrCur(restored); setBrQ(s.q);
               setBrAg(s.agents || brAg); sv("cos-br-live", restored);
               setBrShowHistory(false);
