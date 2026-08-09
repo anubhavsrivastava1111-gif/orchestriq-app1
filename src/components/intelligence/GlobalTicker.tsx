@@ -149,7 +149,7 @@ function useMarkets(): Quote[] {
       if (alive && out.length) setQuotes(out);
     };
     load();
-    const id = setInterval(load, 120000);
+    const id = setInterval(load, 60000);
     return () => { alive = false; clearInterval(id); };
   }, []);
   return quotes;
@@ -157,27 +157,37 @@ function useMarkets(): Quote[] {
 
 function MarketStrip() {
   const quotes = useMarkets();
+  // Duplicated once so the track loops seamlessly — the second copy is
+  // already on screen when the first scrolls out.
+  const track = quotes.length ? [...quotes, ...quotes] : [];
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, height: 36, zIndex: 9991,
       background: 'var(--sb-bg)', borderBottom: '1px solid var(--sb-bdr)',
       display: 'flex', alignItems: 'stretch', overflow: 'hidden',
     }}>
+      <style>{`@keyframes oiq-mkt { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        .oiq-mkt-track { animation: oiq-mkt 45s linear infinite; }
+        .oiq-mkt-track:hover { animation-play-state: paused; }`}</style>
       <div style={{ width: 70, background: 'var(--oiq-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--oiq-accentText)', letterSpacing: '.14em', textTransform: 'uppercase' }}>Markets</span>
       </div>
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 22, padding: '0 18px', overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
         {quotes.length === 0
-          ? <span style={{ fontSize: 11, color: 'var(--oiq-sbDim)' }}>Loading live rates…</span>
-          : quotes.map(q => (
-            <div key={q.label} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', flexShrink: 0 }}>
-              <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--oiq-sbDim)', letterSpacing: '.06em', textTransform: 'uppercase', lineHeight: 1.2 }}>{q.label}</span>
-              <span style={{
-                fontSize: 12.5, fontWeight: 700, lineHeight: 1.25, fontVariantNumeric: 'tabular-nums',
-                color: q.delta === undefined ? 'var(--oiq-sbText)' : q.delta >= 0 ? '#6EE7B7' : '#FCA5A5',
-              }}>{q.value}</span>
+          ? <span style={{ fontSize: 11, color: 'var(--oiq-sbDim)', paddingLeft: 18 }}>Loading live rates…</span>
+          : (
+            <div className="oiq-mkt-track" style={{ display: 'flex', alignItems: 'center', gap: 26, paddingLeft: 18, width: 'max-content', flexShrink: 0 }}>
+              {track.map((q, i) => (
+                <div key={q.label + i} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', flexShrink: 0 }}>
+                  <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--oiq-sbDim)', letterSpacing: '.06em', textTransform: 'uppercase', lineHeight: 1.2 }}>{q.label}</span>
+                  <span style={{
+                    fontSize: 12.5, fontWeight: 700, lineHeight: 1.25, fontVariantNumeric: 'tabular-nums',
+                    color: q.delta === undefined ? 'var(--oiq-sbText)' : q.delta >= 0 ? '#6EE7B7' : '#FCA5A5',
+                  }}>{q.value}</span>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
       </div>
     </div>
   );
