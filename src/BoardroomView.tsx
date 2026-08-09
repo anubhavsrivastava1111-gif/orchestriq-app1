@@ -220,7 +220,7 @@ function RenderedMd({ text, tok, isDark }: { text: string; tok: typeof T.light; 
 
 // ─── RESEARCH BRIEF CARDS ────────────────────────────────────────────────────
 function ResearchBriefPanel({ text, tok }: { text: string; tok: typeof T.light }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [open, setOpen] = useState(false);
 
   // Parse sections from the brief text
   const lines = text.split("\n").filter(l => l.trim());
@@ -236,39 +236,63 @@ function ResearchBriefPanel({ text, tok }: { text: string; tok: typeof T.light }
   });
   if (current.trim()) sourceBlocks.push(current.trim());
 
-  return (
-    <div style={{ marginBottom: 24, borderRadius: 12, border: `1px solid ${tok.blue}33`, overflow: "hidden", background: tok.blueBg }}>
-      <button
-        onClick={() => setCollapsed(c => !c)}
-        style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}>
-        <div style={{ width: 32, height: 32, borderRadius: 8, background: tok.blue + "15", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>📡</div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: tok.blue, letterSpacing: "0.02em" }}>Research Brief</div>
-          <div style={{ fontSize: 12, color: tok.text3, marginTop: 1 }}>Live data · {new Date().toLocaleString()} · Verify sources independently</div>
-        </div>
-        <div style={{ fontSize: 13, color: tok.text3, transform: collapsed ? "rotate(-90deg)" : "rotate(0)", transition: "transform 0.2s" }}>▼</div>
-      </button>
+  const clean = (s: string) => s.replace(/^#+\s*/gm, "").replace(/\(https?:\/\/[^)]+\)/g, "").trim();
+  const count = sourceBlocks.length || 1;
 
-      {!collapsed && (
-        <div style={{ padding: "0 18px 18px" }}>
-          {sourceBlocks.length > 1 ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 10 }}>
-              {sourceBlocks.map((block, i) => (
-                <div key={i} style={{ background: tok.surface, borderRadius: 8, border: `1px solid ${tok.border}`, padding: "12px 14px" }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: tok.blue, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Source {i + 1}</div>
-                  <div style={{ fontSize: 13, lineHeight: 1.6, color: tok.text2 }}>{block.replace(/^#+\s*/gm, "")}</div>
-                </div>
-              ))}
+  return (
+    <>
+      {/* Collapsed summary row — matches the benchmark card treatment */}
+      <div
+        onClick={() => setOpen(true)}
+        style={{
+          marginBottom: 22, borderRadius: 10, border: `1px solid ${tok.border}`,
+          background: tok.surface, boxShadow: tok.shadow, cursor: "pointer",
+          display: "flex", alignItems: "center", gap: 14, padding: "15px 20px",
+        }}>
+        <div style={{ width: 34, height: 34, borderRadius: 8, background: tok.surface2, border: `1px solid ${tok.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>📡</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: "var(--font-head)", fontSize: 15, fontWeight: 600, color: tok.text }}>Research Brief</div>
+          <div style={{ fontSize: 11.5, color: tok.text3, marginTop: 2 }}>
+            {count} source{count === 1 ? "" : "s"} · Live data · Verify independently
+          </div>
+        </div>
+        <div style={{ fontSize: 11.5, fontWeight: 600, color: tok.accent, flexShrink: 0 }}>Open ↗</div>
+      </div>
+
+      {/* Full-screen reader */}
+      {open && (
+        <div
+          onClick={() => setOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(10,14,26,0.62)", zIndex: 9995, display: "flex", alignItems: "center", justifyContent: "center", padding: 28 }}>
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ width: "min(1080px,100%)", maxHeight: "88vh", background: tok.surface, borderRadius: 12, border: `1px solid ${tok.border}`, boxShadow: tok.shadowLg, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <div style={{ padding: "16px 22px", borderBottom: `1px solid ${tok.border}`, display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: "var(--font-head)", fontSize: 17, fontWeight: 600, color: tok.text }}>Research Brief</div>
+                <div style={{ fontSize: 11.5, color: tok.text3, marginTop: 2 }}>{count} source{count === 1 ? "" : "s"} · AI-generated · Verify critical figures before external use</div>
+              </div>
+              <button onClick={() => setOpen(false)}
+                style={{ background: "none", border: `1px solid ${tok.border}`, borderRadius: 7, width: 30, height: 30, cursor: "pointer", color: tok.text3, fontSize: 15, fontFamily: "inherit", flexShrink: 0 }}>✕</button>
             </div>
-          ) : (
-            <div style={{ fontSize: 14, lineHeight: 1.75, color: tok.text2 }}>{text}</div>
-          )}
-          <div style={{ fontSize: 12, color: tok.muted, marginTop: 12, fontStyle: "italic" }}>
-            ⚠️ AI-generated research. Verify critical figures before external use.
+            <div style={{ padding: "18px 22px 22px", overflowY: "auto" }}>
+              {sourceBlocks.length > 1 ? (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 14 }}>
+                  {sourceBlocks.map((block, i) => (
+                    <div key={i} style={{ background: tok.surface2, borderRadius: 10, border: `1px solid ${tok.border}`, padding: "14px 16px" }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 800, color: tok.text3, marginBottom: 7, textTransform: "uppercase", letterSpacing: ".09em" }}>Source {i + 1}</div>
+                      <div style={{ fontSize: 13, lineHeight: 1.65, color: tok.text2 }}>{clean(block)}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: 13.5, lineHeight: 1.75, color: tok.text2 }}>{clean(text)}</div>
+              )}
+            </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
