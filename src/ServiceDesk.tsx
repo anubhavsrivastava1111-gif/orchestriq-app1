@@ -78,10 +78,10 @@ const CATEGORIES = [
 const SLA_BY_PRIORITY: Record<string,number> = { P1:1, P2:3, P3:5, P4:10 };
 
 const PRI_COLOR: Record<string,string> = {
-  P1:"#EF4444",P2:"#F59E0B",P3:"#3B82F6",P4:"#6B7280"
+  P1:"#EF4444",P2:"#F59E0B",P3:"#3B82F6",P4:"var(--oiq-muted)"
 };
 const STATUS_COLOR: Record<string,string> = {
-  Open:"#3B82F6","In Progress":"#8B5CF6",Pending:"#F59E0B",Resolved:"#10B981",Closed:"#6B7280"
+  Open:"#3B82F6","In Progress":"#8B5CF6",Pending:"#F59E0B",Resolved:"#10B981",Closed:"var(--oiq-muted)"
 };
 
 /* ───────────── helpers ───────────── */
@@ -305,13 +305,13 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
 
   /* ── styles ── */
   const S: Record<string,React.CSSProperties> = {
-    wrap: { padding: "24px 28px", fontFamily: "Inter, system-ui, sans-serif", color: "#C5D4E8", minHeight: "100vh" },
+    wrap: { padding: "24px 28px", fontFamily: "Inter, system-ui, sans-serif", color: "var(--oiq-body)", minHeight: "100vh" },
     hdr: { fontSize: 22, fontWeight: 700, color: "var(--oiq-ink)", marginBottom: 4 },
     sub: { fontSize: 12, color: "var(--oiq-muted)", marginBottom: 20 },
     tabs: { display: "flex", gap: 0, marginBottom: 20, borderBottom: "1px solid var(--oiq-border)" },
     tab: { padding: "10px 20px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none", background: "transparent", color: "var(--oiq-muted)", borderBottom: "2px solid transparent", transition: "all 0.2s" },
     tabA: { padding: "10px 20px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none", background: "transparent", color: "var(--oiq-accent)", borderBottom: "2px solid var(--oiq-accent)", transition: "all 0.2s" },
-    card: { background: "#0D1520", border: "1px solid var(--oiq-border)", borderRadius: 10, padding: "16px 20px" },
+    card: { background: "var(--oiq-surface)", border: "1px solid var(--oiq-border)", borderRadius: 10, padding: "16px 20px" },
     metricVal: { fontSize: 28, fontWeight: 700, color: "var(--oiq-ink)", lineHeight: 1 },
     metricLbl: { fontSize: 10, color: "var(--oiq-muted)", marginTop: 4, textTransform: "uppercase" as const, letterSpacing: "0.06em" },
     grid4: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 20 },
@@ -321,10 +321,10 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
     btnSm: { padding: "6px 12px", borderRadius: 5, border: "1px solid var(--oiq-border)", background: "transparent", color: "var(--oiq-body)", fontSize: 11, cursor: "pointer" },
     table: { width: "100%", borderCollapse: "collapse" as const, fontSize: 11 },
     th: { textAlign: "left" as const, padding: "8px 10px", borderBottom: "1px solid var(--oiq-border)", color: "var(--oiq-muted)", fontWeight: 600, fontSize: 10, textTransform: "uppercase" as const, letterSpacing: "0.06em" },
-    td: { padding: "8px 10px", borderBottom: "1px solid #0D1520" },
+    td: { padding: "8px 10px", borderBottom: "1px solid var(--oiq-surface)" },
     badge: { display: "inline-block", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600 },
     upload: { border: "2px dashed var(--oiq-border)", borderRadius: 10, padding: "40px 20px", textAlign: "center" as const, cursor: "pointer" },
-    aiBox: { background: "#0A0F18", border: "1px solid var(--oiq-border)", borderRadius: 8, padding: "16px 20px", fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap" as const, maxHeight: 500, overflowY: "auto" as const },
+    aiBox: { background: "var(--oiq-bg)", border: "1px solid var(--oiq-border)", borderRadius: 8, padding: "16px 20px", fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap" as const, maxHeight: 500, overflowY: "auto" as const },
   };
 
   if(loading) return <div style={{...S.wrap, display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:"var(--oiq-muted)"}}>Loading Service Desk...</div></div>;
@@ -408,7 +408,7 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
             <div style={{display:"flex",gap:10}}>
               {metrics.agingBuckets.map((b,i)=>(
                 <div key={i} style={{flex:1,textAlign:"center",padding:"12px 6px",background:b.count>0?(i>=4?"rgba(239,68,68,0.1)":i>=3?"rgba(245,158,11,0.1)":"rgba(20,184,166,0.05)"):"transparent",borderRadius:8,border:"1px solid "+(b.count>0?(i>=4?"#EF444444":i>=3?"#F59E0B44":"var(--oiq-border)"):"var(--oiq-border)")}}>
-                  <div style={{fontSize:20,fontWeight:700,color:b.count>0?(i>=4?"#EF4444":i>=3?"#F59E0B":"var(--oiq-accent)"):"#2D4460"}}>{b.count}</div>
+                  <div style={{fontSize:20,fontWeight:700,color:b.count>0?(i>=4?"#EF4444":i>=3?"#F59E0B":"var(--oiq-accent)"):"var(--oiq-faint)"}}>{b.count}</div>
                   <div style={{fontSize:9,color:"var(--oiq-muted)",marginTop:2}}>{b.label}</div>
                 </div>
               ))}
@@ -426,7 +426,7 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
                 </tr></thead>
                 <tbody>{Object.entries(metrics.byTeam).map(([team,v])=>(
                   <tr key={team}>
-                    <td style={{...S.td,color:"#C5D4E8",fontWeight:600}}>{team}</td>
+                    <td style={{...S.td,color:"var(--oiq-body)",fontWeight:600}}>{team}</td>
                     <td style={S.td}>{v.total}</td>
                     <td style={{...S.td,color:"#10B981"}}>{v.resolved}</td>
                     <td style={S.td}>{v.total>0?(v.resolved/v.total*100).toFixed(0)+"%":"–"}</td>
@@ -448,7 +448,7 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
                 </tr></thead>
                 <tbody>{Object.entries(metrics.byMember).sort((a,b)=>b[1].total-a[1].total).map(([m,v])=>(
                   <tr key={m}>
-                    <td style={{...S.td,color:"#C5D4E8",fontWeight:600}}>{m}</td>
+                    <td style={{...S.td,color:"var(--oiq-body)",fontWeight:600}}>{m}</td>
                     <td style={S.td}>{v.total}</td>
                     <td style={{...S.td,color:"#10B981"}}>{v.resolved}</td>
                     <td style={S.td}>{v.total>0?(v.resolved/v.total*100).toFixed(0)+"%":"–"}</td>
@@ -468,7 +468,7 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
                 return (
                   <div key={reason} style={{marginBottom:6}}>
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}>
-                      <span style={{color:"#C5D4E8"}}>{reason}</span><span style={{color:"var(--oiq-muted)"}}>{count}</span>
+                      <span style={{color:"var(--oiq-body)"}}>{reason}</span><span style={{color:"var(--oiq-muted)"}}>{count}</span>
                     </div>
                     <div style={S.barBg}><div style={{height:6,borderRadius:3,background:"#F59E0B",width:(count/maxR*100)+"%"}}/></div>
                   </div>
@@ -493,12 +493,12 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
         <div>
           <div style={{display:"flex",gap:10,marginBottom:16,alignItems:"center"}}>
             <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}
-              style={{...S.btnSm,background:"#0D1520"}}>
+              style={{...S.btnSm,background:"var(--oiq-surface)"}}>
               <option value="all">All Statuses</option>
               {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
             </select>
             <select value={filterPriority} onChange={e=>setFilterPriority(e.target.value)}
-              style={{...S.btnSm,background:"#0D1520"}}>
+              style={{...S.btnSm,background:"var(--oiq-surface)"}}>
               <option value="all">All Priorities</option>
               {PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
             </select>
@@ -515,14 +515,14 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
               <tbody>
                 {filtered.length===0&&<tr><td colSpan={9} style={{...S.td,textAlign:"center",color:"var(--oiq-muted)",padding:30}}>No tickets found</td></tr>}
                 {filtered.slice(0,100).map(t=>(
-                  <tr key={t.id} style={{cursor:"pointer"}} onMouseEnter={e=>(e.currentTarget.style.background="#0A0F18")} onMouseLeave={e=>(e.currentTarget.style.background="transparent")}>
+                  <tr key={t.id} style={{cursor:"pointer"}} onMouseEnter={e=>(e.currentTarget.style.background="var(--oiq-bg)")} onMouseLeave={e=>(e.currentTarget.style.background="transparent")}>
                     <td style={{...S.td,color:"var(--oiq-accent)",fontWeight:600,fontFamily:"JetBrains Mono, monospace"}}>{t.ticket_number}</td>
                     <td style={{...S.td,fontSize:10,color:"var(--oiq-muted)"}}>{t.created_date||"–"}</td>
                     <td style={S.td}><span style={{...S.badge,background:PRI_COLOR[t.priority]+"22",color:PRI_COLOR[t.priority]}}>{t.priority}</span></td>
                     <td style={{...S.td,color:"var(--oiq-body)"}}>{t.category||"–"}</td>
-                    <td style={{...S.td,color:"#C5D4E8"}}>{t.requestor||"–"}</td>
-                    <td style={{...S.td,color:"#C5D4E8"}}>{t.assigned_member||t.current_owner||"–"}</td>
-                    <td style={S.td}><span style={{...S.badge,background:(STATUS_COLOR[t.status]||"#6B7280")+"22",color:STATUS_COLOR[t.status]||"#6B7280"}}>{t.status}</span></td>
+                    <td style={{...S.td,color:"var(--oiq-body)"}}>{t.requestor||"–"}</td>
+                    <td style={{...S.td,color:"var(--oiq-body)"}}>{t.assigned_member||t.current_owner||"–"}</td>
+                    <td style={S.td}><span style={{...S.badge,background:(STATUS_COLOR[t.status]||"var(--oiq-muted)")+"22",color:STATUS_COLOR[t.status]||"var(--oiq-muted)"}}>{t.status}</span></td>
                     <td style={{...S.td,color:(t.ticket_age_days||0)>10?"#EF4444":(t.ticket_age_days||0)>5?"#F59E0B":"#10B981",fontWeight:600}}>{t.ticket_age_days||0}d</td>
                     <td style={S.td}>{t.sla_breached===true?<span style={{color:"#EF4444",fontWeight:700}}>⚠ Breach</span>:t.sla_breached===false?<span style={{color:"#10B981"}}>✓</span>:<span style={{color:"var(--oiq-muted)"}}>–</span>}</td>
                   </tr>
@@ -548,7 +548,7 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
               ) : (
                 <>
                   <div style={{fontSize:36,marginBottom:8}}>📄</div>
-                  <div style={{fontSize:13,color:"#C5D4E8",fontWeight:600}}>Click to upload CSV</div>
+                  <div style={{fontSize:13,color:"var(--oiq-body)",fontWeight:600}}>Click to upload CSV</div>
                   <div style={{fontSize:11,color:"var(--oiq-muted)",marginTop:4}}>or drag and drop</div>
                 </>
               )}
