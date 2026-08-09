@@ -346,9 +346,15 @@ export function applyDesign(p: Prefs) {
         if (light) {
           if (prop === "backgroundColor" && L < 0.10) s.setProperty(css, t.c.surface, "important");
           if (prop === "borderColor" && L < 0.14) s.setProperty(css, t.c.border, "important");
+          // POLARITY LOCK. Any text lighter than mid-grey cannot survive on a
+          // light canvas — that is how whole paragraphs went invisible. Brand
+          // and status colours all sit below 0.55 luminance (gold 0.42, teal
+          // 0.42, red 0.17, green 0.23) so they are untouched.
+          if (prop === "color" && L > 0.55) s.setProperty(css, t.c.body, "important");
         } else {
           if (prop === "backgroundColor" && L > 0.85) s.setProperty(css, t.c.surface, "important");
           if (prop === "borderColor" && L > 0.80) s.setProperty(css, t.c.border, "important");
+          if (prop === "color" && L < 0.12) s.setProperty(css, t.c.body, "important");
         }
       };
       move("backgroundColor", "background-color", "oiqBg");
@@ -389,7 +395,7 @@ export function applyDesign(p: Prefs) {
       const fg = parseColour(cs.color);
       if (!fg) return;
       const bg = behind(el);
-      if (contrast(fg, bg) >= 4.0) return;
+      if (contrast(fg, bg) >= 4.5) return;
 
       const options: RGB[] = [inkRGB, bodyRGB, surfRGB, [255, 255, 255], [17, 17, 17]];
       let best = options[0], bestC = 0;
