@@ -7,7 +7,7 @@ import { WorkspaceMemory } from "./lib/WorkspaceMemory";
 // Read-only aggregation: zero AI calls, zero token cost, instant load.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const C={bg:"#0B1120",card:"#111827",card2:"#0D1829",border:"#1E2D3D",accent:"#14B8A6",blue:"#3B82F6",purple:"#8B5CF6",warn:"#F59E0B",danger:"#EF4444",success:"#10B981",text:"#E8EFF8",mid:"#94A3B8",dim:"#4D6A8A"};
+const C={bg:"var(--oiq-bg)",card:"var(--oiq-surface)",card2:"var(--oiq-surface2)",border:"var(--oiq-border)",accent:"var(--oiq-accent)",blue:"#3B82F6",purple:"#8B5CF6",warn:"var(--oiq-warning)",danger:"var(--oiq-danger)",success:"var(--oiq-success)",text:"var(--oiq-ink)",mid:"var(--oiq-body)",dim:"var(--oiq-muted)"};
 const num=(n:number)=>n>=1e7?(n/1e7).toFixed(1)+"Cr":n>=1e5?(n/1e5).toFixed(1)+"L":n>=1e3?(n/1e3).toFixed(1)+"K":String(Math.round(n));
 const out=(d:any)=>Math.max(0,(Number(d?.amount)||0)-(Number(d?.settled)||0));
 const overdue=(d:any)=>{try{return Math.floor((Date.now()-new Date(d.dueDate).getTime())/864e5)>0;}catch{return false;}};
