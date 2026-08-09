@@ -807,3 +807,160 @@
 [data-oiq-mode="dark"] #oiq-root div[style*="background:#0E1523"] {
   background-color: var(--oiq-surface) !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   OIQ MOCKUP LAYER 2 — chrome refinement
+   Fixes: unreadable market/news ticker, overlapping stage pills, sidebar
+   group headers. Reference: the B*.html mockups (.tick / .news / .stg / .grp).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. MARKET + NEWS TICKER ──────────────────────────────────────────────
+   The ticker renders on the theme's dark chrome, but its text tokens were
+   picked for a different background, so labels sat at ~2:1 contrast. Mockup
+   pairing: label = sbDim, value = sbText, both on sbBg.                     */
+
+#oiq-root [class*="ticker"],
+#oiq-root [class*="Ticker"],
+.global-ticker {
+  background: var(--sb-bg) !important;
+  border-bottom: 1px solid var(--sb-bdr) !important;
+}
+
+#oiq-root [class*="ticker"] span,
+#oiq-root [class*="Ticker"] span,
+.global-ticker span,
+.global-ticker div {
+  color: var(--oiq-sbText) !important;
+}
+
+/* Instrument names sit quieter than their values */
+#oiq-root [class*="ticker"] span[style*="font-size: 10"],
+#oiq-root [class*="ticker"] span[style*="fontSize: 10"],
+#oiq-root [class*="ticker"] span[style*="font-size:10"],
+.global-ticker span[style*="font-size: 10"],
+.global-ticker span[style*="font-size:10"] {
+  color: var(--oiq-sbDim) !important;
+  letter-spacing: .06em !important;
+  text-transform: uppercase !important;
+  font-weight: 600 !important;
+}
+
+/* Numbers: tabular so columns don't jitter as prices tick */
+#oiq-root [class*="ticker"] span[style*="font-size: 13"],
+#oiq-root [class*="ticker"] span[style*="font-size:13"],
+.global-ticker span[style*="font-size:13"] {
+  font-variant-numeric: tabular-nums !important;
+  font-weight: 700 !important;
+}
+
+/* MARKETS / NEWS end caps and severity pills keep their own colours —
+   they are signal, not decoration. */
+#oiq-root [class*="ticker"] [style*="background: rgb(239, 68, 68)"],
+#oiq-root [class*="ticker"] [style*="background:#EF4444"],
+.global-ticker [style*="rgb(239, 68, 68)"] {
+  background-color: #B54A3A !important;
+}
+#oiq-root [class*="ticker"] [style*="background: rgb(239, 68, 68)"] span,
+.global-ticker [style*="rgb(239, 68, 68)"] span {
+  color: #FFFFFF !important;
+}
+
+/* Headline text — the part you actually read */
+#oiq-root [class*="ticker"] span[style*="max-width"],
+.global-ticker span[style*="max-width"] {
+  color: var(--oiq-sbText) !important;
+  font-weight: 500 !important;
+}
+
+/* ── 2. STAGE PILLS — Idea / Formation / MVP / Funding / Growth ───────────
+   These were flex:1 with circular icons and free-flowing labels, so long
+   words ran under their neighbours. The mockup lays them out as an even
+   grid with the label clipped to its own cell (.stg / .s).                 */
+
+.oiq-nerve-tabs {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 6px !important;
+  padding: 12px !important;
+  align-items: stretch !important;
+}
+
+.oiq-nerve-btn {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 3px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 52px !important;
+  padding: 8px 4px !important;
+  border-radius: var(--r-md) !important;
+  border: 1px solid var(--sb-bdr) !important;
+  background-color: transparent !important;
+  overflow: hidden !important;
+  text-align: center !important;
+}
+
+.oiq-nerve-btn > span:first-child {
+  font-size: 14px !important;
+  line-height: 1 !important;
+  margin: 0 !important;
+}
+
+.oiq-nerve-btn > span:last-child {
+  display: block !important;
+  width: 100% !important;
+  font-size: 9.5px !important;
+  font-weight: 600 !important;
+  line-height: 1.15 !important;
+  letter-spacing: 0 !important;
+  color: var(--oiq-sbDim) !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Selected stage — solid accent block, mockup style */
+.oiq-nerve-btn[style*="rgba(20,184,166"],
+.oiq-nerve-btn[style*="rgba(20, 184, 166"] {
+  background-color: var(--oiq-accent) !important;
+  border-color: var(--oiq-accent) !important;
+}
+.oiq-nerve-btn[style*="rgba(20,184,166"] span,
+.oiq-nerve-btn[style*="rgba(20, 184, 166"] span {
+  color: var(--oiq-accentText) !important;
+  font-weight: 700 !important;
+}
+
+/* ── 3. SIDEBAR DEPARTMENT HEADERS ────────────────────────────────────────
+   Collapsed groups read as quiet section labels, not as buttons.           */
+
+.oiq-sidebar button[style*="width: 100%"],
+.oiq-sidebar > div > button {
+  border-radius: var(--r-sm) !important;
+  padding: 8px 10px !important;
+}
+
+.oiq-sidebar button:hover {
+  background-color: var(--accent-10) !important;
+}
+
+/* ── 4. HEADING SCALE — match the mockup's .h1 ────────────────────────────── */
+
+#oiq-main div[style*="font-size: 3"],
+#oiq-main div[style*="font-size:3"],
+#oiq-main div[style*="fontSize:3"] {
+  font-family: var(--font-head) !important;
+  font-weight: 700 !important;
+  letter-spacing: -.02em !important;
+  line-height: 1.15 !important;
+}
+
+/* Uppercase micro-labels — the consulting readout tell */
+#oiq-main div[style*="text-transform: uppercase"],
+#oiq-main span[style*="text-transform: uppercase"] {
+  letter-spacing: .09em !important;
+  font-weight: 700 !important;
+}
