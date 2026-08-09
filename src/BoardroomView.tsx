@@ -446,56 +446,102 @@ function ExecutiveCard({
 }
 // ─── SYNTHESIS CARD ───────────────────────────────────────────────────────────
 function SynthesisCard({ synthesis, question, tok, isDark, onCopy, onExportPDF, onExportPPT, onExportMD, onExtractActions, extracting }: any) {
+  const [open, setOpen] = useState(false);
+  const raw = typeof synthesis === "string" ? synthesis : "";
+
+  // Board-level KPIs, read from the consolidated synthesis — not one executive.
+  const FIG = "(?:₹|\\$)\\s?[\\d,]+(?:\\.\\d+)?\\s?(?:Cr|crore|L|lakh|K|M|bn|mn)?|\\d+(?:\\.\\d+)?%|Month\\s\\d+|\\d+(?:\\.\\d+)?x";
+  const kpis: { label: string; value: string }[] = [];
+  const seen = new Set<string>();
+  const re = new RegExp("([A-Za-z][A-Za-z \\-&/]{2,26}?)\\s*[:\\u2014-]\\s*\\*{0,2}(" + FIG + ")", "g");
+  let m: RegExpExecArray | null;
+  const flat = raw.replace(/\n/g, " ");
+  while ((m = re.exec(flat)) !== null && kpis.length < 4) {
+    const label = m[1].replace(/[*#>]/g, "").trim();
+    const value = m[2].trim();
+    if (label.length < 3 || seen.has(value)) continue;
+    seen.add(value);
+    kpis.push({ label, value });
+  }
+  if (kpis.length < 4) {
+    (flat.match(new RegExp(FIG, "g")) || []).forEach(v => {
+      if (kpis.length < 4 && !seen.has(v.trim())) { seen.add(v.trim()); kpis.push({ label: "Key figure", value: v.trim() }); }
+    });
+  }
+
+  const bold = raw.match(/\*\*(.+?)\*\*/);
+  const firstPara = raw.split("\n").map(l => l.replace(/^[#>\-*\s]+/, "").trim())
+    .find(l => l.length > 50 && !l.startsWith("|")) || "";
+  const headline = (bold ? bold[1] : firstPara).replace(/[*`_]/g, "").slice(0, 240);
+
+  const actions = (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} onClick={e => e.stopPropagation()}>
+      <button onClick={onExportPDF} style={{ ...actionBtn(tok), color: tok.text2 }}>📄 PDF</button>
+      <button onClick={onExportPPT} style={{ ...actionBtn(tok), color: tok.text2 }}>📊 PPT</button>
+      <button onClick={onExportMD} style={{ ...actionBtn(tok), color: tok.text2 }}>MD</button>
+      <button onClick={onCopy} style={{ ...actionBtn(tok), color: tok.text2 }}>Copy</button>
+      <button onClick={onExtractActions} disabled={extracting} style={{ ...actionBtn(tok, true), color: tok.accent }}>
+        {extracting ? "Extracting…" : "✅ Actions"}
+      </button>
+    </div>
+  );
+
   return (
-    <div style={{
-      borderRadius: 16, overflow: "hidden",
-      border: `1px solid ${tok.accent}40`,
-      boxShadow: `0 0 0 4px ${tok.accent}08, ${tok.shadowLg}`,
-      background: tok.surface,
-      animation: "fadeInUp 0.4s ease",
-      marginBottom: 24,
-    }}>
-      {/* Header */}
-      <div style={{
-        padding: "20px 24px",
-        background: `linear-gradient(135deg, ${tok.accent}12, ${tok.blue}08)`,
-        borderBottom: `1px solid ${tok.accent}30`,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: tok.accentBg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, border: `1px solid ${tok.accent}30` }}>
-            🏛️
-          </div>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: tok.accent, letterSpacing: "0.02em" }}>Boardroom Synthesis</div>
-            <div style={{ fontSize: 12, color: tok.text3, marginTop: 2 }}>Executive consensus · AI-generated</div>
-          </div>
-          <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <button onClick={onExportPDF} style={{ ...actionBtn(tok), color: tok.text2 }}>📄 PDF</button>
-            <button onClick={onExportPPT} style={{ ...actionBtn(tok), color: tok.text2 }}>📊 PPT</button>
-            <button onClick={onExportMD} style={{ ...actionBtn(tok), color: tok.text2 }}>MD</button>
-            <button onClick={onCopy} style={{ ...actionBtn(tok), color: tok.text2 }}>Copy</button>
-            <button onClick={onExtractActions} disabled={extracting}
-              style={{ ...actionBtn(tok, true), color: tok.accent }}>
-              {extracting ? "Extracting…" : "✅ Actions"}
-            </button>
-          </div>
+    <>
+      {/* ── BOARD KPI STRIP ── */}
+      {kpis.length > 0 && (
+        <div style={{
+          display: "grid", gridTemplateColumns: `repeat(${kpis.length}, minmax(0,1fr))`,
+          border: `1px solid ${tok.border}`, borderRadius: 10, overflow: "hidden",
+          background: tok.surface, marginBottom: 18, boxShadow: tok.shadow,
+        }}>
+          {kpis.map((k, i) => (
+            <div key={i} style={{ padding: "16px 19px", borderLeft: i ? `1px solid ${tok.border}` : "none" }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: tok.text3, textTransform: "uppercase", letterSpacing: ".09em", marginBottom: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k.label}</div>
+              <div style={{ fontFamily: "var(--font-head)", fontSize: 26, fontWeight: 700, color: tok.text, lineHeight: 1.1, fontVariantNumeric: "tabular-nums" }}>{k.value}</div>
+            </div>
+          ))}
         </div>
-        {question && (
-          <div style={{ fontSize: 13, color: tok.text3, fontStyle: "italic", paddingLeft: 48 }}>
-            "{question.slice(0, 120)}{question.length > 120 ? "…" : ""}"
+      )}
+
+      {/* ── SYNTHESIS ROW ── */}
+      <div onClick={() => setOpen(true)}
+        style={{ marginBottom: 24, borderRadius: 10, border: `1px solid ${tok.accent}55`, background: tok.surface, boxShadow: tok.shadowMd, cursor: "pointer", padding: "16px 20px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 9 }}>
+          <div style={{ width: 34, height: 34, borderRadius: 8, background: tok.accentBg, border: `1px solid ${tok.accent}33`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>🏛️</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: "var(--font-head)", fontSize: 16, fontWeight: 600, color: tok.text }}>Boardroom Synthesis</div>
+            <div style={{ fontSize: 11.5, color: tok.text3, marginTop: 1 }}>Executive consensus · AI-generated</div>
           </div>
-        )}
+          {actions}
+        </div>
+        <div style={{ fontSize: 13.5, lineHeight: 1.65, color: tok.text2, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" as any, overflow: "hidden" }}>{headline}</div>
+        <div style={{ fontSize: 11.5, fontWeight: 600, color: tok.accent, marginTop: 9 }}>Open full synthesis ↗</div>
       </div>
 
-      {/* Body */}
-      <div style={{ padding: "24px 28px" }}>
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-          <ReadAloudButton text={typeof synthesis === "string" ? synthesis.replace(/[#*`_>|]/g, "") : ""} id={"boardroom-synth-" + (question || "").slice(0, 24)} />
+      {/* ── FULL READER ── */}
+      {open && (
+        <div onClick={() => setOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(10,14,26,0.62)", zIndex: 9995, display: "flex", alignItems: "center", justifyContent: "center", padding: 26 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: "min(1120px,100%)", maxHeight: "90vh", background: tok.surface, borderRadius: 12, border: `1px solid ${tok.border}`, boxShadow: tok.shadowLg, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <div style={{ padding: "15px 22px", borderBottom: `1px solid ${tok.border}`, display: "flex", alignItems: "center", gap: 12, flexShrink: 0, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontFamily: "var(--font-head)", fontSize: 17, fontWeight: 600, color: tok.text }}>Boardroom Synthesis</div>
+                {question && <div style={{ fontSize: 11.5, color: tok.text3, marginTop: 2, fontStyle: "italic" }}>"{question.slice(0, 140)}{question.length > 140 ? "…" : ""}"</div>}
+              </div>
+              {actions}
+              <ReadAloudButton text={raw.replace(/[#*`_>|]/g, "")} id={"boardroom-synth-" + (question || "").slice(0, 24)} />
+              <button onClick={() => setOpen(false)}
+                style={{ background: "none", border: `1px solid ${tok.border}`, borderRadius: 7, width: 30, height: 30, cursor: "pointer", color: tok.text3, fontSize: 15, fontFamily: "inherit", flexShrink: 0 }}>✕</button>
+            </div>
+            <div style={{ padding: "20px 26px", overflowY: "auto", flex: 1 }}>
+              <RenderedMd text={synthesis} tok={tok} isDark={isDark} />
+            </div>
+          </div>
         </div>
-        <RenderedMd text={synthesis} tok={tok} isDark={isDark} />
-      </div>
-    </div>
+      )}
+    </>
   );
 }
 
@@ -863,7 +909,7 @@ export default function BoardroomView(props: BoardroomViewProps) {
   return (
     <div style={{ height: "100%", overflowY: "auto", background: tok.bg, fontFamily: "Inter, system-ui, sans-serif" }}>
       {/* ── INNER CONTAINER ── */}
-      <div style={{ maxWidth: 880, margin: "0 auto", padding: "28px 24px 60px" }}>
+      <div style={{ maxWidth: 1280, margin: "0 auto", padding: "26px 28px 60px" }}>
 
         {/* ── PAGE HEADER ── */}
         <div style={{ marginBottom: 28 }}>
