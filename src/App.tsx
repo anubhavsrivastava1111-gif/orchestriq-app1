@@ -2278,10 +2278,14 @@ export default function App(){
   const [me,setMe]=useState<{email:string;role:string}>({email:"",role:""});
   const [showExecs,setShowExecs]=useState(false);
   const [keysHydrated,setKeysHydrated]=useState(false);
+  const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return WorkspaceMemory.get<string>("oiq-sb-col")==="1";}catch{return false;}});
+  const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:""});
 
-  // Save API keys to the signed-in user's own profile row. Debounced so typing
-  // a key doesn't write on every keystroke. Skipped on the first pass so the
-  // empty initial state can never wipe keys that are already saved.
+  // Save API keys to the signed-in user's own profile row. Declared AFTER the
+  // keys state — referencing it any earlier throws "Cannot access before
+  // initialization" and takes the whole app down. Debounced so typing a key
+  // doesn't write on every keystroke, and skipped on the first pass so the
+  // empty initial state can never wipe keys already saved.
   useEffect(()=>{
     if(!keysHydrated){ setKeysHydrated(true); return; }
     const t=setTimeout(async()=>{
@@ -2295,8 +2299,6 @@ export default function App(){
     },1500);
     return ()=>clearTimeout(t);
   },[keys]);
-  const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return WorkspaceMemory.get<string>("oiq-sb-col")==="1";}catch{return false;}});
-  const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:""});
   const [mediaMode,setMediaMode]=useState({image:"prompts",video:"veo"});
   const [showMediaPicker,setShowMediaPicker]=useState(false);
   const [defP,setDefP]=useState("nvidia"); // free, zero-setup default
