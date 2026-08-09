@@ -5744,53 +5744,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         </div>
       </div>
         {/* ── MODULE DROPDOWN TRIGGER ── */}
-        <div style={{position:"relative",padding:"6px 8px",borderBottom:"1px solid #1a2030"}}>
-          <button onClick={()=>setShowModules(v=>!v)}
-            style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"9px 12px",background:"rgba(20,184,166,0.06)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:8,cursor:"pointer",fontFamily:"Manrope,sans-serif",transition:"all 0.15s"}}>
-            <span style={{fontSize:16}}>{[["nerve","🧠"],["workflow","⚡"],["agentic","🔗"],["agents","🤖"],["p3","🤖"],["chat","💬"],["data","🗄️"],["ledger","📒"],["dispatch","📡"],["actions","✅"],["studio","🎨"],["funding","💰"],["tokens","🔢"]].find(([v])=>v===view)?.[1]||"🧠"}</span>
-            <span style={{flex:1,fontSize:12,fontWeight:700,color:"#F1F5F9",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.04em"}}>{[["nerve","Nerve Center"],["workflow","Workflow"],["agentic","Agentic AI"],["agents","AI Agents"],["p3","Autopilot"],["chat","Chat"],["data","Data Hub"],["home","Command Center"],["ledger","Ledger"],["finance","Finance"],["dispatch","Pulse"],["actions","Tasks"],["studio","Studio"],["funding","Funding"],["tokens","Tokens"]].find(([v])=>v===view)?.[1]||"Nerve Center"}</span>
-            <span style={{fontSize:10,color:"#5A6480",transition:"transform 0.2s",transform:showModules?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
-          </button>
-          {showModules&&(
-            <div style={{position:"absolute",top:"calc(100% - 6px)",left:8,right:8,background:"#131825",border:"1px solid #1e2433",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:8,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
-                <button key={v} onClick={()=>{setView(v);setShowModules(false);}}
-                  style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:view===v?"rgba(20,184,166,0.10)":"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"Manrope,sans-serif",marginBottom:2,transition:"background 0.12s"}}>
-                  <span style={{fontSize:16,width:24,textAlign:"center"}}>{ic}</span>
-                  <span style={{fontSize:12,fontWeight:600,color:view===v?"#14B8A6":"#A0AAC0"}}>{lb}</span>
-                  {view===v&&<span style={{marginLeft:"auto",width:6,height:6,borderRadius:"50%",background:"#14B8A6",flexShrink:0}}/>}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        {/* ── STAGE PILLS — restored ── */}
-        <div style={{display:"flex",gap:3,padding:"5px 8px",borderBottom:"1px solid #1a2030",flexWrap:"wrap"}}>
-          {STAGES.map(st=>(
-            <button key={st.id} onClick={()=>{const n={...co,stage:st.id};setCo(n);sv("cos-co",n);}} title={st.l}
-              style={{...S.pill,...(co.stage===st.id?{borderColor:"#14B8A6",color:"#14B8A6",background:"rgba(20,184,166,0.08)"}:{})}}>{st.ic} <span style={{fontSize:9}}>{st.l}</span></button>
-          ))}
-        </div>
-        <div style={{flex:1,overflowY:"auto",padding:"0 4px"}}>
-          {DEPTS.map(dept=>(
-            <div key={dept.id}>
-              <button onClick={()=>{const n={...expD,[dept.id]:!expD[dept.id]};setExpD(n);sv("cos-dp",n);}} style={S.dH}>
-                <span style={{fontSize:8,color:dept.c,transition:"transform 0.15s",transform:expD[dept.id]?"rotate(90deg)":"rotate(0)"}}>▶</span>
-                <span style={{fontSize:10,fontWeight:700,color:dept.c}}>{dept.l}</span>
-              </button>
-              {expD[dept.id]&&dept.roles.map(r=>(
-                <button key={r.id} onClick={()=>{setSelRole(r.id);setView("chat");setError(null);}} style={{...S.rBtn,...(selRole===r.id?{background:dept.c+"10",borderColor:dept.c+"33"}:{})}}>
-                  <span style={{fontSize:12}}>{r.ic}</span>
-                  <div style={{flex:1,minWidth:0}}><div style={{fontSize:9,fontWeight:700,color:dept.c}}>{r.t}</div><div style={{fontSize:7,color:"#3A4060",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.d}</div></div>
-                  {chats[r.id]?.length>0&&<span style={{width:4,height:4,borderRadius:"50%",background:dept.c,opacity:0.6,flexShrink:0}}/>}
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── MAIN PANEL ── */}
+        {/* ── MAIN PANEL ── */}
       <div id="oiq-main" role="main" tabIndex={-1} style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
 
         {/* NERVE CENTER */}
