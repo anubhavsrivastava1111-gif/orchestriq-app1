@@ -306,28 +306,28 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
   /* ── styles ── */
   const S: Record<string,React.CSSProperties> = {
     wrap: { padding: "24px 28px", fontFamily: "Inter, system-ui, sans-serif", color: "#C5D4E8", minHeight: "100vh" },
-    hdr: { fontSize: 22, fontWeight: 700, color: "#E8EFF8", marginBottom: 4 },
-    sub: { fontSize: 12, color: "#4D6A8A", marginBottom: 20 },
-    tabs: { display: "flex", gap: 0, marginBottom: 20, borderBottom: "1px solid #1C2A40" },
-    tab: { padding: "10px 20px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none", background: "transparent", color: "#4D6A8A", borderBottom: "2px solid transparent", transition: "all 0.2s" },
-    tabA: { padding: "10px 20px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none", background: "transparent", color: "#14B8A6", borderBottom: "2px solid #14B8A6", transition: "all 0.2s" },
-    card: { background: "#0D1520", border: "1px solid #1C2A40", borderRadius: 10, padding: "16px 20px" },
-    metricVal: { fontSize: 28, fontWeight: 700, color: "#E8EFF8", lineHeight: 1 },
-    metricLbl: { fontSize: 10, color: "#4D6A8A", marginTop: 4, textTransform: "uppercase" as const, letterSpacing: "0.06em" },
+    hdr: { fontSize: 22, fontWeight: 700, color: "var(--oiq-ink)", marginBottom: 4 },
+    sub: { fontSize: 12, color: "var(--oiq-muted)", marginBottom: 20 },
+    tabs: { display: "flex", gap: 0, marginBottom: 20, borderBottom: "1px solid var(--oiq-border)" },
+    tab: { padding: "10px 20px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none", background: "transparent", color: "var(--oiq-muted)", borderBottom: "2px solid transparent", transition: "all 0.2s" },
+    tabA: { padding: "10px 20px", fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none", background: "transparent", color: "var(--oiq-accent)", borderBottom: "2px solid var(--oiq-accent)", transition: "all 0.2s" },
+    card: { background: "#0D1520", border: "1px solid var(--oiq-border)", borderRadius: 10, padding: "16px 20px" },
+    metricVal: { fontSize: 28, fontWeight: 700, color: "var(--oiq-ink)", lineHeight: 1 },
+    metricLbl: { fontSize: 10, color: "var(--oiq-muted)", marginTop: 4, textTransform: "uppercase" as const, letterSpacing: "0.06em" },
     grid4: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 20 },
     grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 },
-    barBg: { height: 8, borderRadius: 4, background: "#1C2A40", overflow: "hidden" as const },
-    btn: { padding: "8px 16px", borderRadius: 6, border: "1px solid #14B8A644", background: "rgba(20,184,166,0.1)", color: "#14B8A6", fontSize: 12, fontWeight: 600, cursor: "pointer" },
-    btnSm: { padding: "6px 12px", borderRadius: 5, border: "1px solid #1C2A40", background: "transparent", color: "#8FA8CC", fontSize: 11, cursor: "pointer" },
+    barBg: { height: 8, borderRadius: 4, background: "var(--oiq-border)", overflow: "hidden" as const },
+    btn: { padding: "8px 16px", borderRadius: 6, border: "1px solid var(--oiq-accent)44", background: "rgba(20,184,166,0.1)", color: "var(--oiq-accent)", fontSize: 12, fontWeight: 600, cursor: "pointer" },
+    btnSm: { padding: "6px 12px", borderRadius: 5, border: "1px solid var(--oiq-border)", background: "transparent", color: "var(--oiq-body)", fontSize: 11, cursor: "pointer" },
     table: { width: "100%", borderCollapse: "collapse" as const, fontSize: 11 },
-    th: { textAlign: "left" as const, padding: "8px 10px", borderBottom: "1px solid #1C2A40", color: "#4D6A8A", fontWeight: 600, fontSize: 10, textTransform: "uppercase" as const, letterSpacing: "0.06em" },
+    th: { textAlign: "left" as const, padding: "8px 10px", borderBottom: "1px solid var(--oiq-border)", color: "var(--oiq-muted)", fontWeight: 600, fontSize: 10, textTransform: "uppercase" as const, letterSpacing: "0.06em" },
     td: { padding: "8px 10px", borderBottom: "1px solid #0D1520" },
     badge: { display: "inline-block", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600 },
-    upload: { border: "2px dashed #1C2A40", borderRadius: 10, padding: "40px 20px", textAlign: "center" as const, cursor: "pointer" },
-    aiBox: { background: "#0A0F18", border: "1px solid #1C2A40", borderRadius: 8, padding: "16px 20px", fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap" as const, maxHeight: 500, overflowY: "auto" as const },
+    upload: { border: "2px dashed var(--oiq-border)", borderRadius: 10, padding: "40px 20px", textAlign: "center" as const, cursor: "pointer" },
+    aiBox: { background: "#0A0F18", border: "1px solid var(--oiq-border)", borderRadius: 8, padding: "16px 20px", fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap" as const, maxHeight: 500, overflowY: "auto" as const },
   };
 
-  if(loading) return <div style={{...S.wrap, display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:"#4D6A8A"}}>Loading Service Desk...</div></div>;
+  if(loading) return <div style={{...S.wrap, display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:"var(--oiq-muted)"}}>Loading Service Desk...</div></div>;
 
   return (
     <div style={S.wrap}>
@@ -349,7 +349,7 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
           {/* Top metrics */}
           <div style={S.grid4}>
             {[
-              { val: metrics.total, lbl: "Total Tickets", color: "#8FA8CC" },
+              { val: metrics.total, lbl: "Total Tickets", color: "var(--oiq-body)" },
               { val: metrics.open, lbl: "Open Tickets", color: "#3B82F6" },
               { val: metrics.resolved, lbl: "Resolved", color: "#10B981" },
               { val: metrics.slaPct.toFixed(1)+"%", lbl: "SLA Compliance", color: (metrics.slaPct>=95?"#10B981":metrics.slaPct>=85?"#F59E0B":"#EF4444") },
@@ -368,7 +368,7 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
           {/* Status + Priority split */}
           <div style={S.grid2}>
             <div style={S.card}>
-              <div style={{fontSize:12,fontWeight:700,color:"#E8EFF8",marginBottom:12}}>By Status</div>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--oiq-ink)",marginBottom:12}}>By Status</div>
               {STATUSES.map(s=>{
                 const c = metrics.byStatus[s]||0;
                 const pct = metrics.total>0 ? c/metrics.total*100 : 0;
@@ -376,7 +376,7 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
                   <div key={s} style={{marginBottom:8}}>
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
                       <span style={{color:STATUS_COLOR[s]}}>{s}</span>
-                      <span style={{color:"#4D6A8A"}}>{c} ({pct.toFixed(0)}%)</span>
+                      <span style={{color:"var(--oiq-muted)"}}>{c} ({pct.toFixed(0)}%)</span>
                     </div>
                     <div style={S.barBg}><div style={{height:8,borderRadius:4,background:STATUS_COLOR[s],width:pct+"%",transition:"width 0.5s"}}/></div>
                   </div>
@@ -385,7 +385,7 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
             </div>
 
             <div style={S.card}>
-              <div style={{fontSize:12,fontWeight:700,color:"#E8EFF8",marginBottom:12}}>By Priority</div>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--oiq-ink)",marginBottom:12}}>By Priority</div>
               {PRIORITIES.map(p=>{
                 const c = metrics.byPriority[p]||0;
                 const pct = metrics.total>0 ? c/metrics.total*100 : 0;
@@ -393,7 +393,7 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
                   <div key={p} style={{marginBottom:8}}>
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
                       <span style={{color:PRI_COLOR[p]}}>{p}</span>
-                      <span style={{color:"#4D6A8A"}}>{c} ({pct.toFixed(0)}%)</span>
+                      <span style={{color:"var(--oiq-muted)"}}>{c} ({pct.toFixed(0)}%)</span>
                     </div>
                     <div style={S.barBg}><div style={{height:8,borderRadius:4,background:PRI_COLOR[p],width:pct+"%",transition:"width 0.5s"}}/></div>
                   </div>
@@ -404,12 +404,12 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
 
           {/* Aging Buckets */}
           <div style={{...S.card, marginBottom:20}}>
-            <div style={{fontSize:12,fontWeight:700,color:"#E8EFF8",marginBottom:12}}>Aging Analysis (Open Tickets)</div>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--oiq-ink)",marginBottom:12}}>Aging Analysis (Open Tickets)</div>
             <div style={{display:"flex",gap:10}}>
               {metrics.agingBuckets.map((b,i)=>(
-                <div key={i} style={{flex:1,textAlign:"center",padding:"12px 6px",background:b.count>0?(i>=4?"rgba(239,68,68,0.1)":i>=3?"rgba(245,158,11,0.1)":"rgba(20,184,166,0.05)"):"transparent",borderRadius:8,border:"1px solid "+(b.count>0?(i>=4?"#EF444444":i>=3?"#F59E0B44":"#1C2A40"):"#1C2A40")}}>
-                  <div style={{fontSize:20,fontWeight:700,color:b.count>0?(i>=4?"#EF4444":i>=3?"#F59E0B":"#14B8A6"):"#2D4460"}}>{b.count}</div>
-                  <div style={{fontSize:9,color:"#4D6A8A",marginTop:2}}>{b.label}</div>
+                <div key={i} style={{flex:1,textAlign:"center",padding:"12px 6px",background:b.count>0?(i>=4?"rgba(239,68,68,0.1)":i>=3?"rgba(245,158,11,0.1)":"rgba(20,184,166,0.05)"):"transparent",borderRadius:8,border:"1px solid "+(b.count>0?(i>=4?"#EF444444":i>=3?"#F59E0B44":"var(--oiq-border)"):"var(--oiq-border)")}}>
+                  <div style={{fontSize:20,fontWeight:700,color:b.count>0?(i>=4?"#EF4444":i>=3?"#F59E0B":"var(--oiq-accent)"):"#2D4460"}}>{b.count}</div>
+                  <div style={{fontSize:9,color:"var(--oiq-muted)",marginTop:2}}>{b.label}</div>
                 </div>
               ))}
             </div>
@@ -418,7 +418,7 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
           {/* Team Performance */}
           {Object.keys(metrics.byTeam).length>0&&(
             <div style={{...S.card,marginBottom:20}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#E8EFF8",marginBottom:12}}>Team Performance</div>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--oiq-ink)",marginBottom:12}}>Team Performance</div>
               <table style={S.table}>
                 <thead><tr>
                   <th style={S.th}>Team</th><th style={S.th}>Total</th><th style={S.th}>Resolved</th>
@@ -440,7 +440,7 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
           {/* Member Performance */}
           {Object.keys(metrics.byMember).length>0&&(
             <div style={{...S.card,marginBottom:20}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#E8EFF8",marginBottom:12}}>Individual Productivity</div>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--oiq-ink)",marginBottom:12}}>Individual Productivity</div>
               <table style={S.table}>
                 <thead><tr>
                   <th style={S.th}>Member</th><th style={S.th}>Assigned</th><th style={S.th}>Resolved</th>
@@ -462,13 +462,13 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
           {/* Pending Reasons */}
           {Object.keys(metrics.pendingReasons).length>0&&(
             <div style={S.card}>
-              <div style={{fontSize:12,fontWeight:700,color:"#E8EFF8",marginBottom:12}}>Top Pending Reasons</div>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--oiq-ink)",marginBottom:12}}>Top Pending Reasons</div>
               {Object.entries(metrics.pendingReasons).sort((a,b)=>b[1]-a[1]).map(([reason,count])=>{
                 const maxR = Math.max(...Object.values(metrics.pendingReasons));
                 return (
                   <div key={reason} style={{marginBottom:6}}>
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}>
-                      <span style={{color:"#C5D4E8"}}>{reason}</span><span style={{color:"#4D6A8A"}}>{count}</span>
+                      <span style={{color:"#C5D4E8"}}>{reason}</span><span style={{color:"var(--oiq-muted)"}}>{count}</span>
                     </div>
                     <div style={S.barBg}><div style={{height:6,borderRadius:3,background:"#F59E0B",width:(count/maxR*100)+"%"}}/></div>
                   </div>
@@ -480,8 +480,8 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
           {metrics.total===0&&(
             <div style={{...S.card,textAlign:"center",padding:40}}>
               <div style={{fontSize:40,marginBottom:12}}>📤</div>
-              <div style={{fontSize:14,color:"#E8EFF8",fontWeight:600,marginBottom:6}}>No ticket data yet</div>
-              <div style={{fontSize:12,color:"#4D6A8A",marginBottom:16}}>Upload a CSV from ServiceNow, Concur, or any ticketing system to get started</div>
+              <div style={{fontSize:14,color:"var(--oiq-ink)",fontWeight:600,marginBottom:6}}>No ticket data yet</div>
+              <div style={{fontSize:12,color:"var(--oiq-muted)",marginBottom:16}}>Upload a CSV from ServiceNow, Concur, or any ticketing system to get started</div>
               <button style={S.btn} onClick={()=>setTab("upload")}>Upload Data →</button>
             </div>
           )}
@@ -503,7 +503,7 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
               {PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
             </select>
             <div style={{flex:1}}/>
-            <span style={{fontSize:11,color:"#4D6A8A"}}>{filtered.length} tickets</span>
+            <span style={{fontSize:11,color:"var(--oiq-muted)"}}>{filtered.length} tickets</span>
           </div>
           <div style={{...S.card,overflowX:"auto"}}>
             <table style={S.table}>
@@ -513,18 +513,18 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
                 <th style={S.th}>Status</th><th style={S.th}>Age</th><th style={S.th}>SLA</th>
               </tr></thead>
               <tbody>
-                {filtered.length===0&&<tr><td colSpan={9} style={{...S.td,textAlign:"center",color:"#4D6A8A",padding:30}}>No tickets found</td></tr>}
+                {filtered.length===0&&<tr><td colSpan={9} style={{...S.td,textAlign:"center",color:"var(--oiq-muted)",padding:30}}>No tickets found</td></tr>}
                 {filtered.slice(0,100).map(t=>(
                   <tr key={t.id} style={{cursor:"pointer"}} onMouseEnter={e=>(e.currentTarget.style.background="#0A0F18")} onMouseLeave={e=>(e.currentTarget.style.background="transparent")}>
-                    <td style={{...S.td,color:"#14B8A6",fontWeight:600,fontFamily:"JetBrains Mono, monospace"}}>{t.ticket_number}</td>
-                    <td style={{...S.td,fontSize:10,color:"#4D6A8A"}}>{t.created_date||"–"}</td>
+                    <td style={{...S.td,color:"var(--oiq-accent)",fontWeight:600,fontFamily:"JetBrains Mono, monospace"}}>{t.ticket_number}</td>
+                    <td style={{...S.td,fontSize:10,color:"var(--oiq-muted)"}}>{t.created_date||"–"}</td>
                     <td style={S.td}><span style={{...S.badge,background:PRI_COLOR[t.priority]+"22",color:PRI_COLOR[t.priority]}}>{t.priority}</span></td>
-                    <td style={{...S.td,color:"#8FA8CC"}}>{t.category||"–"}</td>
+                    <td style={{...S.td,color:"var(--oiq-body)"}}>{t.category||"–"}</td>
                     <td style={{...S.td,color:"#C5D4E8"}}>{t.requestor||"–"}</td>
                     <td style={{...S.td,color:"#C5D4E8"}}>{t.assigned_member||t.current_owner||"–"}</td>
                     <td style={S.td}><span style={{...S.badge,background:(STATUS_COLOR[t.status]||"#6B7280")+"22",color:STATUS_COLOR[t.status]||"#6B7280"}}>{t.status}</span></td>
                     <td style={{...S.td,color:(t.ticket_age_days||0)>10?"#EF4444":(t.ticket_age_days||0)>5?"#F59E0B":"#10B981",fontWeight:600}}>{t.ticket_age_days||0}d</td>
-                    <td style={S.td}>{t.sla_breached===true?<span style={{color:"#EF4444",fontWeight:700}}>⚠ Breach</span>:t.sla_breached===false?<span style={{color:"#10B981"}}>✓</span>:<span style={{color:"#4D6A8A"}}>–</span>}</td>
+                    <td style={S.td}>{t.sla_breached===true?<span style={{color:"#EF4444",fontWeight:700}}>⚠ Breach</span>:t.sla_breached===false?<span style={{color:"#10B981"}}>✓</span>:<span style={{color:"var(--oiq-muted)"}}>–</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -537,43 +537,43 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
       {tab==="upload"&&(
         <div>
           <div style={{...S.card,marginBottom:20}}>
-            <div style={{fontSize:14,fontWeight:700,color:"#E8EFF8",marginBottom:8}}>Upload Ticket Data</div>
-            <div style={{fontSize:12,color:"#4D6A8A",marginBottom:16}}>
+            <div style={{fontSize:14,fontWeight:700,color:"var(--oiq-ink)",marginBottom:8}}>Upload Ticket Data</div>
+            <div style={{fontSize:12,color:"var(--oiq-muted)",marginBottom:16}}>
               Upload a CSV exported from ServiceNow, Concur, Helpdesk, or any ticketing system. Column headers are auto-mapped.
             </div>
             <div style={S.upload} onClick={()=>fileRef.current?.click()}>
               <input ref={fileRef} type="file" accept=".csv" onChange={handleUpload} style={{display:"none"}}/>
               {uploading ? (
-                <div style={{color:"#14B8A6"}}>⏳ Importing tickets...</div>
+                <div style={{color:"var(--oiq-accent)"}}>⏳ Importing tickets...</div>
               ) : (
                 <>
                   <div style={{fontSize:36,marginBottom:8}}>📄</div>
                   <div style={{fontSize:13,color:"#C5D4E8",fontWeight:600}}>Click to upload CSV</div>
-                  <div style={{fontSize:11,color:"#4D6A8A",marginTop:4}}>or drag and drop</div>
+                  <div style={{fontSize:11,color:"var(--oiq-muted)",marginTop:4}}>or drag and drop</div>
                 </>
               )}
             </div>
             {uploadResult&&(
               <div style={{marginTop:12,padding:"10px 14px",borderRadius:6,background:uploadResult.errors>0?"rgba(245,158,11,0.1)":"rgba(16,185,129,0.1)",border:"1px solid "+(uploadResult.errors>0?"#F59E0B44":"#10B98144")}}>
-                <span style={{fontSize:12,color:"#E8EFF8"}}>✅ {uploadResult.success} tickets imported</span>
+                <span style={{fontSize:12,color:"var(--oiq-ink)"}}>✅ {uploadResult.success} tickets imported</span>
                 {uploadResult.errors>0&&<span style={{fontSize:12,color:"#F59E0B",marginLeft:10}}>⚠ {uploadResult.errors} rows skipped</span>}
               </div>
             )}
           </div>
 
           <div style={S.card}>
-            <div style={{fontSize:12,fontWeight:700,color:"#E8EFF8",marginBottom:10}}>Supported Column Headers</div>
-            <div style={{fontSize:11,color:"#4D6A8A",lineHeight:1.8}}>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--oiq-ink)",marginBottom:10}}>Supported Column Headers</div>
+            <div style={{fontSize:11,color:"var(--oiq-muted)",lineHeight:1.8}}>
               The system auto-maps common headers. Examples of recognized columns:
             </div>
             <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:10}}>
               {["Ticket Number","Created Date","Priority","Category","Status","Assigned To","Team",
                 "Requestor","Department","Resolution Date","Closed Date","CSAT","Pending Reason",
                 "First Response","Resolved By","Notes"].map(h=>(
-                <span key={h} style={{...S.badge,background:"#1C2A40",color:"#8FA8CC",padding:"3px 8px"}}>{h}</span>
+                <span key={h} style={{...S.badge,background:"var(--oiq-border)",color:"var(--oiq-body)",padding:"3px 8px"}}>{h}</span>
               ))}
             </div>
-            <div style={{fontSize:11,color:"#4D6A8A",marginTop:12}}>
+            <div style={{fontSize:11,color:"var(--oiq-muted)",marginTop:12}}>
               Priority values like "Critical", "High", "Medium", "Low" or "1","2","3","4" are auto-converted to P1–P4.
             </div>
           </div>
@@ -598,13 +598,13 @@ export default function ServiceDesk({ co, compData, ask, supabase, userId }: Pro
             ))}
           </div>
           {metrics.total===0&&(
-            <div style={{...S.card,textAlign:"center",padding:30,color:"#4D6A8A",fontSize:12}}>
+            <div style={{...S.card,textAlign:"center",padding:30,color:"var(--oiq-muted)",fontSize:12}}>
               Upload ticket data first to generate AI reports
             </div>
           )}
           {aiLoading&&(
             <div style={{...S.card,textAlign:"center",padding:30}}>
-              <div style={{color:"#14B8A6",fontSize:13}}>🤖 AI agents analyzing your operations data...</div>
+              <div style={{color:"var(--oiq-accent)",fontSize:13}}>🤖 AI agents analyzing your operations data...</div>
             </div>
           )}
           {aiResult&&!aiLoading&&(
