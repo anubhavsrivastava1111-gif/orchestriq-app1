@@ -673,3 +673,137 @@
 #oiq-root div[style*="background:#0E1523"] {
   background-color: #FFFFFF !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   OIQ MOCKUP LAYER — appended last so it wins on equal specificity.
+
+   WHY THIS EXISTS
+   The rules above were written when the sidebar was going to be LIGHT. They
+   give sidebar children `color: var(--t3)` (dark-on-light text) and the final
+   rule in this file forces every dark panel to #FFFFFF. Meanwhile
+   `.oiq-sidebar` itself is set to `var(--sb-bg)`, which is dark in all eight
+   themes. The result is a white sidebar carrying text coloured for a dark one.
+
+   This layer resolves that contradiction: the chrome (sidebar, header, ticker,
+   nerve tabs) becomes a single continuous dark surface in the theme's own
+   colour, exactly as in the reference mockup, with text and accents to match.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. Undo the blanket white-panel rule inside the chrome ───────────────── */
+.oiq-sidebar div[style*="background:#131825"],
+.oiq-sidebar div[style*="background:#0a0e1a"],
+.oiq-sidebar div[style*="background:#0E1523"],
+#oiq-header div[style*="background:#131825"],
+#oiq-header div[style*="background:#0a0e1a"],
+.oiq-nerve-tabs div[style*="background:#131825"] {
+  background-color: transparent !important;
+}
+
+/* ── 2. The chrome is one continuous dark surface ─────────────────────────── */
+.oiq-sidebar,
+#oiq-header,
+.oiq-nerve-tabs {
+  background: var(--sb-bg) !important;
+  border-color: var(--sb-bdr) !important;
+}
+
+.oiq-sidebar * ,
+#oiq-header * ,
+.oiq-nerve-tabs * {
+  background-color: transparent !important;
+  border-color: var(--sb-bdr) !important;
+}
+
+/* ── 3. Text on the chrome, per theme ─────────────────────────────────────── */
+.oiq-sidebar,
+.oiq-sidebar *,
+#oiq-header,
+#oiq-header *,
+.oiq-nerve-tabs,
+.oiq-nerve-tabs * {
+  color: var(--oiq-sbText) !important;
+}
+
+/* Secondary / caption text inside the chrome */
+.oiq-sidebar span[style*="font-size:9"],
+.oiq-sidebar span[style*="fontSize:9"],
+.oiq-sidebar div[style*="font-size:9"],
+.oiq-sidebar div[style*="font-size:10"],
+.oiq-sidebar [style*="#5A6480"],
+.oiq-sidebar [style*="#3A4060"] {
+  color: var(--oiq-sbDim) !important;
+}
+
+/* Section headings — Executive / Finance / Technology */
+.oiq-sidebar div[style*="text-transform:uppercase"],
+.oiq-sidebar div[style*="textTransform:uppercase"] {
+  color: var(--oiq-sbDim) !important;
+  letter-spacing: .14em !important;
+  font-weight: 800 !important;
+}
+
+/* ── 4. Selected + active states carry the theme accent ───────────────────── */
+.oiq-sidebar [style*="rgba(20,184,166"],
+.oiq-sidebar [style*="rgba(20, 184, 166"],
+.oiq-nerve-tabs [style*="rgba(20,184,166"],
+.oiq-nerve-tabs [style*="rgba(20, 184, 166"] {
+  background-color: var(--oiq-accent) !important;
+  border-color: var(--oiq-accent) !important;
+}
+.oiq-sidebar [style*="rgba(20,184,166"] *,
+.oiq-sidebar [style*="rgba(20, 184, 166"] *,
+.oiq-nerve-tabs [style*="rgba(20,184,166"] *,
+.oiq-nerve-tabs [style*="rgba(20, 184, 166"] * {
+  color: var(--oiq-accentText) !important;
+}
+
+/* Hover — a lift, not a colour change */
+.oiq-sidebar button:hover {
+  background-color: var(--accent-10) !important;
+}
+
+/* ── 5. Brand mark and module trigger, mockup weights ─────────────────────── */
+.oiq-sidebar span[style*="font-weight:900"],
+.oiq-sidebar span[style*="fontWeight:900"] {
+  color: var(--oiq-accent) !important;
+}
+
+.oiq-sidebar select,
+.oiq-sidebar select option {
+  background-color: var(--sb-bg) !important;
+  color: var(--oiq-sbText) !important;
+  border-color: var(--sb-bdr) !important;
+}
+
+/* ── 6. Status dots keep their meaning — never recoloured ─────────────────── */
+.oiq-sidebar span[style*="border-radius:50%"],
+.oiq-sidebar span[style*="borderRadius:'50%'"],
+.oiq-sidebar span[style*="border-radius: 50%"] {
+  background-color: currentColor !important;
+}
+
+/* ── 7. Page canvas and typography ────────────────────────────────────────── */
+#oiq-root {
+  background: var(--oiq-bg) !important;
+}
+#oiq-main {
+  background: var(--oiq-bg) !important;
+}
+
+/* Headings use the theme's display face. Fraunces on Executive Editorial,
+   EB Garamond on Institutional Gold, Lexend on Analytics Blue, and so on. */
+#oiq-main div[style*="font-size:3"],
+#oiq-main div[style*="fontSize:3"],
+#oiq-main div[style*="font-size:2"],
+#oiq-main div[style*="fontSize:2"],
+#oiq-main h1, #oiq-main h2, #oiq-main h3 {
+  font-family: var(--font-head) !important;
+  letter-spacing: -.02em !important;
+}
+
+/* ── 8. Dark themes must not be forced white ──────────────────────────────── */
+[data-oiq-mode="dark"] #oiq-root div[style*="background:#131825"],
+[data-oiq-mode="dark"] #oiq-root div[style*="background:#0a0e1a"],
+[data-oiq-mode="dark"] #oiq-root div[style*="background:#0E1523"] {
+  background-color: var(--oiq-surface) !important;
+}
