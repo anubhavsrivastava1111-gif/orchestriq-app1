@@ -2276,6 +2276,7 @@ export default function App(){
   const [sbOpen,setSbOpen]=useState(false);
   const [showModules,setShowModules]=useState(false);
   const [me,setMe]=useState<{email:string;role:string}>({email:"",role:""});
+  const [showExecs,setShowExecs]=useState(false);
   const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return WorkspaceMemory.get<string>("oiq-sb-col")==="1";}catch{return false;}});
   const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:""});
   const [mediaMode,setMediaMode]=useState({image:"prompts",video:"veo"});
@@ -5705,8 +5706,12 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 
         {/* ── EXECUTIVE ROSTER ── */}
         <div style={{flex:1,overflowY:"auto",padding:"0 10px 10px"}}>
-          <div style={{fontSize:9,fontWeight:800,color:"var(--oiq-sbDim)",letterSpacing:".14em",textTransform:"uppercase",padding:"2px 4px 8px"}}>Executives</div>
-          {DEPTS.map(dept=>(
+          <button onClick={()=>setShowExecs(v=>!v)}
+            style={{width:"100%",display:"flex",alignItems:"center",gap:7,padding:"8px 4px",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit"}}>
+            <span style={{fontSize:9,fontWeight:800,color:"var(--oiq-sbDim)",letterSpacing:".14em",textTransform:"uppercase"}}>Executives</span>
+            <span style={{marginLeft:"auto",fontSize:9,color:"var(--oiq-sbDim)",transition:"transform .15s",transform:showExecs?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
+          </button>
+          {showExecs&&DEPTS.map(dept=>(
             <div key={dept.id} style={{marginBottom:2}}>
               <button onClick={()=>{const n={...expD,[dept.id]:!expD[dept.id]};setExpD(n);sv("cos-dp",n);}}
                 style={{width:"100%",display:"flex",alignItems:"center",gap:7,padding:"7px 8px",background:"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>
@@ -5738,9 +5743,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               {(me.role==="super_admin"?"Super Admin":me.role==="admin"?"Admin":"User")}{co.location?" · "+co.location:""}
             </div>
           </div>
-          <button onClick={()=>setShowExport(true)} title="Export Studio" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,padding:2,color:"var(--oiq-sbDim)"}}>🎨</button>
-          <button onClick={()=>{setShowSettings(true);setSTab("api");}} title="Settings" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,padding:2,color:"var(--oiq-sbDim)"}}>⚙</button>
-          <button onClick={()=>setShowSignOutConfirm(true)} title="Sign Out" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,padding:2,color:"var(--oiq-sbDim)"}}>⎋</button>
+          <button onClick={()=>{setShowSettings(true);setSTab("api");}} title="Settings" style={{background:"none",border:"none",cursor:"pointer",fontSize:14,padding:2,color:"var(--oiq-sbDim)"}}>⚙</button>
+          <button onClick={()=>setShowSignOutConfirm(true)} title="Sign Out" style={{background:"none",border:"none",cursor:"pointer",fontSize:14,padding:2,color:"#EF4444"}}>⎋</button>
         </div>
       </div>
         {/* ── MODULE DROPDOWN TRIGGER ── */}
