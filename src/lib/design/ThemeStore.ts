@@ -172,22 +172,60 @@ export function getTheme(id: string): Theme {
   return THEMES.find(t => t.id === id) || THEMES.find(t => t.id === "midnight")!;
 }
 
-// Applies the theme.
+// ── THEME APPLICATION ENGINE ───────────────────────────────────────────────
 //
-// WHY THIS USES JAVASCRIPT, NOT CSS SELECTORS:
+// WHY THIS IS JAVASCRIPT AND NOT CSS:
 // React writes inline styles into the DOM as rgb() — `background:"#070C18"`
-// becomes `style="background: rgb(7, 12, 24)"`. CSS attribute selectors like
-// [style*="#070C18"] therefore never match, which is why some modules never
-// restyled. We instead walk the DOM, read each element's ACTUAL colour, and
-// swap it. Format-independent, so it works on every module.
+// becomes `style="background: rgb(7, 12, 24)"`. CSS attribute selectors that
+// match on hex text therefore never fire. We walk the DOM instead.
+//
+// THREE PASSES, in order:
+//   1. TRANSLATE  — swap known colours via an explicit table (precise).
+//   2. GENERALISE — anything very dark that the table missed still gets moved
+//                   onto the theme surface, so unknown hexes cannot leave a
+//                   black block sitting in a light theme.
+//   3. REPAIR     — measure real WCAG contrast of every piece of text against
+//                   its actual background and re-colour anything unreadable.
+//
+// Pass 3 is what makes all eight themes hold together. Passes 1 and 2 move
+// colours one at a time and lose the pairing between a surface and the text
+// sitting on it; pass 3 puts that pairing back by measurement, not guesswork.
 
-const HEX = (h: string) => {
+type RGB = [number, number, number];
+
+const hexToRgb = (h: string): RGB => {
   const n = h.replace("#", "");
-  return [parseInt(n.slice(0,2),16), parseInt(n.slice(2,4),16), parseInt(n.slice(4,6),16)];
+  return [parseInt(n.slice(0, 2), 16), parseInt(n.slice(2, 4), 16), parseInt(n.slice(4, 6), 16)];
 };
-const RGB = (h: string) => { const [r,g,b] = HEX(h); return `rgb(${r}, ${g}, ${b})`; };
+const rgbStr = (h: string) => { const [r, g, b] = hexToRgb(h); return `rgb(${r}, ${g}, ${b})`; };
+
+// Parse any CSS colour string the browser can hand back.
+const parseColour = (v: string): RGB | null => {
+  if (!v) return null;
+  const s = v.trim().toLowerCase();
+  if (s === "transparent" || s.startsWith("rgba(0, 0, 0, 0")) return null;
+  const m = s.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
+  if (m) return [Math.round(+m[1]), Math.round(+m[2]), Math.round(+m[3])];
+  if (s.startsWith("#")) {
+    const n = s.slice(1);
+    if (n.length === 3) return [parseInt(n[0] + n[0], 16), parseInt(n[1] + n[1], 16), parseInt(n[2] + n[2], 16)];
+    if (n.length >= 6) return hexToRgb(s);
+  }
+  return null;
+};
+
+// Relative luminance + WCAG contrast ratio.
+const lum = (c: RGB) => {
+  const f = (v: number) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
+  return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+};
+const contrast = (a: RGB, b: RGB) => {
+  const l1 = lum(a), l2 = lum(b);
+  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+};
 
 let observer: MutationObserver | null = null;
+let timer = 0;
 
 export function applyDesign(p: Prefs) {
   const t = getTheme(p.themeId);
@@ -207,63 +245,145 @@ export function applyDesign(p: Prefs) {
   set("--oiq-scale", String(ts.scale * d.scale));
   r.setAttribute("data-oiq-theme", t.id);
   r.setAttribute("data-oiq-mode", t.mode);
+  document.body.style.setProperty("background", t.c.bg, "important");
 
-  // ── Colour translation table: every dark colour used anywhere → theme colour
-  const M: Record<string,string> = {};
-  const add = (from: string, to: string) => {
-    M[from.toLowerCase()] = to;
-    M[RGB(from)] = to;
-  };
-  // App.tsx
-  add("#0a0e1a", t.c.bg);    add("#0c1120", t.c.surface2); add("#131825", t.c.surface);
+  const light = t.mode === "light";
+  const inkRGB = parseColour(t.c.ink) as RGB;
+  const bodyRGB = parseColour(t.c.body) as RGB;
+  const surfRGB = parseColour(t.c.surface) as RGB;
+  const bgRGB = parseColour(t.c.bg) as RGB;
+
+  // ── PASS 1 table: known colours → theme colours ──
+  const M: Record<string, string> = {};
+  const add = (from: string, to: string) => { M[from.toLowerCase()] = to; M[rgbStr(from)] = to; };
+  // App.tsx surfaces
+  add("#0a0e1a", t.c.bg);     add("#0c1120", t.c.surface2); add("#131825", t.c.surface);
   add("#1a2030", t.c.border); add("#14192a", t.c.border);   add("#080c18", t.c.surface2);
   add("#0E1523", t.c.surface);
-  // CommandCenter / AgenticWorkflows / AIAgents / Dispatch / Ledger
-  add("#0B1120", t.c.bg);    add("#070C18", t.c.bg);       add("#0d1829", t.c.surface2);
-  add("#111827", t.c.surface); add("#0F1829", t.c.surface); add("#141F33", t.c.surface2);
-  add("#1C2A40", t.c.border); add("#1E2D3D", t.c.border);   add("#243044", t.c.border);
-  add("#0F1117", t.c.sbBg);  add("#151C2C", t.c.surface);
+  // Module surfaces
+  add("#0B1120", t.c.bg);      add("#070C18", t.c.bg);       add("#0d1829", t.c.surface2);
+  add("#111827", t.c.surface); add("#0F1829", t.c.surface);  add("#141F33", t.c.surface2);
+  add("#1C2A40", t.c.border);  add("#1E2D3D", t.c.border);   add("#243044", t.c.border);
+  add("#0F1117", t.c.sbBg);    add("#151C2C", t.c.surface);
   // Text
-  add("#F1F5F9", t.c.ink);   add("#F0F4FF", t.c.ink);      add("#E8EFF8", t.c.ink);
-  add("#A0AAC0", t.c.body);  add("#8FA8CC", t.c.body);     add("#8892B0", t.c.body);
-  add("#94A3B8", t.c.body);  add("#5A6480", t.c.muted);    add("#4D6A8A", t.c.muted);
+  add("#F1F5F9", t.c.ink);   add("#F0F4FF", t.c.ink);   add("#E8EFF8", t.c.ink);
+  add("#A0AAC0", t.c.body);  add("#8FA8CC", t.c.body);  add("#8892B0", t.c.body);
+  add("#94A3B8", t.c.body);  add("#5A6480", t.c.muted); add("#4D6A8A", t.c.muted);
   add("#64748B", t.c.muted); add("#3A4060", t.c.faint);
 
   const root = document.getElementById("oiq-root");
   if (!root) return;
 
-  // Walk every element and swap colours that match the table.
+  // Read the original value once and remember it, so switching from theme A to
+  // theme B still resolves against the SOURCE colour rather than theme A's.
+  const orig = (el: HTMLElement, key: string, live: string): string => {
+    const had = el.dataset[key];
+    if (had !== undefined) return had;
+    el.dataset[key] = live || "";
+    return live || "";
+  };
+
+  // Effective background behind an element: walk up until something opaque.
+  const behind = (el: HTMLElement): RGB => {
+    let n: HTMLElement | null = el;
+    for (let i = 0; i < 12 && n; i++) {
+      const c = parseColour(getComputedStyle(n).backgroundColor);
+      if (c) return c;
+      n = n.parentElement;
+    }
+    return bgRGB;
+  };
+
   const paint = () => {
     const all = root.querySelectorAll<HTMLElement>("*");
+
     all.forEach(el => {
       const s = el.style;
-      const swap = (prop: "backgroundColor"|"color"|"borderColor") => {
-        const cur = s[prop];
-        if (!cur) return;
-        const hit = M[cur.toLowerCase()];
-        if (hit) {
-          if (!el.dataset.oiqOrig) el.dataset.oiqOrig = "1";
-          s.setProperty(prop === "backgroundColor" ? "background-color"
-            : prop === "borderColor" ? "border-color" : "color", hit, "important");
+
+      // ---- PASS 1 + 2: surfaces, text and borders ----
+      const move = (prop: "backgroundColor" | "color" | "borderColor", css: string, key: string) => {
+        const src = orig(el, key, s[prop]);
+        if (!src) return;
+        const hit = M[src.toLowerCase()];
+        if (hit) { s.setProperty(css, hit, "important"); return; }
+        // PASS 2 — unknown colour. Only rescue extremes, so brand accents,
+        // status colours and charts keep their identity.
+        const c = parseColour(src);
+        if (!c) return;
+        const L = lum(c);
+        if (light) {
+          if (prop === "backgroundColor" && L < 0.10) s.setProperty(css, t.c.surface, "important");
+          if (prop === "borderColor" && L < 0.14) s.setProperty(css, t.c.border, "important");
+        } else {
+          if (prop === "backgroundColor" && L > 0.85) s.setProperty(css, t.c.surface, "important");
+          if (prop === "borderColor" && L > 0.80) s.setProperty(css, t.c.border, "important");
         }
       };
-      swap("backgroundColor"); swap("color"); swap("borderColor");
+      move("backgroundColor", "background-color", "oiqBg");
+      move("color", "color", "oiqFg");
+      move("borderColor", "border-color", "oiqBd");
+
+      // ---- Gradients (the dark banners the table never caught) ----
+      const gsrc = orig(el, "oiqGrad", s.backgroundImage);
+      if (gsrc && gsrc.indexOf("gradient") >= 0) {
+        let out = gsrc;
+        Object.keys(M).forEach(k => { if (k.indexOf("rgb") === 0) out = out.split(k).join(M[k]); });
+        const stops = out.match(/rgba?\([^)]*\)/g) || [];
+        stops.forEach(st => {
+          const c = parseColour(st);
+          if (!c) return;
+          const L = lum(c);
+          if (light && L < 0.10) out = out.split(st).join(t.c.surface2);
+          if (!light && L > 0.85) out = out.split(st).join(t.c.surface2);
+        });
+        if (out !== gsrc) s.setProperty("background-image", out, "important");
+      }
     });
+
     root.style.setProperty("background", t.c.bg, "important");
     root.style.setProperty("color", t.c.body, "important");
+
+    // ---- PASS 3: contrast repair ----
+    // Anything that now fails WCAG against its real background gets re-coloured
+    // to whichever theme text colour reads best. This is the pass that stops
+    // text disappearing when a dark surface turns light underneath it.
+    all.forEach(el => {
+      if (!el.firstChild) return;
+      let hasText = false;
+      for (let i = 0; i < el.childNodes.length; i++) {
+        const n = el.childNodes[i];
+        if (n.nodeType === 3 && (n.textContent || "").trim().length > 0) { hasText = true; break; }
+      }
+      if (!hasText) return;
+
+      const cs = getComputedStyle(el);
+      const fg = parseColour(cs.color);
+      if (!fg) return;
+      const bg = behind(el);
+      if (contrast(fg, bg) >= 4.0) return;
+
+      const options: RGB[] = [inkRGB, bodyRGB, surfRGB, [255, 255, 255], [17, 17, 17]];
+      let best = options[0], bestC = 0;
+      options.forEach(o => { const c = contrast(o, bg); if (c > bestC) { bestC = c; best = o; } });
+      el.style.setProperty("color", `rgb(${best[0]}, ${best[1]}, ${best[2]})`, "important");
+    });
   };
 
   paint();
 
-  // Re-apply when React renders new content (switching modules, loading data)
+  // Re-apply when React renders new content. Debounced — large tables would
+  // otherwise trigger a full walk per inserted row.
   if (observer) observer.disconnect();
-  observer = new MutationObserver(() => { window.requestAnimationFrame(paint); });
+  observer = new MutationObserver(() => {
+    if (timer) return;
+    timer = window.setTimeout(() => { timer = 0; paint(); }, 90);
+  });
   observer.observe(root, { childList: true, subtree: true });
 
   // Fonts
   const fid = "oiq-font-link";
-  const fam = [t.fonts.heading, t.fonts.body].filter((v,i,a)=>a.indexOf(v)===i)
-    .map(f => "family=" + f.replace(/ /g,"+") + ":wght@400;500;600;700;800").join("&");
+  const fam = [t.fonts.heading, t.fonts.body].filter((v, i, a) => a.indexOf(v) === i)
+    .map(f => "family=" + f.replace(/ /g, "+") + ":wght@400;500;600;700;800").join("&");
   let link = document.getElementById(fid) as HTMLLinkElement | null;
   if (!link) { link = document.createElement("link"); link.id = fid; link.rel = "stylesheet"; document.head.appendChild(link); }
   link.href = `https://fonts.googleapis.com/css2?${fam}&display=swap`;
