@@ -924,3 +924,13 @@
   #oiq-hamburger { display: flex !important; }
   #oiq-root { padding-top: calc(var(--oiq-tick-h) + var(--hdr-h)) !important; }
 }
+
+/* ── SIDEBAR FOOTER PINNED TO THE BASE ─────────────────────────────────────
+   The roster above it stops growing when Executives is collapsed, so the
+   footer floated mid-panel. margin-top:auto pushes it to the floor whatever
+   is above it.                                                             */
+
+.oiq-sidebar > div:last-child {
+  margin-top: auto !important;
+  flex-shrink: 0 !important;
+}
