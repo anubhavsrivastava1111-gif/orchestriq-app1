@@ -1018,21 +1018,7 @@ export default function BoardroomView(props: BoardroomViewProps) {
                 <DecisionStatus status={stage.decisionStatus} tok={tok} />
               )}
             </div>
-            {/* Executive cards for this stage */}
-            {(stage.debate || []).map((e: any, ei: number) => (
-              <ExecutiveCard
-                key={ei} entry={e} index={ei} question={stage.question}
-                isDark={isDark} tok={tok}
-                drillRole={drillRole}
-                drillQ={drillQ} setDrillQ={setDrillQ}
-                drillRun={drillRun} runDrill={runDrill}
-                onDrill={() => setDrillRole(drillRole === e.ag.id ? null : e.ag.id)}
-                showDrillClose={() => { setDrillRole(null); setDrillQ(""); }}
-                onCopy={() => cp(e.text)}
-                onContinue={async () => showToast("Use the follow-up box below to continue.", "info")}
-              />
-            ))}
-            {/* Stage synthesis */}
+            {/* KPI strip + synthesis (renders the board's declared figures) */}
             {stage.synthesis && (
               <SynthesisCard
                 synthesis={stage.synthesis} question={stage.question}
@@ -1049,7 +1035,82 @@ export default function BoardroomView(props: BoardroomViewProps) {
                 extracting={extracting === "boardroom"}
               />
             )}
-            {/* Stage divider (not after last stage) */}
+
+            {/* ── TWO COLUMNS: debate left, decision + evidence right ── */}
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.55fr) minmax(0,1fr)", gap: 18, alignItems: "start" }}>
+
+              {/* LEFT — Executive Debate */}
+              <div style={{ borderRadius: 10, border: `1px solid ${tok.border}`, background: tok.surface, boxShadow: tok.shadow, overflow: "hidden" }}>
+                <div style={{ padding: "14px 20px", borderBottom: `1px solid ${tok.border}`, display: "flex", alignItems: "center" }}>
+                  <div style={{ fontFamily: "var(--font-head)", fontSize: 16, fontWeight: 600, color: tok.text }}>Executive Debate</div>
+                  <div style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 600, color: tok.accent }}>{(stage.debate || []).length} executives</div>
+                </div>
+                <div style={{ padding: "6px 14px 14px" }}>
+                  {(stage.debate || []).map((e: any, ei: number) => (
+                    <ExecutiveCard
+                      key={ei} entry={e} index={ei} question={stage.question}
+                      isDark={isDark} tok={tok}
+                      drillRole={drillRole}
+                      drillQ={drillQ} setDrillQ={setDrillQ}
+                      drillRun={drillRun} runDrill={runDrill}
+                      onDrill={() => setDrillRole(drillRole === e.ag.id ? null : e.ag.id)}
+                      showDrillClose={() => { setDrillRole(null); setDrillQ(""); }}
+                      onCopy={() => cp(e.text)}
+                      onContinue={async () => showToast("Use the follow-up box below to continue.", "info")}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* RIGHT — Board Decision + Evidence Quality */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                {stage.decisionStatus && (
+                  <div style={{ borderRadius: 10, border: `1px solid ${tok.border}`, background: tok.surface, boxShadow: tok.shadow, overflow: "hidden" }}>
+                    <div style={{ padding: "14px 20px", borderBottom: `1px solid ${tok.border}` }}>
+                      <div style={{ fontFamily: "var(--font-head)", fontSize: 16, fontWeight: 600, color: tok.text }}>Board Decision</div>
+                    </div>
+                    <div style={{ padding: 18 }}>
+                      <div style={{ background: "var(--oiq-sbBg)", borderRadius: 9, padding: 18 }}>
+                        <div style={{ fontSize: 9.5, fontWeight: 800, color: "var(--oiq-accent)", letterSpacing: ".14em", textTransform: "uppercase", marginBottom: 10 }}>
+                          ✓ {stage.decisionStatus}
+                        </div>
+                        <div style={{ fontFamily: "var(--font-head)", fontSize: 15, fontWeight: 600, color: "var(--oiq-sbText)", lineHeight: 1.55 }}>
+                          {(() => {
+                            const r = (stage.synthesis || "").match(/Reason:\s*(.+)/);
+                            const c = (stage.synthesis || "").match(/===CRUX===([\s\S]*?)===END_CRUX===/);
+                            return (c ? c[1] : r ? r[1] : "Open the synthesis for the full board position.").replace(/[*`_]/g, "").trim().slice(0, 240);
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ borderRadius: 10, border: `1px solid ${tok.border}`, background: tok.surface, boxShadow: tok.shadow, overflow: "hidden" }}>
+                  <div style={{ padding: "14px 20px", borderBottom: `1px solid ${tok.border}` }}>
+                    <div style={{ fontFamily: "var(--font-head)", fontSize: 16, fontWeight: 600, color: tok.text }}>Evidence Quality</div>
+                  </div>
+                  <div style={{ padding: "6px 20px 12px" }}>
+                    {(() => {
+                      const all = ((stage.debate || []).map((e: any) => e.text || "").join(" ") + " " + (stage.synthesis || ""));
+                      const n = (re: RegExp) => (all.match(re) || []).length;
+                      const rows = [
+                        { dot: tok.success, label: "Verified facts", n: n(/\[Verified Fact|TIER 1|TIER 2/gi), unit: "sources" },
+                        { dot: tok.warn, label: "Expert inference", n: n(/\[Estimate/gi), unit: "claims" },
+                        { dot: tok.danger, label: "Unverified estimate", n: n(/\[Assumption/gi), unit: "figures" },
+                      ];
+                      return rows.map((r, i) => (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, padding: "11px 0", borderBottom: i < 2 ? `1px solid ${tok.border}` : "none", fontSize: 12.5 }}>
+                          <span style={{ width: 9, height: 9, borderRadius: 999, background: r.dot, flexShrink: 0 }} />
+                          <span style={{ color: tok.text2 }}>{r.label}</span>
+                          <span style={{ marginLeft: "auto", fontWeight: 700, color: tok.text }}>{r.n} {r.unit}</span>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </div>
             {si < brCur.stages.length - 1 && (
               <div style={{ height: 1, background:
                 `linear-gradient(90deg, transparent, ${tok.accent}44, transparent)`,
