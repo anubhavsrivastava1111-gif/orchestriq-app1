@@ -115,6 +115,74 @@ function IntelligenceDrawer({ news, onClose }: { news: NewsItem | null; onClose:
   );
 }
 
+// ─── MARKET STRIP ────────────────────────────────────────────────────────────
+// Replaces the TradingView iframe. That widget rendered inside a sandboxed
+// frame, so no theme could reach it, and its 56px content was being clipped
+// into a 36px bar. This renders the reference layout from our own live feed.
+type Quote = { label: string; value: string; delta?: number };
+
+function useMarkets(): Quote[] {
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const fxList = [
+      { label: 'USD/INR', code: 'USD', dp: 2 },
+      { label: 'EUR/INR', code: 'EUR', dp: 2 },
+      { label: 'GBP/INR', code: 'GBP', dp: 2 },
+      { label: 'AED/INR', code: 'AED', dp: 3 },
+      { label: 'JPY/INR', code: 'JPY', dp: 4 },
+    ];
+    const load = async () => {
+      const out: Quote[] = [];
+      try {
+        const fx = await fetch('https://open.er-api.com/v6/latest/INR').then(r => r.json());
+        fxList.forEach(f => {
+          const r = fx?.rates?.[f.code];
+          if (r) out.push({ label: f.label, value: (1 / r).toFixed(f.dp) });
+        });
+      } catch { /* feed unavailable — strip degrades, never blocks */ }
+      try {
+        const cg = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true').then(r => r.json());
+        if (cg?.bitcoin) out.push({ label: 'BTC', value: Math.round(cg.bitcoin.usd).toLocaleString('en-US'), delta: cg.bitcoin.usd_24h_change });
+        if (cg?.ethereum) out.push({ label: 'ETH', value: Math.round(cg.ethereum.usd).toLocaleString('en-US'), delta: cg.ethereum.usd_24h_change });
+      } catch { /* same */ }
+      if (alive && out.length) setQuotes(out);
+    };
+    load();
+    const id = setInterval(load, 120000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+  return quotes;
+}
+
+function MarketStrip() {
+  const quotes = useMarkets();
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, height: 36, zIndex: 9991,
+      background: 'var(--sb-bg)', borderBottom: '1px solid var(--sb-bdr)',
+      display: 'flex', alignItems: 'stretch', overflow: 'hidden',
+    }}>
+      <div style={{ width: 70, background: 'var(--oiq-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--oiq-accentText)', letterSpacing: '.14em', textTransform: 'uppercase' }}>Markets</span>
+      </div>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 22, padding: '0 18px', overflow: 'hidden' }}>
+        {quotes.length === 0
+          ? <span style={{ fontSize: 11, color: 'var(--oiq-sbDim)' }}>Loading live rates…</span>
+          : quotes.map(q => (
+            <div key={q.label} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', flexShrink: 0 }}>
+              <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--oiq-sbDim)', letterSpacing: '.06em', textTransform: 'uppercase', lineHeight: 1.2 }}>{q.label}</span>
+              <span style={{
+                fontSize: 12.5, fontWeight: 700, lineHeight: 1.25, fontVariantNumeric: 'tabular-nums',
+                color: q.delta === undefined ? 'var(--oiq-sbText)' : q.delta >= 0 ? '#6EE7B7' : '#FCA5A5',
+              }}>{q.value}</span>
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+}
+
 export function GlobalTicker() {
   const { news: rawNews, loading, lastUpdated, refetch } = useNewsFeed(TICKER.refreshMs);
   const [category, setCategory] = useState<NewsCategory>('all');
@@ -161,30 +229,8 @@ export function GlobalTicker() {
 
   return (
     <>
-      {/* ── ROW 1: TRADINGVIEW MARKET DATA ── */}
-      <div style={{
-        position: 'fixed', top: 0, left: 0, right: 0,
-        height: '36px',
-        zIndex: 9991,
-        background: COLOR.bg,
-        borderBottom: `1px solid ${COLOR.border}`,
-        display: 'flex',
-        alignItems: 'center',
-        overflow: 'hidden',
-      }}>
-        <div style={{ width: 70, height: '100%', background: COLOR.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <span style={{ fontSize: TYPE.size10, fontWeight: TYPE.black, color: '#fff', letterSpacing: TYPE.wider_ls, textTransform: 'uppercase' }}>Markets</span>
-        </div>
-        <div style={{ flex: 1, height: '100%', overflow: 'hidden' }}>
-          <iframe
-            scrolling="no"
-            allowTransparency={true}
-            frameBorder="0"
-            src="https://s.tradingview.com/embed-widget/ticker-tape/?locale=en#%7B%22symbols%22%3A%5B%7B%22proName%22%3A%22BSE%3ASENSEX%22%2C%22title%22%3A%22Sensex%22%7D%2C%7B%22proName%22%3A%22NSE%3ANIFTY%22%2C%22title%22%3A%22Nifty%2050%22%7D%2C%7B%22proName%22%3A%22FX_IDC%3AUSDINR%22%2C%22title%22%3A%22USD%2FINR%22%7D%2C%7B%22proName%22%3A%22FX_IDC%3AEURINR%22%2C%22title%22%3A%22EUR%2FINR%22%7D%2C%7B%22proName%22%3A%22FX_IDC%3AGBPINR%22%2C%22title%22%3A%22GBP%2FINR%22%7D%2C%7B%22proName%22%3A%22FX_IDC%3AJPYINR%22%2C%22title%22%3A%22JPY%2FINR%22%7D%2C%7B%22proName%22%3A%22FX_IDC%3AAEDINR%22%2C%22title%22%3A%22AED%2FINR%22%7D%2C%7B%22proName%22%3A%22MCX%3AGOLD1%21%22%2C%22title%22%3A%22Gold%22%7D%2C%7B%22proName%22%3A%22MCX%3ASILVER1%21%22%2C%22title%22%3A%22Silver%22%7D%2C%7B%22proName%22%3A%22MCX%3ACRUDEOIL1%21%22%2C%22title%22%3A%22Crude%22%7D%2C%7B%22proName%22%3A%22BITSTAMP%3ABTCUSD%22%2C%22title%22%3A%22BTC%22%7D%2C%7B%22proName%22%3A%22BITSTAMP%3AETHUSD%22%2C%22title%22%3A%22ETH%22%7D%5D%2C%22showSymbolLogo%22%3Afalse%2C%22isTransparent%22%3Atrue%2C%22displayMode%22%3A%22compact%22%2C%22colorTheme%22%3A%22dark%22%2C%22locale%22%3A%22en%22%7D"
-            style={{ width: '100%', height: '56px', marginTop: '-10px', display: 'block' }}
-          />
-        </div>
-      </div>
+      {/* ── ROW 1: MARKET STRIP (own markup, themed, live feed) ── */}
+      <MarketStrip />
 
       {/* ── ROW 2: NEWS TICKER ── */}
       <div style={{
