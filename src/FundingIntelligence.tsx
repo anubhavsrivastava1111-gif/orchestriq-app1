@@ -42,26 +42,26 @@ interface SearchState {
 }
 
 const S = {
-  page: { flex:1 as const, overflowY:"auto" as const, background:"#070C18", fontFamily:"'Inter',-apple-system,sans-serif", color:"#F0F4FF" },
-  header: { padding:"24px 28px 0", borderBottom:"1px solid #1C2A40", paddingBottom:"20px" },
-  title: { fontSize:20, fontWeight:800, color:"#F0F4FF", marginBottom:4 },
-  subtitle: { fontSize:12, color:"#4D6A8A" },
+  page: { flex:1 as const, overflowY:"auto" as const, background:"var(--oiq-bg)", fontFamily:"'Inter',-apple-system,sans-serif", color:"var(--oiq-ink)" },
+  header: { padding:"24px 28px 0", borderBottom:"1px solid var(--oiq-border)", paddingBottom:"20px" },
+  title: { fontSize:20, fontWeight:800, color:"var(--oiq-ink)", marginBottom:4 },
+  subtitle: { fontSize:12, color:"var(--oiq-muted)" },
   body: { padding:"24px 28px" },
-  card: { background:"#0F1829", border:"1px solid #1C2A40", borderRadius:8, padding:20, marginBottom:16 },
-  label: { fontSize:10, fontWeight:700, color:"#4D6A8A", letterSpacing:"0.1em", textTransform:"uppercase" as const, display:"block" as const, marginBottom:6 },
-  input: { width:"100%", background:"#070C18", border:"1px solid #1C2A40", borderRadius:6, padding:"9px 12px", color:"#F0F4FF", fontSize:12, fontFamily:"'Inter',-apple-system,sans-serif", boxSizing:"border-box" as const },
-  select: { width:"100%", background:"#070C18", border:"1px solid #1C2A40", borderRadius:6, padding:"9px 12px", color:"#F0F4FF", fontSize:12, fontFamily:"'Inter',-apple-system,sans-serif", boxSizing:"border-box" as const },
+  card: { background:"var(--oiq-surface)", border:"1px solid var(--oiq-border)", borderRadius:8, padding:20, marginBottom:16 },
+  label: { fontSize:10, fontWeight:700, color:"var(--oiq-muted)", letterSpacing:"0.1em", textTransform:"uppercase" as const, display:"block" as const, marginBottom:6 },
+  input: { width:"100%", background:"var(--oiq-bg)", border:"1px solid var(--oiq-border)", borderRadius:6, padding:"9px 12px", color:"var(--oiq-ink)", fontSize:12, fontFamily:"'Inter',-apple-system,sans-serif", boxSizing:"border-box" as const },
+  select: { width:"100%", background:"var(--oiq-bg)", border:"1px solid var(--oiq-border)", borderRadius:6, padding:"9px 12px", color:"var(--oiq-ink)", fontSize:12, fontFamily:"'Inter',-apple-system,sans-serif", boxSizing:"border-box" as const },
   btn: { background:"#3B82F6", color:"#fff", border:"none", borderRadius:6, padding:"11px 24px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"'Inter',-apple-system,sans-serif" },
-  schemeCard: { background:"#0F1829", border:"1px solid #1C2A40", borderRadius:8, padding:20, marginBottom:12 },
+  schemeCard: { background:"var(--oiq-surface)", border:"1px solid var(--oiq-border)", borderRadius:8, padding:20, marginBottom:12 },
   tag: { display:"inline-flex" as const, alignItems:"center" as const, padding:"2px 8px", borderRadius:9999, fontSize:10, fontWeight:600, marginRight:6, marginBottom:4 },
-  sectionLabel: { fontSize:10, fontWeight:700, color:"#4D6A8A", letterSpacing:"0.1em", textTransform:"uppercase" as const, marginBottom:6, display:"block" as const },
+  sectionLabel: { fontSize:10, fontWeight:700, color:"var(--oiq-muted)", letterSpacing:"0.1em", textTransform:"uppercase" as const, marginBottom:6, display:"block" as const },
 };
 
 function ScoreBar({ score }: { score: number }) {
   const color = score >= 80 ? "#10B981" : score >= 60 ? "#EAB308" : "#F97316";
   return (
     <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-      <div style={{ flex:1, background:"#1C2A40", borderRadius:9999, height:4 }}>
+      <div style={{ flex:1, background:"var(--oiq-border)", borderRadius:9999, height:4 }}>
         <div style={{ width:`${score}%`, background:color, height:"100%", borderRadius:9999, transition:"width 0.5s" }} />
       </div>
       <span style={{ fontSize:11, fontWeight:700, color, minWidth:32 }}>{score}%</span>
@@ -81,31 +81,31 @@ function SchemeCard({ scheme }: { scheme: SchemeResult }) {
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ display:"flex", flexWrap:"wrap" as const, gap:4, marginBottom:6 }}>
             <span style={{ ...S.tag, background:`${typeColor}15`, color:typeColor, border:`1px solid ${typeColor}30` }}>{scheme.type}</span>
-            <span style={{ ...S.tag, background:"rgba(59,130,246,0.1)", color:"#8FA8CC", border:"1px solid #1C2A40" }}>{scheme.authority}</span>
+            <span style={{ ...S.tag, background:"rgba(59,130,246,0.1)", color:"var(--oiq-body)", border:"1px solid var(--oiq-border)" }}>{scheme.authority}</span>
             {scheme.deadline && scheme.deadline !== "Ongoing" && (
               <span style={{ ...S.tag, background:"rgba(239,68,68,0.1)", color:"#EF4444", border:"1px solid rgba(239,68,68,0.2)" }}>⏰ {scheme.deadline}</span>
             )}
           </div>
-          <div style={{ fontSize:14, fontWeight:700, color:"#F0F4FF", marginBottom:4, lineHeight:1.4 }}>{scheme.name}</div>
+          <div style={{ fontSize:14, fontWeight:700, color:"var(--oiq-ink)", marginBottom:4, lineHeight:1.4 }}>{scheme.name}</div>
           <div style={{ fontSize:12, color:"#10B981", fontWeight:600 }}>{scheme.funding}</div>
         </div>
         <div style={{ textAlign:"right" as const, flexShrink:0 }}>
-          <div style={{ fontSize:10, color:"#4D6A8A", marginBottom:4 }}>Match</div>
+          <div style={{ fontSize:10, color:"var(--oiq-muted)", marginBottom:4 }}>Match</div>
           <ScoreBar score={scheme.matchScore} />
         </div>
       </div>
 
-      <div style={{ fontSize:11, color:"#8FA8CC", lineHeight:1.6, marginBottom:10, padding:"8px 12px", background:"rgba(59,130,246,0.05)", borderRadius:6, borderLeft:"2px solid #3B82F6" }}>
+      <div style={{ fontSize:11, color:"var(--oiq-body)", lineHeight:1.6, marginBottom:10, padding:"8px 12px", background:"rgba(59,130,246,0.05)", borderRadius:6, borderLeft:"2px solid #3B82F6" }}>
         {scheme.matchReason}
       </div>
 
       {expanded && (
-        <div style={{ borderTop:"1px solid #1C2A40", paddingTop:12, marginTop:4 }}>
+        <div style={{ borderTop:"1px solid var(--oiq-border)", paddingTop:12, marginTop:4 }}>
           {scheme.eligibility && scheme.eligibility.length > 0 && (
             <div style={{ marginBottom:12 }}>
               <span style={S.sectionLabel}>Eligibility</span>
               {scheme.eligibility.map((e, i) => (
-                <div key={i} style={{ display:"flex", gap:8, alignItems:"flex-start", fontSize:12, color:"#8FA8CC", lineHeight:1.6, marginBottom:3 }}>
+                <div key={i} style={{ display:"flex", gap:8, alignItems:"flex-start", fontSize:12, color:"var(--oiq-body)", lineHeight:1.6, marginBottom:3 }}>
                   <span style={{ color:"#3B82F6", flexShrink:0 }}>→</span>{e}
                 </div>
               ))}
@@ -114,7 +114,7 @@ function SchemeCard({ scheme }: { scheme: SchemeResult }) {
           {scheme.howToApply && (
             <div style={{ marginBottom:12 }}>
               <span style={S.sectionLabel}>How to Apply</span>
-              <div style={{ fontSize:12, color:"#8FA8CC", lineHeight:1.6 }}>{scheme.howToApply}</div>
+              <div style={{ fontSize:12, color:"var(--oiq-body)", lineHeight:1.6 }}>{scheme.howToApply}</div>
             </div>
           )}
           {scheme.officialLink && scheme.officialLink !== "N/A" && (
@@ -127,7 +127,7 @@ function SchemeCard({ scheme }: { scheme: SchemeResult }) {
       )}
 
       <button onClick={() => setExpanded(!expanded)}
-        style={{ background:"none", border:"none", color:"#4D6A8A", fontSize:11, cursor:"pointer", marginTop:8, fontFamily:"'Inter',-apple-system,sans-serif", padding:0 }}>
+        style={{ background:"none", border:"none", color:"var(--oiq-muted)", fontSize:11, cursor:"pointer", marginTop:8, fontFamily:"'Inter',-apple-system,sans-serif", padding:0 }}>
         {expanded ? "▴ Show less" : "▾ Show eligibility & how to apply"}
       </button>
     </div>
@@ -226,7 +226,7 @@ Return ONLY valid JSON. No preamble. No markdown. Find at least 8-12 schemes.`;
       <div style={S.body}>
         {/* Search Form */}
         <div style={S.card}>
-          <div style={{ fontSize:12, fontWeight:700, color:"#F0F4FF", marginBottom:16 }}>
+          <div style={{ fontSize:12, fontWeight:700, color:"var(--oiq-ink)", marginBottom:16 }}>
             Describe your business to find matching schemes
           </div>
           <div style={{ marginBottom:12 }}>
@@ -286,8 +286,8 @@ Return ONLY valid JSON. No preamble. No markdown. Find at least 8-12 schemes.`;
         {search.status === "searching" && (
           <div style={{ ...S.card, textAlign:"center" as const, padding:40 }}>
             <div style={{ fontSize:28, marginBottom:12 }}>🔍</div>
-            <div style={{ fontSize:13, fontWeight:600, color:"#F0F4FF", marginBottom:6 }}>Searching across all schemes...</div>
-            <div style={{ fontSize:11, color:"#4D6A8A", lineHeight:1.7 }}>
+            <div style={{ fontSize:13, fontWeight:600, color:"var(--oiq-ink)", marginBottom:6 }}>Searching across all schemes...</div>
+            <div style={{ fontSize:11, color:"var(--oiq-muted)", lineHeight:1.7 }}>
               Central Government · State Schemes · MUDRA · CGTMSE · SIDBI · NABARD<br/>
               World Bank · ADB · IFC · Export Incentives · PLI Schemes
             </div>
@@ -298,7 +298,7 @@ Return ONLY valid JSON. No preamble. No markdown. Find at least 8-12 schemes.`;
         {search.status === "error" && (
           <div style={{ ...S.card, borderColor:"rgba(239,68,68,0.3)", background:"rgba(239,68,68,0.05)" }}>
             <div style={{ fontSize:12, color:"#EF4444" }}>⚠ {search.error}</div>
-            <div style={{ fontSize:11, color:"#4D6A8A", marginTop:4 }}>Add a Gemini API key in Settings for web search capability.</div>
+            <div style={{ fontSize:11, color:"var(--oiq-muted)", marginTop:4 }}>Add a Gemini API key in Settings for web search capability.</div>
           </div>
         )}
 
@@ -308,16 +308,16 @@ Return ONLY valid JSON. No preamble. No markdown. Find at least 8-12 schemes.`;
             {search.summary && (
               <div style={{ ...S.card, background:"rgba(59,130,246,0.06)", borderColor:"rgba(59,130,246,0.25)", borderLeft:"3px solid #3B82F6", marginBottom:20 }}>
                 <div style={{ fontSize:10, fontWeight:700, color:"#3B82F6", letterSpacing:"0.1em", textTransform:"uppercase" as const, marginBottom:6 }}>Intelligence Summary</div>
-                <div style={{ fontSize:13, lineHeight:1.7, color:"#8FA8CC" }}>{search.summary}</div>
+                <div style={{ fontSize:13, lineHeight:1.7, color:"var(--oiq-body)" }}>{search.summary}</div>
               </div>
             )}
-            <div style={{ fontSize:12, color:"#4D6A8A", marginBottom:16 }}>
-              Found <strong style={{ color:"#F0F4FF" }}>{search.results.length}</strong> matching schemes — sorted by relevance
+            <div style={{ fontSize:12, color:"var(--oiq-muted)", marginBottom:16 }}>
+              Found <strong style={{ color:"var(--oiq-ink)" }}>{search.results.length}</strong> matching schemes — sorted by relevance
             </div>
             {search.results.map((scheme, i) => (
               <SchemeCard key={i} scheme={scheme} />
             ))}
-            <div style={{ fontSize:11, color:"#2D4460", marginTop:16, lineHeight:1.6, padding:"12px 16px", background:"#0B1120", borderRadius:6 }}>
+            <div style={{ fontSize:11, color:"#2D4460", marginTop:16, lineHeight:1.6, padding:"12px 16px", background:"var(--oiq-bg)", borderRadius:6 }}>
               ⚠ Always verify scheme details on official government websites before applying. Scheme terms, eligibility and deadlines change frequently. This is AI-generated guidance, not legal or financial advice.
             </div>
           </div>
@@ -327,8 +327,8 @@ Return ONLY valid JSON. No preamble. No markdown. Find at least 8-12 schemes.`;
         {search.status === "idle" && (
           <div style={{ ...S.card, textAlign:"center" as const, padding:40 }}>
             <div style={{ fontSize:36, marginBottom:12 }}>🏛️</div>
-            <div style={{ fontSize:14, fontWeight:700, color:"#F0F4FF", marginBottom:8 }}>Find your funding match</div>
-            <div style={{ fontSize:12, color:"#4D6A8A", lineHeight:1.7, maxWidth:400, margin:"0 auto" }}>
+            <div style={{ fontSize:14, fontWeight:700, color:"var(--oiq-ink)", marginBottom:8 }}>Find your funding match</div>
+            <div style={{ fontSize:12, color:"var(--oiq-muted)", lineHeight:1.7, maxWidth:400, margin:"0 auto" }}>
               Describe your business above and we'll search across 1000+ central, state, bank and international funding schemes to find the best matches for you.
             </div>
           </div>
