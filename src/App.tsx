@@ -2298,26 +2298,7 @@ export default function App(){
       }catch{}
     },1500);
     return ()=>clearTimeout(t);
-  },[keys]);
-
-  // Save API keys to the signed-in user's own profile row. Declared AFTER the
-  // keys state — referencing it any earlier throws "Cannot access before
-  // initialization" and takes the whole app down. Debounced so typing a key
-  // doesn't write on every keystroke, and skipped on the first pass so the
-  // empty initial state can never wipe keys already saved.
-  useEffect(()=>{
-    if(!keysHydrated){ setKeysHydrated(true); return; }
-    const t=setTimeout(async()=>{
-      try{
-        const {data:{user}}=await supabase.auth.getUser();
-        if(!user)return;
-        const clean:any={};
-        Object.entries(keys||{}).forEach(([k,v])=>{ if(typeof v==="string"&&v.trim())clean[k]=v.trim(); });
-        await supabase.from("profiles").update({user_api_keys:clean}).eq("id",user.id);
-      }catch{}
-    },1500);
-    return ()=>clearTimeout(t);
-  },[keys]);
+  },[keys]);  
   const [mediaMode,setMediaMode]=useState({image:"prompts",video:"veo"});
   const [showMediaPicker,setShowMediaPicker]=useState(false);
   const [defP,setDefP]=useState("nvidia"); // free, zero-setup default
