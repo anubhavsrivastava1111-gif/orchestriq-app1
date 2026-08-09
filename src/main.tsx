@@ -7,6 +7,12 @@ import PlanSelection from "./PlanSelection";
 import App from "./App";
 import "./index.css";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { loadPrefs, applyDesign } from "./lib/design/ThemeStore";
+
+// Apply the saved theme before React paints. Previously applyDesign() ran only
+// when the Design Centre panel mounted, so every normal page load rendered with
+// the theme variables undefined — no accent, no canvas colour, no display font.
+applyDesign(loadPrefs());
 
 type Screen = "loading" | "auth" | "profile" | "plan" | "app";
 
@@ -23,6 +29,14 @@ function Root() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // The colour walk needs #oiq-root to exist, which it does not at import time.
+  // Re-apply once the app screen is mounted.
+  useEffect(() => {
+    if (screen !== "app") return;
+    const id = setTimeout(() => applyDesign(loadPrefs()), 60);
+    return () => clearTimeout(id);
+  }, [screen]);
 
   const checkUser = async () => {
     try {
