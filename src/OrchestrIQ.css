@@ -637,3 +637,39 @@
 #oiq-root [style*="#EF4444"] { color: #B54A3A !important; }
 #oiq-root [style*="#10B981"] { color: #3D6B4E !important; }
 #oiq-root [style*="#F59E0B"] { color: #8A6A24 !important; }
+
+/* ── STEP 6: convert the class-based screens that use CSS variables ── */
+#oiq-root, :root {
+  --panel: #FFFFFF !important;
+  --panel2: #F7F5F1 !important;
+  --bdr: #E4E0D8 !important;
+  --bg: #EDEAE3 !important;
+  --bg2: #FBFAF8 !important;
+  --t1: #1C2A24 !important;
+  --t2: #4A453D !important;
+  --t3: #8A8378 !important;
+  --t4: #B5AEA2 !important;
+  --accent: #C9A961 !important;
+  --accent-10: rgba(201,169,97,0.12) !important;
+  --accent-20: rgba(201,169,97,0.22) !important;
+  --code: #F7F5F1 !important;
+  --scroll: #DDD8CE !important;
+}
+
+/* Sidebar and header keep the dark forest look */
+.oiq-sidebar, #oiq-sidebar, #oiq-header {
+  --panel: #26362E !important;
+  --panel2: #1C2A24 !important;
+  --bdr: #35473D !important;
+  --t1: #F3F1EC !important;
+  --t2: #B9C9C0 !important;
+  --t3: #7E9689 !important;
+  --t4: #5F7568 !important;
+}
+
+/* Any remaining hardcoded dark panels */
+#oiq-root div[style*="background:#131825"],
+#oiq-root div[style*="background:#0a0e1a"],
+#oiq-root div[style*="background:#0E1523"] {
+  background-color: #FFFFFF !important;
+}
