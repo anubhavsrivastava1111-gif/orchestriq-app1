@@ -268,8 +268,6 @@ export function applyDesign(p: Prefs) {
   const bodyRGB = parseColour(t.c.body) as RGB;
   const surfRGB = parseColour(t.c.surface) as RGB;
   const bgRGB = parseColour(t.c.bg) as RGB;
-  const sbTextRGB = parseColour(t.c.sbText) as RGB;
-  const sbDimRGB = parseColour(t.c.sbDim) as RGB;
 
   // ── BODY map: module content → surface palette ──
   const M: Record<string, string> = {};
@@ -287,17 +285,6 @@ export function applyDesign(p: Prefs) {
   // The house teal. 117 uses across App.tsx — the single biggest reason every
   // theme looked the same. Route it to the theme accent.
   add("#14B8A6", t.c.accent);  add("#0D9488", t.c.accent);   add("#2DD4BF", t.c.accent);
-
-  // ── CHROME map: sidebar / header / ticker → sidebar palette ──
-  const S: Record<string, string> = {};
-  const addS = (from: string, to: string) => { S[from.toLowerCase()] = to; S[rgbStr(from)] = to; };
-  addS("#0c1120", t.c.sbBg);   addS("#0a0e1a", t.c.sbBg);    addS("#080c18", t.c.sbBg);
-  addS("#0F1117", t.c.sbBg);   addS("#131825", t.c.sbBorder); addS("#14192a", t.c.sbBorder);
-  addS("#1a2030", t.c.sbBorder); addS("#151C2C", t.c.sbBorder);
-  addS("#F1F5F9", t.c.sbText); addS("#F0F4FF", t.c.sbText);  addS("#E8EFF8", t.c.sbText);
-  addS("#A0AAC0", t.c.sbText); addS("#8892B0", t.c.sbDim);   addS("#94A3B8", t.c.sbDim);
-  addS("#5A6480", t.c.sbDim);  addS("#3A4060", t.c.sbDim);
-  addS("#14B8A6", t.c.sbActive); addS("#0D9488", t.c.sbActive); addS("#2DD4BF", t.c.sbActive);
 
   const root = document.getElementById("oiq-root");
   if (!root) return;
@@ -326,24 +313,36 @@ export function applyDesign(p: Prefs) {
 
     all.forEach(el => {
       const s = el.style;
-      const chrome = !!el.closest(CHROME);
-      const TABLE = chrome ? S : M;
+
+      // CHROME IS OWNED BY OrchestrIQ.css.
+      // That stylesheet already themes the sidebar, header, ticker and nerve
+      // tabs from --sb-bg / --sb-bdr / --accent, and every one of its rules is
+      // !important. An inline !important written from here OUTRANKS a
+      // stylesheet !important — which is precisely what was bleaching the
+      // sidebar white. So we undo anything we previously wrote and hand the
+      // whole region back to CSS, which is where it belongs.
+      if (el.closest(CHROME)) {
+        const undo = (css: string, key: string) => {
+          const had = el.dataset[key];
+          if (had === undefined) return;
+          s.removeProperty(css);
+          if (had) s.setProperty(css, had);
+        };
+        undo("background-color", "oiqBg");
+        undo("color", "oiqFg");
+        undo("border-color", "oiqBd");
+        undo("background-image", "oiqGrad");
+        return;
+      }
 
       const move = (prop: "backgroundColor" | "color" | "borderColor", css: string, key: string) => {
         const src = orig(el, key, s[prop]);
         if (!src) return;
-        const hit = TABLE[src.toLowerCase()];
+        const hit = M[src.toLowerCase()];
         if (hit) { s.setProperty(css, hit, "important"); return; }
         const c = parseColour(src);
         if (!c) return;
         const L = lum(c);
-        if (chrome) {
-          // Chrome stays dark in every theme. Only rescue into sidebar colours.
-          if (prop === "backgroundColor" && L < 0.10) s.setProperty(css, t.c.sbBg, "important");
-          if (prop === "borderColor" && L < 0.14) s.setProperty(css, t.c.sbBorder, "important");
-          if (prop === "color" && L > 0.75) s.setProperty(css, t.c.sbText, "important");
-          return;
-        }
         if (light) {
           if (prop === "backgroundColor" && L < 0.10) s.setProperty(css, t.c.surface, "important");
           if (prop === "borderColor" && L < 0.14) s.setProperty(css, t.c.border, "important");
@@ -359,15 +358,14 @@ export function applyDesign(p: Prefs) {
       const gsrc = orig(el, "oiqGrad", s.backgroundImage);
       if (gsrc && gsrc.indexOf("gradient") >= 0) {
         let out = gsrc;
-        Object.keys(TABLE).forEach(k => { if (k.indexOf("rgb") === 0) out = out.split(k).join(TABLE[k]); });
+        Object.keys(M).forEach(k => { if (k.indexOf("rgb") === 0) out = out.split(k).join(M[k]); });
         const stops = out.match(/rgba?\([^)]*\)/g) || [];
         stops.forEach(st => {
           const c = parseColour(st);
           if (!c) return;
           const L = lum(c);
-          if (chrome && L < 0.10) out = out.split(st).join(t.c.sbBg);
-          else if (!chrome && light && L < 0.10) out = out.split(st).join(t.c.surface2);
-          else if (!chrome && !light && L > 0.85) out = out.split(st).join(t.c.surface2);
+          if (light && L < 0.10) out = out.split(st).join(t.c.surface2);
+          if (!light && L > 0.85) out = out.split(st).join(t.c.surface2);
         });
         if (out !== gsrc) s.setProperty("background-image", out, "important");
       }
@@ -385,6 +383,7 @@ export function applyDesign(p: Prefs) {
         if (n.nodeType === 3 && (n.textContent || "").trim().length > 0) { hasText = true; break; }
       }
       if (!hasText) return;
+      if (el.closest(CHROME)) return;   // CSS owns chrome contrast
 
       const cs = getComputedStyle(el);
       const fg = parseColour(cs.color);
@@ -392,9 +391,7 @@ export function applyDesign(p: Prefs) {
       const bg = behind(el);
       if (contrast(fg, bg) >= 4.0) return;
 
-      const options: RGB[] = el.closest(CHROME)
-        ? [sbTextRGB, sbDimRGB, [255, 255, 255], [17, 17, 17]]
-        : [inkRGB, bodyRGB, surfRGB, [255, 255, 255], [17, 17, 17]];
+      const options: RGB[] = [inkRGB, bodyRGB, surfRGB, [255, 255, 255], [17, 17, 17]];
       let best = options[0], bestC = 0;
       options.forEach(o => { const c = contrast(o, bg); if (c > bestC) { bestC = c; best = o; } });
       el.style.setProperty("color", `rgb(${best[0]}, ${best[1]}, ${best[2]})`, "important");
