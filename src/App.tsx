@@ -13,6 +13,7 @@ import { getExecutivesCached } from "./lib/executives";
 import { supabase } from "./lib/supabase";
 import { WorkspaceMemory } from "./lib/WorkspaceMemory";
 import ReadAloudButton from "./components/ReadAloudButton";
+import DesignCentre from "./components/DesignCentre";
 import { generateExcel, generatePptx, generatePdf, generateDocx } from "./lib/GenerationService";
 import { ENGINE_ENABLED, runPipeline, classifyDomain, selectFramework, selfReview, classifyEvidence } from "./lib/IntelligenceEngine";
 
