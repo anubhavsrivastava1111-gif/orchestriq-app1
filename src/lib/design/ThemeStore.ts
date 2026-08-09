@@ -172,24 +172,23 @@ export function getTheme(id: string): Theme {
   return THEMES.find(t => t.id === id) || THEMES.find(t => t.id === "midnight")!;
 }
 
-// ── THEME APPLICATION ENGINE ───────────────────────────────────────────────
+// ── THEME APPLICATION ENGINE (v3) ──────────────────────────────────────────
 //
-// WHY THIS IS JAVASCRIPT AND NOT CSS:
-// React writes inline styles into the DOM as rgb() — `background:"#070C18"`
-// becomes `style="background: rgb(7, 12, 24)"`. CSS attribute selectors that
-// match on hex text therefore never fire. We walk the DOM instead.
+// TWO SYSTEMS, ONE THEME.
 //
-// THREE PASSES, in order:
-//   1. TRANSLATE  — swap known colours via an explicit table (precise).
-//   2. GENERALISE — anything very dark that the table missed still gets moved
-//                   onto the theme surface, so unknown hexes cannot leave a
-//                   black block sitting in a light theme.
-//   3. REPAIR     — measure real WCAG contrast of every piece of text against
-//                   its actual background and re-colour anything unreadable.
+// 1. OrchestrIQ.css already styles the chrome (sidebar, header, ticker, nerve
+//    tabs) from CSS variables. That stylesheet IS the design system. We drive
+//    every variable it consumes from the active theme, so the chrome changes
+//    properly when the theme changes.
 //
-// Pass 3 is what makes all eight themes hold together. Passes 1 and 2 move
-// colours one at a time and lose the pairing between a surface and the text
-// sitting on it; pass 3 puts that pairing back by measurement, not guesswork.
+// 2. The module bodies are still inline-styled in App.tsx. React writes those
+//    as rgb(), so CSS text-matching can never reach them. We walk the DOM and
+//    swap them.
+//
+// The walk must NEVER repaint anything the stylesheet governs — previously it
+// did, painting the sidebar's inline #0c1120 onto a near-white surface colour
+// and overriding `background: var(--sb-bg)`. That is why every theme looked
+// identical. Chrome now uses the sidebar palette; body uses the surface palette.
 
 type RGB = [number, number, number];
 
@@ -198,15 +197,15 @@ const hexToRgb = (h: string): RGB => {
   return [parseInt(n.slice(0, 2), 16), parseInt(n.slice(2, 4), 16), parseInt(n.slice(4, 6), 16)];
 };
 const rgbStr = (h: string) => { const [r, g, b] = hexToRgb(h); return `rgb(${r}, ${g}, ${b})`; };
+const rgba = (h: string, a: number) => { const [r, g, b] = hexToRgb(h); return `rgba(${r}, ${g}, ${b}, ${a})`; };
 
-// Parse any CSS colour string the browser can hand back.
 const parseColour = (v: string): RGB | null => {
   if (!v) return null;
   const s = v.trim().toLowerCase();
-  if (s === "transparent" || s.startsWith("rgba(0, 0, 0, 0")) return null;
+  if (s === "transparent" || s.indexOf("rgba(0, 0, 0, 0)") === 0) return null;
   const m = s.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
   if (m) return [Math.round(+m[1]), Math.round(+m[2]), Math.round(+m[3])];
-  if (s.startsWith("#")) {
+  if (s.charAt(0) === "#") {
     const n = s.slice(1);
     if (n.length === 3) return [parseInt(n[0] + n[0], 16), parseInt(n[1] + n[1], 16), parseInt(n[2] + n[2], 16)];
     if (n.length >= 6) return hexToRgb(s);
@@ -214,7 +213,6 @@ const parseColour = (v: string): RGB | null => {
   return null;
 };
 
-// Relative luminance + WCAG contrast ratio.
 const lum = (c: RGB) => {
   const f = (v: number) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
   return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
@@ -223,6 +221,9 @@ const contrast = (a: RGB, b: RGB) => {
   const l1 = lum(a), l2 = lum(b);
   return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
 };
+
+// Elements the stylesheet owns. The walk treats these as the dark chrome.
+const CHROME = ".oiq-sidebar,#oiq-sidebar,#oiq-header,.global-ticker,.oiq-nerve-tabs";
 
 let observer: MutationObserver | null = null;
 let timer = 0;
@@ -234,13 +235,28 @@ export function applyDesign(p: Prefs) {
   const set = (k: string, v: string) => r.style.setProperty(k, v);
 
   Object.entries(t.c).forEach(([k, v]) => set(`--oiq-${k}`, v as string));
-  // Bridge to the variable names App.tsx already uses
-  set("--bg", t.c.bg); set("--bg2", t.c.surface2); set("--panel", t.c.surface);
-  set("--panel2", t.c.surface2); set("--border", t.c.border); set("--border2", t.c.border);
-  set("--text", t.c.ink); set("--text2", t.c.body); set("--text3", t.c.body);
-  set("--muted", t.c.muted); set("--muted2", t.c.faint); set("--accent", t.c.accent);
-  set("--code", t.c.surface2); set("--scroll", t.c.border);
+
+  // ── Every variable OrchestrIQ.css consumes, driven by the theme ──
+  set("--main-bg", t.c.surface); set("--panel", t.c.surface);
+  set("--bdr", t.c.border);
+  set("--t1", t.c.ink); set("--t2", t.c.body); set("--t3", t.c.muted); set("--t4", t.c.faint);
+  set("--accent", t.c.accent);
+  set("--accent-10", rgba(t.c.accent, 0.12));
+  set("--accent-20", rgba(t.c.accent, 0.22));
   set("--sb-bg", t.c.sbBg); set("--sb-bdr", t.c.sbBorder);
+  set("--font", `'${t.fonts.body}',-apple-system,system-ui,sans-serif`);
+  set("--font-head", `'${t.fonts.heading}',Georgia,serif`);
+  set("--r-sm", Math.max(2, cr.r - 4) + "px");
+  set("--r-md", cr.r + "px");
+  set("--r-lg", (cr.r + 3) + "px");
+  set("--r-xl", (cr.r + 7) + "px");
+
+  // Legacy aliases still referenced elsewhere
+  set("--bg", t.c.bg); set("--bg2", t.c.surface2); set("--panel2", t.c.surface2);
+  set("--border", t.c.border); set("--border2", t.c.border);
+  set("--text", t.c.ink); set("--text2", t.c.body); set("--text3", t.c.body);
+  set("--muted", t.c.muted); set("--muted2", t.c.faint);
+  set("--code", t.c.surface2); set("--scroll", t.c.border);
   set("--oiq-radius", cr.r + "px");
   set("--oiq-scale", String(ts.scale * d.scale));
   r.setAttribute("data-oiq-theme", t.id);
@@ -252,30 +268,42 @@ export function applyDesign(p: Prefs) {
   const bodyRGB = parseColour(t.c.body) as RGB;
   const surfRGB = parseColour(t.c.surface) as RGB;
   const bgRGB = parseColour(t.c.bg) as RGB;
+  const sbTextRGB = parseColour(t.c.sbText) as RGB;
+  const sbDimRGB = parseColour(t.c.sbDim) as RGB;
 
-  // ── PASS 1 table: known colours → theme colours ──
+  // ── BODY map: module content → surface palette ──
   const M: Record<string, string> = {};
   const add = (from: string, to: string) => { M[from.toLowerCase()] = to; M[rgbStr(from)] = to; };
-  // App.tsx surfaces
-  add("#0a0e1a", t.c.bg);     add("#0c1120", t.c.surface2); add("#131825", t.c.surface);
-  add("#1a2030", t.c.border); add("#14192a", t.c.border);   add("#080c18", t.c.surface2);
-  add("#0E1523", t.c.surface);
-  // Module surfaces
-  add("#0B1120", t.c.bg);      add("#070C18", t.c.bg);       add("#0d1829", t.c.surface2);
-  add("#111827", t.c.surface); add("#0F1829", t.c.surface);  add("#141F33", t.c.surface2);
-  add("#1C2A40", t.c.border);  add("#1E2D3D", t.c.border);   add("#243044", t.c.border);
-  add("#0F1117", t.c.sbBg);    add("#151C2C", t.c.surface);
-  // Text
-  add("#F1F5F9", t.c.ink);   add("#F0F4FF", t.c.ink);   add("#E8EFF8", t.c.ink);
-  add("#A0AAC0", t.c.body);  add("#8FA8CC", t.c.body);  add("#8892B0", t.c.body);
-  add("#94A3B8", t.c.body);  add("#5A6480", t.c.muted); add("#4D6A8A", t.c.muted);
-  add("#64748B", t.c.muted); add("#3A4060", t.c.faint);
+  add("#0a0e1a", t.c.bg);      add("#0c1120", t.c.surface2); add("#131825", t.c.surface);
+  add("#1a2030", t.c.border);  add("#14192a", t.c.border);   add("#080c18", t.c.surface2);
+  add("#0E1523", t.c.surface); add("#0B1120", t.c.bg);       add("#070C18", t.c.bg);
+  add("#0d1829", t.c.surface2); add("#111827", t.c.surface); add("#0F1829", t.c.surface);
+  add("#141F33", t.c.surface2); add("#1C2A40", t.c.border);  add("#1E2D3D", t.c.border);
+  add("#243044", t.c.border);  add("#0F1117", t.c.sbBg);     add("#151C2C", t.c.surface);
+  add("#F1F5F9", t.c.ink);     add("#F0F4FF", t.c.ink);      add("#E8EFF8", t.c.ink);
+  add("#A0AAC0", t.c.body);    add("#8FA8CC", t.c.body);     add("#8892B0", t.c.body);
+  add("#94A3B8", t.c.body);    add("#5A6480", t.c.muted);    add("#4D6A8A", t.c.muted);
+  add("#64748B", t.c.muted);   add("#3A4060", t.c.faint);
+  // The house teal. 117 uses across App.tsx — the single biggest reason every
+  // theme looked the same. Route it to the theme accent.
+  add("#14B8A6", t.c.accent);  add("#0D9488", t.c.accent);   add("#2DD4BF", t.c.accent);
+
+  // ── CHROME map: sidebar / header / ticker → sidebar palette ──
+  const S: Record<string, string> = {};
+  const addS = (from: string, to: string) => { S[from.toLowerCase()] = to; S[rgbStr(from)] = to; };
+  addS("#0c1120", t.c.sbBg);   addS("#0a0e1a", t.c.sbBg);    addS("#080c18", t.c.sbBg);
+  addS("#0F1117", t.c.sbBg);   addS("#131825", t.c.sbBorder); addS("#14192a", t.c.sbBorder);
+  addS("#1a2030", t.c.sbBorder); addS("#151C2C", t.c.sbBorder);
+  addS("#F1F5F9", t.c.sbText); addS("#F0F4FF", t.c.sbText);  addS("#E8EFF8", t.c.sbText);
+  addS("#A0AAC0", t.c.sbText); addS("#8892B0", t.c.sbDim);   addS("#94A3B8", t.c.sbDim);
+  addS("#5A6480", t.c.sbDim);  addS("#3A4060", t.c.sbDim);
+  addS("#14B8A6", t.c.sbActive); addS("#0D9488", t.c.sbActive); addS("#2DD4BF", t.c.sbActive);
 
   const root = document.getElementById("oiq-root");
   if (!root) return;
 
-  // Read the original value once and remember it, so switching from theme A to
-  // theme B still resolves against the SOURCE colour rather than theme A's.
+  // Remember the source colour, so switching theme A → B still resolves
+  // against the original value rather than theme A's output.
   const orig = (el: HTMLElement, key: string, live: string): string => {
     const had = el.dataset[key];
     if (had !== undefined) return had;
@@ -283,7 +311,6 @@ export function applyDesign(p: Prefs) {
     return live || "";
   };
 
-  // Effective background behind an element: walk up until something opaque.
   const behind = (el: HTMLElement): RGB => {
     let n: HTMLElement | null = el;
     for (let i = 0; i < 12 && n; i++) {
@@ -299,18 +326,24 @@ export function applyDesign(p: Prefs) {
 
     all.forEach(el => {
       const s = el.style;
+      const chrome = !!el.closest(CHROME);
+      const TABLE = chrome ? S : M;
 
-      // ---- PASS 1 + 2: surfaces, text and borders ----
       const move = (prop: "backgroundColor" | "color" | "borderColor", css: string, key: string) => {
         const src = orig(el, key, s[prop]);
         if (!src) return;
-        const hit = M[src.toLowerCase()];
+        const hit = TABLE[src.toLowerCase()];
         if (hit) { s.setProperty(css, hit, "important"); return; }
-        // PASS 2 — unknown colour. Only rescue extremes, so brand accents,
-        // status colours and charts keep their identity.
         const c = parseColour(src);
         if (!c) return;
         const L = lum(c);
+        if (chrome) {
+          // Chrome stays dark in every theme. Only rescue into sidebar colours.
+          if (prop === "backgroundColor" && L < 0.10) s.setProperty(css, t.c.sbBg, "important");
+          if (prop === "borderColor" && L < 0.14) s.setProperty(css, t.c.sbBorder, "important");
+          if (prop === "color" && L > 0.75) s.setProperty(css, t.c.sbText, "important");
+          return;
+        }
         if (light) {
           if (prop === "backgroundColor" && L < 0.10) s.setProperty(css, t.c.surface, "important");
           if (prop === "borderColor" && L < 0.14) s.setProperty(css, t.c.border, "important");
@@ -323,18 +356,18 @@ export function applyDesign(p: Prefs) {
       move("color", "color", "oiqFg");
       move("borderColor", "border-color", "oiqBd");
 
-      // ---- Gradients (the dark banners the table never caught) ----
       const gsrc = orig(el, "oiqGrad", s.backgroundImage);
       if (gsrc && gsrc.indexOf("gradient") >= 0) {
         let out = gsrc;
-        Object.keys(M).forEach(k => { if (k.indexOf("rgb") === 0) out = out.split(k).join(M[k]); });
+        Object.keys(TABLE).forEach(k => { if (k.indexOf("rgb") === 0) out = out.split(k).join(TABLE[k]); });
         const stops = out.match(/rgba?\([^)]*\)/g) || [];
         stops.forEach(st => {
           const c = parseColour(st);
           if (!c) return;
           const L = lum(c);
-          if (light && L < 0.10) out = out.split(st).join(t.c.surface2);
-          if (!light && L > 0.85) out = out.split(st).join(t.c.surface2);
+          if (chrome && L < 0.10) out = out.split(st).join(t.c.sbBg);
+          else if (!chrome && light && L < 0.10) out = out.split(st).join(t.c.surface2);
+          else if (!chrome && !light && L > 0.85) out = out.split(st).join(t.c.surface2);
         });
         if (out !== gsrc) s.setProperty("background-image", out, "important");
       }
@@ -343,10 +376,7 @@ export function applyDesign(p: Prefs) {
     root.style.setProperty("background", t.c.bg, "important");
     root.style.setProperty("color", t.c.body, "important");
 
-    // ---- PASS 3: contrast repair ----
-    // Anything that now fails WCAG against its real background gets re-coloured
-    // to whichever theme text colour reads best. This is the pass that stops
-    // text disappearing when a dark surface turns light underneath it.
+    // ── Contrast repair: measure, don't guess ──
     all.forEach(el => {
       if (!el.firstChild) return;
       let hasText = false;
@@ -362,7 +392,9 @@ export function applyDesign(p: Prefs) {
       const bg = behind(el);
       if (contrast(fg, bg) >= 4.0) return;
 
-      const options: RGB[] = [inkRGB, bodyRGB, surfRGB, [255, 255, 255], [17, 17, 17]];
+      const options: RGB[] = el.closest(CHROME)
+        ? [sbTextRGB, sbDimRGB, [255, 255, 255], [17, 17, 17]]
+        : [inkRGB, bodyRGB, surfRGB, [255, 255, 255], [17, 17, 17]];
       let best = options[0], bestC = 0;
       options.forEach(o => { const c = contrast(o, bg); if (c > bestC) { bestC = c; best = o; } });
       el.style.setProperty("color", `rgb(${best[0]}, ${best[1]}, ${best[2]})`, "important");
@@ -371,8 +403,6 @@ export function applyDesign(p: Prefs) {
 
   paint();
 
-  // Re-apply when React renders new content. Debounced — large tables would
-  // otherwise trigger a full walk per inserted row.
   if (observer) observer.disconnect();
   observer = new MutationObserver(() => {
     if (timer) return;
