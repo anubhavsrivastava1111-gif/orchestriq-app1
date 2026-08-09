@@ -2277,6 +2277,24 @@ export default function App(){
   const [showModules,setShowModules]=useState(false);
   const [me,setMe]=useState<{email:string;role:string}>({email:"",role:""});
   const [showExecs,setShowExecs]=useState(false);
+  const [keysHydrated,setKeysHydrated]=useState(false);
+
+  // Save API keys to the signed-in user's own profile row. Debounced so typing
+  // a key doesn't write on every keystroke. Skipped on the first pass so the
+  // empty initial state can never wipe keys that are already saved.
+  useEffect(()=>{
+    if(!keysHydrated){ setKeysHydrated(true); return; }
+    const t=setTimeout(async()=>{
+      try{
+        const {data:{user}}=await supabase.auth.getUser();
+        if(!user)return;
+        const clean:any={};
+        Object.entries(keys||{}).forEach(([k,v])=>{ if(typeof v==="string"&&v.trim())clean[k]=v.trim(); });
+        await supabase.from("profiles").update({user_api_keys:clean}).eq("id",user.id);
+      }catch{}
+    },1500);
+    return ()=>clearTimeout(t);
+  },[keys]);
   const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return WorkspaceMemory.get<string>("oiq-sb-col")==="1";}catch{return false;}});
   const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:""});
   const [mediaMode,setMediaMode]=useState({image:"prompts",video:"veo"});
@@ -2444,8 +2462,20 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{
       const {data:{user}}=await supabase.auth.getUser();
       if(user){
-        const {data:prof}=await supabase.from("profiles").select("full_name,role,admin_api_keys").eq("id",user.id).single();
+        const {data:prof}=await supabase.from("profiles").select("full_name,role,admin_api_keys,user_api_keys").eq("id",user.id).single();
         setMe({email:(prof as any)?.full_name||user.email||"",role:prof?.role||"user"});
+        // Load this user's saved keys. Row Level Security guarantees this row
+        // is only ever returned to its owner.
+        try{
+          const uk=(prof as any)?.user_api_keys;
+          if(uk&&typeof uk==="object"&&Object.keys(uk).length){
+            setKeys(prev=>{
+              const merged:any={...prev};
+              Object.keys(uk).forEach(k=>{ if(uk[k]) merged[k]=uk[k]; });
+              return merged;
+            });
+          }
+        }catch{}
         if(prof?.role==="super_admin"&&prof?.admin_api_keys){
           const ak=prof.admin_api_keys as any;
           const loadedKeys=ak.keys||ak;
