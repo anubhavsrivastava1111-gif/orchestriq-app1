@@ -313,19 +313,19 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
 
   return(
     <div style={{flex:1,padding:"14px 18px",overflowY:"auto"}}>
-      <h2 style={{fontSize:15,fontWeight:800,color:"#F1F5F9",marginBottom:2}}>General Ledger</h2>
-      <p style={{fontSize:10,color:"#5A6480",marginBottom:10}}>Double-entry bookkeeping. Currency: <strong style={{color:"#14B8A6"}}>{cur.sym} {cur.code}</strong></p>
+      <h2 style={{fontSize:15,fontWeight:800,color:"var(--oiq-ink)",marginBottom:2}}>General Ledger</h2>
+      <p style={{fontSize:10,color:"var(--oiq-muted)",marginBottom:10}}>Double-entry bookkeeping. Currency: <strong style={{color:"var(--oiq-accent)"}}>{cur.sym} {cur.code}</strong></p>
 
       <div style={{display:"flex",gap:3,marginBottom:12,flexWrap:"wrap"}}>
         {[["ai","AI Assistant"],["entry","Manual Entry"],["accounts","Accounts ("+accounts.length+")"],["journal","All Entries ("+entries.length+")"],["trial","Trial Balance"],["pnl","P&L"],["bs","Balance Sheet"]].map(([id,lb])=>(
-          <button key={id} onClick={()=>setTab(id)} style={{padding:"5px 12px",borderRadius:5,fontSize:10,fontWeight:600,border:"1px solid "+(tab===id?"#14B8A6":"#1a2030"),background:tab===id?"rgba(20,184,166,0.08)":"transparent",color:tab===id?"#14B8A6":"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{lb}</button>
+          <button key={id} onClick={()=>setTab(id)} style={{padding:"5px 12px",borderRadius:5,fontSize:10,fontWeight:600,border:"1px solid "+(tab===id?"var(--oiq-accent)":"var(--oiq-border)"),background:tab===id?"rgba(20,184,166,0.08)":"transparent",color:tab===id?"var(--oiq-accent)":"var(--oiq-muted)",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{lb}</button>
         ))}
       </div>
 
       {!obDone&&!entries.length&&(
         <div style={{background:"linear-gradient(135deg,rgba(20,184,166,0.06),rgba(59,130,246,0.04))",border:"1px solid rgba(20,184,166,0.25)",borderRadius:9,padding:"14px 16px",marginBottom:14}}>
-          <div style={{fontSize:13,fontWeight:800,color:"#14B8A6",marginBottom:4}}>Set Up Opening Balances</div>
-          <div style={{fontSize:11,color:"#A0AAC0",marginBottom:12,lineHeight:1.6}}>If your business already has cash, a bank balance, loans, or assets, enter them here so your Ledger starts accurate. You can skip this and add entries later.</div>
+          <div style={{fontSize:13,fontWeight:800,color:"var(--oiq-accent)",marginBottom:4}}>Set Up Opening Balances</div>
+          <div style={{fontSize:11,color:"var(--oiq-body)",marginBottom:12,lineHeight:1.6}}>If your business already has cash, a bank balance, loans, or assets, enter them here so your Ledger starts accurate. You can skip this and add entries later.</div>
           <div style={{marginBottom:8}}><label style={S.lbl}>As of Date</label><input type="date" style={{...S.inp,maxWidth:200}} value={obDate} onChange={e=>setObDate(e.target.value)}/></div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginBottom:8}}>
             <div><label style={S.lbl}>Cash on Hand</label><input style={S.inp} type="number" value={ob.cash} onChange={e=>setOb({...ob,cash:e.target.value})} placeholder="0"/></div>
@@ -340,7 +340,7 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
             <div><label style={S.lbl}>Long-term Bank Loan</label><input style={S.inp} type="number" value={ob.longLoan} onChange={e=>setOb({...ob,longLoan:e.target.value})} placeholder="0"/></div>
             <div><label style={S.lbl}>Owner's Capital (if known)</label><input style={S.inp} type="number" value={ob.capital} onChange={e=>setOb({...ob,capital:e.target.value})} placeholder="0"/></div>
           </div>
-          <div style={{fontSize:9,color:"#5A6480",marginBottom:10,lineHeight:1.5}}>Any difference between assets and (liabilities + capital) will be automatically recorded as Owner's Equity.</div>
+          <div style={{fontSize:9,color:"var(--oiq-muted)",marginBottom:10,lineHeight:1.5}}>Any difference between assets and (liabilities + capital) will be automatically recorded as Owner's Equity.</div>
           <div style={{display:"flex",gap:6}}>
             <button onClick={postOpeningBalance} style={{...S.pBtn,marginTop:0,flex:1}}>Save Opening Balances</button>
             <button onClick={skipOpeningBalance} style={{...S.hBtn,padding:"10px 16px"}}>Skip for now</button>
@@ -350,7 +350,7 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
 
       {tab==="ai"&&(
         <div>
-          <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"10px 12px",marginBottom:10,fontSize:11,color:"#A0AAC0",lineHeight:1.7}}>
+          <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"10px 12px",marginBottom:10,fontSize:11,color:"var(--oiq-body)",lineHeight:1.7}}>
             Describe a transaction in plain language - for example: "I purchased a tractor for the business today, I paid by cash."
             The assistant will work out the correct double-entry treatment, ask follow-up questions if needed, and propose a journal entry for your review before posting.
           </div>
@@ -366,15 +366,15 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
           {aiQuestion&&!aiProposal&&(
             <div style={{background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.25)",borderRadius:7,padding:"12px 14px",marginBottom:10}}>
               <div style={{fontSize:11,fontWeight:700,color:"#F59E0B",marginBottom:6}}>The assistant needs more information</div>
-              <div style={{fontSize:12,color:"#F1F5F9",marginBottom:10,lineHeight:1.6}}>{aiQuestion}</div>
+              <div style={{fontSize:12,color:"var(--oiq-ink)",marginBottom:10,lineHeight:1.6}}>{aiQuestion}</div>
               <AnswerBox onSubmit={answerQuestion} disabled={aiThinking} S={S}/>
             </div>
           )}
 
           {aiProposal&&(
-            <div style={{background:"#131825",border:"1px solid rgba(20,184,166,0.3)",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
-              <div style={{fontSize:12,fontWeight:800,color:"#14B8A6",marginBottom:6}}>Proposed Journal Entry</div>
-              <div style={{fontSize:11,color:"#8892B0",marginBottom:8,lineHeight:1.6}}>{aiProposal.explanation}</div>
+            <div style={{background:"var(--oiq-surface)",border:"1px solid rgba(20,184,166,0.3)",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
+              <div style={{fontSize:12,fontWeight:800,color:"var(--oiq-accent)",marginBottom:6}}>Proposed Journal Entry</div>
+              <div style={{fontSize:11,color:"var(--oiq-body)",marginBottom:8,lineHeight:1.6}}>{aiProposal.explanation}</div>
               <div style={{display:"flex",gap:6,marginBottom:8}}>
                 <div style={{flex:1}}><label style={S.lbl}>Date</label><input type="date" style={S.inp} value={aiProposal.date} onChange={e=>setAiProposal({...aiProposal,date:e.target.value})}/></div>
                 <div style={{flex:2}}><label style={S.lbl}>Narration</label><input style={S.inp} value={aiProposal.narration} onChange={e=>setAiProposal({...aiProposal,narration:e.target.value})}/></div>
@@ -384,16 +384,16 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
                 <div key={i} style={{display:"flex",gap:4,marginBottom:4,alignItems:"center"}}>
                   <select style={{...S.inp,flex:2}} value={l.accountCode} onChange={e=>editProposalLine(i,"accountCode",e.target.value)}>
                     <option value="">Select account...</option>
-                    {accounts.map(a=><option key={a.code} value={a.code} style={{background:"#0a0e1a"}}>{a.code} - {a.name} ({a.type})</option>)}
+                    {accounts.map(a=><option key={a.code} value={a.code} style={{background:"var(--oiq-bg)"}}>{a.code} - {a.name} ({a.type})</option>)}
                   </select>
                   <input style={{...S.inp,flex:1}} type="number" placeholder="Debit" value={l.debit||""} onChange={e=>editProposalLine(i,"debit",e.target.value)}/>
                   <input style={{...S.inp,flex:1}} type="number" placeholder="Credit" value={l.credit||""} onChange={e=>editProposalLine(i,"credit",e.target.value)}/>
                   {!acc&&l.accountCode&&<span style={{fontSize:9,color:"#EF4444"}}>unknown</span>}
                 </div>
               );})}
-              <div style={{display:"flex",justifyContent:"space-between",padding:"8px 10px",background:"#0a0e1a",borderRadius:5,marginTop:8,marginBottom:10,fontSize:11}}>
-                <span style={{color:"#A0AAC0"}}>Total Debit: <strong style={{color:"#F1F5F9"}}>{fmt(propTotalD)}</strong></span>
-                <span style={{color:"#A0AAC0"}}>Total Credit: <strong style={{color:"#F1F5F9"}}>{fmt(propTotalC)}</strong></span>
+              <div style={{display:"flex",justifyContent:"space-between",padding:"8px 10px",background:"var(--oiq-bg)",borderRadius:5,marginTop:8,marginBottom:10,fontSize:11}}>
+                <span style={{color:"var(--oiq-body)"}}>Total Debit: <strong style={{color:"var(--oiq-ink)"}}>{fmt(propTotalD)}</strong></span>
+                <span style={{color:"var(--oiq-body)"}}>Total Credit: <strong style={{color:"var(--oiq-ink)"}}>{fmt(propTotalC)}</strong></span>
                 <span style={{color:propBalanced?"#10B981":"#EF4444",fontWeight:700}}>{propBalanced?"Balanced":"Not Balanced"}</span>
               </div>
               <div style={{display:"flex",gap:6}}>
@@ -407,20 +407,20 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
 
       {tab==="accounts"&&(
         <div>
-          <div style={{background:"#131825",border:"1px solid #1a2030",borderRadius:7,padding:"12px",marginBottom:12}}>
-            <div style={{fontSize:11,fontWeight:700,color:"#F1F5F9",marginBottom:8}}>{editAccCode?"Edit Account":"Add New Account"}</div>
+          <div style={{background:"var(--oiq-surface)",border:"1px solid var(--oiq-border)",borderRadius:7,padding:"12px",marginBottom:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:"var(--oiq-ink)",marginBottom:8}}>{editAccCode?"Edit Account":"Add New Account"}</div>
             <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
               <div style={{flex:2,minWidth:140}}><label style={S.lbl}>Account Name</label><input style={S.inp} value={newAcc.name} onChange={e=>setNewAcc({...newAcc,name:e.target.value})} placeholder="e.g. HDFC Current Account"/></div>
               <div style={{flex:1,minWidth:110}}>
                 <label style={S.lbl}>Type</label>
                 <select style={{...S.inp,padding:"8px"}} value={newAcc.type} onChange={e=>setNewAcc({...newAcc,type:e.target.value,sub:SUBS_BY_TYPE[e.target.value][0]})}>
-                  {Object.keys(TYPE_RANGES).map(t=><option key={t} value={t} style={{background:"#0a0e1a"}}>{t}</option>)}
+                  {Object.keys(TYPE_RANGES).map(t=><option key={t} value={t} style={{background:"var(--oiq-bg)"}}>{t}</option>)}
                 </select>
               </div>
               <div style={{flex:1,minWidth:140}}>
                 <label style={S.lbl}>Sub-category</label>
                 <select style={{...S.inp,padding:"8px"}} value={newAcc.sub} onChange={e=>setNewAcc({...newAcc,sub:e.target.value})}>
-                  {SUBS_BY_TYPE[newAcc.type].map(s=><option key={s} value={s} style={{background:"#0a0e1a"}}>{s}</option>)}
+                  {SUBS_BY_TYPE[newAcc.type].map(s=><option key={s} value={s} style={{background:"var(--oiq-bg)"}}>{s}</option>)}
                 </select>
               </div>
             </div>
@@ -430,22 +430,22 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
             </div>
           </div>
 
-          <div style={{fontSize:10,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginBottom:6}}>Your Custom Accounts</div>
+          <div style={{fontSize:10,fontWeight:700,color:"var(--oiq-muted)",textTransform:"uppercase",marginBottom:6}}>Your Custom Accounts</div>
           {!customAccounts.length?(
-            <div style={{fontSize:11,color:"#5A6480",padding:"10px 0"}}>No custom accounts yet. Add one above, or let the AI Assistant create them automatically.</div>
+            <div style={{fontSize:11,color:"var(--oiq-muted)",padding:"10px 0"}}>No custom accounts yet. Add one above, or let the AI Assistant create them automatically.</div>
           ):customAccounts.map(a=>(
-            <div key={a.code} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"#131825",border:"1px solid #1a2030",borderRadius:5,marginBottom:3}}>
-              <div style={{fontSize:11,color:"#A0AAC0"}}><span style={{color:"#5A6480"}}>{a.code}</span> {a.name} <span style={{color:"#5A6480",fontSize:9}}>({a.type} / {a.sub})</span></div>
+            <div key={a.code} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"var(--oiq-surface)",border:"1px solid var(--oiq-border)",borderRadius:5,marginBottom:3}}>
+              <div style={{fontSize:11,color:"var(--oiq-body)"}}><span style={{color:"var(--oiq-muted)"}}>{a.code}</span> {a.name} <span style={{color:"var(--oiq-muted)",fontSize:9}}>({a.type} / {a.sub})</span></div>
               <div style={{display:"flex",gap:4}}>
-                <button onClick={()=>startEditAccount(a)} style={{background:"none",border:"none",color:"#5A6480",fontSize:10,cursor:"pointer"}}>Edit</button>
-                <button onClick={()=>deleteAccount(a.code)} style={{background:"none",border:"none",color:"#3A4060",fontSize:10,cursor:"pointer"}}>Delete</button>
+                <button onClick={()=>startEditAccount(a)} style={{background:"none",border:"none",color:"var(--oiq-muted)",fontSize:10,cursor:"pointer"}}>Edit</button>
+                <button onClick={()=>deleteAccount(a.code)} style={{background:"none",border:"none",color:"var(--oiq-faint)",fontSize:10,cursor:"pointer"}}>Delete</button>
               </div>
             </div>
           ))}
 
-          <div style={{fontSize:10,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginTop:14,marginBottom:6}}>Default Accounts (Reference)</div>
+          <div style={{fontSize:10,fontWeight:700,color:"var(--oiq-muted)",textTransform:"uppercase",marginTop:14,marginBottom:6}}>Default Accounts (Reference)</div>
           {COA.map(a=>(
-            <div key={a.code} style={{display:"flex",justifyContent:"space-between",padding:"5px 10px",fontSize:10,color:"#5A6480",borderBottom:"1px solid #14192a"}}>
+            <div key={a.code} style={{display:"flex",justifyContent:"space-between",padding:"5px 10px",fontSize:10,color:"var(--oiq-muted)",borderBottom:"1px solid var(--oiq-border)"}}>
               <span>{a.code} {a.name}</span><span>{a.type} / {a.sub}</span>
             </div>
           ))}
@@ -463,17 +463,17 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
             <div key={i} style={{display:"flex",gap:4,marginBottom:4,alignItems:"center"}}>
               <select style={{...S.inp,flex:2}} value={l.accountCode} onChange={e=>updateLine(i,"accountCode",e.target.value)}>
                 <option value="">Select account...</option>
-                {accounts.map(a=><option key={a.code} value={a.code} style={{background:"#0a0e1a"}}>{a.code} - {a.name} ({a.type})</option>)}
+                {accounts.map(a=><option key={a.code} value={a.code} style={{background:"var(--oiq-bg)"}}>{a.code} - {a.name} ({a.type})</option>)}
               </select>
               <input style={{...S.inp,flex:1}} type="number" placeholder="Debit" value={l.debit||""} onChange={e=>updateLine(i,"debit",e.target.value)}/>
               <input style={{...S.inp,flex:1}} type="number" placeholder="Credit" value={l.credit||""} onChange={e=>updateLine(i,"credit",e.target.value)}/>
-              {lines.length>2&&<button onClick={()=>removeLine(i)} style={{background:"none",border:"none",color:"#3A4060",fontSize:14,cursor:"pointer",padding:"0 4px"}}>x</button>}
+              {lines.length>2&&<button onClick={()=>removeLine(i)} style={{background:"none",border:"none",color:"var(--oiq-faint)",fontSize:14,cursor:"pointer",padding:"0 4px"}}>x</button>}
             </div>
           ))}
           <button onClick={addLine} style={{...S.hBtn,marginBottom:10}}>+ Add Line</button>
-          <div style={{display:"flex",justifyContent:"space-between",padding:"8px 10px",background:"#0a0e1a",borderRadius:5,marginBottom:10,fontSize:11}}>
-            <span style={{color:"#A0AAC0"}}>Total Debit: <strong style={{color:"#F1F5F9"}}>{fmt(totalDebit)}</strong></span>
-            <span style={{color:"#A0AAC0"}}>Total Credit: <strong style={{color:"#F1F5F9"}}>{fmt(totalCredit)}</strong></span>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"8px 10px",background:"var(--oiq-bg)",borderRadius:5,marginBottom:10,fontSize:11}}>
+            <span style={{color:"var(--oiq-body)"}}>Total Debit: <strong style={{color:"var(--oiq-ink)"}}>{fmt(totalDebit)}</strong></span>
+            <span style={{color:"var(--oiq-body)"}}>Total Credit: <strong style={{color:"var(--oiq-ink)"}}>{fmt(totalCredit)}</strong></span>
             <span style={{color:balanced?"#10B981":"#EF4444",fontWeight:700}}>{balanced?"Balanced":"Not Balanced"}</span>
           </div>
           <button onClick={postManual} disabled={!balanced} style={{...S.pBtn,marginTop:0,opacity:balanced?1:0.4}}>Post Journal Entry</button>
@@ -483,15 +483,15 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
       {tab==="journal"&&(
         <div>
           {!entries.length?(
-            <div style={{textAlign:"center",padding:"30px",color:"#5A6480"}}><div style={{fontSize:12}}>No journal entries yet.</div></div>
+            <div style={{textAlign:"center",padding:"30px",color:"var(--oiq-muted)"}}><div style={{fontSize:12}}>No journal entries yet.</div></div>
           ):entries.slice().reverse().map(e=>(
-            <div key={e.id} style={{background:"#131825",border:"1px solid #1a2030",borderRadius:7,padding:"10px 12px",marginBottom:6}}>
+            <div key={e.id} style={{background:"var(--oiq-surface)",border:"1px solid var(--oiq-border)",borderRadius:7,padding:"10px 12px",marginBottom:6}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-                <div><span style={{fontSize:10,color:"#5A6480"}}>{e.date}</span> - <span style={{fontSize:11,color:"#F1F5F9",fontWeight:600}}>{e.narration}</span></div>
-                <button onClick={()=>deleteEntry(e.id)} style={{background:"none",border:"none",color:"#3A4060",fontSize:10,cursor:"pointer"}}>Delete</button>
+                <div><span style={{fontSize:10,color:"var(--oiq-muted)"}}>{e.date}</span> - <span style={{fontSize:11,color:"var(--oiq-ink)",fontWeight:600}}>{e.narration}</span></div>
+                <button onClick={()=>deleteEntry(e.id)} style={{background:"none",border:"none",color:"var(--oiq-faint)",fontSize:10,cursor:"pointer"}}>Delete</button>
               </div>
               {e.lines.map((l,i)=>{const acc=accounts.find(a=>a.code===l.accountCode);return(
-                <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"#A0AAC0",padding:"2px 0"}}>
+                <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"var(--oiq-body)",padding:"2px 0"}}>
                   <span>{acc?.code} {acc?.name||"(unknown account "+l.accountCode+")"}</span>
                   <span>{l.debit>0?"Dr "+fmt(l.debit):""}{l.credit>0?"Cr "+fmt(l.credit):""}</span>
                 </div>
@@ -505,7 +505,7 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
             <thead><tr>
-              {["Code","Account","Type","Debit","Credit"].map(h=><th key={h} style={{textAlign:"left",padding:"6px 8px",borderBottom:"2px solid #14B8A633",color:"#14B8A6",fontWeight:700,fontSize:9,textTransform:"uppercase",background:"#0d1220"}}>{h}</th>)}
+              {["Code","Account","Type","Debit","Credit"].map(h=><th key={h} style={{textAlign:"left",padding:"6px 8px",borderBottom:"2px solid var(--oiq-accent)33",color:"var(--oiq-accent)",fontWeight:700,fontSize:9,textTransform:"uppercase",background:"#0d1220"}}>{h}</th>)}
             </tr></thead>
             <tbody>
               {accounts.map(a=>{
@@ -516,60 +516,60 @@ export default function Ledger({cur,entries,setEntries,customAccounts,setCustomA
                 const cr=isDebitNormal?(b<0?-b:0):(b>0?b:0);
                 return(
                   <tr key={a.code}>
-                    <td style={{padding:"5px 8px",borderBottom:"1px solid #14192a",color:"#5A6480"}}>{a.code}</td>
-                    <td style={{padding:"5px 8px",borderBottom:"1px solid #14192a",color:"#F1F5F9"}}>{a.name}</td>
-                    <td style={{padding:"5px 8px",borderBottom:"1px solid #14192a",color:"#8892B0"}}>{a.type}</td>
-                    <td style={{padding:"5px 8px",borderBottom:"1px solid #14192a",color:"#A0AAC0"}}>{dr>0?fmt(dr):""}</td>
-                    <td style={{padding:"5px 8px",borderBottom:"1px solid #14192a",color:"#A0AAC0"}}>{cr>0?fmt(cr):""}</td>
+                    <td style={{padding:"5px 8px",borderBottom:"1px solid var(--oiq-border)",color:"var(--oiq-muted)"}}>{a.code}</td>
+                    <td style={{padding:"5px 8px",borderBottom:"1px solid var(--oiq-border)",color:"var(--oiq-ink)"}}>{a.name}</td>
+                    <td style={{padding:"5px 8px",borderBottom:"1px solid var(--oiq-border)",color:"var(--oiq-body)"}}>{a.type}</td>
+                    <td style={{padding:"5px 8px",borderBottom:"1px solid var(--oiq-border)",color:"var(--oiq-body)"}}>{dr>0?fmt(dr):""}</td>
+                    <td style={{padding:"5px 8px",borderBottom:"1px solid var(--oiq-border)",color:"var(--oiq-body)"}}>{cr>0?fmt(cr):""}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          {!entries.length&&<div style={{textAlign:"center",padding:"30px",color:"#5A6480"}}>No entries posted yet.</div>}
+          {!entries.length&&<div style={{textAlign:"center",padding:"30px",color:"var(--oiq-muted)"}}>No entries posted yet.</div>}
         </div>
       )}
 
       {tab==="pnl"&&(
         <div>
-          <div style={{fontSize:12,fontWeight:800,color:"#14B8A6",marginBottom:8}}>Profit & Loss Statement</div>
-          <div style={{fontSize:10,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginBottom:4}}>Income</div>
-          {stmts.income.map(a=><div key={a.code} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"3px 0",color:"#A0AAC0"}}><span>{a.name}</span><span>{fmt(a.balance)}</span></div>)}
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontWeight:700,padding:"4px 0",borderTop:"1px solid #1a2030",color:"#F1F5F9"}}><span>Total Income</span><span>{fmt(stmts.totalIncome)}</span></div>
-          <div style={{fontSize:10,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginTop:10,marginBottom:4}}>Expenses</div>
-          {stmts.expense.map(a=><div key={a.code} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"3px 0",color:"#A0AAC0"}}><span>{a.name}</span><span>{fmt(a.balance)}</span></div>)}
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontWeight:700,padding:"4px 0",borderTop:"1px solid #1a2030",color:"#F1F5F9"}}><span>Total Expenses</span><span>{fmt(stmts.totalExpense)}</span></div>
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:800,padding:"10px 0",marginTop:8,borderTop:"2px solid #14B8A6",color:stmts.netProfit>=0?"#10B981":"#EF4444"}}><span>Net {stmts.netProfit>=0?"Profit":"Loss"}</span><span>{fmt(stmts.netProfit)}</span></div>
-          {!entries.length&&<div style={{textAlign:"center",padding:"30px",color:"#5A6480"}}>No entries posted yet.</div>}
+          <div style={{fontSize:12,fontWeight:800,color:"var(--oiq-accent)",marginBottom:8}}>Profit & Loss Statement</div>
+          <div style={{fontSize:10,fontWeight:700,color:"var(--oiq-muted)",textTransform:"uppercase",marginBottom:4}}>Income</div>
+          {stmts.income.map(a=><div key={a.code} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"3px 0",color:"var(--oiq-body)"}}><span>{a.name}</span><span>{fmt(a.balance)}</span></div>)}
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontWeight:700,padding:"4px 0",borderTop:"1px solid var(--oiq-border)",color:"var(--oiq-ink)"}}><span>Total Income</span><span>{fmt(stmts.totalIncome)}</span></div>
+          <div style={{fontSize:10,fontWeight:700,color:"var(--oiq-muted)",textTransform:"uppercase",marginTop:10,marginBottom:4}}>Expenses</div>
+          {stmts.expense.map(a=><div key={a.code} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"3px 0",color:"var(--oiq-body)"}}><span>{a.name}</span><span>{fmt(a.balance)}</span></div>)}
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontWeight:700,padding:"4px 0",borderTop:"1px solid var(--oiq-border)",color:"var(--oiq-ink)"}}><span>Total Expenses</span><span>{fmt(stmts.totalExpense)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:800,padding:"10px 0",marginTop:8,borderTop:"2px solid var(--oiq-accent)",color:stmts.netProfit>=0?"#10B981":"#EF4444"}}><span>Net {stmts.netProfit>=0?"Profit":"Loss"}</span><span>{fmt(stmts.netProfit)}</span></div>
+          {!entries.length&&<div style={{textAlign:"center",padding:"30px",color:"var(--oiq-muted)"}}>No entries posted yet.</div>}
         </div>
       )}
 
       {tab==="bs"&&(
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
           <div>
-            <div style={{fontSize:12,fontWeight:800,color:"#14B8A6",marginBottom:8}}>Assets</div>
+            <div style={{fontSize:12,fontWeight:800,color:"var(--oiq-accent)",marginBottom:8}}>Assets</div>
             {["Current Asset","Fixed Asset"].map(sub=>{const items=stmts.assets.filter(a=>a.sub===sub);if(!items.length)return null;return(
               <div key={sub} style={{marginBottom:8}}>
-                <div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginBottom:3}}>{sub}</div>
-                {items.map(a=><div key={a.code} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"#A0AAC0"}}><span>{a.name}</span><span>{fmt(a.balance)}</span></div>)}
+                <div style={{fontSize:9,fontWeight:700,color:"var(--oiq-muted)",textTransform:"uppercase",marginBottom:3}}>{sub}</div>
+                {items.map(a=><div key={a.code} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"var(--oiq-body)"}}><span>{a.name}</span><span>{fmt(a.balance)}</span></div>)}
               </div>
             );})}
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,padding:"8px 0",borderTop:"2px solid #14B8A6",color:"#F1F5F9"}}><span>Total Assets</span><span>{fmt(stmts.totalAssets)}</span></div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,padding:"8px 0",borderTop:"2px solid var(--oiq-accent)",color:"var(--oiq-ink)"}}><span>Total Assets</span><span>{fmt(stmts.totalAssets)}</span></div>
           </div>
           <div>
-            <div style={{fontSize:12,fontWeight:800,color:"#14B8A6",marginBottom:8}}>Liabilities & Equity</div>
+            <div style={{fontSize:12,fontWeight:800,color:"var(--oiq-accent)",marginBottom:8}}>Liabilities & Equity</div>
             {["Current Liability","Long-term Liability"].map(sub=>{const items=stmts.liabilities.filter(a=>a.sub===sub);if(!items.length)return null;return(
               <div key={sub} style={{marginBottom:8}}>
-                <div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginBottom:3}}>{sub}</div>
-                {items.map(a=><div key={a.code} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"#A0AAC0"}}><span>{a.name}</span><span>{fmt(a.balance)}</span></div>)}
+                <div style={{fontSize:9,fontWeight:700,color:"var(--oiq-muted)",textTransform:"uppercase",marginBottom:3}}>{sub}</div>
+                {items.map(a=><div key={a.code} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"var(--oiq-body)"}}><span>{a.name}</span><span>{fmt(a.balance)}</span></div>)}
               </div>
             );})}
-            <div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",marginBottom:3,marginTop:8}}>Equity</div>
-            {stmts.equity.map(a=><div key={a.code} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"#A0AAC0"}}><span>{a.name}</span><span>{fmt(a.balance)}</span></div>)}
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"#A0AAC0"}}><span>Retained Earnings (Current Period)</span><span>{fmt(stmts.netProfit)}</span></div>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,padding:"8px 0",borderTop:"2px solid #14B8A6",color:"#F1F5F9"}}><span>Total Liabilities + Equity</span><span>{fmt(stmts.totalLiabilities+stmts.totalEquity)}</span></div>
+            <div style={{fontSize:9,fontWeight:700,color:"var(--oiq-muted)",textTransform:"uppercase",marginBottom:3,marginTop:8}}>Equity</div>
+            {stmts.equity.map(a=><div key={a.code} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"var(--oiq-body)"}}><span>{a.name}</span><span>{fmt(a.balance)}</span></div>)}
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"var(--oiq-body)"}}><span>Retained Earnings (Current Period)</span><span>{fmt(stmts.netProfit)}</span></div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,padding:"8px 0",borderTop:"2px solid var(--oiq-accent)",color:"var(--oiq-ink)"}}><span>Total Liabilities + Equity</span><span>{fmt(stmts.totalLiabilities+stmts.totalEquity)}</span></div>
           </div>
-          {!entries.length&&<div style={{gridColumn:"1/-1",textAlign:"center",padding:"30px",color:"#5A6480"}}>No entries posted yet.</div>}
+          {!entries.length&&<div style={{gridColumn:"1/-1",textAlign:"center",padding:"30px",color:"var(--oiq-muted)"}}>No entries posted yet.</div>}
         </div>
       )}
     </div>
