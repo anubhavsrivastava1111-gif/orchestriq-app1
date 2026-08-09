@@ -1053,7 +1053,7 @@ export default function AIAgents({
                     onClick={()=>{if(!agent.comingSoon){setActiveAgent(agent);setUserInput("");setUploadedText("");setUploadedFileName("");setPhotoNotes([""]);setWorkingMode("text");setView("run");}}}
                     style={{background:"#0F1829",border:"1px solid "+(agent.flagship?agent.color+"44":"#1C2A40"),borderRadius:8,padding:"12px 14px",cursor:agent.comingSoon?"default":"pointer",opacity:agent.comingSoon?0.5:1,position:"relative" as const}}>
                     {agent.flagship&&<div style={{position:"absolute",top:8,right:8,...S.badge("#14B8A6")}}>FLAGSHIP</div>}
-                    {agent.comingSoon&&<div style={{position:"absolute",top:8,right:8,...S.badge("#5A6480")}}>SOON</div>}
+                    {agent.comingSoon&&<div style={{position:"absolute",top:8,right:8,...S.badge("var(--oiq-muted)")}}>SOON</div>}
                     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
                       <span style={{fontSize:20}}>{agent.icon}</span>
                       <div style={{fontSize:11,fontWeight:700,color:"#F0F4FF",flex:1}}>{agent.name}</div>
@@ -1239,7 +1239,7 @@ export default function AIAgents({
                     <div style={{overflowX:"auto" as const}}>
                       <table style={{fontSize:9,borderCollapse:"collapse" as const,width:"100%"}}>
                         <thead><tr>{sheet.headers.map((h,i)=><th key={i} style={{background:"#141F33",color:"#14B8A6",padding:"4px 8px",textAlign:"left" as const,whiteSpace:"nowrap" as const,borderBottom:"1px solid #1C2A40"}}>{h}</th>)}</tr></thead>
-                        <tbody>{(sheet.rows||[]).slice(0,4).map((row,ri)=><tr key={ri}>{(Array.isArray(row)?row:[]).map((c:any,ci:number)=><td key={ci} style={{padding:"3px 8px",borderBottom:"1px solid #0a0e1a",color:"#8FA8CC",whiteSpace:"nowrap" as const}}>{String(c).slice(0,22)}</td>)}</tr>)}</tbody>
+                        <tbody>{(sheet.rows||[]).slice(0,4).map((row,ri)=><tr key={ri}>{(Array.isArray(row)?row:[]).map((c:any,ci:number)=><td key={ci} style={{padding:"3px 8px",borderBottom:"1px solid var(--oiq-bg)",color:"#8FA8CC",whiteSpace:"nowrap" as const}}>{String(c).slice(0,22)}</td>)}</tr>)}</tbody>
                       </table>
                       {(sheet.rows||[]).length>4&&<div style={{fontSize:9,color:"#4D6A8A",marginTop:3}}>{(sheet.rows||[]).length-4} more rows in download</div>}
                     </div>
