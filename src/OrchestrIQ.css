@@ -934,3 +934,22 @@
   margin-top: auto !important;
   flex-shrink: 0 !important;
 }
+
+/* ── SIDEBAR FOOTER — pinned, not floated ─────────────────────────────────── */
+
+.oiq-sidebar {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  overflow-y: auto !important;
+}
+
+.oiq-sidebar > div:last-child {
+  position: sticky !important;
+  bottom: 0 !important;
+  margin-top: auto !important;
+  z-index: 5 !important;
+  background: var(--sb-bg) !important;
+  border-top: 1px solid var(--sb-bdr) !important;
+  flex-shrink: 0 !important;
+}
