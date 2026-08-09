@@ -2275,6 +2275,7 @@ export default function App(){
   const [page,setPage]=useState("landing");
   const [sbOpen,setSbOpen]=useState(false);
   const [showModules,setShowModules]=useState(false);
+  const [me,setMe]=useState<{email:string;role:string}>({email:"",role:""});
   const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return WorkspaceMemory.get<string>("oiq-sb-col")==="1";}catch{return false;}});
   const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:""});
   const [mediaMode,setMediaMode]=useState({image:"prompts",video:"veo"});
@@ -2443,6 +2444,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
       const {data:{user}}=await supabase.auth.getUser();
       if(user){
         const {data:prof}=await supabase.from("profiles").select("role,admin_api_keys").eq("id",user.id).single();
+        setMe({email:user.email||"",role:prof?.role||"user"});
         if(prof?.role==="super_admin"&&prof?.admin_api_keys){
           const ak=prof.admin_api_keys as any;
           const loadedKeys=ak.keys||ak;
@@ -5651,26 +5653,96 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
       <div className="oiq-body-row" style={{display:"flex",flex:1,overflow:"hidden",minHeight:0}}>
       {/* ── SIDEBAR ── */}
       <div id="oiq-sidebar" className="oiq-sidebar" role="navigation" aria-label="Executive roster and module navigation" style={{width:210,background:"#0c1120",borderRight:"1px solid #14192a",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden",paddingTop:'0'}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 8px",borderBottom:"1px solid #14192a"}}>
-          <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
-            <span style={{color:"#14B8A6",fontSize:13,fontWeight:900}}>◆</span>
-            <span style={{fontWeight:700,fontSize:12,color:"#F1F5F9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{co.name||BRAND}</span>
-          </div>
-          <div style={{display:"flex",gap:3,alignItems:"center"}}>
-            <span title={healthTip} style={{fontSize:10,cursor:"default"}}>{healthDot}</span>
-            <select value={theme} onChange={e=>changeTheme(e.target.value)} title="Theme" style={{background:"none",border:"1px solid #1a2030",borderRadius:4,color:"#A0AAC0",fontSize:10,cursor:"pointer",padding:"2px",fontFamily:"Manrope,sans-serif"}}>
-              {Object.entries(THEMES).map(([id,t])=><option key={id} value={id} style={{background:"#0a0e1a"}}>{t.ic}</option>)}
-            </select>
-            <button onClick={()=>setShowExport(true)} title="Export Studio — PDF & PowerPoint" style={{...S.iBtn,color:"#A855F7"}}>🎨</button>
-            <button onClick={()=>setShowSignOutConfirm(true)} title="Sign Out" style={{...S.iBtn,color:"#EF4444"}}>⎋</button>
-            <button onClick={()=>{setShowSettings(true);setSTab("api");}} title="Settings" style={S.iBtn}>⚙</button>
-          </div>
+        {/* ── WORDMARK ── */}
+        <div style={{padding:"16px 14px 13px",borderBottom:"1px solid var(--sb-bdr)",flexShrink:0}}>
+          <div style={{fontFamily:"var(--font-head)",fontSize:19,fontWeight:700,color:"var(--oiq-sbText)",letterSpacing:"-.01em",lineHeight:1.1}}>{BRAND}</div>
+          <div style={{fontSize:9,fontWeight:700,color:"var(--oiq-sbDim)",letterSpacing:".12em",textTransform:"uppercase",marginTop:3}}>Decision Intelligence</div>
         </div>
-        <div style={{padding:"3px 8px 2px",fontSize:9,color:"#5A6480",display:"flex",alignItems:"center",gap:4}}>
-          <span style={{width:5,height:5,borderRadius:"50%",background:cfgP.length?"#14B8A6":"#EF4444",flexShrink:0}}/>
+
+        {/* ── PROVIDER + CURRENCY ── */}
+        <div style={{padding:"7px 14px",fontSize:9,color:"var(--oiq-sbDim)",display:"flex",alignItems:"center",gap:5,borderBottom:"1px solid var(--sb-bdr)",flexShrink:0}}>
+          <span style={{width:5,height:5,borderRadius:"50%",background:cfgP.length?"var(--oiq-accent)":"#EF4444",flexShrink:0}}/>
           <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{!cfgP.length?"No key — add in Settings":cfgP.length===1?MODELS[cfgP[0]]?.name:MODELS[defP]?.name+" · "+cfgP.length+" keys"}</span>
           <span style={{marginLeft:"auto",flexShrink:0}}>{cur.sym}{co.currency}</span>
         </div>
+
+        {/* ── MODULE DROPDOWN TRIGGER ── */}
+        <div style={{position:"relative",padding:"10px 10px",flexShrink:0}}>
+          <button onClick={()=>setShowModules(v=>!v)}
+            style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:"var(--oiq-sbBorder)",border:"1px solid var(--sb-bdr)",borderRadius:8,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}>
+            <span style={{fontSize:15}}>{[["nerve","🧠"],["workflow","⚡"],["agentic","🔗"],["agents","🤖"],["p3","🤖"],["chat","💬"],["data","🗄️"],["ledger","📒"],["dispatch","📡"],["actions","✅"],["studio","🎨"],["funding","💰"],["tokens","🔢"]].find(([v])=>v===view)?.[1]||"🧠"}</span>
+            <span style={{flex:1,fontSize:11.5,fontWeight:700,color:"var(--oiq-sbText)",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.06em"}}>{[["nerve","Nerve Center"],["workflow","Workflow"],["agentic","Agentic AI"],["agents","AI Agents"],["p3","Autopilot"],["chat","Chat"],["data","Data Hub"],["home","Command Center"],["ledger","Ledger"],["finance","Finance"],["dispatch","Pulse"],["actions","Tasks"],["studio","Studio"],["funding","Funding"],["tokens","Tokens"]].find(([v])=>v===view)?.[1]||"Nerve Center"}</span>
+            <span style={{fontSize:9,color:"var(--oiq-sbDim)",transition:"transform 0.2s",transform:showModules?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
+          </button>
+          {showModules&&(
+            <div style={{position:"absolute",top:"calc(100% - 2px)",left:10,right:10,background:"var(--oiq-sbBorder)",border:"1px solid var(--sb-bdr)",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:7,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
+              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
+                <button key={v} onClick={()=>{setView(v);setShowModules(false);}}
+                  style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 11px",background:view===v?"var(--oiq-accent)":"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"inherit",marginBottom:2,transition:"background 0.12s"}}>
+                  <span style={{fontSize:15,width:22,textAlign:"center"}}>{ic}</span>
+                  <span style={{fontSize:11.5,fontWeight:600,color:view===v?"var(--oiq-accentText)":"var(--oiq-sbText)"}}>{lb}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── STAGE PANEL — 3×2 grid ── */}
+        <div style={{margin:"0 10px 12px",background:"var(--oiq-sbBorder)",border:"1px solid var(--sb-bdr)",borderRadius:9,padding:11,flexShrink:0}}>
+          <div style={{fontSize:9,fontWeight:800,color:"var(--oiq-accent)",letterSpacing:".12em",textTransform:"uppercase",marginBottom:9,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Nerve Center · {co.name||BRAND}</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:5}}>
+            {STAGES.map(st=>{const on=co.stage===st.id;return(
+              <button key={st.id} onClick={()=>{const n={...co,stage:st.id};setCo(n);sv("cos-co",n);}} title={st.l}
+                style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"7px 3px",borderRadius:6,cursor:"pointer",overflow:"hidden",fontFamily:"inherit",
+                  border:"1px solid "+(on?"var(--oiq-accent)":"transparent"),
+                  background:on?"var(--oiq-accent)":"var(--sb-bg)",
+                  color:on?"var(--oiq-accentText)":"var(--oiq-sbDim)",fontWeight:on?700:600}}>
+                <span style={{fontSize:13,lineHeight:1}}>{st.ic}</span>
+                <span style={{fontSize:9,lineHeight:1.1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:"100%"}}>{st.l}</span>
+              </button>);})}
+          </div>
+        </div>
+
+        {/* ── EXECUTIVE ROSTER ── */}
+        <div style={{flex:1,overflowY:"auto",padding:"0 10px 10px"}}>
+          <div style={{fontSize:9,fontWeight:800,color:"var(--oiq-sbDim)",letterSpacing:".14em",textTransform:"uppercase",padding:"2px 4px 8px"}}>Executives</div>
+          {DEPTS.map(dept=>(
+            <div key={dept.id} style={{marginBottom:2}}>
+              <button onClick={()=>{const n={...expD,[dept.id]:!expD[dept.id]};setExpD(n);sv("cos-dp",n);}}
+                style={{width:"100%",display:"flex",alignItems:"center",gap:7,padding:"7px 8px",background:"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>
+                <span style={{fontSize:7,color:"var(--oiq-sbDim)",transition:"transform .15s",transform:expD[dept.id]?"rotate(90deg)":"rotate(0)"}}>▶</span>
+                <span style={{fontSize:10,fontWeight:700,color:"var(--oiq-sbText)",letterSpacing:".04em"}}>{dept.l}</span>
+                <span style={{marginLeft:"auto",fontSize:9,fontWeight:700,color:"var(--oiq-sbDim)"}}>{dept.roles.length}</span>
+              </button>
+              {expD[dept.id]&&dept.roles.map(r=>(
+                <button key={r.id} onClick={()=>{setSelRole(r.id);setView("chat");setError(null);}}
+                  style={{width:"100%",display:"flex",alignItems:"center",gap:9,padding:"7px 8px 7px 20px",borderRadius:6,cursor:"pointer",textAlign:"left",fontFamily:"inherit",border:"none",
+                    background:selRole===r.id?"var(--oiq-accent)":"none"}}>
+                  <span style={{fontSize:12,flexShrink:0}}>{r.ic}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:10.5,fontWeight:600,color:selRole===r.id?"var(--oiq-accentText)":"var(--oiq-sbText)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.t}</div>
+                    <div style={{fontSize:8.5,color:selRole===r.id?"var(--oiq-accentText)":"var(--oiq-sbDim)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",opacity:.85}}>{r.d}</div>
+                  </div>
+                  {chats[r.id]?.length>0&&<span style={{width:4,height:4,borderRadius:"50%",background:"var(--oiq-accent)",flexShrink:0}}/>}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {/* ── FOOTER — identity, settings, sign out ── */}
+        <div style={{borderTop:"1px solid var(--sb-bdr)",padding:"11px 14px",display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:11.5,fontWeight:600,color:"var(--oiq-sbText)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{me.email||"Signed in"}</div>
+            <div style={{fontSize:9.5,color:"var(--oiq-sbDim)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+              {(me.role==="super_admin"?"Super Admin":me.role||"User")}{co.location?" · "+co.location:""}
+            </div>
+          </div>
+          <button onClick={()=>setShowExport(true)} title="Export Studio" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,padding:2,color:"var(--oiq-sbDim)"}}>🎨</button>
+          <button onClick={()=>{setShowSettings(true);setSTab("api");}} title="Settings" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,padding:2,color:"var(--oiq-sbDim)"}}>⚙</button>
+          <button onClick={()=>setShowSignOutConfirm(true)} title="Sign Out" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,padding:2,color:"var(--oiq-sbDim)"}}>⎋</button>
+        </div>
+      </div>
         {/* ── MODULE DROPDOWN TRIGGER ── */}
         <div style={{position:"relative",padding:"6px 8px",borderBottom:"1px solid #1a2030"}}>
           <button onClick={()=>setShowModules(v=>!v)}
