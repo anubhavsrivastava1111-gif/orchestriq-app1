@@ -7076,23 +7076,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               </div>
             )}
             {sTab==="theme"&&(
-              <div>
-                <p style={{fontSize:11,color:"#8892B0",marginBottom:12,lineHeight:1.6}}>Switch visual themes instantly. Your choice is saved and persists across refreshes and sessions. Layout, content, and navigation are never changed.</p>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
-                  {Object.entries(THEMES).map(([id,t])=>(
-                    <button key={id} onClick={()=>changeTheme(id)} style={{display:"flex",alignItems:"center",gap:10,padding:"12px",borderRadius:8,border:"1px solid "+(theme===id?"#14B8A6":"#1a2030"),background:theme===id?"rgba(20,184,166,0.06)":"#0a0e1a",cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"left"}}>
-                      <div style={{display:"flex",flexShrink:0}}>
-                        {["--bg","--panel","--accent","--text"].map(v=><div key={v} style={{width:14,height:28,background:t.vars[v],borderLeft:"1px solid rgba(128,128,128,0.2)"}}/>)}
-                      </div>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:11,fontWeight:700,color:theme===id?"#14B8A6":"#F1F5F9"}}>{t.ic} {t.name}</div>
-                        {t.default&&<div style={{fontSize:8,color:"#5A6480"}}>Default</div>}
-                        {theme===id&&<div style={{fontSize:8,color:"#14B8A6",fontWeight:700}}>● Active</div>}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <DesignCentre onApplied={()=>{}} />
             )}
             {sTab==="workspace"&&(
               <div>
