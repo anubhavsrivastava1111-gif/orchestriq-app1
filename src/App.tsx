@@ -7305,3 +7305,96 @@ button:hover{filter:brightness(1.1)}select{appearance:auto}html,body{background:
 /* P6: Reduce ticker height */
 #oiq-root .global-ticker,#oiq-root [class*="ticker"]{transform:scaleY(0.88);transform-origin:top;}
 #oiq-root header+*{margin-top:-3px;}`;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EXECUTIVE EDITORIAL OVERRIDE — Direction B
+   Loaded last so it wins over inline styles, earlier CSS, and the JS theme.
+   To remove this look entirely, delete everything from this line to the end.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. SHELL ── */
+#oiq-root { background: #EDEAE3 !important; color: #4A453D !important; }
+#oiq-header { background: #1C2A24 !important; border-bottom: 1px solid #2C3D35 !important; }
+.oiq-sidebar, #oiq-sidebar { background: #1C2A24 !important; border-right: 1px solid #2C3D35 !important; }
+
+/* ── 2. BACKGROUNDS: dark navies → light surfaces ── */
+#oiq-root [style*="background:#0a0e1a"],#oiq-root [style*="background: #0a0e1a"],
+#oiq-root [style*="background:#0A0E1A"],#oiq-root [style*="backgroundColor:#0a0e1a"]
+{ background-color: #F7F5F1 !important; }
+
+#oiq-root [style*="background:#131825"],#oiq-root [style*="background: #131825"],
+#oiq-root [style*="background:#0c1120"],#oiq-root [style*="background: #0c1120"],
+#oiq-root [style*="background:#14192a"],#oiq-root [style*="background:#0E1523"]
+{ background-color: #FFFFFF !important; }
+
+/* ── 3. BORDERS ── */
+#oiq-root [style*="#1a2030"],#oiq-root [style*="#1A2030"],
+#oiq-root [style*="#14192a"],#oiq-root [style*="#232C42"]
+{ border-color: #E4E0D8 !important; }
+
+/* ── 4. TEXT: light text → dark ink (must come after backgrounds) ── */
+#oiq-root [style*="color:#F1F5F9"],#oiq-root [style*="color: #F1F5F9"]
+{ color: #1C2A24 !important; }
+#oiq-root [style*="color:#A0AAC0"],#oiq-root [style*="color: #A0AAC0"],
+#oiq-root [style*="color:#8892B0"]
+{ color: #4A453D !important; }
+#oiq-root [style*="color:#5A6480"],#oiq-root [style*="color: #5A6480"]
+{ color: #8A8378 !important; }
+#oiq-root [style*="color:#3A4060"],#oiq-root [style*="color: #3A4060"]
+{ color: #B5AEA2 !important; }
+
+/* ── 5. SIDEBAR keeps light text on dark green ── */
+.oiq-sidebar [style*="color:#F1F5F9"],.oiq-sidebar [style*="color:#A0AAC0"],
+.oiq-sidebar [style*="color:#8892B0"],#oiq-sidebar [style*="color:#F1F5F9"],
+#oiq-sidebar [style*="color:#A0AAC0"],#oiq-sidebar [style*="color:#8892B0"]
+{ color: #B9C9C0 !important; }
+.oiq-sidebar [style*="color:#5A6480"],#oiq-sidebar [style*="color:#5A6480"],
+.oiq-sidebar [style*="color:#3A4060"],#oiq-sidebar [style*="color:#3A4060"]
+{ color: #7E9689 !important; }
+.oiq-sidebar [style*="background:#0a0e1a"],#oiq-sidebar [style*="background:#0a0e1a"],
+.oiq-sidebar [style*="background:#131825"],#oiq-sidebar [style*="background:#131825"],
+.oiq-sidebar [style*="background:#0c1120"],#oiq-sidebar [style*="background:#0c1120"]
+{ background-color: #26362E !important; }
+.oiq-sidebar [style*="#1a2030"],#oiq-sidebar [style*="#1a2030"],
+.oiq-sidebar [style*="#14192a"],#oiq-sidebar [style*="#14192a"]
+{ border-color: #35473D !important; }
+
+/* ── 6. HEADER keeps light text on dark green ── */
+#oiq-header, #oiq-header * { color: #B9C9C0 !important; }
+#oiq-header .oiq-brand-name { color: #F3F1EC !important; }
+
+/* ── 7. ACCENT: teal → gold ── */
+#oiq-root [style*="#14B8A6"] { color: #8A6A24 !important; }
+#oiq-root [style*="background:#14B8A6"],#oiq-root [style*="background: #14B8A6"]
+{ background-color: #C9A961 !important; color: #1C2A24 !important; }
+#oiq-root [style*="border-left:3px solid #14B8A6"],
+#oiq-root [style*="borderLeft:3px solid #14B8A6"] { border-left-color: #C9A961 !important; }
+
+/* ── 8. INPUTS + SELECTS ── */
+#oiq-root input, #oiq-root textarea, #oiq-root select
+{ background: #FFFFFF !important; color: #1C2A24 !important; border-color: #DDD8CE !important; }
+#oiq-sidebar select, .oiq-sidebar select, #oiq-header select
+{ background: #26362E !important; color: #B9C9C0 !important; border-color: #35473D !important; }
+
+/* ── 9. PANELS from OrchestrIQ.css ── */
+#oiq-root .oiq-panel, #oiq-root [class*="panel"], #oiq-root [class*="Card"]
+{ background: #FFFFFF !important; border-color: #E4E0D8 !important; }
+
+/* ── 10. TYPOGRAPHY: lift the smallest sizes for readability ── */
+#oiq-root { font-family: 'Inter',-apple-system,sans-serif !important; }
+#oiq-root [style*="fontSize:8"] { font-size: 11px !important; }
+#oiq-root [style*="fontSize:9"] { font-size: 12px !important; }
+#oiq-root [style*="fontSize:10"] { font-size: 12.5px !important; }
+#oiq-root [style*="fontSize:11"] { font-size: 13px !important; }
+#oiq-root [style*="fontSize:12"] { font-size: 13.5px !important; }
+
+/* ── 11. SCROLLBARS ── */
+#oiq-root ::-webkit-scrollbar-thumb { background: #DDD8CE !important; }
+#oiq-root ::-webkit-scrollbar-track { background: #F7F5F1 !important; }
+.oiq-sidebar ::-webkit-scrollbar-thumb { background: #35473D !important; }
+.oiq-sidebar ::-webkit-scrollbar-track { background: #1C2A24 !important; }
+
+/* ── 12. KEEP semantic colours readable on light ── */
+#oiq-root [style*="#EF4444"] { color: #B54A3A !important; }
+#oiq-root [style*="#10B981"] { color: #3D6B4E !important; }
+#oiq-root [style*="#F59E0B"] { color: #8A6A24 !important; }
