@@ -2443,8 +2443,8 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{
       const {data:{user}}=await supabase.auth.getUser();
       if(user){
-        const {data:prof}=await supabase.from("profiles").select("role,admin_api_keys").eq("id",user.id).single();
-        setMe({email:user.email||"",role:prof?.role||"user"});
+        const {data:prof}=await supabase.from("profiles").select("full_name,role,admin_api_keys").eq("id",user.id).single();
+        setMe({email:(prof as any)?.full_name||user.email||"",role:prof?.role||"user"});
         if(prof?.role==="super_admin"&&prof?.admin_api_keys){
           const ak=prof.admin_api_keys as any;
           const loadedKeys=ak.keys||ak;
@@ -5735,7 +5735,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:11.5,fontWeight:600,color:"var(--oiq-sbText)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{me.email||"Signed in"}</div>
             <div style={{fontSize:9.5,color:"var(--oiq-sbDim)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-              {(me.role==="super_admin"?"Super Admin":me.role||"User")}{co.location?" · "+co.location:""}
+              {(me.role==="super_admin"?"Super Admin":me.role==="admin"?"Admin":"User")}{co.location?" · "+co.location:""}
             </div>
           </div>
           <button onClick={()=>setShowExport(true)} title="Export Studio" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,padding:2,color:"var(--oiq-sbDim)"}}>🎨</button>
