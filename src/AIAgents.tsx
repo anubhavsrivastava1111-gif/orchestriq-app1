@@ -253,7 +253,7 @@ export const AGENT_REGISTRY: AgentDef[] = [
   // ─── EXECUTIVE ASSISTANT ──────────────────────────────────────────────────
   {
     id: "exec_assistant", name: "Executive Assistant", category: "Executive Office",
-    icon: "🤝", color: "#14B8A6", flagship: true,
+    icon: "🤝", color: "var(--oiq-accent)", flagship: true,
     timeSaved: "2–3 hours per day",
     description: "Drafts executive communications, meeting agendas, briefings, board papers and action summaries.",
     inputTypes: ["text","meeting notes","emails","context"],
@@ -508,7 +508,7 @@ export const AGENT_REGISTRY: AgentDef[] = [
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const CATEGORIES = [
-  { id: "Executive Office",      icon: "🏛️", color: "#14B8A6" },
+  { id: "Executive Office",      icon: "🏛️", color: "var(--oiq-accent)" },
   { id: "Finance & Audit",       icon: "💰", color: "#3B82F6" },
   { id: "Operations",            icon: "⚙️", color: "#06B6D4" },
   { id: "Compliance & Risk",     icon: "⚖️", color: "#F59E0B" },
@@ -901,7 +901,7 @@ export default function AIAgents({
       } catch {}
       // Fallback: basic DOCX
       const secs = parseSections(content);
-      let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><style>@page{mso-page-orientation:portrait;margin:2.54cm;}body{font-family:Calibri,sans-serif;font-size:11pt;text-align:left;}h1{font-size:20pt;color:#14B8A6;border-bottom:2pt solid #14B8A6;padding-bottom:4pt;}h2{font-size:14pt;color:#0D6EFD;margin-top:14pt;}h3{font-size:12pt;color:#333;}p{line-height:1.5;margin:4pt 0;text-align:left;}table{border-collapse:collapse;width:100%;margin:8pt 0;}th{background:#14B8A6;color:#fff;padding:5pt 8pt;text-align:left;}td{padding:4pt 8pt;border-bottom:1pt solid #e2e2e2;}tr:nth-child(even) td{background:#f6f8fb;}</style></head><body><h1>${run.agentName}</h1><p><em>${co?.name||""} · ${new Date(run.ts).toLocaleDateString()} · Confidence: ${run.output.confidence}%</em></p>`;
+      let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><style>@page{mso-page-orientation:portrait;margin:2.54cm;}body{font-family:Calibri,sans-serif;font-size:11pt;text-align:left;}h1{font-size:20pt;color:var(--oiq-accent);border-bottom:2pt solid var(--oiq-accent);padding-bottom:4pt;}h2{font-size:14pt;color:#0D6EFD;margin-top:14pt;}h3{font-size:12pt;color:#333;}p{line-height:1.5;margin:4pt 0;text-align:left;}table{border-collapse:collapse;width:100%;margin:8pt 0;}th{background:var(--oiq-accent);color:#fff;padding:5pt 8pt;text-align:left;}td{padding:4pt 8pt;border-bottom:1pt solid var(--oiq-border);}tr:nth-child(even) td{background:var(--oiq-surface2);}</style></head><body><h1>${run.agentName}</h1><p><em>${co?.name||""} · ${new Date(run.ts).toLocaleDateString()} · Confidence: ${run.output.confidence}%</em></p>`;
       for (const sec of secs) {
         html += `<h2>${sec.title}</h2>`;
         const tableLines = sec.lines.filter(l=>l.includes("|")&&l.trim().startsWith("|"));
@@ -913,7 +913,7 @@ export default function AIAgents({
           html += `</tbody></table>`;
         } else { sec.lines.forEach(ln=>{ const t=stripMd(ln).trim(); if(t)html+=`<p>${t}</p>`; }); }
       }
-      if (run.output.automationGuide) html += `<h2>Automation Guide</h2><pre style="font-size:9pt;background:#f5f5f5;padding:8pt;">${run.output.automationGuide.slice(0,3000)}</pre>`;
+      if (run.output.automationGuide) html += `<h2>Automation Guide</h2><pre style="font-size:9pt;background:var(--oiq-surface2);padding:8pt;">${run.output.automationGuide.slice(0,3000)}</pre>`;
       html += "</body></html>";
       dlFile(nm+".doc",html,"application/msword"); return;
     }
@@ -945,7 +945,7 @@ export default function AIAgents({
         const jsPDF = await ensureJsPDF();
         const doc = new jsPDF({unit:"pt",format:"a4"});
         const W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight(), M=48;
-        const agColor = agent?.color||"#14B8A6";
+        const agColor = agent?.color||"var(--oiq-accent)";
         const r=parseInt(agColor.slice(1,3),16), g=parseInt(agColor.slice(3,5),16), b=parseInt(agColor.slice(5,7),16);
         let y=M;
         doc.setFillColor(r,g,b); doc.rect(0,0,W,80,"F");
@@ -998,15 +998,15 @@ export default function AIAgents({
 
   // ─── STYLES ───────────────────────────────────────────────────────────────
   const S = {
-    page:  { flex:1, overflowY:"auto" as const, background:"#070C18", fontFamily:"'Inter',-apple-system,sans-serif", color:"#F0F4FF" },
-    hdr:   { padding:"16px 24px 12px", borderBottom:"1px solid #1C2A40", marginBottom:14 },
-    card:  { background:"#0F1829", border:"1px solid #1C2A40", borderRadius:8, padding:"14px 16px", marginBottom:10 },
-    inp:   { width:"100%", background:"#141F33", border:"1px solid #1C2A40", borderRadius:6, padding:"9px 12px", color:"#F0F4FF", fontSize:12, fontFamily:"inherit", boxSizing:"border-box" as const, outline:"none" },
-    btn:   { background:"linear-gradient(135deg,#14B8A6,#6366F1)", border:"none", borderRadius:6, padding:"10px 18px", color:"#fff", fontSize:12, fontWeight:700 as const, cursor:"pointer" as const, fontFamily:"inherit" },
-    hBtn:  { background:"none", border:"1px solid #1C2A40", borderRadius:5, padding:"5px 12px", color:"#8FA8CC", fontSize:11, cursor:"pointer" as const, fontFamily:"inherit" },
-    modeBtn:(active:boolean,c:string)=>({ padding:"8px 14px", borderRadius:7, border:"1px solid "+(active?c:"#1C2A40"), background:active?c+"18":"transparent", color:active?c:"#4D6A8A", cursor:"pointer" as const, fontFamily:"inherit", fontSize:11, fontWeight:(active?700:400) as any }),
+    page:  { flex:1, overflowY:"auto" as const, background:"var(--oiq-bg)", fontFamily:"'Inter',-apple-system,sans-serif", color:"var(--oiq-ink)" },
+    hdr:   { padding:"16px 24px 12px", borderBottom:"1px solid var(--oiq-border)", marginBottom:14 },
+    card:  { background:"var(--oiq-surface)", border:"1px solid var(--oiq-border)", borderRadius:8, padding:"14px 16px", marginBottom:10 },
+    inp:   { width:"100%", background:"var(--oiq-surface2)", border:"1px solid var(--oiq-border)", borderRadius:6, padding:"9px 12px", color:"var(--oiq-ink)", fontSize:12, fontFamily:"inherit", boxSizing:"border-box" as const, outline:"none" },
+    btn:   { background:"linear-gradient(135deg,var(--oiq-accent),#6366F1)", border:"none", borderRadius:6, padding:"10px 18px", color:"#fff", fontSize:12, fontWeight:700 as const, cursor:"pointer" as const, fontFamily:"inherit" },
+    hBtn:  { background:"none", border:"1px solid var(--oiq-border)", borderRadius:5, padding:"5px 12px", color:"var(--oiq-body)", fontSize:11, cursor:"pointer" as const, fontFamily:"inherit" },
+    modeBtn:(active:boolean,c:string)=>({ padding:"8px 14px", borderRadius:7, border:"1px solid "+(active?c:"var(--oiq-border)"), background:active?c+"18":"transparent", color:active?c:"var(--oiq-muted)", cursor:"pointer" as const, fontFamily:"inherit", fontSize:11, fontWeight:(active?700:400) as any }),
     badge: (c:string)=>({ fontSize:8, padding:"2px 7px", borderRadius:10, background:c+"22", color:c, fontWeight:700 as const }),
-    tab:   (active:boolean)=>({ padding:"5px 14px", borderRadius:6, fontSize:10, fontWeight:600 as const, border:"1px solid "+(active?"#14B8A6":"#1C2A40"), background:active?"rgba(20,184,166,0.1)":"transparent", color:active?"#14B8A6":"#4D6A8A", cursor:"pointer" as const, fontFamily:"inherit" }),
+    tab:   (active:boolean)=>({ padding:"5px 14px", borderRadius:6, fontSize:10, fontWeight:600 as const, border:"1px solid "+(active?"var(--oiq-accent)":"var(--oiq-border)"), background:active?"rgba(20,184,166,0.1)":"transparent", color:active?"var(--oiq-accent)":"var(--oiq-muted)", cursor:"pointer" as const, fontFamily:"inherit" }),
   };
 
   const filteredAgents = AGENT_REGISTRY.filter(a=>
@@ -1020,8 +1020,8 @@ export default function AIAgents({
       <div style={S.hdr}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
-            <div style={{fontSize:18,fontWeight:800,color:"#F0F4FF",marginBottom:2}}>🤖 AI Agents</div>
-            <div style={{fontSize:11,color:"#4D6A8A"}}>Your digital workforce · real time savings · enterprise-grade outputs</div>
+            <div style={{fontSize:18,fontWeight:800,color:"var(--oiq-ink)",marginBottom:2}}>🤖 AI Agents</div>
+            <div style={{fontSize:11,color:"var(--oiq-muted)"}}>Your digital workforce · real time savings · enterprise-grade outputs</div>
           </div>
           <div style={{display:"flex",gap:6}}>
             <button onClick={()=>setView("orchestrate")} style={{...S.hBtn,color:"#A855F7",borderColor:"#A855F744"}}>🎯 Orchestrate</button>
@@ -1044,21 +1044,21 @@ export default function AIAgents({
             <div key={cat.id} style={{marginBottom:22}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
                 <span style={{fontSize:16}}>{cat.icon}</span>
-                <div style={{fontSize:13,fontWeight:800,color:"#F0F4FF"}}>{cat.id}</div>
-                <div style={{height:1,flex:1,background:"#1C2A40"}}/>
+                <div style={{fontSize:13,fontWeight:800,color:"var(--oiq-ink)"}}>{cat.id}</div>
+                <div style={{height:1,flex:1,background:"var(--oiq-border)"}}/>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:8}}>
                 {agents.map(agent=>(
                   <div key={agent.id}
                     onClick={()=>{if(!agent.comingSoon){setActiveAgent(agent);setUserInput("");setUploadedText("");setUploadedFileName("");setPhotoNotes([""]);setWorkingMode("text");setView("run");}}}
-                    style={{background:"#0F1829",border:"1px solid "+(agent.flagship?agent.color+"44":"#1C2A40"),borderRadius:8,padding:"12px 14px",cursor:agent.comingSoon?"default":"pointer",opacity:agent.comingSoon?0.5:1,position:"relative" as const}}>
-                    {agent.flagship&&<div style={{position:"absolute",top:8,right:8,...S.badge("#14B8A6")}}>FLAGSHIP</div>}
+                    style={{background:"var(--oiq-surface)",border:"1px solid "+(agent.flagship?agent.color+"44":"var(--oiq-border)"),borderRadius:8,padding:"12px 14px",cursor:agent.comingSoon?"default":"pointer",opacity:agent.comingSoon?0.5:1,position:"relative" as const}}>
+                    {agent.flagship&&<div style={{position:"absolute",top:8,right:8,...S.badge("var(--oiq-accent)")}}>FLAGSHIP</div>}
                     {agent.comingSoon&&<div style={{position:"absolute",top:8,right:8,...S.badge("var(--oiq-muted)")}}>SOON</div>}
                     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
                       <span style={{fontSize:20}}>{agent.icon}</span>
-                      <div style={{fontSize:11,fontWeight:700,color:"#F0F4FF",flex:1}}>{agent.name}</div>
+                      <div style={{fontSize:11,fontWeight:700,color:"var(--oiq-ink)",flex:1}}>{agent.name}</div>
                     </div>
-                    <div style={{fontSize:10,color:"#4D6A8A",lineHeight:1.5,marginBottom:6}}>{agent.description}</div>
+                    <div style={{fontSize:10,color:"var(--oiq-muted)",lineHeight:1.5,marginBottom:6}}>{agent.description}</div>
                     <div style={{fontSize:9,color:"#10B981",marginBottom:6}}>⏱ Saves {agent.timeSaved}</div>
                     <div style={{display:"flex",gap:3,flexWrap:"wrap" as const}}>
                       {agent.supportsUpload&&<span style={{...S.badge("#3B82F6"),fontSize:7}}>📎 Upload</span>}
@@ -1083,16 +1083,16 @@ export default function AIAgents({
       <div style={S.page}>
         <div style={S.hdr}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-            <button onClick={()=>setView("landing")} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>← Agents</button>
+            <button onClick={()=>setView("landing")} style={{...S.hBtn,color:"var(--oiq-accent)",borderColor:"var(--oiq-accent)33"}}>← Agents</button>
             <span style={{fontSize:20}}>{agent.icon}</span>
             <div>
-              <div style={{fontSize:14,fontWeight:800,color:"#F0F4FF"}}>{agent.name}</div>
+              <div style={{fontSize:14,fontWeight:800,color:"var(--oiq-ink)"}}>{agent.name}</div>
               <div style={{fontSize:10,color:"#10B981"}}>⏱ Saves {agent.timeSaved}</div>
             </div>
           </div>
-          <div style={{fontSize:10,fontWeight:700,color:"#4D6A8A",textTransform:"uppercase" as const,letterSpacing:"0.08em",marginBottom:8}}>Working Mode</div>
+          <div style={{fontSize:10,fontWeight:700,color:"var(--oiq-muted)",textTransform:"uppercase" as const,letterSpacing:"0.08em",marginBottom:8}}>Working Mode</div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap" as const}}>
-            <button onClick={()=>setWorkingMode("text")} style={S.modeBtn(workingMode==="text","#14B8A6")}>✏️ Type / Paste</button>
+            <button onClick={()=>setWorkingMode("text")} style={S.modeBtn(workingMode==="text","var(--oiq-accent)")}>✏️ Type / Paste</button>
             {agent.supportsUpload&&<button onClick={()=>{setWorkingMode("upload");setTimeout(()=>fileRef.current?.click(),100);}} style={S.modeBtn(workingMode==="upload","#3B82F6")}>📎 Upload File</button>}
             {agent.supportsPhoto&&<button onClick={()=>setWorkingMode("photo")} style={S.modeBtn(workingMode==="photo","#F59E0B")}>📷 Photo Capture</button>}
             {agent.supportsGuide&&<button onClick={()=>setWorkingMode("guide")} style={S.modeBtn(workingMode==="guide","#8B5CF6")}>⚡ Automation Guide</button>}
@@ -1107,7 +1107,7 @@ export default function AIAgents({
                 <div style={{fontSize:11,color:"#10B981"}}>✅ {uploadedFileName} loaded — {uploadedText.length.toLocaleString()} chars extracted</div>
               ):(
                 <div>
-                  <div style={{fontSize:11,color:"#8FA8CC",marginBottom:8}}>Accepts: Excel (.xlsx), CSV, Text (.txt/.md). For PDF/Word, paste the content as text below.</div>
+                  <div style={{fontSize:11,color:"var(--oiq-body)",marginBottom:8}}>Accepts: Excel (.xlsx), CSV, Text (.txt/.md). For PDF/Word, paste the content as text below.</div>
                   <button onClick={()=>fileRef.current?.click()} style={{...S.btn,background:"#3B82F6",fontSize:11}}>Choose File</button>
                 </div>
               )}
@@ -1116,7 +1116,7 @@ export default function AIAgents({
           {workingMode==="photo"&&(
             <div style={{...S.card,border:"1px solid #F59E0B44",marginBottom:12}}>
               <div style={{fontSize:11,fontWeight:700,color:"#F59E0B",marginBottom:4}}>📷 Secure Photo Capture Mode</div>
-              <div style={{fontSize:10,color:"#8FA8CC",marginBottom:10,lineHeight:1.5}}>Cannot upload files? Take photos of document sections and describe what you see. Add one description per photo.</div>
+              <div style={{fontSize:10,color:"var(--oiq-body)",marginBottom:10,lineHeight:1.5}}>Cannot upload files? Take photos of document sections and describe what you see. Add one description per photo.</div>
               {photoNotes.map((note,idx)=>(
                 <div key={idx} style={{display:"flex",gap:6,marginBottom:6}}>
                   <span style={{fontSize:11,color:"#F59E0B",paddingTop:9,minWidth:24}}>📷{idx+1}</span>
@@ -1130,19 +1130,19 @@ export default function AIAgents({
           {workingMode==="guide"&&(
             <div style={{...S.card,border:"1px solid #8B5CF644",marginBottom:12}}>
               <div style={{fontSize:11,fontWeight:700,color:"#8B5CF6",marginBottom:4}}>⚡ Automation Guide Mode</div>
-              <div style={{fontSize:10,color:"#8FA8CC",lineHeight:1.5}}>Cannot share data externally? The AI generates step-by-step automation instructions using tools in your organisation: Excel, Power BI, Power Automate, SQL, SAP, Concur, ServiceNow, SharePoint, Teams, VBA, and more.</div>
+              <div style={{fontSize:10,color:"var(--oiq-body)",lineHeight:1.5}}>Cannot share data externally? The AI generates step-by-step automation instructions using tools in your organisation: Excel, Power BI, Power Automate, SQL, SAP, Concur, ServiceNow, SharePoint, Teams, VBA, and more.</div>
             </div>
           )}
           <div style={S.card}>
-            <label style={{fontSize:10,fontWeight:700,color:"#4D6A8A",textTransform:"uppercase" as const,letterSpacing:"0.08em",display:"block",marginBottom:5}}>Industry (optional)</label>
+            <label style={{fontSize:10,fontWeight:700,color:"var(--oiq-muted)",textTransform:"uppercase" as const,letterSpacing:"0.08em",display:"block",marginBottom:5}}>Industry (optional)</label>
             <select value={industry} onChange={e=>setIndustry(e.target.value)} style={{...S.inp,marginBottom:industry?10:0}}>
               <option value="">— General —</option>
               {Object.entries(INDUSTRY_TEMPLATES).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}
             </select>
-            {industry&&<div style={{fontSize:10,color:"#14B8A6",background:"rgba(20,184,166,0.06)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:5,padding:"6px 10px"}}>💡 {INDUSTRY_TEMPLATES[industry]?.hint}</div>}
+            {industry&&<div style={{fontSize:10,color:"var(--oiq-accent)",background:"rgba(20,184,166,0.06)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:5,padding:"6px 10px"}}>💡 {INDUSTRY_TEMPLATES[industry]?.hint}</div>}
           </div>
           <div style={S.card}>
-            <label style={{fontSize:10,fontWeight:700,color:"#4D6A8A",textTransform:"uppercase" as const,letterSpacing:"0.08em",display:"block",marginBottom:5}}>
+            <label style={{fontSize:10,fontWeight:700,color:"var(--oiq-muted)",textTransform:"uppercase" as const,letterSpacing:"0.08em",display:"block",marginBottom:5}}>
               {workingMode==="guide"?"What process do you want to automate?":workingMode==="upload"?"Additional context / instructions":workingMode==="photo"?"Additional notes":"Input — paste data or describe the task"}
             </label>
             <textarea value={userInput} onChange={e=>setUserInput(e.target.value)}
@@ -1150,7 +1150,7 @@ export default function AIAgents({
                 "Example: We spend 4 hours every month reconciling expense reports against Concur. We have 200 employees. We use SAP Concur, Excel and SharePoint. Tell me how to automate this completely.":
                 "Paste data, describe the task, or enter your request...\nAccepts: "+agent.inputTypes.join(", ")}
               rows={workingMode==="guide"?5:8} style={{...S.inp,resize:"vertical" as const,minHeight:workingMode==="guide"?100:160}}/>
-            {co?.name&&<div style={{fontSize:9,color:"#2D4460",marginTop:5}}>Context: {co.name} · {co.industry||"General"} · {co.currencySymbol||"₹"}</div>}
+            {co?.name&&<div style={{fontSize:9,color:"var(--oiq-faint)",marginTop:5}}>Context: {co.name} · {co.industry||"General"} · {co.currencySymbol||"₹"}</div>}
           </div>
           <button onClick={()=>runAgent(agent)} disabled={running||(workingMode==="text"&&!userInput.trim()&&!uploadedText)||(workingMode==="photo"&&!photoNotes.some(Boolean))} style={{...S.btn,width:"100%",opacity:running?0.5:1}}>
             {running?"⏳ Agent Running...":"▶ Run "+agent.name}
@@ -1176,12 +1176,12 @@ export default function AIAgents({
       <div style={S.page}>
         <div style={S.hdr}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-            <button onClick={()=>setView("run")} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>← Re-run</button>
+            <button onClick={()=>setView("run")} style={{...S.hBtn,color:"var(--oiq-accent)",borderColor:"var(--oiq-accent)33"}}>← Re-run</button>
             <button onClick={()=>setView("landing")} style={S.hBtn}>All Agents</button>
             <span style={{fontSize:18}}>{agent?.icon}</span>
             <div style={{flex:1}}>
-              <div style={{fontSize:13,fontWeight:800,color:"#F0F4FF"}}>{result.agentName}</div>
-              <div style={{fontSize:9,color:"#4D6A8A"}}>{new Date(result.ts).toLocaleString()} · {result.mode} mode</div>
+              <div style={{fontSize:13,fontWeight:800,color:"var(--oiq-ink)"}}>{result.agentName}</div>
+              <div style={{fontSize:9,color:"var(--oiq-muted)"}}>{new Date(result.ts).toLocaleString()} · {result.mode} mode</div>
             </div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:10}}>
@@ -1190,8 +1190,8 @@ export default function AIAgents({
               ["Assumptions",out.assumptions.length+" items","#F59E0B"],
               ["Risks",out.risks.length+" flags","#EF4444"],
             ].map(([lb,val,c])=>(
-              <div key={lb as string} style={{background:"#141F33",borderRadius:7,padding:"8px",textAlign:"center" as const}}>
-                <div style={{fontSize:8,fontWeight:700,color:"#4D6A8A",textTransform:"uppercase" as const,marginBottom:2}}>{lb}</div>
+              <div key={lb as string} style={{background:"var(--oiq-surface2)",borderRadius:7,padding:"8px",textAlign:"center" as const}}>
+                <div style={{fontSize:8,fontWeight:700,color:"var(--oiq-muted)",textTransform:"uppercase" as const,marginBottom:2}}>{lb}</div>
                 <div style={{fontSize:15,fontWeight:800,color:c as string}}>{val}</div>
               </div>
             ))}
@@ -1204,22 +1204,22 @@ export default function AIAgents({
           {(out.evidence.length>0||out.assumptions.length>0||out.risks.length>0)&&(
             <div style={{...S.card,marginBottom:12}}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-                {out.evidence.length>0&&<div><div style={{fontSize:10,fontWeight:700,color:"#3B82F6",marginBottom:4}}>✓ Evidence</div>{out.evidence.map((e,i)=><div key={i} style={{fontSize:9,color:"#8FA8CC",marginBottom:2,lineHeight:1.4}}>• {e.slice(0,70)}</div>)}</div>}
-                {out.assumptions.length>0&&<div><div style={{fontSize:10,fontWeight:700,color:"#F59E0B",marginBottom:4}}>⚠ Assumptions</div>{out.assumptions.map((a,i)=><div key={i} style={{fontSize:9,color:"#8FA8CC",marginBottom:2,lineHeight:1.4}}>• {a.slice(0,70)}</div>)}</div>}
-                {out.risks.length>0&&<div><div style={{fontSize:10,fontWeight:700,color:"#EF4444",marginBottom:4}}>🚨 Key Risks</div>{out.risks.map((r,i)=><div key={i} style={{fontSize:9,color:"#8FA8CC",marginBottom:2,lineHeight:1.4}}>• {r.slice(0,70)}</div>)}</div>}
+                {out.evidence.length>0&&<div><div style={{fontSize:10,fontWeight:700,color:"#3B82F6",marginBottom:4}}>✓ Evidence</div>{out.evidence.map((e,i)=><div key={i} style={{fontSize:9,color:"var(--oiq-body)",marginBottom:2,lineHeight:1.4}}>• {e.slice(0,70)}</div>)}</div>}
+                {out.assumptions.length>0&&<div><div style={{fontSize:10,fontWeight:700,color:"#F59E0B",marginBottom:4}}>⚠ Assumptions</div>{out.assumptions.map((a,i)=><div key={i} style={{fontSize:9,color:"var(--oiq-body)",marginBottom:2,lineHeight:1.4}}>• {a.slice(0,70)}</div>)}</div>}
+                {out.risks.length>0&&<div><div style={{fontSize:10,fontWeight:700,color:"#EF4444",marginBottom:4}}>🚨 Key Risks</div>{out.risks.map((r,i)=><div key={i} style={{fontSize:9,color:"var(--oiq-body)",marginBottom:2,lineHeight:1.4}}>• {r.slice(0,70)}</div>)}</div>}
               </div>
             </div>
           )}
           {activeTab==="output"&&(
             <div style={S.card}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <div style={{fontSize:12,fontWeight:700,color:"#F0F4FF"}}>Analysis Report</div>
-                <button onClick={()=>{if(editedOutput!==out.mainReport)setShowPrefPrompt(true);}} style={{...S.hBtn,fontSize:9,color:"#14B8A6"}}>💡 Save Style</button>
+                <div style={{fontSize:12,fontWeight:700,color:"var(--oiq-ink)"}}>Analysis Report</div>
+                <button onClick={()=>{if(editedOutput!==out.mainReport)setShowPrefPrompt(true);}} style={{...S.hBtn,fontSize:9,color:"var(--oiq-accent)"}}>💡 Save Style</button>
               </div>
               <textarea value={editedOutput} onChange={e=>setEditedOutput(e.target.value)} style={{...S.inp,minHeight:360,resize:"vertical" as const,fontSize:11,lineHeight:1.6}}/>
               {showPrefPrompt&&(
-                <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid #14B8A644",borderRadius:6,padding:"10px 12px",marginTop:8}}>
-                  <div style={{fontSize:11,fontWeight:700,color:"#14B8A6",marginBottom:6}}>💡 Save edits as style preference for future runs?</div>
+                <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid var(--oiq-accent)44",borderRadius:6,padding:"10px 12px",marginTop:8}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"var(--oiq-accent)",marginBottom:6}}>💡 Save edits as style preference for future runs?</div>
                   <div style={{display:"flex",gap:6}}>
                     <button onClick={()=>{const p={...preferences,[result.agentId]:"Match this style: "+editedOutput.slice(0,200)};setPreferences(p);try{WorkspaceMemory.set("oiq-agent-prefs",p);}catch{}setShowPrefPrompt(false);showToast("Style preference saved","success");}} style={{...S.btn,flex:1,fontSize:10}}>Yes — Save</button>
                     <button onClick={()=>setShowPrefPrompt(false)} style={{...S.hBtn,flex:1,textAlign:"center" as const}}>No</button>
@@ -1230,18 +1230,18 @@ export default function AIAgents({
           )}
           {activeTab==="excel"&&out.excelSchema&&(
             <div style={S.card}>
-              <div style={{fontSize:12,fontWeight:700,color:"#F0F4FF",marginBottom:8}}>📊 Excel Workbook — {out.excelSchema.sheets.length} sheets</div>
-              <div style={{fontSize:10,color:"#4D6A8A",marginBottom:12}}>Click Download to get the fully formatted workbook with all data extracted from your input.</div>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--oiq-ink)",marginBottom:8}}>📊 Excel Workbook — {out.excelSchema.sheets.length} sheets</div>
+              <div style={{fontSize:10,color:"var(--oiq-muted)",marginBottom:12}}>Click Download to get the fully formatted workbook with all data extracted from your input.</div>
               {out.excelSchema.sheets.map((sheet,si)=>(
                 <div key={si} style={{marginBottom:12}}>
-                  <div style={{fontSize:11,fontWeight:700,color:"#14B8A6",marginBottom:4}}>📋 {sheet.name}</div>
+                  <div style={{fontSize:11,fontWeight:700,color:"var(--oiq-accent)",marginBottom:4}}>📋 {sheet.name}</div>
                   {sheet.headers.length>0&&(
                     <div style={{overflowX:"auto" as const}}>
                       <table style={{fontSize:9,borderCollapse:"collapse" as const,width:"100%"}}>
-                        <thead><tr>{sheet.headers.map((h,i)=><th key={i} style={{background:"#141F33",color:"#14B8A6",padding:"4px 8px",textAlign:"left" as const,whiteSpace:"nowrap" as const,borderBottom:"1px solid #1C2A40"}}>{h}</th>)}</tr></thead>
-                        <tbody>{(sheet.rows||[]).slice(0,4).map((row,ri)=><tr key={ri}>{(Array.isArray(row)?row:[]).map((c:any,ci:number)=><td key={ci} style={{padding:"3px 8px",borderBottom:"1px solid var(--oiq-bg)",color:"#8FA8CC",whiteSpace:"nowrap" as const}}>{String(c).slice(0,22)}</td>)}</tr>)}</tbody>
+                        <thead><tr>{sheet.headers.map((h,i)=><th key={i} style={{background:"var(--oiq-surface2)",color:"var(--oiq-accent)",padding:"4px 8px",textAlign:"left" as const,whiteSpace:"nowrap" as const,borderBottom:"1px solid var(--oiq-border)"}}>{h}</th>)}</tr></thead>
+                        <tbody>{(sheet.rows||[]).slice(0,4).map((row,ri)=><tr key={ri}>{(Array.isArray(row)?row:[]).map((c:any,ci:number)=><td key={ci} style={{padding:"3px 8px",borderBottom:"1px solid var(--oiq-bg)",color:"var(--oiq-body)",whiteSpace:"nowrap" as const}}>{String(c).slice(0,22)}</td>)}</tr>)}</tbody>
                       </table>
-                      {(sheet.rows||[]).length>4&&<div style={{fontSize:9,color:"#4D6A8A",marginTop:3}}>{(sheet.rows||[]).length-4} more rows in download</div>}
+                      {(sheet.rows||[]).length>4&&<div style={{fontSize:9,color:"var(--oiq-muted)",marginTop:3}}>{(sheet.rows||[]).length-4} more rows in download</div>}
                     </div>
                   )}
                 </div>
@@ -1256,29 +1256,29 @@ export default function AIAgents({
           )}
           {activeTab==="email"&&out.emailDraft&&(
             <div style={S.card}>
-              <div style={{fontSize:12,fontWeight:700,color:"#F0F4FF",marginBottom:8}}>📧 Draft Email</div>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--oiq-ink)",marginBottom:8}}>📧 Draft Email</div>
               <textarea defaultValue={out.emailDraft} style={{...S.inp,minHeight:240,resize:"vertical" as const,fontSize:11,lineHeight:1.6}}/>
             </div>
           )}
           {activeTab==="actions"&&out.actionItems&&(
             <div style={S.card}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                <div style={{fontSize:12,fontWeight:700,color:"#F0F4FF"}}>✅ Action Items</div>
+                <div style={{fontSize:12,fontWeight:700,color:"var(--oiq-ink)"}}>✅ Action Items</div>
                 <button onClick={()=>addToActionTracker(out.actionItems!)} style={{...S.btn,fontSize:10,padding:"6px 12px"}}>+ Add to Action Tracker</button>
               </div>
               {out.actionItems.map((item,idx)=>(
-                <div key={idx} style={{display:"flex",gap:8,padding:"8px 0",borderBottom:"1px solid #1C2A40",alignItems:"center"}}>
+                <div key={idx} style={{display:"flex",gap:8,padding:"8px 0",borderBottom:"1px solid var(--oiq-border)",alignItems:"center"}}>
                   <span style={{...S.badge(item.priority==="High"?"#EF4444":item.priority==="Medium"?"#F59E0B":"#10B981"),flexShrink:0}}>{item.priority}</span>
-                  <div style={{flex:1,fontSize:11,color:"#F0F4FF"}}>{item.title}</div>
-                  <div style={{fontSize:10,color:"#4D6A8A",minWidth:80}}>{item.owner}</div>
-                  <div style={{fontSize:10,color:"#4D6A8A",minWidth:60}}>{item.dueDate}</div>
+                  <div style={{flex:1,fontSize:11,color:"var(--oiq-ink)"}}>{item.title}</div>
+                  <div style={{fontSize:10,color:"var(--oiq-muted)",minWidth:80}}>{item.owner}</div>
+                  <div style={{fontSize:10,color:"var(--oiq-muted)",minWidth:60}}>{item.dueDate}</div>
                 </div>
               ))}
             </div>
           )}
           <div style={{display:"flex",gap:6,flexWrap:"wrap" as const,marginTop:8}}>
             {(agent?.exportFormats||["md"]).map(fmt=>(
-              <button key={fmt} onClick={()=>exportResult(result,fmt)} style={{...S.hBtn,color:agent?.color||"#14B8A6",borderColor:(agent?.color||"#14B8A6")+"44"}}>↓ {fmt.toUpperCase()}</button>
+              <button key={fmt} onClick={()=>exportResult(result,fmt)} style={{...S.hBtn,color:agent?.color||"var(--oiq-accent)",borderColor:(agent?.color||"var(--oiq-accent)")+"44"}}>↓ {fmt.toUpperCase()}</button>
             ))}
             {["business_analyst","monthly_review","exec_assistant"].includes(result.agentId)&&(
               <button onClick={()=>sendToBoardroom(result)} style={{...S.hBtn,color:"#8B5CF6",borderColor:"#8B5CF644"}}>🏛 Boardroom</button>
@@ -1295,16 +1295,16 @@ export default function AIAgents({
     <div style={S.page}>
       <div style={S.hdr}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <button onClick={()=>setView("landing")} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>← Agents</button>
+          <button onClick={()=>setView("landing")} style={{...S.hBtn,color:"var(--oiq-accent)",borderColor:"var(--oiq-accent)33"}}>← Agents</button>
           <div>
-            <div style={{fontSize:14,fontWeight:800,color:"#F0F4FF"}}>🎯 AI Agent Orchestrator</div>
-            <div style={{fontSize:10,color:"#4D6A8A"}}>Describe your need · system selects and runs the right agents automatically</div>
+            <div style={{fontSize:14,fontWeight:800,color:"var(--oiq-ink)"}}>🎯 AI Agent Orchestrator</div>
+            <div style={{fontSize:10,color:"var(--oiq-muted)"}}>Describe your need · system selects and runs the right agents automatically</div>
           </div>
         </div>
       </div>
       <div style={{padding:"0 24px 24px"}}>
         <div style={S.card}>
-          <div style={{fontSize:11,color:"#4D6A8A",marginBottom:12,lineHeight:1.7}}>Describe what work you need done. The Orchestrator automatically selects the right combination of agents, runs them in sequence, and combines their outputs.</div>
+          <div style={{fontSize:11,color:"var(--oiq-muted)",marginBottom:12,lineHeight:1.7}}>Describe what work you need done. The Orchestrator automatically selects the right combination of agents, runs them in sequence, and combines their outputs.</div>
           <textarea value={orchestrateInput} onChange={e=>setOrchestrateInput(e.target.value)}
             placeholder={"Examples:\n• Analyse our Q3 financial performance and prepare a boardroom brief with recommendations\n• Review this month's expense claims for policy violations and generate an audit report\n• Help me build a complete marketing campaign for our product launch"}
             rows={6} style={{...S.inp,minHeight:120}}/>
@@ -1315,13 +1315,13 @@ export default function AIAgents({
         {orchestrateResult.map(run=>{
           const agent = AGENT_REGISTRY.find(a=>a.id===run.agentId);
           return (
-            <div key={run.id} style={{...S.card,border:"1px solid "+(agent?.color||"#14B8A6")+"44"}}>
+            <div key={run.id} style={{...S.card,border:"1px solid "+(agent?.color||"var(--oiq-accent)")+"44"}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
                 <span style={{fontSize:16}}>{agent?.icon}</span>
-                <div style={{flex:1}}><div style={{fontSize:11,fontWeight:700,color:"#F0F4FF"}}>{run.agentName}</div><div style={{fontSize:9,color:"#4D6A8A"}}>Confidence: {run.output.confidence}%</div></div>
-                <button onClick={()=>{setResult(run);setEditedOutput(run.output.mainReport);setActiveTab("output");setView("result");}} style={{...S.hBtn,fontSize:9,color:"#14B8A6"}}>View Full</button>
+                <div style={{flex:1}}><div style={{fontSize:11,fontWeight:700,color:"var(--oiq-ink)"}}>{run.agentName}</div><div style={{fontSize:9,color:"var(--oiq-muted)"}}>Confidence: {run.output.confidence}%</div></div>
+                <button onClick={()=>{setResult(run);setEditedOutput(run.output.mainReport);setActiveTab("output");setView("result");}} style={{...S.hBtn,fontSize:9,color:"var(--oiq-accent)"}}>View Full</button>
               </div>
-              <div style={{fontSize:10,color:"#8FA8CC",lineHeight:1.5,maxHeight:100,overflow:"hidden"}}>{run.output.mainReport.slice(0,350)}...</div>
+              <div style={{fontSize:10,color:"var(--oiq-body)",lineHeight:1.5,maxHeight:100,overflow:"hidden"}}>{run.output.mainReport.slice(0,350)}...</div>
             </div>
           );
         })}
@@ -1334,14 +1334,14 @@ export default function AIAgents({
     <div style={S.page}>
       <div style={S.hdr}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <button onClick={()=>setView("landing")} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>← Agents</button>
-          <div style={{fontSize:14,fontWeight:800,color:"#F0F4FF"}}>Agent History ({history.length})</div>
+          <button onClick={()=>setView("landing")} style={{...S.hBtn,color:"var(--oiq-accent)",borderColor:"var(--oiq-accent)33"}}>← Agents</button>
+          <div style={{fontSize:14,fontWeight:800,color:"var(--oiq-ink)"}}>Agent History ({history.length})</div>
           <button onClick={()=>{if(confirm("Clear all history?"))saveHistory([]);}} style={{...S.hBtn,color:"#EF4444",borderColor:"#EF444433",marginLeft:"auto"}}>Clear</button>
         </div>
       </div>
       <div style={{padding:"0 24px 24px"}}>
         {history.length===0?(
-          <div style={{...S.card,textAlign:"center" as const,padding:40,color:"#4D6A8A"}}>No runs yet. Run an agent to see history here.</div>
+          <div style={{...S.card,textAlign:"center" as const,padding:40,color:"var(--oiq-muted)"}}>No runs yet. Run an agent to see history here.</div>
         ):history.map(run=>{
           const agent = AGENT_REGISTRY.find(a=>a.id===run.agentId);
           return (
@@ -1349,12 +1349,12 @@ export default function AIAgents({
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
                 <span style={{fontSize:16}}>{agent?.icon||"🤖"}</span>
                 <div style={{flex:1}}>
-                  <div style={{fontSize:11,fontWeight:700,color:"#F0F4FF"}}>{run.agentName}</div>
-                  <div style={{fontSize:9,color:"#4D6A8A"}}>{new Date(run.ts).toLocaleString()} · {run.mode} mode · Confidence: {run.output.confidence}%</div>
+                  <div style={{fontSize:11,fontWeight:700,color:"var(--oiq-ink)"}}>{run.agentName}</div>
+                  <div style={{fontSize:9,color:"var(--oiq-muted)"}}>{new Date(run.ts).toLocaleString()} · {run.mode} mode · Confidence: {run.output.confidence}%</div>
                 </div>
-                <button onClick={()=>{setResult(run);setEditedOutput(run.output.mainReport);setActiveTab("output");setView("result");}} style={{...S.hBtn,fontSize:9,color:"#14B8A6"}}>Open</button>
+                <button onClick={()=>{setResult(run);setEditedOutput(run.output.mainReport);setActiveTab("output");setView("result");}} style={{...S.hBtn,fontSize:9,color:"var(--oiq-accent)"}}>Open</button>
               </div>
-              <div style={{fontSize:10,color:"#4D6A8A"}}>{run.input.slice(0,80)}...</div>
+              <div style={{fontSize:10,color:"var(--oiq-muted)"}}>{run.input.slice(0,80)}...</div>
             </div>
           );
         })}
