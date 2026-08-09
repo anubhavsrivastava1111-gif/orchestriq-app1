@@ -36,8 +36,8 @@ const T = {
     shadow:    "0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)",
     shadowMd:  "0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04)",
     shadowLg:  "0 8px 24px rgba(0,0,0,0.10), 0 4px 8px rgba(0,0,0,0.06)",
-    inputBg:   "#FFFFFF",
-    cardHover: "#FAFBFF",
+    inputBg:   "var(--oiq-surface)",
+    cardHover: "var(--oiq-surface2)",
   },
   dark: {
     bg:        "var(--oiq-bg)",
@@ -65,8 +65,8 @@ const T = {
     shadow:    "0 1px 3px rgba(0,0,0,0.4)",
     shadowMd:  "0 4px 12px rgba(0,0,0,0.4)",
     shadowLg:  "0 8px 24px rgba(0,0,0,0.5)",
-    inputBg:   "#0D1829",
-    cardHover: "#131F30",
+    inputBg:   "var(--oiq-surface)",
+    cardHover: "var(--oiq-surface2)",
   },
 };
 
