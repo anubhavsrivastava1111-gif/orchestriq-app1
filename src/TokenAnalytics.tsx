@@ -227,7 +227,7 @@ export default function TokenAnalytics({ defP, keys }: { defP: string; keys: Rec
                   return (
                     <div key={prov} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr", gap: 4, padding: "8px 0", borderBottom: "1px solid var(--oiq-border)", fontSize: 11, alignItems: "center" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: PROVIDER_COLORS[prov] || "#6B7280", flexShrink: 0 }} />
+                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: PROVIDER_COLORS[prov] || "var(--oiq-muted)", flexShrink: 0 }} />
                         <div>
                           <div style={{ color: "var(--oiq-ink)", fontWeight: 600, textTransform: "capitalize" as const }}>{prov}</div>
                           <div style={{ fontSize: 9, color: "var(--oiq-muted)" }}>{pricing?.label || prov}</div>
@@ -289,7 +289,7 @@ export default function TokenAnalytics({ defP, keys }: { defP: string; keys: Rec
                     <div key={r.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr", gap: 4, padding: "6px 0", borderBottom: "1px solid var(--oiq-surface)", fontSize: 10, alignItems: "center" }}>
                       <div style={{ overflow: "hidden" }}>
                         <div style={{ color: FEATURE_COLORS[r.feature?.split(" — ")[0]] || "var(--oiq-accent)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{r.feature?.slice(0, 22)}</div>
-                        <div style={{ fontSize: 8, color: "#2D4460" }}>{new Date(r.ts).toLocaleTimeString()}</div>
+                        <div style={{ fontSize: 8, color: "var(--oiq-faint)" }}>{new Date(r.ts).toLocaleTimeString()}</div>
                       </div>
                       <div style={{ color: "var(--oiq-muted)", textTransform: "capitalize" as const }}>{r.provider}</div>
                       <div style={{ textAlign: "right" as const, color: "#3B82F6" }}>{fmt(r.inputTokens ?? 0)}</div>
