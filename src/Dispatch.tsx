@@ -49,14 +49,14 @@ export default function Dispatch({templates,setTemplates,sv,S,showToast,ask,askV
   if(!activeAgent){
     return(
       <div style={{flex:1,padding:"14px 18px",overflowY:"auto"}}>
-        <h2 style={{fontSize:15,fontWeight:800,color:"#F1F5F9",marginBottom:2}}>Pulse Agentic</h2>
-        <p style={{fontSize:10,color:"#5A6480",marginBottom:14}}>A toolkit of small agents that turn your messy daily inputs into polished, ready-to-use output. Pick a tool to get started.</p>
+        <h2 style={{fontSize:15,fontWeight:800,color:"var(--oiq-ink)",marginBottom:2}}>Pulse Agentic</h2>
+        <p style={{fontSize:10,color:"var(--oiq-muted)",marginBottom:14}}>A toolkit of small agents that turn your messy daily inputs into polished, ready-to-use output. Pick a tool to get started.</p>
         <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
           {AGENTS.map(a=>(
-            <button key={a.id} onClick={()=>setActiveAgent(a.id)} style={{display:"flex",flexDirection:"column",alignItems:"flex-start",gap:6,padding:"14px",borderRadius:9,border:"1px solid #1a2030",background:"#131825",cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"left"}}>
+            <button key={a.id} onClick={()=>setActiveAgent(a.id)} style={{display:"flex",flexDirection:"column",alignItems:"flex-start",gap:6,padding:"14px",borderRadius:9,border:"1px solid var(--oiq-border)",background:"var(--oiq-surface)",cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"left"}}>
               <span style={{fontSize:22}}>{a.ic}</span>
-              <div style={{fontSize:12,fontWeight:700,color:"#F1F5F9"}}>{a.name}</div>
-              <div style={{fontSize:10,color:"#8892B0",lineHeight:1.6}}>{a.desc}</div>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--oiq-ink)"}}>{a.name}</div>
+              <div style={{fontSize:10,color:"var(--oiq-body)",lineHeight:1.6}}>{a.desc}</div>
               <div style={{fontSize:9,color:a.setup==="Ready to use"?"#10B981":"#F59E0B",fontWeight:700,marginTop:2}}>{a.setup==="Ready to use"?"● Ready to use":"○ "+a.setup}</div>
             </button>
           ))}
@@ -96,7 +96,7 @@ const cpHtmlRich=async(html:string,showToast:(m:string,ty?:string)=>void)=>{
 };
 
 function AIDisclaimer(){
-  return <div style={{fontSize:9,color:"#5A6480",marginTop:6,lineHeight:1.5,fontStyle:"italic"}}>⚠ AI-generated — please review and verify before sending or posting.</div>;
+  return <div style={{fontSize:9,color:"var(--oiq-muted)",marginTop:6,lineHeight:1.5,fontStyle:"italic"}}>⚠ AI-generated — please review and verify before sending or posting.</div>;
 }
 
 // Multi-image upload gallery: shows thumbnails with remove buttons + an "add more" tile
@@ -114,15 +114,15 @@ function ImageGallery({images,onRemove,onAddClick,inputRef,onFiles,label,emptyLa
     <div>
       <input ref={inputRef} type="file" accept="image/*" multiple onChange={e=>e.target.files&&onFiles(e.target.files)} style={{display:"none"}}/>
       {!images.length?(
-        <button onClick={onAddClick} style={{...S.inp,cursor:"pointer",textAlign:"center",color:"#5A6480",padding:"24px 10px"}}>{emptyLabel}</button>
+        <button onClick={onAddClick} style={{...S.inp,cursor:"pointer",textAlign:"center",color:"var(--oiq-muted)",padding:"24px 10px"}}>{emptyLabel}</button>
       ):(
         <div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:6,marginBottom:6}}>
             {images.map((img,i)=>(
               <div key={i} style={{position:"relative"}}>
-                <img src={img.preview} alt={label+" "+(i+1)} style={{width:"100%",height:80,objectFit:"cover",borderRadius:5,border:"1px solid #1a2030"}}/>
-                <button onClick={()=>onRemove(i)} style={{position:"absolute",top:2,right:2,background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:4,color:"#EF4444",fontSize:9,cursor:"pointer",padding:"1px 4px",lineHeight:1.4}}>×</button>
-                <span style={{position:"absolute",bottom:2,left:2,background:"rgba(10,14,26,0.8)",borderRadius:3,color:"#A0AAC0",fontSize:8,padding:"1px 4px"}}>{i+1}</span>
+                <img src={img.preview} alt={label+" "+(i+1)} style={{width:"100%",height:80,objectFit:"cover",borderRadius:5,border:"1px solid var(--oiq-border)"}}/>
+                <button onClick={()=>onRemove(i)} style={{position:"absolute",top:2,right:2,background:"var(--oiq-bg)",border:"1px solid var(--oiq-border)",borderRadius:4,color:"#EF4444",fontSize:9,cursor:"pointer",padding:"1px 4px",lineHeight:1.4}}>×</button>
+                <span style={{position:"absolute",bottom:2,left:2,background:"rgba(10,14,26,0.8)",borderRadius:3,color:"var(--oiq-body)",fontSize:8,padding:"1px 4px"}}>{i+1}</span>
               </div>
             ))}
           </div>
@@ -162,9 +162,9 @@ function MeetingNotesAgent({S,showToast,ask,MicButton,vLang}:{S:any,showToast:(m
     <div>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
         <span style={{fontSize:22}}>📝</span>
-        <div><h3 style={{fontSize:14,fontWeight:800,color:"#F1F5F9"}}>Meeting Notes to Action Items</h3><p style={{fontSize:10,color:"#5A6480"}}>Paste rough notes or a transcript - get a clean action items table.</p></div>
+        <div><h3 style={{fontSize:14,fontWeight:800,color:"var(--oiq-ink)"}}>Meeting Notes to Action Items</h3><p style={{fontSize:10,color:"var(--oiq-muted)"}}>Paste rough notes or a transcript - get a clean action items table.</p></div>
       </div>
-      <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"10px 12px",margin:"10px 0",fontSize:11,color:"#A0AAC0",lineHeight:1.7}}>
+      <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"10px 12px",margin:"10px 0",fontSize:11,color:"var(--oiq-body)",lineHeight:1.7}}>
         Paste your raw meeting notes below - bullet points, a transcript, even messy typed notes work fine.
       </div>
       <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"flex-end"}}>
@@ -176,7 +176,7 @@ function MeetingNotesAgent({S,showToast,ask,MicButton,vLang}:{S:any,showToast:(m
         <div style={{marginTop:12}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
             <label style={{...S.lbl,marginBottom:0}}>Result (editable)</label>
-            <button onClick={()=>cpHelper(output,showToast)} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>Copy</button>
+            <button onClick={()=>cpHelper(output,showToast)} style={{...S.hBtn,color:"var(--oiq-accent)",borderColor:"var(--oiq-accent)33"}}>Copy</button>
           </div>
           <textarea style={{...S.inp,minHeight:180,resize:"vertical",fontSize:11,lineHeight:1.7,fontFamily:"monospace"}} value={output} onChange={e=>setOutput(e.target.value)}/>
           <AIDisclaimer/>
@@ -220,13 +220,13 @@ function EmailDrafterAgent({S,showToast,ask,MicButton,vLang}:{S:any,showToast:(m
     <div>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
         <span style={{fontSize:22}}>✉️</span>
-        <div><h3 style={{fontSize:14,fontWeight:800,color:"#F1F5F9"}}>Email Drafter</h3><p style={{fontSize:10,color:"#5A6480"}}>Turn bullet points into a polished, ready-to-send email.</p></div>
+        <div><h3 style={{fontSize:14,fontWeight:800,color:"var(--oiq-ink)"}}>Email Drafter</h3><p style={{fontSize:10,color:"var(--oiq-muted)"}}>Turn bullet points into a polished, ready-to-send email.</p></div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,margin:"10px 0"}}>
         <div>
           <label style={S.lbl}>Tone</label>
           <select style={{...S.inp,padding:"8px"}} value={tone} onChange={e=>setTone(e.target.value)}>
-            {TONES.map(t=><option key={t} value={t} style={{background:"#0a0e1a"}}>{t}</option>)}
+            {TONES.map(t=><option key={t} value={t} style={{background:"var(--oiq-bg)"}}>{t}</option>)}
           </select>
         </div>
         <div>
@@ -244,7 +244,7 @@ function EmailDrafterAgent({S,showToast,ask,MicButton,vLang}:{S:any,showToast:(m
         <div style={{marginTop:12}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
             <label style={{...S.lbl,marginBottom:0}}>Draft</label>
-            <button onClick={()=>cpHelper(output,showToast)} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>Copy</button>
+            <button onClick={()=>cpHelper(output,showToast)} style={{...S.hBtn,color:"var(--oiq-accent)",borderColor:"var(--oiq-accent)33"}}>Copy</button>
           </div>
           <textarea style={{...S.inp,minHeight:180,resize:"vertical",fontSize:11,lineHeight:1.7}} value={output} onChange={e=>setOutput(e.target.value)}/>
           <AIDisclaimer/>
@@ -286,7 +286,7 @@ function VarianceAgent({S,showToast,ask,MicButton,vLang}:{S:any,showToast:(m:str
     <div>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
         <span style={{fontSize:22}}>📊</span>
-        <div><h3 style={{fontSize:14,fontWeight:800,color:"#F1F5F9"}}>Variance Explainer</h3><p style={{fontSize:10,color:"#5A6480"}}>Paste two periods of numbers - get a written explanation of what changed.</p></div>
+        <div><h3 style={{fontSize:14,fontWeight:800,color:"var(--oiq-ink)"}}>Variance Explainer</h3><p style={{fontSize:10,color:"var(--oiq-muted)"}}>Paste two periods of numbers - get a written explanation of what changed.</p></div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,margin:"10px 0"}}>
         <div>
@@ -308,7 +308,7 @@ function VarianceAgent({S,showToast,ask,MicButton,vLang}:{S:any,showToast:(m:str
         <div style={{marginTop:12}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
             <label style={{...S.lbl,marginBottom:0}}>Explanation (editable)</label>
-            <button onClick={()=>cpHelper(output,showToast)} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>Copy</button>
+            <button onClick={()=>cpHelper(output,showToast)} style={{...S.hBtn,color:"var(--oiq-accent)",borderColor:"var(--oiq-accent)33"}}>Copy</button>
           </div>
           <textarea style={{...S.inp,minHeight:160,resize:"vertical",fontSize:11,lineHeight:1.7}} value={output} onChange={e=>setOutput(e.target.value)}/>
           <AIDisclaimer/>
@@ -465,11 +465,11 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
     <div>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
         <span style={{fontSize:22}}>📡</span>
-        <div><h3 style={{fontSize:14,fontWeight:800,color:"#F1F5F9"}}>Status Report Generator</h3><p style={{fontSize:10,color:"#5A6480"}}>Learn your report format once, then generate it daily from a quick update.</p></div>
+        <div><h3 style={{fontSize:14,fontWeight:800,color:"var(--oiq-ink)"}}>Status Report Generator</h3><p style={{fontSize:10,color:"var(--oiq-muted)"}}>Learn your report format once, then generate it daily from a quick update.</p></div>
       </div>
       <div style={{display:"flex",gap:3,margin:"10px 0",flexWrap:"wrap"}}>
         {[["templates","My Templates ("+templates.length+")"],["new","+ New Template"],["run","Run Report"]].map(([id,lb])=>(
-          <button key={id} onClick={()=>setTab(id as any)} style={{padding:"5px 12px",borderRadius:5,fontSize:10,fontWeight:600,border:"1px solid "+(tab===id?"#14B8A6":"#1a2030"),background:tab===id?"rgba(20,184,166,0.08)":"transparent",color:tab===id?"#14B8A6":"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{lb}</button>
+          <button key={id} onClick={()=>setTab(id as any)} style={{padding:"5px 12px",borderRadius:5,fontSize:10,fontWeight:600,border:"1px solid "+(tab===id?"var(--oiq-accent)":"var(--oiq-border)"),background:tab===id?"rgba(20,184,166,0.08)":"transparent",color:tab===id?"var(--oiq-accent)":"var(--oiq-muted)",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{lb}</button>
         ))}
       </div>
 
@@ -477,20 +477,20 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
         <div>
           {!templates.length?(
             <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"16px",textAlign:"center"}}>
-              <div style={{fontSize:12,color:"#A0AAC0",marginBottom:10,lineHeight:1.7}}>No templates yet. Create one by uploading a sample of your tracker and the report format you currently produce - the AI will learn the structure once, and you can reuse it every day.</div>
+              <div style={{fontSize:12,color:"var(--oiq-body)",marginBottom:10,lineHeight:1.7}}>No templates yet. Create one by uploading a sample of your tracker and the report format you currently produce - the AI will learn the structure once, and you can reuse it every day.</div>
               <button onClick={()=>setTab("new")} style={{...S.pBtn,marginTop:0,width:"auto",padding:"8px 18px"}}>+ Create Your First Template</button>
             </div>
           ):templates.map(t=>(
-            <div key={t.id} style={{background:"#131825",border:"1px solid #1a2030",borderRadius:7,padding:"10px 12px",marginBottom:6}}>
+            <div key={t.id} style={{background:"var(--oiq-surface)",border:"1px solid var(--oiq-border)",borderRadius:7,padding:"10px 12px",marginBottom:6}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
-                <div style={{fontSize:12,fontWeight:700,color:"#F1F5F9"}}>{t.name}</div>
+                <div style={{fontSize:12,fontWeight:700,color:"var(--oiq-ink)"}}>{t.name}</div>
                 <div style={{display:"flex",gap:4}}>
-                  <button onClick={()=>{setRunTemplateId(t.id);setTab("run");}} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>Use</button>
+                  <button onClick={()=>{setRunTemplateId(t.id);setTab("run");}} style={{...S.hBtn,color:"var(--oiq-accent)",borderColor:"var(--oiq-accent)33"}}>Use</button>
                   <button onClick={()=>deleteTemplate(t.id)} style={{...S.hBtn,color:"#EF4444",borderColor:"#EF444433"}}>Delete</button>
                 </div>
               </div>
-              <div style={{fontSize:9,color:"#5A6480",marginBottom:4}}>Created {new Date(t.createdAt).toLocaleDateString()}{t.lastUsed?" · Last used "+new Date(t.lastUsed).toLocaleDateString():""}</div>
-              <div style={{fontSize:10,color:"#8892B0",lineHeight:1.6,maxHeight:60,overflow:"hidden",textOverflow:"ellipsis"}}>{t.description.slice(0,200)}{t.description.length>200?"...":""}</div>
+              <div style={{fontSize:9,color:"var(--oiq-muted)",marginBottom:4}}>Created {new Date(t.createdAt).toLocaleDateString()}{t.lastUsed?" · Last used "+new Date(t.lastUsed).toLocaleDateString():""}</div>
+              <div style={{fontSize:10,color:"var(--oiq-body)",lineHeight:1.6,maxHeight:60,overflow:"hidden",textOverflow:"ellipsis"}}>{t.description.slice(0,200)}{t.description.length>200?"...":""}</div>
             </div>
           ))}
         </div>
@@ -498,7 +498,7 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
 
       {tab==="new"&&(
         <div>
-          <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"10px 12px",marginBottom:12,fontSize:11,color:"#A0AAC0",lineHeight:1.7}}>
+          <div style={{background:"rgba(20,184,166,0.05)",border:"1px solid rgba(20,184,166,0.2)",borderRadius:7,padding:"10px 12px",marginBottom:12,fontSize:11,color:"var(--oiq-body)",lineHeight:1.7}}>
             Upload a screenshot of your tracker (the spreadsheet/queue you work from) and/or a sample of the report you currently send. The AI will learn the structure and rules once - then you reuse this template every day with just a quick update.
           </div>
 
@@ -537,7 +537,7 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
       {tab==="run"&&(
         <div>
           {!templates.length?(
-            <div style={{textAlign:"center",padding:"30px",color:"#5A6480"}}>
+            <div style={{textAlign:"center",padding:"30px",color:"var(--oiq-muted)"}}>
               <div style={{fontSize:12,marginBottom:10}}>No templates yet.</div>
               <button onClick={()=>setTab("new")} style={{...S.pBtn,width:"auto",padding:"8px 18px"}}>+ Create a Template</button>
             </div>
@@ -546,7 +546,7 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
               <label style={S.lbl}>Select Template</label>
               <select style={{...S.inp,marginBottom:10,padding:"8px"}} value={runTemplateId||""} onChange={e=>setRunTemplateId(Number(e.target.value)||null)}>
                 <option value="">Choose a template...</option>
-                {templates.map(t=><option key={t.id} value={t.id} style={{background:"#0a0e1a"}}>{t.name}</option>)}
+                {templates.map(t=><option key={t.id} value={t.id} style={{background:"var(--oiq-bg)"}}>{t.name}</option>)}
               </select>
 
               <label style={S.lbl}>Today's Update (paste team chat messages, counts, etc)</label>
@@ -567,20 +567,20 @@ function StatusReportAgent({templates,setTemplates,sv,S,showToast,askVision,MicB
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:6}}>
                     <label style={{...S.lbl,marginBottom:0}}>Generated Report</label>
                     <div style={{display:"flex",gap:4}}>
-                      <button onClick={()=>setOutputView("preview")} style={{...S.hBtn,color:outputView==="preview"?"#14B8A6":"#5A6480",borderColor:outputView==="preview"?"#14B8A633":"#1a2030"}}>Preview</button>
-                      <button onClick={()=>setOutputView("source")} style={{...S.hBtn,color:outputView==="source"?"#14B8A6":"#5A6480",borderColor:outputView==="source"?"#14B8A633":"#1a2030"}}>HTML Source (edit)</button>
-                      <button onClick={()=>cpHtmlRich(runOutput,showToast)} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>Copy Formatted</button>
+                      <button onClick={()=>setOutputView("preview")} style={{...S.hBtn,color:outputView==="preview"?"var(--oiq-accent)":"var(--oiq-muted)",borderColor:outputView==="preview"?"var(--oiq-accent)33":"var(--oiq-border)"}}>Preview</button>
+                      <button onClick={()=>setOutputView("source")} style={{...S.hBtn,color:outputView==="source"?"var(--oiq-accent)":"var(--oiq-muted)",borderColor:outputView==="source"?"var(--oiq-accent)33":"var(--oiq-border)"}}>HTML Source (edit)</button>
+                      <button onClick={()=>cpHtmlRich(runOutput,showToast)} style={{...S.hBtn,color:"var(--oiq-accent)",borderColor:"var(--oiq-accent)33"}}>Copy Formatted</button>
                       <button onClick={()=>cpHelper(runOutput,showToast)} style={S.hBtn}>Copy HTML</button>
                     </div>
                   </div>
                   {outputView==="preview"?(
-                    <div style={{background:"#FFFFFF",border:"1px solid #1a2030",borderRadius:6,padding:"14px",maxHeight:480,overflowY:"auto"}}>
+                    <div style={{background:"#FFFFFF",border:"1px solid var(--oiq-border)",borderRadius:6,padding:"14px",maxHeight:480,overflowY:"auto"}}>
                       <div dangerouslySetInnerHTML={{__html:runOutput}}/>
                     </div>
                   ):(
                     <textarea style={{...S.inp,minHeight:240,resize:"vertical",fontSize:11,lineHeight:1.7,fontFamily:"monospace"}} value={runOutput} onChange={e=>setRunOutput(e.target.value)}/>
                   )}
-                  <div style={{fontSize:9,color:"#5A6480",marginTop:6,lineHeight:1.5}}>Click <strong>Copy Formatted</strong> then paste directly into Outlook/Gmail to keep the colors and table layout. Use <strong>HTML Source</strong> to fine-tune the underlying code if needed.</div>
+                  <div style={{fontSize:9,color:"var(--oiq-muted)",marginTop:6,lineHeight:1.5}}>Click <strong>Copy Formatted</strong> then paste directly into Outlook/Gmail to keep the colors and table layout. Use <strong>HTML Source</strong> to fine-tune the underlying code if needed.</div>
                   <AIDisclaimer/>
                 </div>
               )}
