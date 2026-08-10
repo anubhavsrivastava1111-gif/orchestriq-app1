@@ -2278,6 +2278,7 @@ export default function App(){
   const [me,setMe]=useState<{email:string;role:string}>({email:"",role:""});
   const [showExecs,setShowExecs]=useState(false);
   const [keysHydrated,setKeysHydrated]=useState(false);
+  const [offP,setOffP]=useState<Record<string,boolean>>(()=>{try{return JSON.parse(localStorage.getItem("cos-offp")||"{}");}catch{return {};}});
   const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return WorkspaceMemory.get<string>("oiq-sb-col")==="1";}catch{return false;}});
   const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:""});
 
@@ -5547,7 +5548,10 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 
   const curRole=AR.find(r=>r.id===selRole);
   const curMsgs=selRole?(chats[selRole]||[]):[];
-  const cfgP=["nvidia",...Object.keys(keys).filter(p=>keys[p]?.trim())];
+  // A provider is usable only if it has a key AND is switched on. Everything
+  // downstream (Primary AI, fallback chain, specialist routing) reads cfgP, so
+  // switching one off behaves exactly as if its key were never entered.
+  const cfgP=["nvidia",...Object.keys(keys).filter(p=>keys[p]?.trim()&&!offP[p])];
   const sColor=s=>s===TS.APPROVED?"#10B981":s===TS.REVIEWING?"#8B5CF6":s===TS.RUNNING?"#14B8A6":s===TS.REJECTED||s===TS.FAILED?"#EF4444":"#F59E0B";
   const sBg=s=>s===TS.APPROVED?"rgba(16,185,129,0.12)":s===TS.REVIEWING?"rgba(139,92,246,0.1)":s===TS.RUNNING?"rgba(20,184,166,0.1)":s===TS.REJECTED||s===TS.FAILED?"rgba(239,68,68,0.1)":"rgba(245,158,11,0.1)";
 
@@ -7075,12 +7079,29 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                   <div key={id} style={{marginBottom:10}}>
                     <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}>
                       <div style={{width:6,height:6,borderRadius:"50%",background:keys[id]?.trim()?m.color:"#3A4060"}}/>
-                      <span style={{fontSize:11,fontWeight:700,color:"#F1F5F9"}}>{m.name}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:"var(--oiq-ink)"}}>{m.name}</span>
+                      {keys[id]?.trim()&&(
+                        <button onClick={()=>{
+                          const next={...offP,[id]:!offP[id]};
+                          if(!next[id])delete next[id];
+                          setOffP(next);
+                          try{localStorage.setItem("cos-offp",JSON.stringify(next));}catch{}
+                          if(next[id]&&defP===id){
+                            const fall=["nvidia",...Object.keys(keys).filter(p=>keys[p]?.trim()&&!next[p])];
+                            setDefP(fall[1]||"nvidia");
+                          }
+                        }}
+                          title={offP[id]?"Switched off — key saved but not used":"Switched on"}
+                          style={{width:34,height:18,borderRadius:999,border:"none",cursor:"pointer",padding:0,flexShrink:0,
+                            background:offP[id]?"var(--oiq-border)":m.color,position:"relative",transition:"background .15s"}}>
+                          <span style={{position:"absolute",top:2,left:offP[id]?2:18,width:14,height:14,borderRadius:"50%",background:"#fff",transition:"left .15s"}}/>
+                        </button>
+                      )}
                       {id==="gemini"&&<span style={{fontSize:8,color:"#10B981",fontWeight:700}}>FREE</span>}
                       <a href={m.keyUrl} target="_blank" rel="noopener noreferrer" style={{marginLeft:"auto",fontSize:9,color:m.color,textDecoration:"none"}}>Get key ↗</a>
                       {keys[id]?.trim()&&<button onClick={()=>testKey(id)} style={{...S.iBtn,fontSize:9,padding:"1px 6px"}}>{testSt[id]==="testing"?"…":testSt[id]==="ok"?"✓ OK":testSt[id]?.startsWith("fail:")?"✗ Fail":"Test"}</button>}
                     </div>
-                    <input style={{...S.inp,fontSize:11}} type="password" value={keys[id]} onChange={e=>{const nk={...keys,[id]:e.target.value};setKeys(nk);sv("cos-keys",{keys:nk,defaultProvider:defP,multiAI});setTestSt(p=>({...p,[id]:undefined}));if(id==="claude"||id==="openai")saveBYOKeyToSupabase(e.target.value);supabase.auth.getUser().then(({data:{user}})=>{if(user)supabase.from("profiles").select("role").eq("id",user.id).single().then(({data:prof})=>{if(prof?.role==="super_admin")supabase.from("profiles").update({admin_api_keys:{...nk,defaultProvider:defP,multiAI}}).eq("id",user.id).catch(()=>{});});}).catch(()=>{});}} placeholder={m.placeholder}/>
+                    <input style={{...S.inp,fontSize:11,opacity:offP[id]?0.45:1}} type="password" value={keys[id]} onChange={e=>{const nk={...keys,[id]:e.target.value};setKeys(nk);sv("cos-keys",{keys:nk,defaultProvider:defP,multiAI});setTestSt(p=>({...p,[id]:undefined}));if(id==="claude"||id==="openai")saveBYOKeyToSupabase(e.target.value);supabase.auth.getUser().then(({data:{user}})=>{if(user)supabase.from("profiles").select("role").eq("id",user.id).single().then(({data:prof})=>{if(prof?.role==="super_admin")supabase.from("profiles").update({admin_api_keys:{...nk,defaultProvider:defP,multiAI}}).eq("id",user.id).catch(()=>{});});}).catch(()=>{});}} placeholder={m.placeholder}/>
                     {testSt[id]?.startsWith("fail:")&&<div style={{fontSize:9,color:"#EF4444",marginTop:2,lineHeight:1.4}}>{testSt[id].slice(5)}</div>}
                   </div>
                 ))}
