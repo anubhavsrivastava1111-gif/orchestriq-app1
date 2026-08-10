@@ -5618,7 +5618,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
             <div key={id} style={{marginBottom:8}}>
               <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}>
                 <div style={{width:6,height:6,borderRadius:"50%",background:keys[id]?.trim()?m.color:"#3A4060"}}/>
-                <span style={{fontSize:11,fontWeight:700,color:"#F1F5F9"}}>{m.name}</span>
+                <span style={{fontSize:11,fontWeight:700,color:"var(--oiq-ink)"}}>{m.name}</span>
                 {id==="gemini"&&<span style={{fontSize:8,color:"#10B981",fontWeight:700}}>FREE</span>}{m.note&&<span style={{fontSize:9,color:"#5A6480",marginLeft:4}}>{m.note}</span>}
                 <a href={m.keyUrl} target="_blank" rel="noopener noreferrer" style={{marginLeft:"auto",fontSize:9,color:m.color,textDecoration:"none"}}>Get key</a>
                 {keys[id]?.trim()&&<button onClick={()=>testKey(id)} style={{...S.iBtn,fontSize:9,padding:"1px 6px"}}>{testSt[id]==="testing"?"…":testSt[id]==="ok"?"✓ OK":testSt[id]?.startsWith("fail:")?"✗ Fail":"Test"}</button>}
