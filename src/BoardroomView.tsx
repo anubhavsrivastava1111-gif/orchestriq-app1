@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import ReadAloudButton from "./components/ReadAloudButton";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -221,73 +221,116 @@ function RenderedMd({ text, tok, isDark }: { text: string; tok: typeof T.light; 
 // ─── RESEARCH BRIEF CARDS ────────────────────────────────────────────────────
 function ResearchBriefPanel({ text, tok }: { text: string; tok: typeof T.light }) {
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
 
-  // Parse sections from the brief text
-  const lines = text.split("\n").filter(l => l.trim());
-  const sourceBlocks: string[] = [];
-  let current = "";
-  lines.forEach(l => {
-    if (l.match(/^(#{1,3}|\d+\.|Source|Data Point|Ref)/i) && current.trim()) {
-      sourceBlocks.push(current.trim());
-      current = l + "\n";
-    } else {
-      current += l + "\n";
-    }
-  });
-  if (current.trim()) sourceBlocks.push(current.trim());
+  // The brief arrives as blocks separated by headings, with individual findings
+  // separated by 🔴 and attributed as "— [TIER n: label] Publisher , accessed DATE".
+  // Splitting on that structure turns a wall of text into scannable rows.
+  const sources = useMemo(() => {
+    const blocks: { title: string; findings: { claim: string; pub: string; date: string; tier: string }[] }[] = [];
+    const rawBlocks = (text || "").split(/\n(?=(?:#{1,3}\s|\d+\.\s|Source\s|Data Point|Ref\s))/i);
+    rawBlocks.forEach(b => {
+      const parts = b.split("🔴").map(p => p.trim()).filter(Boolean);
+      if (!parts.length) return;
+      const title = parts[0].replace(/^[#>\-*\s\d.]+/, "").replace(/\(https?:\/\/[^)]*\)/g, "").trim().slice(0, 90);
+      const findings = parts.slice(title && parts.length > 1 ? 1 : 0).map(p => {
+        const clean = p.replace(/\(https?:\/\/[^)]*\)/g, "").trim();
+        const tierM = clean.match(/\[TIER\s*(\d)[^\]]*\]/i);
+        const dateM = clean.match(/accessed\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/i);
+        let claim = clean.split(/—\s*\[TIER/i)[0].replace(/[*`_]/g, "").trim();
+        let pub = "";
+        const after = clean.split(/\]/).slice(1).join("]");
+        if (after) pub = after.split(/,\s*accessed/i)[0].replace(/[*`_]/g, "").trim();
+        return { claim, pub: pub.slice(0, 70), date: dateM ? dateM[1] : "", tier: tierM ? tierM[1] : "" };
+      }).filter(f => f.claim.length > 15);
+      if (findings.length) blocks.push({ title: title || "Findings", findings });
+    });
+    return blocks;
+  }, [text]);
 
-  const clean = (s: string) => s.replace(/^#+\s*/gm, "").replace(/\(https?:\/\/[^)]+\)/g, "").trim();
-  const count = sourceBlocks.length || 1;
+  const totalFindings = sources.reduce((n, s) => n + s.findings.length, 0);
+  const copy = (t: string, id: string) => {
+    try { navigator.clipboard.writeText(t); setCopied(id); setTimeout(() => setCopied(null), 1400); } catch {}
+  };
+  const plain = (s: any) => `${s.title}\n` + s.findings.map((f: any) => `• ${f.claim}${f.pub ? `\n  — ${f.pub}${f.date ? `, ${f.date}` : ""}` : ""}`).join("\n");
+
+  // Highlight the figures inside a claim so numbers are findable at a glance.
+  const mark = (s: string) => {
+    const parts = s.split(/((?:₹|USD\s?|\$)\s?[\d,]+(?:\.\d+)?\s?(?:Cr|crore|lakh|L|K|M|B|Million|Billion|bn|mn)?|\d+(?:\.\d+)?\s?%(?:\s*CAGR)?)/gi);
+    return parts.map((p, i) =>
+      /^(?:₹|USD|\$)|%$|% CAGR$/i.test(p.trim()) && p.trim().length > 1
+        ? <span key={i} style={{ fontFamily: "var(--font-mono),monospace", background: tok.accentBg, color: tok.accent, padding: "1px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>{p.trim()}</span>
+        : <span key={i}>{p}</span>
+    );
+  };
+
+  const tierColor = (t: string) =>
+    t === "1" ? { bg: tok.successBg, fg: tok.success }
+    : t === "3" ? { bg: tok.warnBg, fg: tok.warn }
+    : { bg: tok.accentBg, fg: tok.accent };
 
   return (
     <>
-      {/* Collapsed summary row — matches the benchmark card treatment */}
-      <div
-        onClick={() => setOpen(true)}
-        style={{
-          marginBottom: 22, borderRadius: 10, border: `1px solid ${tok.border}`,
-          background: tok.surface, boxShadow: tok.shadow, cursor: "pointer",
-          display: "flex", alignItems: "center", gap: 14, padding: "15px 20px",
-        }}>
+      <div onClick={() => setOpen(true)}
+        style={{ marginBottom: 22, borderRadius: 10, border: `1px solid ${tok.border}`, background: tok.surface, boxShadow: tok.shadow, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, padding: "15px 20px" }}>
         <div style={{ width: 34, height: 34, borderRadius: 8, background: tok.surface2, border: `1px solid ${tok.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>📡</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: "var(--font-head)", fontSize: 15, fontWeight: 600, color: tok.text }}>Research Brief</div>
           <div style={{ fontSize: 11.5, color: tok.text3, marginTop: 2 }}>
-            {count} source{count === 1 ? "" : "s"} · Live data · Verify independently
+            {sources.length} source{sources.length === 1 ? "" : "s"} · {totalFindings} finding{totalFindings === 1 ? "" : "s"} · verify before external use
           </div>
         </div>
         <div style={{ fontSize: 11.5, fontWeight: 600, color: tok.accent, flexShrink: 0 }}>Open ↗</div>
       </div>
 
-      {/* Full-screen reader */}
       {open && (
-        <div
-          onClick={() => setOpen(false)}
-          style={{ position: "fixed", inset: 0, background: "rgba(10,14,26,0.62)", zIndex: 9995, display: "flex", alignItems: "center", justifyContent: "center", padding: 28 }}>
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{ width: "min(1080px,100%)", maxHeight: "88vh", background: tok.surface, borderRadius: 12, border: `1px solid ${tok.border}`, boxShadow: tok.shadowLg, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            <div style={{ padding: "16px 22px", borderBottom: `1px solid ${tok.border}`, display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+        <div onClick={() => setOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(10,14,26,0.62)", zIndex: 9995, display: "flex", alignItems: "center", justifyContent: "center", padding: 26 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: "min(1080px,100%)", maxHeight: "90vh", background: tok.surface, borderRadius: 12, border: `1px solid ${tok.border}`, boxShadow: tok.shadowLg, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+
+            <div style={{ padding: "15px 22px", borderBottom: `1px solid ${tok.border}`, display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontFamily: "var(--font-head)", fontSize: 17, fontWeight: 600, color: tok.text }}>Research Brief</div>
-                <div style={{ fontSize: 11.5, color: tok.text3, marginTop: 2 }}>{count} source{count === 1 ? "" : "s"} · AI-generated · Verify critical figures before external use</div>
+                <div style={{ fontSize: 11.5, color: tok.text3, marginTop: 2 }}>{sources.length} sources · {totalFindings} findings · verify critical figures before external use</div>
               </div>
+              <button onClick={() => copy(sources.map(plain).join("\n\n"), "all")}
+                style={{ padding: "6px 12px", borderRadius: 7, border: `1px solid ${tok.border}`, background: tok.surface2, color: tok.text2, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>
+                {copied === "all" ? "Copied" : "Copy all"}
+              </button>
               <button onClick={() => setOpen(false)}
-                style={{ background: "none", border: `1px solid ${tok.border}`, borderRadius: 7, width: 30, height: 30, cursor: "pointer", color: tok.text3, fontSize: 15, fontFamily: "inherit", flexShrink: 0 }}>✕</button>
+                style={{ background: "none", border: `1px solid ${tok.border}`, borderRadius: 7, width: 30, height: 30, cursor: "pointer", color: tok.text3, fontSize: 15, fontFamily: "inherit" }}>✕</button>
             </div>
-            <div style={{ padding: "18px 22px 22px", overflowY: "auto" }}>
-              {sourceBlocks.length > 1 ? (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 14 }}>
-                  {sourceBlocks.map((block, i) => (
-                    <div key={i} style={{ background: tok.surface2, borderRadius: 10, border: `1px solid ${tok.border}`, padding: "14px 16px" }}>
-                      <div style={{ fontSize: 10.5, fontWeight: 800, color: tok.text3, marginBottom: 7, textTransform: "uppercase", letterSpacing: ".09em" }}>Source {i + 1}</div>
-                      <div style={{ fontSize: 13, lineHeight: 1.65, color: tok.text2 }}>{clean(block)}</div>
+
+            <div style={{ padding: "16px 22px 22px", overflowY: "auto", flex: 1 }}>
+              {sources.length === 0 && (
+                <div style={{ fontSize: 13.5, lineHeight: 1.75, color: tok.text2, whiteSpace: "pre-wrap" }}>{(text || "").replace(/\(https?:\/\/[^)]*\)/g, "")}</div>
+              )}
+              {sources.map((s, si) => (
+                <div key={si} style={{ border: `1px solid ${tok.border}`, borderRadius: 10, padding: "14px 16px", marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 11 }}>
+                    <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: tok.text3, flexShrink: 0 }}>Source {si + 1}</span>
+                    <span style={{ fontSize: 13.5, fontWeight: 600, color: tok.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</span>
+                    {s.findings[0]?.tier && (
+                      <span style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 999, background: tierColor(s.findings[0].tier).bg, color: tierColor(s.findings[0].tier).fg, fontWeight: 700, flexShrink: 0 }}>Tier {s.findings[0].tier}</span>
+                    )}
+                    <button onClick={() => copy(plain(s), "s" + si)}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: tok.text3, fontSize: 13, padding: 2, flexShrink: 0 }}>
+                      {copied === "s" + si ? "✓" : "⧉"}
+                    </button>
+                  </div>
+                  {s.findings.map((f, fi) => (
+                    <div key={fi} style={{ borderTop: `1px solid ${tok.border}`, paddingTop: 11, marginTop: fi ? 11 : 0 }}>
+                      <div style={{ fontSize: 13.5, lineHeight: 1.62, color: tok.text }}>{mark(f.claim)}</div>
+                      {(f.pub || f.date) && (
+                        <div style={{ fontSize: 11, color: tok.text3, marginTop: 5 }}>
+                          {f.pub}{f.pub && f.date ? " · accessed " : ""}{f.date}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
-              ) : (
-                <div style={{ fontSize: 13.5, lineHeight: 1.75, color: tok.text2 }}>{clean(text)}</div>
-              )}
+              ))}
             </div>
           </div>
         </div>
