@@ -1266,8 +1266,19 @@ function getModuleContext(category,{ledgerEntries,brSessions,workflows,tQueue,tm
       parts.push("=== RECENT BOARDROOM SESSIONS (strategic context) ===");
       recentBR.forEach(s=>parts.push("Q: \""+s.q+"\"\n"+(s.synthesis?stripMd(s.synthesis).slice(0,500):"")));
     }
-    if(tmRes)parts.push("=== LAST TIME MACHINE SIMULATION ===\n"+stripMd(tmRes).slice(0,600));
-    if(apRes)parts.push("=== LAST AUTOPILOT DECISION SCAN ===\n"+stripMd(apRes).slice(0,600));
+    // Draw on the saved record, not just whatever happens to be on screen.
+    // tmRes/apRes are view state — after a reload they hold one cached result
+    // while the stored history sits unused.
+    const recentTM=(tmSessions||[]).slice(0,2);
+    if(recentTM.length){
+      parts.push("=== RECENT TIME MACHINE SIMULATIONS ===");
+      recentTM.forEach((s:any)=>parts.push("Decision: \""+s.dec+"\"\n"+stripMd(s.res||"").slice(0,700)));
+    } else if(tmRes) parts.push("=== LAST TIME MACHINE SIMULATION ===\n"+stripMd(tmRes).slice(0,700));
+    const recentAP=(apSessions||[]).slice(0,2);
+    if(recentAP.length){
+      parts.push("=== RECENT AUTOPILOT DECISION SCANS ===");
+      recentAP.forEach((s:any)=>parts.push("Scan "+new Date(s.ts).toLocaleDateString()+" (stage: "+(s.stage||"—")+")\n"+stripMd(s.res||"").slice(0,700)));
+    } else if(apRes) parts.push("=== LAST AUTOPILOT DECISION SCAN ===\n"+stripMd(apRes).slice(0,700));
   }
   // All categories: inject same-category approved task outputs so the chain builds
   // forward rather than repeating what was already decided.
