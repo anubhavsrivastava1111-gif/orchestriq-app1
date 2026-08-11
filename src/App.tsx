@@ -1250,7 +1250,7 @@ function buildLedgerSnapshot(entries,cur){
 // Rule: each category declares its own permitted data sources. Irrelevant
 // sources never enter the prompt. This prevents cross-module data pollution
 // while ensuring each chain has the real business context it needs.
-function getModuleContext(category,{ledgerEntries,brSessions,workflows,tQueue,tmRes,apRes,cur}){
+function getModuleContext(category,{ledgerEntries,brSessions,workflows,tQueue,tmRes,apRes,tmSessions,apSessions,cur}){
   const parts=[];
   const FINANCE=["finance","tax","audit"];
   const STRATEGY=["strategy_task","executive_task"];
@@ -2355,6 +2355,8 @@ export default function App(){
   const [tmResearchBrief,setTmResearchBrief]=useState("");
   const [tmPh,setTmPh]=useState("");
   const [tmSessions,setTmSessions]=useState([]);
+  const [apSessions,setApSessions]=useState<any[]>(()=>{try{return JSON.parse(localStorage.getItem("cos-ap")||"[]");}catch{return [];}});
+  const [apShowHistory,setApShowHistory]=useState(false);
   const [tmShowHistory,setTmShowHistory]=useState(false);
   const [apRes,setApRes]=useState("");
   const [apRun,setApRun]=useState(false);
@@ -2839,6 +2841,12 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       res+=ieEvidenceAudit(res);
       if(!cancelRef.current.ap){
         setApRes(res);sv("cos-ap-live",{res,brief:researchBrief});
+        // Every scan is kept. Previously each run overwrote the last one and
+        // the earlier result was unrecoverable.
+        try{
+          const entry={id:Date.now(),ts:Date.now(),res,brief:researchBrief,stage:co.stage,company:co.name};
+          setApSessions(prev=>{const ns=[entry,...prev].slice(0,30);sv("cos-ap",ns);return ns;});
+        }catch{}
         try{const apI=estimateTokens(co.name);const apO=estimateTokens(res);
         saveRecord({feature:"Decision Autopilot",provider:defP,model:MODELS[defP]?.model||defP,inputTokens:apI,outputTokens:apO,cost:estimateCost(defP,apI,apO)||0});}catch{}
       }
@@ -4890,7 +4898,7 @@ const runWorkflow=useCallback(async(customChainOverride?:string[],preflightAnswe
   // Same relevance-scoped context injection as processTask — Flow chains
   // get real Ledger/Boardroom data rather than reasoning from scratch.
   const wfModuleContext=getModuleContext(taskCat,{
-    ledgerEntries,brSessions,workflows,tQueue:tQRef.current,tmRes,apRes,cur:wfCurr
+    ledgerEntries,brSessions,workflows,tQueue:tQRef.current,tmRes,apRes,tmSessions,apSessions,cur:wfCurr
   });
 
   for(let i=0;i<activeChain.length;i++){
@@ -5064,7 +5072,7 @@ const processTask=useCallback(async(task:any)=>{
   // All tasks get prior approved outputs from the same category.
   // Nothing irrelevant enters the prompt.
   const moduleContext=getModuleContext(task.category,{
-    ledgerEntries,brSessions,workflows,tQueue:tQRef.current,tmRes,apRes,cur:p3Curr
+    ledgerEntries,brSessions,workflows,tQueue:tQRef.current,tmRes,apRes,tmSessions,apSessions,cur:p3Curr
   });
 
   for(let i=0;i<ch.chain.length;i++){
@@ -5884,7 +5892,25 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               {/* AUTOPILOT */}
               {nTab==="autopilot"&&(
                 <div>
-                  <div style={{fontSize:13,fontWeight:800,color:"#F1F5F9",marginBottom:2}}>Decision Autopilot</div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:2}}>
+                    <div style={{fontSize:13,fontWeight:800,color:"var(--oiq-ink)"}}>Decision Autopilot</div>
+                    {apSessions.length>0&&<button onClick={()=>setApShowHistory(s=>!s)} style={{...S.hBtn,...(apShowHistory?{color:"#F59E0B",borderColor:"#F59E0B44"}:{})}}>{apShowHistory?"✕ Hide":"🕘 History ("+apSessions.length+")"}</button>}
+                  </div>
+                  {apShowHistory&&(
+                    <div style={{marginBottom:10,background:"var(--oiq-surface2)",border:"1px solid var(--oiq-border)",borderRadius:8,padding:"10px 12px"}}>
+                      <div style={{fontSize:9,fontWeight:700,color:"var(--oiq-muted)",textTransform:"uppercase",letterSpacing:0.8,marginBottom:8}}>Saved Scans</div>
+                      {apSessions.map((s:any)=>(
+                        <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"var(--oiq-surface)",border:"1px solid var(--oiq-border)",borderRadius:6,marginBottom:5}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:11,fontWeight:600,color:"var(--oiq-ink)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.company||"Scan"} · {s.stage||"—"}</div>
+                            <div style={{fontSize:8,color:"var(--oiq-muted)",marginTop:2}}>{new Date(s.ts).toLocaleString()}</div>
+                          </div>
+                          <button onClick={()=>{setApRes(s.res);setApResearchBrief(s.brief||"");sv("cos-ap-live",{res:s.res,brief:s.brief||""});setApShowHistory(false);}} style={{...S.iBtn,fontSize:9,padding:"3px 9px"}}>Reopen</button>
+                          <button onClick={()=>{if(confirm("Delete this saved scan?")){setApSessions(prev=>{const ns=prev.filter((x:any)=>x.id!==s.id);sv("cos-ap",ns);return ns;});}}} style={{...S.iBtn,fontSize:9,padding:"3px 7px",color:"#EF4444"}}>✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <p style={{fontSize:10,color:"#5A6480",marginBottom:10}}>Surfaces decisions you should be making but aren't · {co.location||"Set location"} · {cur.code}</p>
                   <div style={{display:"flex",gap:5,marginBottom:14}}>
                     <button onClick={runAP} disabled={apRun} style={{...S.pBtn,width:"auto",padding:"10px 24px",marginTop:0,fontSize:13,background:"#F59E0B",opacity:apRun?0.4:1}}>{apRun?"Scanning…":"Run Decision Scan"}</button>
