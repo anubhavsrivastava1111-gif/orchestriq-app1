@@ -200,8 +200,8 @@ export interface CostArchitectureProps {
   showToast?: (msg: string, kind?: string) => void;
   companyName?: string;
   onDiagnosis?: (d: PortfolioDiagnosis) => void;
-  /** Web-search-enabled AI call. Without it the Start tab explains it is unavailable. */
-  callAI?: (prompt: string) => Promise<string>;
+  /** (prompt, useWebSearch) => text. The research ladder toggles search itself. */
+  callAI?: (prompt: string, useWebSearch: boolean) => Promise<string>;
 }
 
 export default function CostArchitecture({ showToast, companyName, onDiagnosis, callAI }: CostArchitectureProps) {
@@ -1268,7 +1268,7 @@ const EXAMPLES = [
 ];
 
 const StartTab: React.FC<{
-  callAI?: (prompt: string) => Promise<string>;
+  callAI?: (prompt: string, useWebSearch: boolean) => Promise<string>;
   ctx: CaBusinessContext | null;
   applyBlueprint: (bp: Blueprint, skip: { resources: Set<string>; offerings: Set<string>; channels: Set<string>; costPools: Set<string> }) => Promise<boolean>;
   hasData: boolean;
@@ -1306,6 +1306,9 @@ const StartTab: React.FC<{
       "Checking real commission and fee structures...",
       "Finding where businesses like this usually lose margin...",
       "Building your draft cost model...",
+      "Web search is slow - falling back to model knowledge...",
+      "Trying a simplified request...",
+      "Building a structural starter model for you...",
     ];
     let i = 0;
     setPhase(steps[0]);
@@ -1316,7 +1319,7 @@ const StartTab: React.FC<{
       });
       setRes(r);
     } catch (e: any) {
-      setRes({ ok: false, blueprint: null, rawLength: 0, error: e?.message || "Research failed. Please try again." });
+      setRes({ ok: false, blueprint: null, rawLength: 0, stage: "failed", attempts: [], error: e?.message || "Research failed. Please try again." });
     } finally {
       clearInterval(timer); setBusy(false); setPhase("");
     }
@@ -1380,6 +1383,11 @@ const StartTab: React.FC<{
         <div style={{ ...S.card, borderColor: BAD.fg }}>
           <div style={{ ...S.cardH, color: BAD.fg, marginBottom: 6 }}>That did not work</div>
           <div style={{ fontSize: 12, lineHeight: 1.6 }}>{res.error}</div>
+          {res.attempts.length > 0 && (
+            <div style={{ ...S.note, marginTop: 9, fontSize: 10.5 }}>
+              What was tried: {res.attempts.join(" \u2192 ")}
+            </div>
+          )}
           <button style={{ ...S.btnGhost, marginTop: 10 }} onClick={run}>Try again</button>
         </div>
       )}
@@ -1399,9 +1407,17 @@ const StartTab: React.FC<{
                   </div>
                 )}
               </div>
-              <Chip tone={bp.confidence === "high" ? OK : bp.confidence === "medium" ? WARN : BAD}>
-                {bp.confidence} confidence
-              </Chip>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5, alignItems: "flex-end" }}>
+                <Chip tone={bp.confidence === "high" ? OK : bp.confidence === "medium" ? WARN : BAD}>
+                  {bp.confidence} confidence
+                </Chip>
+                <Chip tone={res!.stage === "web_research" ? OK : res!.stage === "template" ? BAD : WARN}>
+                  {res!.stage === "web_research" ? "Web researched"
+                    : res!.stage === "model_knowledge" ? "From model knowledge"
+                    : res!.stage === "compact" ? "Simplified draft"
+                    : "Structural starter"}
+                </Chip>
+              </div>
             </div>
 
             <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginTop: 13 }}>
