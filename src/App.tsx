@@ -17,6 +17,7 @@ import DesignCentre from "./components/DesignCentre";
 import { generateExcel, generatePptx, generatePdf, generateDocx } from "./lib/GenerationService";
 import { ENGINE_ENABLED, runPipeline, classifyDomain, selectFramework, selfReview, classifyEvidence } from "./lib/IntelligenceEngine"; 
 import CostArchitecture from "./CostArchitecture";
+import { loadCostContext, getCostBrief, publishCostDiagnosis, clearCostContext } from "./lib/CostContext";
 
 // Intelligence Engine — evidence audit line appended to final deliverables (no AI call, fail-safe)
 function ieEvidenceAudit(text:string):string{
@@ -1202,7 +1203,7 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
 
 function buildCtx(co,compData){
   const cur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
-  return "COMPANY: "+co.name+" | INDUSTRY: "+co.industry+" | STAGE: "+co.stage+"\nHQ: "+(co.location||"Not set")+" | CURRENCY: "+cur.code+" ("+cur.sym+") | MARKETS: "+(co.markets||"Not specified")+"\nDATA:\n"+(Object.keys(compData).length===0?"(None)":Object.entries(compData).map(([k,v])=>"  "+k+": "+v).join("\n"))+"\nRULES: All figures in "+cur.sym+cur.code+". Account for "+(co.location||"company location")+" macro+micro context. Show all math. Structure 0-90d then 3-12mo then 1-3yr.";
+  return "COMPANY: "+co.name+" | INDUSTRY: "+co.industry+" | STAGE: "+co.stage+"\nHQ: "+(co.location||"Not set")+" | CURRENCY: "+cur.code+" ("+cur.sym+") | MARKETS: "+(co.markets||"Not specified")+"\nDATA:\n"+(Object.keys(compData).length===0?"(None)":Object.entries(compData).map(([k,v])=>"  "+k+": "+v).join("\n"))+(getCostBrief()?"\n\n"+getCostBrief()+"\n":"")+"\nRULES: All figures in "+cur.sym+cur.code+". Account for "+(co.location||"company location")+" macro+micro context. Show all math. Structure 0-90d then 3-12mo then 1-3yr.";
 }
 function buildSys(role,co,compData,liveRates=""){
   const p = getExecutiveIntel(role.id);
@@ -2479,6 +2480,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{
       const {data:{user}}=await supabase.auth.getUser();
       if(user){
+        try{loadCostContext(true);}catch(e){console.warn("[OIQ] cost context:",e);}
         const {data:prof}=await supabase.from("profiles").select("full_name,role,admin_api_keys,user_api_keys").eq("id",user.id).single();
         setMe({email:(prof as any)?.full_name||user.email||"",role:prof?.role||"user"});
         // Load this user's saved keys. Row Level Security guarantees this row
@@ -5343,6 +5345,7 @@ const processTask=useCallback(async(task:any)=>{
     showToast("All data reset — API keys preserved","warning");
   };
   const fullReset=async()=>{
+    try{clearCostContext();}catch{}
     WorkspaceMemory.clearAll();
     try{await supabase.auth.signOut();}catch(e){console.warn("[OIQ] Sign out error:",e);}
     window.location.href="/";
@@ -6784,7 +6787,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         {/* COST ARCHITECTURE */}
         {view==="costarch"&&(
           <div style={{flex:1,overflowY:"auto"}}>
-            <CostArchitecture showToast={showToast} companyName={co.name}/>
+            <CostArchitecture showToast={showToast} companyName={co.name} onDiagnosis={publishCostDiagnosis}/>
           </div>
         )}
 
