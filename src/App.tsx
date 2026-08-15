@@ -15,7 +15,8 @@ import { WorkspaceMemory } from "./lib/WorkspaceMemory";
 import ReadAloudButton from "./components/ReadAloudButton";
 import DesignCentre from "./components/DesignCentre";
 import { generateExcel, generatePptx, generatePdf, generateDocx } from "./lib/GenerationService";
-import { ENGINE_ENABLED, runPipeline, classifyDomain, selectFramework, selfReview, classifyEvidence } from "./lib/IntelligenceEngine";
+import { ENGINE_ENABLED, runPipeline, classifyDomain, selectFramework, selfReview, classifyEvidence } from "./lib/IntelligenceEngine"; 
+import CostArchitecture from "./CostArchitecture";
 
 // Intelligence Engine — evidence audit line appended to final deliverables (no AI call, fail-safe)
 function ieEvidenceAudit(text:string):string{
@@ -5727,12 +5728,12 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           <button onClick={()=>setShowModules(v=>!v)}
             style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:"var(--oiq-sbBorder)",border:"1px solid var(--sb-bdr)",borderRadius:8,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}>
             <span style={{fontSize:15}}>{[["nerve","🧠"],["workflow","⚡"],["agentic","🔗"],["agents","🤖"],["p3","🤖"],["chat","💬"],["data","🗄️"],["ledger","📒"],["dispatch","📡"],["actions","✅"],["studio","🎨"],["funding","💰"],["tokens","🔢"]].find(([v])=>v===view)?.[1]||"🧠"}</span>
-            <span style={{flex:1,fontSize:11.5,fontWeight:700,color:"var(--oiq-sbText)",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.06em"}}>{[["nerve","Nerve Center"],["workflow","Workflow"],["agentic","Agentic AI"],["agents","AI Agents"],["p3","Autopilot"],["chat","Chat"],["data","Data Hub"],["home","Command Center"],["ledger","Ledger"],["finance","Finance"],["dispatch","Pulse"],["actions","Tasks"],["studio","Studio"],["funding","Funding"],["tokens","Tokens"]].find(([v])=>v===view)?.[1]||"Nerve Center"}</span>
+            <span style={{flex:1,fontSize:11.5,fontWeight:700,color:"var(--oiq-sbText)",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.06em"}}>{[["nerve","Nerve Center"],["workflow","Workflow"],["agentic","Agentic AI"],["agents","AI Agents"],["p3","Autopilot"],["chat","Chat"],["data","Data Hub"],["costarch","Cost Architecture"],["home","Command Center"],["ledger","Ledger"],["finance","Finance"],["dispatch","Pulse"],["actions","Tasks"],["studio","Studio"],["funding","Funding"],["tokens","Tokens"]].find(([v])=>v===view)?.[1]||"Nerve Center"}</span>
             <span style={{fontSize:9,color:"var(--oiq-sbDim)",transition:"transform 0.2s",transform:showModules?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
           </button>
           {showModules&&(
             <div style={{position:"absolute",top:"calc(100% - 2px)",left:10,right:10,background:"var(--oiq-sbBorder)",border:"1px solid var(--sb-bdr)",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:7,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
+              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
                 <button key={v} onClick={()=>{setView(v);setShowModules(false);}}
                   style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 11px",background:view===v?"var(--oiq-accent)":"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"inherit",marginBottom:2,transition:"background 0.12s"}}>
                   <span style={{fontSize:15,width:22,textAlign:"center"}}>{ic}</span>
@@ -6779,6 +6780,13 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 {view==="actions"&&(
   <ActionTracker items={actionItems} setItems={setActionItems} sv={sv} S={S} showToast={showToast} AR={AR}/>
 )}
+
+        {/* COST ARCHITECTURE */}
+        {view==="costarch"&&(
+          <div style={{flex:1,overflowY:"auto"}}>
+            <CostArchitecture showToast={showToast} companyName={co.name}/>
+          </div>
+        )}
 
         {/* DATA HUB */}
         {view==="data"&&(
