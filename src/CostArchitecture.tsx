@@ -15,6 +15,10 @@ import {
   type CaBusinessContext, type ResourceClass, type OfferingType,
   type PortfolioDiagnosis, type Opportunity,
 } from "./lib/CostEngine";
+import {
+  researchBlueprint, blueprintToRows, blueprintStats,
+  type Blueprint, type BlueprintResult, type Verify,
+} from "./lib/BusinessBlueprint";
 
 /* ---------------------------------------------------------------- constants */
 
@@ -77,7 +81,7 @@ const ALLOCATION_BASES = [
   { v: "equal",            label: "Split equally" },
 ];
 
-type TabKey = "setup" | "inputs" | "products" | "channels" | "diagnostics";
+type TabKey = "start" | "setup" | "inputs" | "products" | "channels" | "diagnostics";
 
 /* ------------------------------------------------------------------ styling */
 
@@ -196,10 +200,12 @@ export interface CostArchitectureProps {
   showToast?: (msg: string, kind?: string) => void;
   companyName?: string;
   onDiagnosis?: (d: PortfolioDiagnosis) => void;
+  /** Web-search-enabled AI call. Without it the Start tab explains it is unavailable. */
+  callAI?: (prompt: string) => Promise<string>;
 }
 
-export default function CostArchitecture({ showToast, companyName, onDiagnosis }: CostArchitectureProps) {
-  const [tab, setTab] = useState<TabKey>("setup");
+export default function CostArchitecture({ showToast, companyName, onDiagnosis, callAI }: CostArchitectureProps) {
+  const [tab, setTab] = useState<TabKey>("start");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -249,7 +255,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis }
         setChannels((ch.data as CaChannel[]) ?? []);
         setOfferingChannels((oc.data as CaOfferingChannel[]) ?? []);
         setBenchmarks((bm.data as CaBenchmark[]) ?? []);
-        if ((of.data ?? []).length) setTab("diagnostics");
+        setTab((of.data ?? []).length ? "diagnostics" : "start");
       } catch (e: any) {
         if (!cancelled) setErr(e?.message || "Could not load your cost data.");
       } finally {
@@ -412,6 +418,52 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis }
     setOfferingChannels((p) => p.filter((c) => c.channel_id !== id)); void removeRow("ca_channels", id); };
   const delOC = (id: string) => { setOfferingChannels((p) => p.filter((c) => c.id !== id)); void removeRow("ca_offering_channels", id); };
 
+  /* --------------------------------------------------- blueprint application */
+
+  const applyBlueprint = useCallback(async (
+    bp: Blueprint,
+    skip: { resources: Set<string>; offerings: Set<string>; channels: Set<string>; costPools: Set<string> }
+  ) => {
+    if (!userId) { toast("Sign in first.", "error"); return false; }
+    setSaving(true);
+    try {
+      const rows = blueprintToRows(bp, userId, uid, skip);
+
+      const nextCtx = { ...(ctx || { id: uid(), user_id: userId }), ...rows.context } as CaBusinessContext;
+      const w = async (table: string, data: any[]) => {
+        if (!data.length) return;
+        const clean = data.map((r) => { const { effective_cost_per_base_unit, created_at, updated_at, ...rest } = r; return rest; });
+        const { error } = await supabase.from(table).upsert(clean, { onConflict: "id" });
+        if (error) throw error;
+      };
+
+      // order matters: parents before the rows that reference them
+      await w("ca_business_context", [nextCtx]);
+      await w("ca_resources", rows.resources);
+      await w("ca_offerings", rows.offerings);
+      await w("ca_channels", rows.channels);
+      await w("ca_bom_lines", rows.bomLines);
+      await w("ca_offering_channels", rows.offeringChannels);
+      await w("ca_cost_pools", rows.costPools);
+
+      setCtx(nextCtx);
+      setResources((p) => [...p, ...rows.resources]);
+      setOfferings((p) => [...p, ...rows.offerings]);
+      setChannels((p) => [...p, ...rows.channels]);
+      setBomLines((p) => [...p, ...rows.bomLines]);
+      setOfferingChannels((p) => [...p, ...rows.offeringChannels]);
+      setCostPools((p) => [...p, ...rows.costPools]);
+
+      toast(`Draft model created: ${rows.resources.length} inputs, ${rows.offerings.length} products, ${rows.bomLines.length} recipe lines.`, "success");
+      setTab("products");
+      return true;
+    } catch (e: any) {
+      const m = e?.message || "Could not save the draft.";
+      setErr(m); toast("Could not apply: " + m, "error");
+      return false;
+    } finally { setSaving(false); }
+  }, [userId, ctx, toast]);
+
   /* ----------------------------------------------------------- computation */
 
   const ws: CostWorkspace = useMemo(() => ({
@@ -430,6 +482,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis }
   if (err && !userId) return <div style={{ ...S.wrap, ...S.empty }}>{err}</div>;
 
   const TABS: Array<{ k: TabKey; label: string; count?: number }> = [
+    { k: "start",       label: "Start here" },
     { k: "setup",       label: "Setup" },
     { k: "inputs",      label: "What you buy",  count: resources.length },
     { k: "products",    label: "What you sell", count: offerings.length },
@@ -467,6 +520,11 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis }
           <div style={{ fontSize: 12, color: BAD.fg }}>{err}</div>
           <button style={{ ...S.btnGhost, marginTop: 8 }} onClick={() => setErr(null)}>Dismiss</button>
         </div>
+      )}
+
+      {tab === "start" && (
+        <StartTab callAI={callAI} ctx={ctx} applyBlueprint={applyBlueprint}
+          hasData={offerings.length > 0} goTo={setTab} companyName={companyName} />
       )}
 
       {tab === "setup" && (
@@ -1184,6 +1242,400 @@ const DiagnosticsTab: React.FC<{ dx: PortfolioDiagnosis; M: (v: number) => strin
         Data completeness {dx.completenessScore}% &middot; confidence {dx.confidenceScore}%.
         Every figure is calculated from what you entered &mdash; nothing is estimated or guessed.
       </div>
+    </>
+  );
+};
+
+/* ============================================================================
+ * TAB :: START HERE
+ * Describe the business in plain words. The system researches it, drafts the
+ * whole cost model, and hands back a checklist to verify - instead of a blank
+ * form that assumes the user is already an expert in this industry.
+ * ========================================================================== */
+
+const VERIFY_STYLE: Record<Verify, { tone: { bg: string; fg: string }; label: string }> = {
+  confirmed:    { tone: OK,   label: "Researched" },
+  needs_check:  { tone: WARN, label: "Check this" },
+  must_supply:  { tone: BAD,  label: "You must enter" },
+};
+
+const EXAMPLES = [
+  "A bakery in Lucknow making birthday cakes, cookies and multigrain bread. Sells walk-in and on Swiggy and Zomato.",
+  "A 40-seat casual dining restaurant in Pune serving North Indian food, about half the orders come from delivery apps.",
+  "A steel re-rolling mill in Ghaziabad buying HRC coil and making angles and channels for local fabricators.",
+  "A 6-person management consulting firm in Bengaluru doing market entry projects and monthly advisory retainers.",
+  "A D2C skincare brand selling on our own website and Amazon, we get the products made by a third-party manufacturer.",
+];
+
+const StartTab: React.FC<{
+  callAI?: (prompt: string) => Promise<string>;
+  ctx: CaBusinessContext | null;
+  applyBlueprint: (bp: Blueprint, skip: { resources: Set<string>; offerings: Set<string>; channels: Set<string>; costPools: Set<string> }) => Promise<boolean>;
+  hasData: boolean;
+  goTo: (t: TabKey) => void;
+  companyName?: string;
+}> = ({ callAI, ctx, applyBlueprint, hasData, goTo, companyName }) => {
+  const [desc, setDesc] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState("");
+  const [res, setRes] = useState<BlueprintResult | null>(null);
+  const [skipR, setSkipR] = useState<Set<string>>(new Set());
+  const [skipO, setSkipO] = useState<Set<string>>(new Set());
+  const [skipC, setSkipC] = useState<Set<string>>(new Set());
+  const [skipP, setSkipP] = useState<Set<string>>(new Set());
+  const [applied, setApplied] = useState(false);
+
+  const bp = res?.ok ? res.blueprint : null;
+  const cur = bp?.currency || ctx?.currency || "INR";
+  const M = (v: number) => fmtMoney(v, cur);
+
+  const toggle = (set: Set<string>, k: string, fn: (s: Set<string>) => void) => {
+    const next = new Set(set);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    fn(next);
+  };
+
+  const run = async () => {
+    if (!callAI) return;
+    setBusy(true); setRes(null); setApplied(false);
+    setSkipR(new Set()); setSkipO(new Set()); setSkipC(new Set()); setSkipP(new Set());
+    const steps = [
+      "Working out what kind of business this is...",
+      "Searching for current input prices in your market...",
+      "Looking up normal wastage and utilisation for this trade...",
+      "Checking real commission and fee structures...",
+      "Finding where businesses like this usually lose margin...",
+      "Building your draft cost model...",
+    ];
+    let i = 0;
+    setPhase(steps[0]);
+    const timer = setInterval(() => { i = Math.min(i + 1, steps.length - 1); setPhase(steps[i]); }, 6000);
+    try {
+      const r = await researchBlueprint(callAI, desc, {
+        geography: ctx?.geography || "India", currency: cur, depth: "deep",
+      });
+      setRes(r);
+    } catch (e: any) {
+      setRes({ ok: false, blueprint: null, rawLength: 0, error: e?.message || "Research failed. Please try again." });
+    } finally {
+      clearInterval(timer); setBusy(false); setPhase("");
+    }
+  };
+
+  const stats = bp ? blueprintStats(bp) : null;
+
+  /* ---- no AI wired ---- */
+  if (!callAI) {
+    return (
+      <div style={S.card}>
+        <Empty title="Guided setup is not switched on"
+          body="This screen can research your industry and draft the whole cost model for you, but it needs an AI provider key. Add one in Settings, or build the model by hand from the tabs above."
+          action={<button style={S.btnGhost} onClick={() => goTo("inputs")}>Build it by hand instead</button>} />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* ---------------- input ---------------- */}
+      <div style={S.card}>
+        <div style={S.cardH}>Describe the business in your own words</div>
+        <div style={{ ...S.note, marginBottom: 11 }}>
+          You do not need to know this industry. Write what the business makes or does, roughly where it operates,
+          and how it sells. The system researches current prices, normal wastage, real channel commissions and the
+          usual margin leaks, then drafts the model for you to check and correct.
+        </div>
+
+        <textarea
+          value={desc} onChange={(e) => setDesc(e.target.value)} rows={4} disabled={busy}
+          placeholder={companyName ? `e.g. ${companyName} is a ...` : "e.g. A bakery in Lucknow making birthday cakes and bread, selling walk-in and on Swiggy"}
+          style={{ ...S.inp, resize: "vertical", lineHeight: 1.55, minHeight: 84, fontSize: 12.5 }} />
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "9px 0 12px" }}>
+          {EXAMPLES.slice(0, 3).map((ex, i) => (
+            <button key={i} disabled={busy} onClick={() => setDesc(ex)}
+              style={{ ...S.btnGhost, fontSize: 10, opacity: busy ? 0.5 : 1, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {ex.slice(0, 44)}...
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={run} disabled={busy || desc.trim().length < 12}
+            style={{ ...S.btn, opacity: busy || desc.trim().length < 12 ? 0.45 : 1, cursor: busy ? "wait" : "pointer" }}>
+            {busy ? "Researching..." : "Research and build my cost model"}
+          </button>
+          {busy && <span style={{ fontSize: 11, color: V("accent", "#4ADE80") }}>{phase}</span>}
+          {!busy && hasData && (
+            <span style={{ ...S.note, fontSize: 10.5 }}>
+              You already have data. Anything generated here is <strong style={{ color: V("ink", "#e6edf3") }}>added alongside</strong> it, never replacing it.
+            </span>
+          )}
+        </div>
+        {busy && <div style={{ ...S.note, marginTop: 9, fontSize: 10.5 }}>This takes 30-60 seconds because it is doing live research, not guessing.</div>}
+      </div>
+
+      {/* ---------------- error ---------------- */}
+      {res && !res.ok && (
+        <div style={{ ...S.card, borderColor: BAD.fg }}>
+          <div style={{ ...S.cardH, color: BAD.fg, marginBottom: 6 }}>That did not work</div>
+          <div style={{ fontSize: 12, lineHeight: 1.6 }}>{res.error}</div>
+          <button style={{ ...S.btnGhost, marginTop: 10 }} onClick={run}>Try again</button>
+        </div>
+      )}
+
+      {/* ---------------- review ---------------- */}
+      {bp && stats && (
+        <>
+          <div style={S.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+              <div style={{ flex: "1 1 320px" }}>
+                <div style={S.cardH}>What we understood</div>
+                <div style={{ fontSize: 12.5, lineHeight: 1.6, marginBottom: 8 }}>{bp.business_summary || "—"}</div>
+                {bp.constraint_resource_label && (
+                  <div style={S.note}>
+                    Bottleneck identified: <strong style={{ color: V("ink", "#e6edf3") }}>{bp.constraint_resource_label}</strong>
+                    {bp.constraint_reason ? " — " + bp.constraint_reason : ""}
+                  </div>
+                )}
+              </div>
+              <Chip tone={bp.confidence === "high" ? OK : bp.confidence === "medium" ? WARN : BAD}>
+                {bp.confidence} confidence
+              </Chip>
+            </div>
+
+            <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginTop: 13 }}>
+              <Tile label="Researched" value={String(stats.confirmed)} sub="figures we found" tone={OK.fg} />
+              <Tile label="Check these" value={String(stats.needsCheck)} sub="typical, confirm them" tone={WARN.fg} />
+              <Tile label="You must enter" value={String(stats.mustSupply)} sub="specific to this business" tone={BAD.fg} />
+              <Tile label="Recipe lines" value={String(stats.recipeLines)} sub="drafted for you" />
+            </div>
+          </div>
+
+          {/* ---- leaks: the consulting value ---- */}
+          {bp.leaks.length > 0 && (
+            <div style={S.card}>
+              <div style={S.cardH}>Where this kind of business usually loses money</div>
+              <div style={{ ...S.note, marginBottom: 11 }}>
+                These are not calculated from your data — they are known failure patterns for this industry.
+                Check each one against the business.
+              </div>
+              {bp.leaks.map((l, i) => (
+                <div key={i} style={{ padding: "10px 0", borderBottom: i < bp.leaks.length - 1 ? `1px solid ${V("faint", "#16202c")}` : "none" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700 }}>{l.title}</div>
+                    {l.typical_size && <Chip tone={WARN}>{l.typical_size}</Chip>}
+                  </div>
+                  <div style={{ ...S.note, marginTop: 4 }}>{l.what_happens}</div>
+                  {l.how_to_spot_it && (
+                    <div style={{ ...S.note, marginTop: 4, color: V("accent", "#4ADE80") }}>
+                      How to check: {l.how_to_spot_it}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ---- checklist ---- */}
+          {bp.checklist.length > 0 && (
+            <div style={S.card}>
+              <div style={S.cardH}>What you need to find out</div>
+              <div style={{ ...S.note, marginBottom: 11 }}>
+                Everything else is drafted. These are the answers only the business can give you — take this list to them.
+              </div>
+              {bp.checklist.map((c, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, padding: "8px 0", borderBottom: i < bp.checklist.length - 1 ? `1px solid ${V("faint", "#16202c")}` : "none" }}>
+                  <div style={{ paddingTop: 2 }}>
+                    <Chip tone={c.priority === "critical" ? BAD : c.priority === "important" ? WARN : NEU}>
+                      {c.priority === "nice_to_have" ? "optional" : c.priority}
+                    </Chip>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600 }}>{c.question}</div>
+                    <div style={{ ...S.note, marginTop: 3 }}>{c.why_it_matters}{c.field_hint ? ` · Goes in: ${c.field_hint}` : ""}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ---- inputs ---- */}
+          {bp.resources.length > 0 && (
+            <div style={S.card}>
+              <div style={S.cardH}>Inputs we drafted ({bp.resources.length - skipR.size} of {bp.resources.length} selected)</div>
+              <div style={S.scroll}>
+                <table style={S.table}>
+                  <thead><tr>
+                    <th style={{ ...S.th, width: 34 }}>Use</th>
+                    <th style={S.th}>Input</th>
+                    <th style={{ ...S.th, width: 90 }}>Type</th>
+                    <th style={{ ...S.th, width: 130, textAlign: "right" }}>Price</th>
+                    <th style={{ ...S.th, width: 78, textAlign: "right" }}>Usable</th>
+                    <th style={{ ...S.th, width: 105 }}>Status</th>
+                  </tr></thead>
+                  <tbody>
+                    {bp.resources.map((r) => {
+                      const off = skipR.has(r.name);
+                      return (
+                        <tr key={r.name} style={{ opacity: off ? 0.35 : 1 }}>
+                          <td style={S.td}><input type="checkbox" checked={!off} onChange={() => toggle(skipR, r.name, setSkipR)} /></td>
+                          <td style={S.td}>
+                            <div style={{ fontWeight: 600 }}>{r.name}</div>
+                            {r.price_basis && <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5") }}>{r.price_basis}</div>}
+                          </td>
+                          <td style={{ ...S.td, fontSize: 10.5, color: V("muted", "#8b98a5") }}>{r.resource_class.toLowerCase()}</td>
+                          <td style={{ ...S.td, textAlign: "right", whiteSpace: "nowrap" }}>
+                            {M(r.purchase_price)} <span style={{ color: V("muted", "#8b98a5"), fontSize: 10 }}>/ {r.purchase_qty} {r.purchase_uom}</span>
+                          </td>
+                          <td style={{ ...S.td, textAlign: "right" }}>
+                            <div style={{ fontWeight: 600 }}>{r.effective_yield_pct}%</div>
+                            {r.yield_reason && <div style={{ fontSize: 9, color: V("muted", "#8b98a5"), maxWidth: 150 }}>{r.yield_reason}</div>}
+                          </td>
+                          <td style={S.td}><Chip tone={VERIFY_STYLE[r.verify].tone}>{VERIFY_STYLE[r.verify].label}</Chip></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ---- products + recipes ---- */}
+          {bp.offerings.length > 0 && (
+            <div style={S.card}>
+              <div style={S.cardH}>Products and recipes we drafted</div>
+              {bp.offerings.map((o) => {
+                const off = skipO.has(o.name);
+                return (
+                  <div key={o.name} style={{ opacity: off ? 0.35 : 1, padding: "10px 0", borderBottom: `1px solid ${V("faint", "#16202c")}` }}>
+                    <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
+                      <input type="checkbox" checked={!off} onChange={() => toggle(skipO, o.name, setSkipO)} />
+                      <strong style={{ fontSize: 12.5 }}>{o.name}</strong>
+                      <span style={{ fontSize: 10.5, color: V("muted", "#8b98a5") }}>per {o.output_uom}</span>
+                      <Chip tone={VERIFY_STYLE[o.verify].tone}>
+                        {o.list_price > 0 ? `${M(o.list_price)} · ${VERIFY_STYLE[o.verify].label}` : "Price needed"}
+                      </Chip>
+                      {o.constraint_minutes_per_unit ? (
+                        <span style={{ fontSize: 10, color: V("muted", "#8b98a5") }}>{o.constraint_minutes_per_unit} bottleneck-min</span>
+                      ) : null}
+                    </div>
+                    {o.recipe.length > 0 ? (
+                      <div style={{ marginTop: 6, paddingLeft: 24 }}>
+                        {o.recipe.map((l, j) => (
+                          <div key={j} style={{ fontSize: 11, color: V("muted", "#8b98a5"), padding: "2px 0" }}>
+                            <span style={{ color: V("ink", "#e6edf3") }}>{l.qty_per_unit} {l.uom}</span> {l.resource_name}
+                            {l.process_scrap_pct > 0 ? ` · ${l.process_scrap_pct}% waste` : ""}
+                            {l.basis ? ` — ${l.basis}` : ""}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ ...S.note, marginTop: 5, paddingLeft: 24, color: WARN.fg }}>No recipe drafted — you will need to add its inputs.</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ---- channels + fixed costs ---- */}
+          {(bp.channels.length > 0 || bp.cost_pools.length > 0) && (
+            <div style={S.card}>
+              <div style={S.cardH}>Sales channels and fixed costs</div>
+              <div style={S.scroll}>
+                <table style={S.table}>
+                  <thead><tr>
+                    <th style={{ ...S.th, width: 34 }}>Use</th>
+                    <th style={S.th}>Item</th>
+                    <th style={{ ...S.th, width: 200 }}>Detail</th>
+                    <th style={{ ...S.th, width: 105 }}>Status</th>
+                  </tr></thead>
+                  <tbody>
+                    {bp.channels.map((c) => {
+                      const off = skipC.has(c.name);
+                      const drag = c.commission_pct + c.discount_pct + c.ad_spend_pct + c.payment_gateway_pct + c.returns_pct;
+                      return (
+                        <tr key={"ch" + c.name} style={{ opacity: off ? 0.35 : 1 }}>
+                          <td style={S.td}><input type="checkbox" checked={!off} onChange={() => toggle(skipC, c.name, setSkipC)} /></td>
+                          <td style={S.td}>
+                            <div style={{ fontWeight: 600 }}>{c.name}</div>
+                            {c.basis && <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5") }}>{c.basis}</div>}
+                          </td>
+                          <td style={{ ...S.td, fontSize: 10.5 }}>
+                            <span style={{ color: drag > 25 ? BAD.fg : drag > 12 ? WARN.fg : V("muted", "#8b98a5"), fontWeight: 700 }}>{drag.toFixed(1)}% drag</span>
+                            <span style={{ color: V("muted", "#8b98a5") }}>
+                              {c.commission_pct ? ` · ${c.commission_pct}% commission` : ""}
+                              {c.discount_pct ? ` · ${c.discount_pct}% discount` : ""}
+                            </span>
+                          </td>
+                          <td style={S.td}><Chip tone={VERIFY_STYLE[c.verify].tone}>{VERIFY_STYLE[c.verify].label}</Chip></td>
+                        </tr>
+                      );
+                    })}
+                    {bp.cost_pools.map((p) => {
+                      const off = skipP.has(p.name);
+                      return (
+                        <tr key={"cp" + p.name} style={{ opacity: off ? 0.35 : 1 }}>
+                          <td style={S.td}><input type="checkbox" checked={!off} onChange={() => toggle(skipP, p.name, setSkipP)} /></td>
+                          <td style={S.td}>
+                            <div style={{ fontWeight: 600 }}>{p.name}</div>
+                            {p.basis && <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5") }}>{p.basis}</div>}
+                          </td>
+                          <td style={{ ...S.td, fontSize: 10.5 }}>{M(p.amount)} / {p.period}</td>
+                          <td style={S.td}><Chip tone={VERIFY_STYLE[p.verify].tone}>{VERIFY_STYLE[p.verify].label}</Chip></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ---- honesty ---- */}
+          {(bp.warnings.length > 0 || bp.research_notes || bp.sources.length > 0) && (
+            <div style={S.card}>
+              <div style={S.cardH}>What to be careful about</div>
+              {bp.warnings.map((w, i) => (
+                <div key={i} style={{ fontSize: 11.5, marginBottom: 5, color: WARN.fg, lineHeight: 1.55 }}>• {w}</div>
+              ))}
+              {bp.research_notes && <div style={{ ...S.note, marginTop: 8 }}>{bp.research_notes}</div>}
+              {bp.sources.length > 0 && (
+                <div style={{ ...S.note, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${V("faint", "#16202c")}` }}>
+                  <strong style={{ color: V("ink", "#e6edf3") }}>Sources used:</strong> {bp.sources.join(" · ")}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ---- apply ---- */}
+          <div style={{ ...S.card, borderColor: V("accent", "#4ADE80") }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 300px" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
+                  {applied ? "Draft applied" : "Add this draft to your model"}
+                </div>
+                <div style={S.note}>
+                  {applied
+                    ? "Now go to What you sell and correct anything marked \u201CYou must enter\u201D. Diagnostics update as you type."
+                    : "Nothing is saved until you press this. Uncheck anything above that does not apply. You can edit every figure afterwards."}
+                </div>
+              </div>
+              <button
+                style={{ ...S.btn, opacity: applied ? 0.5 : 1 }}
+                disabled={applied}
+                onClick={async () => {
+                  const ok = await applyBlueprint(bp, { resources: skipR, offerings: skipO, channels: skipC, costPools: skipP });
+                  if (ok) setApplied(true);
+                }}>
+                {applied ? "Applied" : "Apply draft"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 };
