@@ -6787,7 +6787,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         {/* COST ARCHITECTURE */}
         {view==="costarch"&&(
           <div style={{flex:1,overflowY:"auto"}}>
-            <CostArchitecture showToast={showToast} companyName={co.name} onDiagnosis={publishCostDiagnosis} callAI={(prompt)=>ask("You are a senior cost engineering and unit economics researcher. Research thoroughly using web search, then return only the exact JSON structure requested with no commentary.",[{role:"user",content:prompt}],8000,true)}/>
+            <CostArchitecture showToast={showToast} companyName={co.name} onDiagnosis={publishCostDiagnosis} callAI={(prompt,useWebSearch)=>ask("You are a senior cost engineering and unit economics researcher. Return ONLY the exact JSON structure requested. No commentary, no markdown fences.",[{role:"user",content:prompt}],8000,!!useWebSearch)}
           </div>
         )}
 
