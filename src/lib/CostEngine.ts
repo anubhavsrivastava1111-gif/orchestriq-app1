@@ -1061,6 +1061,22 @@ export function diagnose(ws: CostWorkspace): PortfolioDiagnosis {
 
 /* ---- The 8-lever opportunity engine -------------------------------------- */
 
+/** Which benchmark measures "efficiency" for each resource class. */
+const YIELD_BENCHMARK_KEY: Record<string, string> = {
+  MATERIAL: "effective_yield_pct", PACKAGING: "effective_yield_pct",
+  LABOUR: "utilisation_pct", SUBCONTRACT: "utilisation_pct",
+  EQUIPMENT: "oee_pct", FACILITY: "capacity_utilisation_pct",
+  LOGISTICS: "capacity_utilisation_pct", DIGITAL: "seat_utilisation_pct",
+  ENERGY: "effective_yield_pct", OTHER: "effective_yield_pct",
+};
+
+/** Physically achievable ceiling per class. Never recommend beyond this. */
+const YIELD_REALISTIC_CEILING: Record<string, number> = {
+  MATERIAL: 95, PACKAGING: 97, LABOUR: 80, SUBCONTRACT: 85,
+  EQUIPMENT: 85, FACILITY: 80, LOGISTICS: 85, DIGITAL: 85,
+  ENERGY: 92, OTHER: 92,
+};
+
 function buildOpportunities(
   ws: CostWorkspace,
   offerings: OfferingEconomics[],
@@ -1073,24 +1089,31 @@ function buildOpportunities(
 ): Opportunity[] {
   const ops: Opportunity[] = [];
 
-  // L1 :: YIELD RECOVERY
-  const yieldBm = findBenchmark(ws.benchmarks, "effective_yield_pct", archetype).bm;
-  const targetYield = yieldBm?.mid_value != null ? num(yieldBm.mid_value) : 95;
+  // L1 :: YIELD RECOVERY  (benchmark key and realistic ceiling vary by class -
+  // 95% is achievable for material trim, impossible for billable labour)
   for (const t of topResources.slice(0, 10)) {
-    if (t.yieldPct >= targetYield || t.yieldPct <= 0 || t.annualSpend <= 0) continue;
+    if (t.yieldPct <= 0 || t.annualSpend <= 0) continue;
+    const bmKey = YIELD_BENCHMARK_KEY[t.resourceClass] || "effective_yield_pct";
+    const bmHit = findBenchmark(ws.benchmarks, bmKey, archetype);
+    const cap = YIELD_REALISTIC_CEILING[t.resourceClass] ?? 92;
+    const targetYield = bmHit.bm?.mid_value != null ? Math.min(num(bmHit.bm.mid_value), cap) : cap;
+    if (t.yieldPct >= targetYield) continue;
     const saving = t.annualSpend * (1 - t.yieldPct / targetYield);
     if (saving < 1000) continue;
+    const label = yieldLabel(t.resourceClass);
     ops.push({
       lever: "YIELD_RECOVERY",
-      title: `Raise usable yield on ${t.name} from ${t.yieldPct}% to ${targetYield}%`,
-      rationale: `You pay for 100% of this input but only ${t.yieldPct}% reaches the finished product. Closing the gap to the ${targetYield}% benchmark cuts spend without any price negotiation.`,
-      affectedItems: [t.name], currentValue: t.yieldPct, targetValue: targetYield,
+      title: `Raise ${label.toLowerCase()} on ${t.name} from ${t.yieldPct}% to ${round(targetYield, 0)}%`,
+      rationale: `You pay for 100% of this input but only ${t.yieldPct}% converts into billable or saleable output. Closing the gap to ${round(targetYield, 0)}% cuts effective cost without renegotiating a single price.`,
+      affectedItems: [t.name], currentValue: t.yieldPct, targetValue: round(targetYield, 0),
       annualImpact: round(saving, 0), difficulty: "medium", timeToImpactWeeks: 8,
-      confidence: yieldBm ? "medium" : "low",
+      confidence: bmHit.bm ? ((bmHit.bm.confidence || "medium") as Confidence) : "low",
       evidence: [
         `Annual spend on this input: ${round(t.annualSpend, 0)}`,
-        `Current yield ${t.yieldPct}% vs target ${targetYield}%`,
-        yieldBm?.source_name ? `Benchmark source: ${yieldBm.source_name}` : "Target is a general operating heuristic - verify",
+        `Measure used: ${label} - current ${t.yieldPct}% vs target ${round(targetYield, 0)}%`,
+        bmHit.bm?.source_name
+          ? `Benchmark: ${bmHit.bm.source_name}${bmHit.bm.as_of_date ? " (" + String(bmHit.bm.as_of_date).slice(0, 4) + ")" : ""}, ${bmHit.scope === "archetype" ? "your industry" : "cross-industry"}`
+          : `No industry benchmark matched - target capped at a realistic ${round(targetYield, 0)}% ceiling for ${t.resourceClass.toLowerCase()}. Verify before acting.`,
       ],
     });
   }
