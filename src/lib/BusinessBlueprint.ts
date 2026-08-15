@@ -121,7 +121,13 @@ export interface BlueprintResult {
   blueprint: Blueprint | null;
   error: string | null;
   rawLength: number;
+  /** How the result was produced - shown to the user so nothing is hidden. */
+  stage: "web_research" | "model_knowledge" | "compact" | "template" | "failed";
+  attempts: string[];
 }
+
+/** callAI receives (prompt, useWebSearch). The ladder toggles search. */
+export type BlueprintCaller = (prompt: string, useWebSearch: boolean) => Promise<string>;
 
 /* ------------------------------------------------------------- the prompt */
 
@@ -451,44 +457,307 @@ export function normalizeBlueprint(o: any): Blueprint {
   };
 }
 
+/* ------------------------------------------------ hints from the user's text */
+
+export interface Hints {
+  money: number[];
+  hours: number[];
+  percents: number[];
+  headcount: number | null;
+  perUnitPrice: number | null;
+  marginPct: number | null;
+  plannedVsActual: { planned: number; actual: number } | null;
+}
+
+/** Pull real figures out of what the user typed so nothing they said is lost. */
+export function extractHints(text: string): Hints {
+  const t = (text || "").replace(/,/g, "");
+  const money: number[] = [];
+  const rxMoney = /(?:\u20B9|rs\.?|inr|rupees?)\s*([0-9]+(?:\.[0-9]+)?)|([0-9]+(?:\.[0-9]+)?)\s*(?:rupees?|inr)\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = rxMoney.exec(t))) {
+    const v = parseFloat(m[1] || m[2]);
+    if (Number.isFinite(v) && v > 0) money.push(v);
+  }
+  const hours: number[] = [];
+  const rxHours = /([0-9]+(?:\.[0-9]+)?)\s*(?:hours?|hrs?)\b/gi;
+  while ((m = rxHours.exec(t))) { const v = parseFloat(m[1]); if (Number.isFinite(v)) hours.push(v); }
+
+  const percents: number[] = [];
+  const rxPct = /([0-9]+(?:\.[0-9]+)?)\s*(?:%|per\s*cent|percent)/gi;
+  while ((m = rxPct.exec(t))) { const v = parseFloat(m[1]); if (Number.isFinite(v)) percents.push(v); }
+
+  const hc = t.match(/\b([0-9]+)\s*(?:person|people|member|employee|staff|consultant|head)/i);
+  const headcount = hc ? parseInt(hc[1], 10) : null;
+
+  // "10,000 per audit / per case / per project / each"
+  const per = t.match(/([0-9]+(?:\.[0-9]+)?)\s*(?:\u20B9|rs\.?|inr|rupees?)?\s*(?:per|\/|each)\s*(?:audit|case|project|engagement|unit|report|assignment)/i)
+           || t.match(/(?:\u20B9|rs\.?|inr|rupees?)\s*([0-9]+(?:\.[0-9]+)?)\s*(?:per|\/|each)\s*(?:audit|case|project|engagement|unit|report|assignment)/i);
+  const perUnitPrice = per ? parseFloat(per[1]) : (money.length ? Math.max(...money) : null);
+
+  const marginPct = percents.length ? percents[percents.length - 1] : null;
+
+  let plannedVsActual: Hints["plannedVsActual"] = null;
+  if (hours.length >= 2) {
+    const a = hours[0], b = hours[1];
+    if (b > a) plannedVsActual = { planned: a, actual: b };
+    else if (a > b) plannedVsActual = { planned: b, actual: a };
+  }
+  return { money, hours, percents, headcount, perUnitPrice, marginPct, plannedVsActual };
+}
+
+/* --------------------------------------------- deterministic archetype guess */
+
+const ARCHETYPE_KEYWORDS: Array<[string, RegExp]> = [
+  ["professional_services", /consult|advisor|audit|agency|legal|law firm|accounting|ca firm|recruit|architect|design studio|market research|due diligence/i],
+  ["saas_digital",          /saas|software as a service|subscription software|app|platform|api|cloud product/i],
+  ["food_beverage",         /restaurant|bakery|cafe|caf\u00e9|cloud kitchen|food|dining|catering|sweet shop|snack|sandwich|pizza|biryani|qsr/i],
+  ["manufacturing_process", /steel|cement|chemical|refinery|smelt|rolling mill|process plant|paper mill|textile mill/i],
+  ["manufacturing_discrete",/manufactur|factory|assembly|fabricat|machin(e|ing) shop|component|工|工厂|workshop|engineering works/i],
+  ["retail_trading",        /retail|store|shop|d2c|ecommerce|e-commerce|marketplace seller|trading|distribut|wholesal/i],
+  ["logistics_transport",   /logistic|transport|fleet|trucking|courier|last mile|freight|delivery company|3pl/i],
+  ["healthcare",            /hospital|clinic|diagnostic|healthcare|medical centre|medical center|dental|pharma retail/i],
+  ["construction",          /construction|contractor|civil work|builder|infrastructure project|interior fit-?out/i],
+  ["hospitality",           /hotel|resort|hostel|homestay|banquet|hospitality/i],
+  ["education",             /school|coaching|edtech|training institute|tuition|academy/i],
+  ["agriculture",           /farm|agri|dairy|poultry|plantation|horticulture/i],
+];
+
+export function detectArchetype(text: string): string {
+  for (const [a, rx] of ARCHETYPE_KEYWORDS) if (rx.test(text || "")) return a;
+  return "other";
+}
+
+/* ------------------------------------------------ deterministic fallback model */
+
+/**
+ * Built without any AI. Guarantees the user always leaves with a working
+ * starting model seeded with the figures they actually typed.
+ */
+export function templateBlueprint(
+  description: string, currency = "INR", geography = "India"
+): Blueprint {
+  const arch = detectArchetype(description);
+  const h = extractHints(description);
+  const price = h.perUnitPrice && h.perUnitPrice > 0 ? h.perUnitPrice : 0;
+
+  const resources: BpResource[] = [];
+  const recipe: BpRecipeLine[] = [];
+  const channels: BpChannel[] = [];
+  const pools: BpCostPool[] = [];
+  const leaks: BpLeak[] = [];
+
+  const R = (r: Partial<BpResource> & { name: string }): BpResource => ({
+    resource_class: "OTHER", purchase_uom: "month", purchase_qty: 1, purchase_price: 0,
+    base_uom: "unit", conversion_factor: 1, effective_yield_pct: 90,
+    yield_reason: "", price_basis: "Starting placeholder - replace with your figure",
+    verify: "must_supply", note: "", ...r,
+  });
+
+  if (arch === "professional_services") {
+    // Utilisation derived from what the user described, if they gave it
+    const util = h.plannedVsActual
+      ? Math.max(30, Math.round((h.plannedVsActual.planned / h.plannedVsActual.actual) * 100))
+      : 65;
+    const deliveryHours = h.plannedVsActual ? h.plannedVsActual.actual : 10;
+
+    resources.push(R({ name: "Consultant time", resource_class: "LABOUR", purchase_uom: "month",
+      purchase_price: 0, base_uom: "hour", conversion_factor: 160, effective_yield_pct: util,
+      yield_reason: h.plannedVsActual
+        ? `You said ${h.plannedVsActual.planned} hours are scoped but ${h.plannedVsActual.actual} are actually delivered - that is ${util}% realisation`
+        : "Billable share of paid hours - non-billable admin, sales and rework sit in the gap",
+      price_basis: "Enter the monthly cost of the person delivering the work", verify: "must_supply" }));
+
+    resources.push(R({ name: "Lead generation (LinkedIn / referral)", resource_class: "DIGITAL",
+      purchase_uom: "month", purchase_price: h.money.find((v) => v > 500 && v < 50000 && v !== price) ?? 0,
+      base_uom: "month", conversion_factor: 1, effective_yield_pct: 70,
+      yield_reason: "Share of spend that converts to paying work",
+      price_basis: "From your description", verify: "needs_check" }));
+
+    resources.push(R({ name: "Meeting & collaboration software", resource_class: "DIGITAL",
+      purchase_uom: "month", purchase_price: 0, base_uom: "month", conversion_factor: 1,
+      effective_yield_pct: 75, yield_reason: "Seats actually used", verify: "must_supply" }));
+
+    recipe.push({ resource_name: "Consultant time", qty_per_unit: deliveryHours, uom: "hour",
+      process_scrap_pct: 0, basis: h.plannedVsActual ? "Actual hours you said are delivered" : "Typical hours per engagement" });
+
+    channels.push({ name: "Direct / referral", channel_type: "direct", commission_pct: 0, discount_pct: 0,
+      ad_spend_pct: 0, payment_gateway_pct: 0, packaging_cost: 0, delivery_subsidy: 0, returns_pct: 0,
+      gst_pct: 18, basis: "Professional services attract 18% GST in India", verify: "needs_check" });
+
+    pools.push({ name: "Software subscriptions", category: "technology", amount: 0, period: "monthly",
+      allocation_basis: "revenue", basis: "Add your monthly tool spend", verify: "must_supply" });
+    pools.push({ name: "Admin & office", category: "admin", amount: 0, period: "monthly",
+      allocation_basis: "revenue", basis: "Rent, accounting, compliance", verify: "must_supply" });
+
+    leaks.push({ title: "Scope overrun eats the margin silently",
+      what_happens: "Work is priced on scoped hours but delivered on actual hours. The extra hours are never invoiced, so the loss never appears anywhere in the accounts - it just shows up as a thinner year.",
+      how_to_spot_it: "Compare hours scoped against hours actually spent on your last five engagements.",
+      typical_size: h.plannedVsActual ? `${Math.round(((h.plannedVsActual.actual / h.plannedVsActual.planned) - 1) * 100)}% overrun on your own numbers` : "10-50% of delivery hours" });
+    leaks.push({ title: "Fixed fee on variable effort",
+      what_happens: "A flat per-case fee means every complicated case is subsidised by the simple ones. Without per-engagement tracking the mix quietly shifts toward the hard ones.",
+      how_to_spot_it: "Rank last quarter's engagements by hours spent at the same fee.",
+      typical_size: "The worst quartile often runs at negative margin" });
+    leaks.push({ title: "Non-billable time is invisible",
+      what_happens: "Sales calls, proposals, admin and rework are paid for but never charged. At 65% realisation the true cost per billable hour is over 50% higher than the salary implies.",
+      how_to_spot_it: "Divide monthly salary cost by hours actually invoiced, not hours worked.",
+      typical_size: "20-40% uplift on true hourly cost" });
+  } else if (arch === "food_beverage") {
+    resources.push(R({ name: "Main ingredient", resource_class: "MATERIAL", purchase_uom: "kg",
+      purchase_price: 0, base_uom: "kg", conversion_factor: 1, effective_yield_pct: 88,
+      yield_reason: "Trim, spillage and spoilage" }));
+    resources.push(R({ name: "Kitchen labour", resource_class: "LABOUR", purchase_uom: "month",
+      purchase_price: 0, base_uom: "hour", conversion_factor: 208, effective_yield_pct: 72,
+      yield_reason: "Productive share of paid hours" }));
+    resources.push(R({ name: "Packaging", resource_class: "PACKAGING", purchase_uom: "pack",
+      purchase_price: 0, base_uom: "unit", conversion_factor: 100, effective_yield_pct: 97,
+      yield_reason: "Damage" }));
+    recipe.push({ resource_name: "Main ingredient", qty_per_unit: 0, uom: "kg", process_scrap_pct: 0, basis: "Enter your recipe quantity" });
+    channels.push({ name: "Walk-in", channel_type: "direct", commission_pct: 0, discount_pct: 0, ad_spend_pct: 0,
+      payment_gateway_pct: 0, packaging_cost: 0, delivery_subsidy: 0, returns_pct: 0, gst_pct: 5,
+      basis: "5% GST without input tax credit", verify: "needs_check" });
+    channels.push({ name: "Delivery aggregator", channel_type: "aggregator", commission_pct: 22, discount_pct: 10,
+      ad_spend_pct: 4, payment_gateway_pct: 0, packaging_cost: 0, delivery_subsidy: 0, returns_pct: 0, gst_pct: 5,
+      basis: "NRAI reports 18-30% aggregator commission in India", verify: "needs_check" });
+    pools.push({ name: "Rent", category: "facility", amount: 0, period: "monthly", allocation_basis: "revenue", basis: "", verify: "must_supply" });
+    leaks.push({ title: "Aggregator discount is self-funded",
+      what_happens: "The platform promotes a discount but the restaurant absorbs it, on top of commission and ad spend. Gross order value and settlement diverge sharply.",
+      how_to_spot_it: "Compare app order value against the amount actually settled to your bank.",
+      typical_size: "10-15% of order value on top of commission" });
+  } else {
+    resources.push(R({ name: "Main input", resource_class: "MATERIAL", purchase_uom: "unit",
+      purchase_price: 0, base_uom: "unit", conversion_factor: 1, effective_yield_pct: 92,
+      yield_reason: "Waste and rejection" }));
+    resources.push(R({ name: "Direct labour", resource_class: "LABOUR", purchase_uom: "month",
+      purchase_price: 0, base_uom: "hour", conversion_factor: 208, effective_yield_pct: 70,
+      yield_reason: "Productive share of paid hours" }));
+    recipe.push({ resource_name: "Main input", qty_per_unit: 0, uom: "unit", process_scrap_pct: 0, basis: "Enter your consumption per unit" });
+    channels.push({ name: "Direct", channel_type: "direct", commission_pct: 0, discount_pct: 0, ad_spend_pct: 0,
+      payment_gateway_pct: 0, packaging_cost: 0, delivery_subsidy: 0, returns_pct: 0, gst_pct: 18,
+      basis: "Standard GST", verify: "needs_check" });
+    pools.push({ name: "Fixed overheads", category: "other", amount: 0, period: "monthly", allocation_basis: "revenue", basis: "", verify: "must_supply" });
+    leaks.push({ title: "Paying for more than reaches the product",
+      what_happens: "Every input has a gap between what you buy and what converts into saleable output. That gap is paid for but never sold.",
+      how_to_spot_it: "For your three largest inputs, measure what you purchased against what ended up in finished goods.",
+      typical_size: "5-20% of input spend" });
+  }
+
+  const offering: BpOffering = {
+    name: arch === "professional_services" ? "Client engagement" : "Main product",
+    offering_type: arch === "professional_services" ? "PROJECT" : "UNIT",
+    output_uom: arch === "professional_services" ? "engagement" : "unit",
+    list_price: price, monthly_volume: 0,
+    constraint_minutes_per_unit: arch === "professional_services" && h.plannedVsActual ? h.plannedVsActual.actual * 60 : null,
+    price_basis: price > 0 ? "Taken from your description" : "Enter your price",
+    verify: price > 0 ? "needs_check" : "must_supply",
+    recipe,
+  };
+
+  return {
+    business_summary: "Starter model built from your description without live research. Every figure marked \u201CYou must enter\u201D needs your real number before the diagnostics mean anything.",
+    business_archetype: arch, currency, geography,
+    constraint_resource_label: arch === "professional_services" ? "Consultant hours" : "Production capacity",
+    constraint_reason: "The resource that caps how much you can deliver in a month.",
+    resources, offerings: [offering], channels, cost_pools: pools, leaks,
+    checklist: [
+      { question: "What does the person delivering the work actually cost per month, fully loaded?", why_it_matters: "Every unit cost depends on it.", field_hint: "What you buy > You pay", priority: "critical" },
+      { question: "How many units or engagements do you deliver in a month?", why_it_matters: "Without volume, nothing can be totalled or compared.", field_hint: "What you sell > Vol / month", priority: "critical" },
+      { question: "Of the hours you pay for, what share is genuinely billable or productive?", why_it_matters: "This is usually the single largest hidden cost.", field_hint: "What you buy > Usable %", priority: "critical" },
+      { question: "What are your fixed monthly bills - rent, salaries, software?", why_it_matters: "Needed for breakeven and true profit.", field_hint: "Setup > Fixed monthly costs", priority: "important" },
+    ],
+    research_notes: "Live research was unavailable, so this is a structural starter model rather than a researched one. The structure is correct for your industry; the numbers are yours to supply.",
+    sources: [], confidence: "low",
+    warnings: ["Built without live research - treat every figure as a placeholder until you replace it."],
+  };
+}
+
 /* ------------------------------------------------------------- the runner */
 
+/** Compact prompt - used when the full one produces nothing. */
+function compactPrompt(description: string, geo: string, cur: string): string {
+  return `Build a unit-economics starter model for this business. Market ${geo}, currency ${cur}.
+
+"""${description.slice(0, 1200)}"""
+
+Return ONLY JSON, no prose, no code fences:
+{"business_summary":"","business_archetype":"${ARCHETYPE_LIST}","currency":"${cur}","geography":"${geo}","constraint_resource_label":"","constraint_reason":"",
+"resources":[{"name":"","resource_class":"${CLASS_LIST}","purchase_uom":"","purchase_qty":1,"purchase_price":0,"base_uom":"","conversion_factor":1,"effective_yield_pct":80,"yield_reason":"","price_basis":"","verify":"needs_check","note":""}],
+"offerings":[{"name":"","offering_type":"${TYPE_LIST}","output_uom":"","list_price":0,"monthly_volume":0,"constraint_minutes_per_unit":0,"price_basis":"","verify":"must_supply","recipe":[{"resource_name":"","qty_per_unit":0,"uom":"","process_scrap_pct":0,"basis":""}]}],
+"channels":[{"name":"","channel_type":"direct","commission_pct":0,"discount_pct":0,"ad_spend_pct":0,"payment_gateway_pct":0,"packaging_cost":0,"delivery_subsidy":0,"returns_pct":0,"gst_pct":0,"basis":"","verify":"needs_check"}],
+"cost_pools":[{"name":"","category":"other","amount":0,"period":"monthly","allocation_basis":"revenue","basis":"","verify":"must_supply"}],
+"leaks":[{"title":"","what_happens":"","how_to_spot_it":"","typical_size":""}],
+"checklist":[{"question":"","why_it_matters":"","field_hint":"","priority":"critical"}],
+"research_notes":"","sources":[],"confidence":"medium","warnings":[]}
+
+Use figures the user gave. effective_yield_pct is the share of what you pay for that reaches the product - for labour that is billable utilisation, never 100. 4-8 resources, 1-3 offerings, 3-5 leaks.`;
+}
+
+/**
+ * Resilient ladder. Every rung is tried before giving up, and the last rung
+ * cannot fail because it uses no AI at all. The user always leaves with a model.
+ */
 export async function researchBlueprint(
-  callAI: (prompt: string) => Promise<string>,
+  callAI: BlueprintCaller,
   description: string,
   opts: { geography?: string; currency?: string; depth?: "quick" | "deep" } = {}
 ): Promise<BlueprintResult> {
   const clean = (description || "").trim();
+  const geo = opts.geography || "India";
+  const cur = opts.currency || "INR";
+  const attempts: string[] = [];
+
   if (clean.length < 12) {
-    return { ok: false, blueprint: null, rawLength: 0,
+    return { ok: false, blueprint: null, rawLength: 0, stage: "failed", attempts,
       error: "Describe the business in a bit more detail - what it makes or does, roughly where, and how it sells." };
   }
 
-  let raw = "";
-  try {
-    raw = await callAI(buildBlueprintPrompt(clean, opts));
-  } catch (e: any) {
-    return { ok: false, blueprint: null, rawLength: 0,
-      error: "The AI request failed: " + (e?.message || "unknown error") + ". Check your provider key in Settings and try again." };
+  type Rung = { label: string; stage: BlueprintResult["stage"]; search: boolean; prompt: string };
+  const rungs: Rung[] = [
+    { label: "Live web research",        stage: "web_research",    search: true,  prompt: buildBlueprintPrompt(clean, { geography: geo, currency: cur, depth: "deep" }) },
+    { label: "Model knowledge (no web)", stage: "model_knowledge", search: false, prompt: buildBlueprintPrompt(clean, { geography: geo, currency: cur, depth: "quick" }) },
+    { label: "Compact request",          stage: "compact",         search: false, prompt: compactPrompt(clean, geo, cur) },
+  ];
+
+  let lastRaw = 0;
+  for (const rung of rungs) {
+    let raw = "";
+    try {
+      raw = await callAI(rung.prompt, rung.search);
+    } catch (e: any) {
+      const msg = e?.message || "unknown error";
+      attempts.push(`${rung.label}: request failed - ${msg}`);
+      // A bad key or exhausted quota will fail every rung - stop early and say so.
+      if (/invalid api key|401|no api key|quota|billing/i.test(msg)) {
+        return { ok: false, blueprint: null, rawLength: 0, stage: "failed", attempts,
+          error: "Your AI provider rejected the request: " + msg + " Fix the key in Settings, then press Research again." };
+      }
+      continue;
+    }
+
+    if (!raw || !raw.trim()) { attempts.push(`${rung.label}: returned nothing`); continue; }
+    lastRaw = raw.length;
+
+    const parsed = extractJSON(raw);
+    if (!parsed) { attempts.push(`${rung.label}: replied in prose, not JSON`); continue; }
+
+    const bp = normalizeBlueprint(parsed);
+    if (!bp.resources.length && !bp.offerings.length) { attempts.push(`${rung.label}: JSON had no usable content`); continue; }
+
+    attempts.push(`${rung.label}: success`);
+    if (rung.stage !== "web_research") {
+      bp.warnings.unshift(
+        rung.stage === "model_knowledge"
+          ? "Live web search did not return in time, so this draft comes from the model's own knowledge. Prices may be out of date - check anything marked \u201CCheck this\u201D."
+          : "This is a simplified draft - the fuller request did not come back. Structure is sound; verify the figures."
+      );
+    }
+    return { ok: true, blueprint: bp, error: null, rawLength: raw.length, stage: rung.stage, attempts };
   }
 
-  if (!raw || !raw.trim()) {
-    return { ok: false, blueprint: null, rawLength: 0,
-      error: "The AI returned an empty response. Try again, or switch provider in Settings." };
-  }
-
-  const parsed = extractJSON(raw);
-  if (!parsed) {
-    return { ok: false, blueprint: null, rawLength: raw.length,
-      error: "The AI replied in prose instead of the structured format. Press Research again - this usually clears on a retry." };
-  }
-
-  const bp = normalizeBlueprint(parsed);
-  if (!bp.resources.length && !bp.offerings.length) {
-    return { ok: false, blueprint: null, rawLength: raw.length,
-      error: "Nothing usable came back. Try naming the products and the main things the business buys." };
-  }
-  return { ok: true, blueprint: bp, error: null, rawLength: raw.length };
+  // Last rung: no AI at all. Cannot fail.
+  const tpl = templateBlueprint(clean, cur, geo);
+  attempts.push("Structural starter model: built without AI");
+  return { ok: true, blueprint: tpl, error: null, rawLength: lastRaw, stage: "template", attempts };
 }
 
 /* ------------------------------------------- blueprint -> database rows */
