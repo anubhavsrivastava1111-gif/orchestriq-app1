@@ -1610,6 +1610,43 @@ const StartTab: React.FC<{
             </div>
           )}
 
+          {/* ---- diagnostic: always visible when the AI did not fully succeed ---- */}
+          {res!.stage !== "web_research" && res!.attempts.length > 0 && (
+            <div style={{ ...S.card, borderColor: res!.stage === "template" ? BAD.fg : WARN.fg }}>
+              <div style={{ ...S.cardH, color: res!.stage === "template" ? BAD.fg : WARN.fg, marginBottom: 6 }}>
+                {res!.stage === "template" ? "The AI did not respond - here is exactly what happened" : "The AI partly succeeded - what was tried"}
+              </div>
+              <div style={{ ...S.note, marginBottom: 9 }}>
+                {res!.stage === "template"
+                  ? "Every attempt failed, so the model above was built without AI. The reason is below - send it to support and it can be fixed at source."
+                  : "An earlier attempt failed and a later one succeeded. Figures are usable but less current."}
+              </div>
+              <div style={{ background: V("bg", "#070c18"), border: `1px solid ${V("border", "#1e2a38")}`,
+                            borderRadius: 5, padding: 10, fontFamily: "ui-monospace,SFMono-Regular,Menlo,monospace",
+                            fontSize: 10.5, lineHeight: 1.65, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                            maxHeight: 220, overflowY: "auto" }}>
+                {res!.attempts.map((a, i) => `${i + 1}. ${a}`).join("\n")}
+              </div>
+              <button style={{ ...S.btnGhost, marginTop: 9 }}
+                onClick={() => {
+                  const txt = "OrchestrIQ Cost Architecture diagnostic\nStage: " + res!.stage +
+                    "\nLast reply length: " + res!.rawLength + " chars\n\n" +
+                    res!.attempts.map((a, i) => `${i + 1}. ${a}`).join("\n");
+                  try {
+                    const nav: any = navigator;
+                    if (nav?.clipboard?.writeText) { nav.clipboard.writeText(txt); }
+                    else {
+                      const ta = document.createElement("textarea");
+                      ta.value = txt; document.body.appendChild(ta); ta.select();
+                      document.execCommand("copy"); document.body.removeChild(ta);
+                    }
+                  } catch { /* clipboard blocked - the text is on screen anyway */ }
+                }}>
+                Copy diagnostic
+              </button>
+            </div>
+          )}
+
           {/* ---- honesty ---- */}
           {(bp.warnings.length > 0 || bp.research_notes || bp.sources.length > 0) && (
             <div style={S.card}>
