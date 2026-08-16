@@ -96,9 +96,9 @@ const S: Record<string, React.CSSProperties> = {
   tabOn:     { color: V("accent", "#4ADE80"), borderBottom: `2px solid ${V("accent", "#4ADE80")}` },
   card:      { background: V("surface", "#0d1520"), border: `1px solid ${V("border", "#1e2a38")}`, borderRadius: V("radius", "8px") as string, padding: 14, marginBottom: 14 },
   cardH:     { fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: V("muted", "#8b98a5"), marginBottom: 10 },
-  table:     { width: "100%", borderCollapse: "collapse", fontSize: 12 },
+  table:     { width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed", minWidth: 720 },
   th:        { textAlign: "left", padding: "7px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, color: V("muted", "#8b98a5"), borderBottom: `1px solid ${V("border", "#1e2a38")}`, whiteSpace: "nowrap" },
-  td:        { padding: "5px 8px", borderBottom: `1px solid ${V("faint", "#16202c")}`, verticalAlign: "middle" },
+  td:        { padding: "5px 8px", borderBottom: `1px solid ${V("faint", "#16202c")}`, verticalAlign: "middle", overflow: "hidden", textOverflow: "ellipsis" },
   inp:       { width: "100%", background: V("bg", "#070c18"), border: `1px solid ${V("border", "#1e2a38")}`, borderRadius: 5, color: V("ink", "#e6edf3"), padding: "5px 7px", fontSize: 12, outline: "none", fontFamily: "inherit", boxSizing: "border-box" },
   btn:       { background: V("accent", "#4ADE80"), color: V("accentText", "#06210f"), border: "none", borderRadius: 6, padding: "7px 13px", fontSize: 12, fontWeight: 700, cursor: "pointer" },
   btnGhost:  { background: "transparent", color: V("muted", "#8b98a5"), border: `1px solid ${V("border", "#1e2a38")}`, borderRadius: 6, padding: "6px 11px", fontSize: 11, fontWeight: 600, cursor: "pointer" },
@@ -112,6 +112,7 @@ const S: Record<string, React.CSSProperties> = {
   note:      { fontSize: 11, color: V("muted", "#8b98a5"), lineHeight: 1.55 },
   grid2:     { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 11 },
   lbl:       { fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, color: V("muted", "#8b98a5"), marginBottom: 4, display: "block" },
+  tableWide: { width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed", minWidth: 1080 },
   scroll:    { overflowX: "auto", WebkitOverflowScrolling: "touch" },
 };
 
@@ -681,14 +682,14 @@ const InputsTab: React.FC<{
       <div style={S.scroll}>
         <table style={S.table}>
           <thead><tr>
-            <th style={S.th}>Name</th>
-            <th style={{ ...S.th, width: 120 }}>Type</th>
-            <th style={{ ...S.th, width: 90 }}>You pay</th>
-            <th style={{ ...S.th, width: 60 }}>For qty</th>
-            <th style={{ ...S.th, width: 78 }}>Unit</th>
-            <th style={{ ...S.th, width: 78 }}>Usable %</th>
-            <th style={{ ...S.th, width: 120, textAlign: "right" }}>True cost / unit</th>
-            <th style={{ ...S.th, width: 70 }}></th>
+            <th style={{ ...S.th, width: "18%", minWidth: 130 }}>Name</th>
+            <th style={{ ...S.th, width: 118 }}>Type</th>
+            <th style={{ ...S.th, width: 92 }}>You pay</th>
+            <th style={{ ...S.th, width: 74 }}>For qty</th>
+            <th style={{ ...S.th, width: 86 }}>Bought as</th>
+            <th style={{ ...S.th, width: 84 }}>Usable %</th>
+            <th style={{ ...S.th, width: 134, textAlign: "right" }}>True cost</th>
+            <th style={{ ...S.th, width: 62 }}></th>
           </tr></thead>
           <tbody>
             {resources.map((r) => {
@@ -708,6 +709,7 @@ const InputsTab: React.FC<{
                     <td style={S.td}><NumCell value={r.effective_yield_pct} onChange={(v) => patchRes(r.id, { effective_yield_pct: v })} suffix="%" /></td>
                     <td style={{ ...S.td, textAlign: "right", fontWeight: 700, whiteSpace: "nowrap" }}>
                       {fmtMoney(eff, cur)}
+                      <span style={{ fontSize: 9.5, fontWeight: 500, color: V("muted", "#8b98a5") }}> / {r.base_uom || r.purchase_uom || "unit"}</span>
                       {uplift > 0.5 && <div style={{ fontSize: 9.5, fontWeight: 600, color: WARN.fg }}>+{uplift.toFixed(1)}% hidden</div>}
                     </td>
                     <td style={{ ...S.td, whiteSpace: "nowrap" }}>
@@ -1015,9 +1017,9 @@ const ChannelsTab: React.FC<{
         Same product, two channels, and the difference is often larger than your entire profit margin.
       </div>
       <div style={S.scroll}>
-        <table style={S.table}>
+        <table style={S.tableWide}>
           <thead><tr>
-            <th style={S.th}>Channel</th>
+            <th style={{ ...S.th, width: 130 }}>Channel</th>
             <th style={{ ...S.th, width: 145 }}>Type</th>
             <th style={{ ...S.th, width: 84 }}>Commission</th>
             <th style={{ ...S.th, width: 84 }}>Discount</th>
@@ -1178,20 +1180,20 @@ const DiagnosticsTab: React.FC<{ dx: PortfolioDiagnosis; M: (v: number) => strin
         <div style={S.scroll}>
           <table style={S.table}>
             <thead><tr>
-              <th style={S.th}>Product</th>
-              <th style={{ ...S.th, textAlign: "right" }}>Price</th>
-              <th style={{ ...S.th, textAlign: "right" }}>Reaches bank</th>
-              <th style={{ ...S.th, textAlign: "right" }}>Cost to make</th>
-              <th style={{ ...S.th, textAlign: "right" }}>Profit/unit</th>
-              <th style={{ ...S.th, textAlign: "right" }}>Margin</th>
-              <th style={{ ...S.th, textAlign: "right" }}>Per bottleneck-min</th>
-              <th style={{ ...S.th, textAlign: "right" }}>Monthly profit</th>
+              <th style={{ ...S.th, width: "20%", minWidth: 150 }}>Product</th>
+              <th style={{ ...S.th, width: 92,  textAlign: "right" }}>Price</th>
+              <th style={{ ...S.th, width: 112, textAlign: "right" }}>Reaches bank</th>
+              <th style={{ ...S.th, width: 108, textAlign: "right" }}>Cost to make</th>
+              <th style={{ ...S.th, width: 100, textAlign: "right" }}>Profit/unit</th>
+              <th style={{ ...S.th, width: 84,  textAlign: "right" }}>Margin</th>
+              <th style={{ ...S.th, width: 118, textAlign: "right" }}>Per bottleneck-min</th>
+              <th style={{ ...S.th, width: 110, textAlign: "right" }}>Monthly profit</th>
             </tr></thead>
             <tbody>
               {dx.offerings.map((e) => (
                 <tr key={e.offeringId}>
                   <td style={S.td}>
-                    <div style={{ fontWeight: 600 }}>{e.name || "(unnamed)"}</div>
+                    <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name || "(unnamed)"}</div>
                     {e.paretoTop3Labels.length > 0 && (
                       <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5") }}>
                         {e.paretoTop3Labels.slice(0, 2).join(", ")} = {e.paretoTop3SharePct}%
