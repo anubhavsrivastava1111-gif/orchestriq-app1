@@ -8,6 +8,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "./lib/supabase";
+import VoiceField from "./components/VoiceField";
 import {
   diagnose, effectiveCostPerBaseUnit, naiveCostPerBaseUnit, yieldLabel, num,
   type CostWorkspace, type CaResource, type CaOffering, type CaBomLine,
@@ -1568,6 +1569,9 @@ const StartTab: React.FC<{
           value={desc} onChange={(e) => setDesc(e.target.value)} rows={4} disabled={busy}
           placeholder={companyName ? `e.g. ${companyName} is a ...` : "e.g. A bakery in Lucknow making birthday cakes and bread, selling walk-in and on Swiggy"}
           style={{ ...S.inp, resize: "vertical", lineHeight: 1.55, minHeight: 84, fontSize: 12.5 }} />
+        <div style={{ marginTop: 6 }}>
+          <VoiceField value={desc} onChange={setDesc} disabled={busy} />
+        </div>
 
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "9px 0 12px" }}>
           {EXAMPLES.slice(0, 3).map((ex, i) => (
