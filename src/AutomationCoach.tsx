@@ -9,6 +9,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "./lib/supabase";
+import VoiceField from "./components/VoiceField";
 import {
   PLAYBOOKS, PLATFORM_OPTIONS, RISK_COPY, matchPlaybook, assessRisk,
   generatePlan, recover, phaseProgress,
@@ -268,6 +269,9 @@ export default function AutomationCoach({ callAI, showToast, onBack }: Automatio
             <textarea value={goal} onChange={(e) => setGoal(e.target.value)} rows={5} disabled={busy}
               placeholder="Every morning I log into ServiceNow, filter tickets by state and assignee, export to Excel, and paste it into a Google Sheet tracker. At the end of the day I email the client a status with SLA and ageing."
               style={{ ...S.inp, resize: "vertical", minHeight: 100, lineHeight: 1.55 }} />
+            <div style={{ marginTop: 6 }}>
+              <VoiceField value={goal} onChange={setGoal} disabled={busy} />
+            </div>
 
             <div style={{ ...S.grid, marginTop: 12 }}>
               <div>
@@ -556,6 +560,9 @@ export default function AutomationCoach({ callAI, showToast, onBack }: Automatio
               <textarea value={problem} onChange={(e) => setProblem(e.target.value)} rows={3} disabled={busy}
                 placeholder="There is no Schedule option in the menu, only Export and Share."
                 style={{ ...S.inp, resize: "vertical" }} />
+              <div style={{ marginTop: 6 }}>
+                <VoiceField value={problem} onChange={setProblem} disabled={busy} />
+              </div>
               <button style={{ ...S.btn, marginTop: 9, opacity: busy || !problem.trim() ? .5 : 1 }}
                 disabled={busy || !problem.trim()} onClick={askForHelp}>
                 {busy ? "Thinking..." : "Get me unstuck"}
