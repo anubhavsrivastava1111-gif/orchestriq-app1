@@ -1100,6 +1100,8 @@ ${ctx.previousOutputs.load_support||""}` },
 
 // ─── PROPS ────────────────────────────────────────────────────────────────────
 
+import AutomationCoach from "./AutomationCoach";
+
 interface Props {
   co: any; compData: any; keys: Record<string, string>; defP: string;
   ask: (sys: string, msgs: any[], maxT?: number, enableSearch?: boolean, taskType?: string) => Promise<any>;
@@ -1136,7 +1138,7 @@ export default function AgenticWorkflows({
   brSessions, setBrSessions, sv
 }: Props) {
 
-  const [view, setView] = useState<"library" | "config" | "run" | "result" | "history" | "builder">("library");
+  const [view, setView] = useState<"library" | "config" | "run" | "result" | "history" | "builder" | "coach">("library");
   const [selectedWF, setSelectedWF] = useState<WorkflowDef | null>(null);
   const [mode, setMode] = useState<WorkflowMode>("guided");
   const [currentRun, setCurrentRun] = useState<WorkflowRun | null>(null);
@@ -1568,6 +1570,7 @@ ${csv}
             <div style={{ fontSize: 11, color: "var(--oiq-muted)" }}>Complete business process automation · intelligent step-by-step execution · three working modes</div>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => setView("coach")} style={{ ...S.hBtn, color: "#4ADE80", borderColor: "#4ADE8044" }}>🧭 Automation Coach</button>
             <button onClick={() => { setRuns(loadRuns()); setView("history"); }} style={S.hBtn}>History</button>
             <button onClick={() => setView("builder")} style={{ ...S.hBtn, color: "#A855F7", borderColor: "#A855F744" }}>⚙ Builder</button>
           </div>
@@ -1854,6 +1857,17 @@ ${csv}
   }
 
   // ─── HISTORY VIEW ───────────────────────────────────────────────────────────
+  if (view === "coach") return (
+    <AutomationCoach
+      showToast={showToast}
+      onBack={() => setView("library")}
+      callAI={(prompt, useWebSearch) => ask(
+        "You are an automation architect guiding a non-technical person. Return ONLY the exact JSON structure requested. No commentary, no markdown fences.",
+        [{ role: "user", content: prompt }], 8000, !!useWebSearch
+      ).then((r: any) => typeof r === "string" ? r : (r?.primary ?? String(r ?? "")))}
+    />
+  );
+
   if (view === "history") return (
     <div style={S.page}>
       <div style={S.hdr}>
