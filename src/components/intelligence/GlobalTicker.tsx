@@ -119,44 +119,62 @@ function IntelligenceDrawer({ news, onClose }: { news: NewsItem | null; onClose:
 // Replaces the TradingView iframe. That widget rendered inside a sandboxed
 // frame, so no theme could reach it, and its 56px content was being clipped
 // into a 36px bar. This renders the reference layout from our own live feed.
-type Quote = { label: string; value: string; delta?: number };
+type Quote = { label: string; value: string; delta?: number; freshness?: 'live' | 'delayed' | 'daily' };
 
-function useMarkets(): Quote[] {
+function useMarkets(): { quotes: Quote[]; feedMeta: { updatedAt: string; providers: any } | null } {
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [feedMeta, setFeedMeta] = useState<{ updatedAt: string; providers: any } | null>(null);
+
   useEffect(() => {
     let alive = true;
-    const fxList = [
-      { label: 'USD/INR', code: 'USD', dp: 2 },
-      { label: 'EUR/INR', code: 'EUR', dp: 2 },
-      { label: 'GBP/INR', code: 'GBP', dp: 2 },
-      { label: 'AED/INR', code: 'AED', dp: 3 },
-      { label: 'JPY/INR', code: 'JPY', dp: 4 },
-    ];
+
+    // One server-side endpoint aggregates every source. The browser cannot
+    // call most market APIs directly (CORS), and an API key in front-end code
+    // would be public. See functions/api/market.ts.
     const load = async () => {
-      const out: Quote[] = [];
       try {
-        const fx = await fetch('https://open.er-api.com/v6/latest/INR').then(r => r.json());
-        fxList.forEach(f => {
-          const r = fx?.rates?.[f.code];
-          if (r) out.push({ label: f.label, value: (1 / r).toFixed(f.dp) });
-        });
-      } catch { /* feed unavailable — strip degrades, never blocks */ }
-      try {
-        const cg = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true').then(r => r.json());
-        if (cg?.bitcoin) out.push({ label: 'BTC', value: Math.round(cg.bitcoin.usd).toLocaleString('en-US'), delta: cg.bitcoin.usd_24h_change });
-        if (cg?.ethereum) out.push({ label: 'ETH', value: Math.round(cg.ethereum.usd).toLocaleString('en-US'), delta: cg.ethereum.usd_24h_change });
-      } catch { /* same */ }
-      if (alive && out.length) setQuotes(out);
+        const r = await fetch('/api/market', { cache: 'no-store' });
+        if (!r.ok) throw new Error('feed ' + r.status);
+        const d = await r.json();
+        if (!alive || !Array.isArray(d?.items)) return;
+        setQuotes(d.items.map((q: any) => ({
+          label: q.label,
+          value: q.value,
+          delta: typeof q.delta === 'number' ? q.delta : undefined,
+          freshness: q.freshness,
+        })));
+        setFeedMeta({ updatedAt: d.updatedAt, providers: d.providers });
+      } catch {
+        // Endpoint not deployed yet, or offline. Fall back to the direct
+        // calls so the strip degrades rather than disappearing.
+        const out: Quote[] = [];
+        try {
+          const fx = await fetch('https://open.er-api.com/v6/latest/INR').then(r => r.json());
+          ([['USD/INR','USD',2],['EUR/INR','EUR',2],['GBP/INR','GBP',2],['AED/INR','AED',3],['JPY/INR','JPY',4]] as Array<[string,string,number]>)
+            .forEach(([label, code, dp]) => {
+              const rate = fx?.rates?.[code];
+              if (rate) out.push({ label, value: (1 / rate).toFixed(dp), freshness: 'daily' });
+            });
+        } catch { /* strip degrades, never blocks */ }
+        try {
+          const cg = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true').then(r => r.json());
+          if (cg?.bitcoin) out.push({ label: 'BTC', value: Math.round(cg.bitcoin.usd).toLocaleString('en-US'), delta: cg.bitcoin.usd_24h_change, freshness: 'live' });
+          if (cg?.ethereum) out.push({ label: 'ETH', value: Math.round(cg.ethereum.usd).toLocaleString('en-US'), delta: cg.ethereum.usd_24h_change, freshness: 'live' });
+        } catch { /* same */ }
+        if (alive && out.length) setQuotes(out);
+      }
     };
+
     load();
     const id = setInterval(load, 60000);
     return () => { alive = false; clearInterval(id); };
   }, []);
-  return quotes;
+
+  return { quotes, feedMeta };
 }
 
 function MarketStrip() {
-  const quotes = useMarkets();
+  const { quotes } = useMarkets();
   // Duplicated once so the track loops seamlessly — the second copy is
   // already on screen when the first scrolls out.
   const track = quotes.length ? [...quotes, ...quotes] : [];
@@ -179,7 +197,14 @@ function MarketStrip() {
             <div className="oiq-mkt-track" style={{ display: 'flex', alignItems: 'center', gap: 26, paddingLeft: 18, width: 'max-content', flexShrink: 0 }}>
               {track.map((q, i) => (
                 <div key={q.label + i} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', flexShrink: 0 }}>
-                  <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--oiq-sbDim)', letterSpacing: '.06em', textTransform: 'uppercase', lineHeight: 1.2 }}>{q.label}</span>
+                  <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--oiq-sbDim)', letterSpacing: '.06em', textTransform: 'uppercase', lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: 3 }}>
+                    {q.freshness && (
+                      <span title={q.freshness === 'live' ? 'Live - updates continuously' : q.freshness === 'delayed' ? 'Intraday - refreshed through the day' : 'Updates once a day - not a live rate'}
+                        style={{ width: 4, height: 4, borderRadius: '50%', flexShrink: 0,
+                          background: q.freshness === 'live' ? '#6EE7B7' : q.freshness === 'delayed' ? '#FBBF24' : '#8b98a5' }} />
+                    )}
+                    {q.label}
+                  </span>
                   <span style={{
                     fontSize: 12.5, fontWeight: 700, lineHeight: 1.25, fontVariantNumeric: 'tabular-nums',
                     color: q.delta === undefined ? 'var(--oiq-sbText)' : q.delta >= 0 ? '#6EE7B7' : '#FCA5A5',
