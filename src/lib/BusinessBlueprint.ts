@@ -258,7 +258,7 @@ Return ONLY a JSON object. No markdown, no code fences, no commentary before or 
   "warnings": ["anything that could make this draft misleading"]
 }
 
-SIZE: 5 to 12 resources, 1 to 5 offerings, 1 to 4 channels, 2 to 6 cost pools, 3 to 6 leaks, 4 to 8 checklist items. Every recipe resource_name must exactly match a resources[].name. Numbers must be numbers, never strings.`;
+SIZE - keep it tight so the reply is not cut off: 5 to 8 resources, 1 to 2 offerings, 1 to 3 channels, 2 to 4 cost pools, 3 to 4 leaks, 4 to 6 checklist items. Keep every text field under 25 words. Every recipe resource_name must exactly match a resources[].name. Numbers must be numbers, never strings.`;
 }
 
 /* -------------------------------------------------- robust JSON extraction */
@@ -303,7 +303,56 @@ export function extractJSON(raw: string): any | null {
       } catch { /* next */ }
     }
   }
+
+  // 5. Truncated response: the model ran out of tokens mid-object. Close the
+  //    open string/array/object stack and salvage whatever completed.
+  if (first !== -1) {
+    const salvaged = closeTruncatedJSON(raw.slice(first));
+    if (salvaged) {
+      for (const candidate of [salvaged, repairJSON(salvaged)]) {
+        try {
+          const parsed = JSON.parse(candidate);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+        } catch { /* give up */ }
+      }
+    }
+  }
   return null;
+}
+
+/** Walk the token stack and close whatever is still open. */
+function closeTruncatedJSON(src: string): string | null {
+  const stack: string[] = [];
+  let inStr = false, esc = false, lastSafe = -1;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (esc) { esc = false; continue; }
+    if (c === "\\") { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{" || c === "[") stack.push(c === "{" ? "}" : "]");
+    else if (c === "}" || c === "]") { stack.pop(); }
+    // a comma or closing brace outside a string is a safe truncation point
+    if (c === "," || c === "}" || c === "]") lastSafe = i;
+  }
+  if (!stack.length && !inStr) return null;      // not truncated
+  if (lastSafe < 0) return null;                  // nothing usable
+
+  // cut back to the last complete element, then close everything still open
+  let out = src.slice(0, lastSafe + 1).replace(/,\s*$/, "");
+  const stack2: string[] = [];
+  let s2 = false, e2 = false;
+  for (let i = 0; i < out.length; i++) {
+    const c = out[i];
+    if (e2) { e2 = false; continue; }
+    if (c === "\\") { e2 = true; continue; }
+    if (c === '"') { s2 = !s2; continue; }
+    if (s2) continue;
+    if (c === "{" || c === "[") stack2.push(c === "{" ? "}" : "]");
+    else if (c === "}" || c === "]") stack2.pop();
+  }
+  while (stack2.length) out += stack2.pop();
+  return out;
 }
 
 /** Common model output defects: trailing commas, smart quotes, NaN, comments. */
@@ -725,7 +774,7 @@ export async function researchBlueprint(
       raw = await callAI(rung.prompt, rung.search);
     } catch (e: any) {
       const msg = e?.message || "unknown error";
-      attempts.push(`${rung.label}: request failed - ${msg}`);
+      attempts.push(`${rung.label}: THREW - ${msg}`);
       // A bad key or exhausted quota will fail every rung - stop early and say so.
       if (/invalid api key|401|no api key|quota|billing/i.test(msg)) {
         return { ok: false, blueprint: null, rawLength: 0, stage: "failed", attempts,
@@ -734,14 +783,20 @@ export async function researchBlueprint(
       continue;
     }
 
-    if (!raw || !raw.trim()) { attempts.push(`${rung.label}: returned nothing`); continue; }
+    if (!raw || !raw.trim()) { attempts.push(`${rung.label}: EMPTY reply (0 chars)`); continue; }
     lastRaw = raw.length;
 
     const parsed = extractJSON(raw);
-    if (!parsed) { attempts.push(`${rung.label}: replied in prose, not JSON`); continue; }
+    if (!parsed) {
+      attempts.push(`${rung.label}: UNPARSEABLE (${raw.length} chars) | starts: ${JSON.stringify(raw.slice(0, 160))} | ends: ${JSON.stringify(raw.slice(-120))}`);
+      continue;
+    }
 
     const bp = normalizeBlueprint(parsed);
-    if (!bp.resources.length && !bp.offerings.length) { attempts.push(`${rung.label}: JSON had no usable content`); continue; }
+    if (!bp.resources.length && !bp.offerings.length) {
+      attempts.push(`${rung.label}: PARSED but empty | keys: ${Object.keys(parsed).join(",")}`);
+      continue;
+    }
 
     attempts.push(`${rung.label}: success`);
     if (rung.stage !== "web_research") {
