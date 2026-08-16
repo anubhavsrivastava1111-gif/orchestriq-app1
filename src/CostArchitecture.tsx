@@ -16,7 +16,7 @@ import {
   type PortfolioDiagnosis, type Opportunity,
 } from "./lib/CostEngine";
 import {
-  validate, summarise, findingsFor, worstOf,
+  validate, summarise,
   type Finding, type Severity,
 } from "./lib/CostValidator";
 import {
@@ -197,6 +197,115 @@ const Empty: React.FC<{ title: string; body: string; action?: React.ReactNode }>
   </div>
 );
 
+/* ---------------------------------------------------------- field-level flag */
+
+export type FlagLookup = (entityId: string, field: string) => Finding[];
+export type AcceptFn = (f: Finding, reason: string) => void;
+
+const SEV_TONE2: Record<Severity, { bg: string; fg: string }> = { error: BAD, warning: WARN, info: NEU };
+
+/**
+ * Wraps a single input. If that exact field has a problem it outlines the box,
+ * shows a marker, and opens the reason + consequence right where the value was
+ * typed. Popover is position:fixed so table overflow cannot clip it.
+ */
+const Flag: React.FC<{
+  findings: Finding[];
+  onAccept: AcceptFn;
+  children: React.ReactNode;
+}> = ({ findings, onAccept, children }) => {
+  const [open, setOpen] = useState(false);
+  const [asking, setAsking] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) { setOpen(false); setAsking(null); }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  if (!findings.length) return <>{children}</>;
+
+  const sev: Severity = findings.some((f) => f.severity === "error") ? "error"
+    : findings.some((f) => f.severity === "warning") ? "warning" : "info";
+  const tone = SEV_TONE2[sev];
+
+  const toggle = () => {
+    if (!open && ref.current) {
+      const r = ref.current.getBoundingClientRect();
+      const w = 340;
+      setPos({
+        top: Math.min(r.bottom + 6, (typeof window !== "undefined" ? window.innerHeight : 800) - 300),
+        left: Math.max(8, Math.min(r.left, (typeof window !== "undefined" ? window.innerWidth : 1200) - w - 8)),
+      });
+    }
+    setOpen(!open); setAsking(null);
+  };
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <div style={{ outline: `1.5px solid ${tone.fg}`, outlineOffset: 1, borderRadius: 6, background: tone.bg }}>
+        {children}
+      </div>
+      <button onClick={toggle} title={findings[0].title}
+        style={{ position: "absolute", top: -7, right: -7, width: 17, height: 17, borderRadius: "50%",
+                 border: "none", background: tone.fg, color: "#fff", fontSize: 11, fontWeight: 800,
+                 lineHeight: "17px", padding: 0, cursor: "pointer", zIndex: 3 }}>!</button>
+
+      {open && pos && (
+        <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 340, zIndex: 9999,
+                      background: V("surface", "#0d1520"), border: `1px solid ${tone.fg}`,
+                      borderRadius: 8, padding: 13, boxShadow: "0 10px 32px rgba(0,0,0,.42)" }}>
+          {findings.map((f, i) => (
+            <div key={f.id} style={{ marginTop: i ? 13 : 0, paddingTop: i ? 11 : 0,
+                                     borderTop: i ? `1px solid ${V("faint", "#16202c")}` : "none" }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 5 }}>
+                <Chip tone={SEV_TONE2[f.severity]}>{f.severity === "error" ? "Wrong" : f.severity === "warning" ? "Check" : "Note"}</Chip>
+                <span style={{ fontSize: 12, fontWeight: 700 }}>{f.title}</span>
+              </div>
+              <div style={{ ...S.note, marginBottom: 9 }}>{f.why}</div>
+
+              {f.impact && (
+                <div style={{ display: "flex", gap: 7, marginBottom: 9 }}>
+                  <div style={{ flex: 1, background: V("bg", "#070c18"), border: `1px solid ${BAD.fg}`, borderRadius: 5, padding: "7px 8px" }}>
+                    <div style={{ fontSize: 8.5, textTransform: "uppercase", letterSpacing: .4, color: V("muted", "#8b98a5"), fontWeight: 700 }}>Yours: {f.currentValue}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, marginTop: 3 }}>{f.impact.withCurrent}</div>
+                  </div>
+                  <div style={{ flex: 1, background: V("bg", "#070c18"), border: `1px solid ${OK.fg}`, borderRadius: 5, padding: "7px 8px" }}>
+                    <div style={{ fontSize: 8.5, textTransform: "uppercase", letterSpacing: .4, color: V("muted", "#8b98a5"), fontWeight: 700 }}>If {f.suggestedValue}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, marginTop: 3, color: OK.fg }}>{f.impact.withSuggested}</div>
+                  </div>
+                </div>
+              )}
+              {!f.impact && f.suggestedValue && (
+                <div style={{ ...S.note, marginBottom: 9 }}>Suggested: <strong style={{ color: OK.fg }}>{f.suggestedValue}</strong></div>
+              )}
+              {f.impact && <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5"), marginBottom: 9 }}>{f.impact.label}</div>}
+
+              {asking === f.id ? (
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                  <input style={{ ...S.inp, flex: "1 1 100%" }} value={reason} autoFocus
+                    placeholder="Why is it correct? (optional)"
+                    onChange={(e) => setReason(e.target.value)} />
+                  <button style={S.btn} onClick={() => { onAccept(f, reason); setOpen(false); setAsking(null); setReason(""); }}>Confirm</button>
+                  <button style={S.btnGhost} onClick={() => setAsking(null)}>Cancel</button>
+                </div>
+              ) : (
+                <button style={S.btnGhost} onClick={() => setAsking(f.id)}>My value is correct &mdash; keep it</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* ============================================================================
  * MAIN COMPONENT
  * ========================================================================== */
@@ -226,7 +335,6 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
   const [benchmarks, setBenchmarks] = useState<CaBenchmark[]>([]);
   const [openOffering, setOpenOffering] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Set<string>>(new Set());
-  const [dqOpen, setDqOpen] = useState(false);
 
   const toast = useCallback((m: string, k?: string) => { if (showToast) showToast(m, k); }, [showToast]);
 
@@ -485,6 +593,39 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
   const findings = useMemo(() => validate(ws, overrides), [ws, overrides]);
   const vSummary = useMemo(() => summarise(findings), [findings]);
 
+  /** Findings indexed by entity+field so every input box can flag itself. */
+  const flagIndex = useMemo(() => {
+    const m = new Map<string, Finding[]>();
+    for (const f of findings) {
+      if (!f.entityId) continue;
+      for (const k of [f.entityId + "::" + f.field, f.entityId + "::*"]) {
+        const arr = m.get(k); if (arr) arr.push(f); else m.set(k, [f]);
+      }
+    }
+    return m;
+  }, [findings]);
+
+  const flagFor = useCallback(
+    (entityId: string, field: string) => flagIndex.get(entityId + "::" + field) || [],
+    [flagIndex]);
+
+  /** Per-tab counts so the user knows WHICH tab to go to. */
+  const tabFlags = useMemo(() => {
+    const c: Record<string, { err: number; warn: number }> = {
+      setup: { err: 0, warn: 0 }, inputs: { err: 0, warn: 0 },
+      products: { err: 0, warn: 0 }, channels: { err: 0, warn: 0 }, diagnostics: { err: 0, warn: 0 },
+    };
+    const bucket: Record<string, string> = {
+      resource: "inputs", offering: "products", bom: "products",
+      channel: "channels", pool: "setup", portfolio: "diagnostics",
+    };
+    for (const f of findings) {
+      const b = bucket[f.scope]; if (!b || f.severity === "info") continue;
+      if (f.severity === "error") c[b].err++; else c[b].warn++;
+    }
+    return c;
+  }, [findings]);
+
   const acceptException = useCallback(async (f: Finding, reason: string) => {
     if (!userId) return;
     setOverrides((prev) => { const n = new Set(prev); n.add(f.id); return n; });
@@ -520,6 +661,12 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
     { k: "channels",    label: "Where you sell", count: channels.length },
     { k: "diagnostics", label: "Diagnostics" },
   ];
+  const tabBadge = (k: TabKey) => {
+    const t = (tabFlags as any)[k]; if (!t) return null;
+    if (t.err) return <span style={{ marginLeft: 5, background: BAD.bg, color: BAD.fg, borderRadius: 9, padding: "1px 6px", fontSize: 9.5, fontWeight: 800 }}>{t.err}</span>;
+    if (t.warn) return <span style={{ marginLeft: 5, background: WARN.bg, color: WARN.fg, borderRadius: 9, padding: "1px 6px", fontSize: 9.5, fontWeight: 800 }}>{t.warn}</span>;
+    return null;
+  };
 
   return (
     <div style={S.wrap}>
@@ -541,7 +688,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
       <div style={S.tabs}>
         {TABS.map((t) => (
           <button key={t.k} onClick={() => setTab(t.k)} style={{ ...S.tab, ...(tab === t.k ? S.tabOn : {}) }}>
-            {t.label}{t.count != null && t.count > 0 ? ` (${t.count})` : ""}
+            {t.label}{t.count != null && t.count > 0 ? ` (${t.count})` : ""}{tabBadge(t.k)}
           </button>
         ))}
       </div>
@@ -553,8 +700,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
         </div>
       )}
 
-      <DataQualityPanel findings={findings} summary={vSummary} open={dqOpen} setOpen={setDqOpen}
-        onAccept={acceptException} overrideCount={overrides.size}
+      <DataQualityBar summary={vSummary} findings={findings} overrideCount={overrides.size} goTo={setTab}
         onUndoAll={() => { overrides.forEach((id) => { void undoException(id); }); }} />
 
       {tab === "start" && (
@@ -564,22 +710,25 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
 
       {tab === "setup" && (
         <SetupTab ctx={ctx} patchCtx={patchCtx} costPools={costPools} patchPool={patchPool}
-          addPool={addPool} delPool={delPool} M={M} />
+          addPool={addPool} delPool={delPool} M={M} flagFor={flagFor} onAccept={acceptException} />
       )}
 
       {tab === "inputs" && (
-        <InputsTab resources={resources} patchRes={patchRes} addResource={addResource} delRes={delRes} cur={cur} findings={findings} />
+        <InputsTab resources={resources} patchRes={patchRes} addResource={addResource} delRes={delRes} cur={cur}
+          flagFor={flagFor} onAccept={acceptException} />
       )}
 
       {tab === "products" && (
         <ProductsTab offerings={offerings} resources={resources} bomLines={bomLines} channels={channels}
           offeringChannels={offeringChannels} dx={dx} openOffering={openOffering} setOpenOffering={setOpenOffering}
           patchOff={patchOff} patchBom={patchBom} patchOC={patchOC} addOffering={addOffering}
-          addBomLine={addBomLine} linkChannel={linkChannel} delOff={delOff} delBom={delBom} delOC={delOC} M={M} />
+          addBomLine={addBomLine} linkChannel={linkChannel} delOff={delOff} delBom={delBom} delOC={delOC} M={M}
+          flagFor={flagFor} onAccept={acceptException} />
       )}
 
       {tab === "channels" && (
-        <ChannelsTab channels={channels} patchCh={patchCh} addChannel={addChannel} delCh={delCh} cur={cur} />
+        <ChannelsTab channels={channels} patchCh={patchCh} addChannel={addChannel} delCh={delCh} cur={cur}
+          flagFor={flagFor} onAccept={acceptException} />
       )}
 
       {tab === "diagnostics" && <DiagnosticsTab dx={dx} M={M} goTo={setTab} />}
@@ -595,7 +744,8 @@ const SetupTab: React.FC<{
   ctx: CaBusinessContext | null; patchCtx: (p: Partial<CaBusinessContext>) => void;
   costPools: CaCostPool[]; patchPool: (id: string, p: Partial<CaCostPool>) => void;
   addPool: () => void; delPool: (id: string) => void; M: (v: number) => string;
-}> = ({ ctx, patchCtx, costPools, patchPool, addPool, delPool, M }) => {
+  flagFor: FlagLookup; onAccept: AcceptFn;
+}> = ({ ctx, patchCtx, costPools, patchPool, addPool, delPool, M, flagFor, onAccept }) => {
   const monthlyFixed = costPools.reduce((s, p) => {
     const a = num(p.amount);
     return s + (p.period === "annual" ? a / 12 : p.period === "quarterly" ? a / 3 : a);
@@ -662,7 +812,7 @@ const SetupTab: React.FC<{
               <tbody>
                 {costPools.map((p) => (
                   <tr key={p.id}>
-                    <td style={S.td}><TextCell value={p.name} onChange={(v) => patchPool(p.id, { name: v })} placeholder="Shop rent" /></td>
+                    <td style={S.td}><Flag findings={flagFor(p.id, "amount")} onAccept={onAccept}><TextCell value={p.name} onChange={(v) => patchPool(p.id, { name: v })} placeholder="Shop rent" /></Flag></td>
                     <td style={S.td}><NumCell value={p.amount} onChange={(v) => patchPool(p.id, { amount: v })} /></td>
                     <td style={S.td}><SelectCell value={p.period ?? "monthly"} onChange={(v) => patchPool(p.id, { period: v })}
                       options={[{ v: "monthly", label: "Month" }, { v: "quarterly", label: "Quarter" }, { v: "annual", label: "Year" }]} /></td>
@@ -690,9 +840,18 @@ const SetupTab: React.FC<{
 
 const InputsTab: React.FC<{
   resources: CaResource[]; patchRes: (id: string, p: Partial<CaResource>) => void;
-  addResource: () => void; delRes: (id: string) => void; cur: string; findings: Finding[];
-}> = ({ resources, patchRes, addResource, delRes, cur, findings }) => {
+  addResource: () => void; delRes: (id: string) => void; cur: string;
+  flagFor: FlagLookup; onAccept: AcceptFn;
+}> = ({ resources, patchRes, addResource, delRes, cur, flagFor, onAccept }) => {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [autoOpened, setAutoOpened] = useState(false);
+
+  // A problem hidden behind a collapsed panel is a problem the user cannot find.
+  useEffect(() => {
+    if (autoOpened || expanded) return;
+    const hidden = resources.find((r) => flagFor(r.id, "conversion_factor").length > 0);
+    if (hidden) { setExpanded(hidden.id); setAutoOpened(true); }
+  }, [resources, flagFor, expanded, autoOpened]);
 
   if (!resources.length) {
     return (
@@ -731,31 +890,33 @@ const InputsTab: React.FC<{
               const naive = naiveCostPerBaseUnit(r);
               const uplift = naive > 0 ? ((eff / naive) - 1) * 100 : 0;
               const isOpen = expanded === r.id;
-              const rowFindings = findingsFor(findings, r.id);
-              const rowFlag = worstOf(rowFindings);
               return (
                 <React.Fragment key={r.id}>
                   <tr>
                     <td style={S.td}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                        {rowFlag && <span title={rowFindings.map((f) => f.title).join(" \u00B7 ")}
-                          style={{ color: rowFlag === "error" ? BAD.fg : rowFlag === "warning" ? WARN.fg : NEU.fg, fontSize: 13, lineHeight: 1, cursor: "help" }}>&#9888;</span>}
+                      <Flag findings={flagFor(r.id, "recipe")} onAccept={onAccept}>
                         <TextCell value={r.name} onChange={(v) => patchRes(r.id, { name: v })} placeholder="Butter, welder time, AWS..." />
-                      </div>
+                      </Flag>
                     </td>
                     <td style={S.td}><SelectCell value={r.resource_class} onChange={(v) => patchRes(r.id, { resource_class: v as ResourceClass })}
                       options={CLASSES.map((c) => ({ v: c.v, label: c.label }))} /></td>
-                    <td style={S.td}><NumCell value={r.purchase_price} onChange={(v) => patchRes(r.id, { purchase_price: v })} /></td>
+                    <td style={S.td}><Flag findings={flagFor(r.id, "purchase_price")} onAccept={onAccept}><NumCell value={r.purchase_price} onChange={(v) => patchRes(r.id, { purchase_price: v })} /></Flag></td>
                     <td style={S.td}><NumCell value={r.purchase_qty} onChange={(v) => patchRes(r.id, { purchase_qty: v })} /></td>
                     <td style={S.td}><TextCell value={r.purchase_uom} onChange={(v) => patchRes(r.id, { purchase_uom: v, base_uom: r.base_uom || v })} placeholder="kg" /></td>
-                    <td style={S.td}><NumCell value={r.effective_yield_pct} onChange={(v) => patchRes(r.id, { effective_yield_pct: v })} suffix="%" /></td>
+                    <td style={S.td}><Flag findings={flagFor(r.id, "effective_yield_pct")} onAccept={onAccept}><NumCell value={r.effective_yield_pct} onChange={(v) => patchRes(r.id, { effective_yield_pct: v })} suffix="%" /></Flag></td>
                     <td style={{ ...S.td, textAlign: "right", fontWeight: 700, whiteSpace: "nowrap" }}>
                       {fmtMoney(eff, cur)}
                       <span style={{ fontSize: 9.5, fontWeight: 500, color: V("muted", "#8b98a5") }}> / {r.base_uom || r.purchase_uom || "unit"}</span>
                       {uplift > 0.5 && <div style={{ fontSize: 9.5, fontWeight: 600, color: WARN.fg }}>+{uplift.toFixed(1)}% hidden</div>}
                     </td>
                     <td style={{ ...S.td, whiteSpace: "nowrap" }}>
-                      <button style={S.btnDel} onClick={() => setExpanded(isOpen ? null : r.id)} title="More detail">{isOpen ? "\u2212" : "+"}</button>
+                      <button style={{ ...S.btnDel,
+                          color: flagFor(r.id, "conversion_factor").length ? BAD.fg : undefined,
+                          fontWeight: flagFor(r.id, "conversion_factor").length ? 800 : undefined,
+                          background: flagFor(r.id, "conversion_factor").length && !isOpen ? BAD.bg : "transparent",
+                          borderRadius: 4 }}
+                        onClick={() => setExpanded(isOpen ? null : r.id)}
+                        title={flagFor(r.id, "conversion_factor").length ? "A problem is inside here - click to open" : "More detail"}>{isOpen ? "\u2212" : "+"}</button>
                       <button style={S.btnDel} onClick={() => delRes(r.id)} title="Remove">&times;</button>
                     </td>
                   </tr>
@@ -768,7 +929,7 @@ const InputsTab: React.FC<{
                         <div><label style={S.lbl}>Base unit used in recipes</label>
                           <TextCell value={r.base_uom} onChange={(v) => patchRes(r.id, { base_uom: v })} placeholder="kg, hour, unit" /></div>
                         <div><label style={S.lbl}>How many base units per purchase</label>
-                          <NumCell value={r.conversion_factor} onChange={(v) => patchRes(r.id, { conversion_factor: v })} /></div>
+                          <Flag findings={flagFor(r.id, "conversion_factor")} onAccept={onAccept}><NumCell value={r.conversion_factor} onChange={(v) => patchRes(r.id, { conversion_factor: v })} /></Flag></div>
                         <div><label style={S.lbl}>Freight / delivery</label>
                           <NumCell value={r.freight_cost} onChange={(v) => patchRes(r.id, { freight_cost: v })} /></div>
                         <div><label style={S.lbl}>Duty / other charges</label>
@@ -825,6 +986,7 @@ const ProductsTab: React.FC<{
   addOffering: () => void; addBomLine: (id: string) => void; linkChannel: (o: string, c: string) => void;
   delOff: (id: string) => void; delBom: (id: string) => void; delOC: (id: string) => void;
   M: (v: number) => string;
+  flagFor: FlagLookup; onAccept: AcceptFn;
 }> = (p) => {
   if (!p.offerings.length) {
     return (
@@ -860,20 +1022,28 @@ const ProductsTab: React.FC<{
               </div>
               <div style={{ flex: "0 1 95px" }}>
                 <label style={S.lbl}>Price</label>
-                <NumCell value={o.list_price} onChange={(v) => p.patchOff(o.id, { list_price: v })} />
+                <Flag findings={p.flagFor(o.id, "list_price")} onAccept={p.onAccept}>
+                  <NumCell value={o.list_price} onChange={(v) => p.patchOff(o.id, { list_price: v })} />
+                </Flag>
               </div>
               <div style={{ flex: "0 1 90px" }}>
                 <label style={S.lbl}>Vol / month</label>
-                <NumCell value={o.monthly_volume} onChange={(v) => p.patchOff(o.id, { monthly_volume: v })} />
+                <Flag findings={p.flagFor(o.id, "monthly_volume")} onAccept={p.onAccept}>
+                  <NumCell value={o.monthly_volume} onChange={(v) => p.patchOff(o.id, { monthly_volume: v })} />
+                </Flag>
               </div>
               <div style={{ flex: "0 1 95px" }}>
                 <label style={S.lbl}>Bottleneck min</label>
-                <NumCell value={o.constraint_minutes_per_unit} onChange={(v) => p.patchOff(o.id, { constraint_minutes_per_unit: v })} />
+                <Flag findings={p.flagFor(o.id, "constraint_minutes_per_unit")} onAccept={p.onAccept}>
+                  <NumCell value={o.constraint_minutes_per_unit} onChange={(v) => p.patchOff(o.id, { constraint_minutes_per_unit: v })} />
+                </Flag>
               </div>
               <div style={{ display: "flex", gap: 5, alignItems: "flex-end", paddingBottom: 3 }}>
-                <button style={S.btnGhost} onClick={() => p.setOpenOffering(isOpen ? null : o.id)}>
-                  {isOpen ? "Close recipe" : `Recipe (${lines.length})`}
-                </button>
+                <Flag findings={p.flagFor(o.id, "recipe")} onAccept={p.onAccept}>
+                  <button style={S.btnGhost} onClick={() => p.setOpenOffering(isOpen ? null : o.id)}>
+                    {isOpen ? "Close recipe" : `Recipe (${lines.length})`}
+                  </button>
+                </Flag>
                 <button style={S.btnDel} onClick={() => p.delOff(o.id)} title="Remove">&times;</button>
               </div>
             </div>
@@ -978,7 +1148,7 @@ const ProductsTab: React.FC<{
                                 <tr key={lk.id}>
                                   <td style={S.td}>{ch?.name || "(unnamed)"}</td>
                                   <td style={S.td}><NumCell value={lk.list_price_override} onChange={(v) => p.patchOC(lk.id, { list_price_override: v })} placeholder={String(o.list_price ?? "")} /></td>
-                                  <td style={S.td}><NumCell value={lk.volume_share_pct} onChange={(v) => p.patchOC(lk.id, { volume_share_pct: v })} suffix="%" /></td>
+                                  <td style={S.td}><Flag findings={p.flagFor(o.id, "volume_share_pct")} onAccept={p.onAccept}><NumCell value={lk.volume_share_pct} onChange={(v) => p.patchOC(lk.id, { volume_share_pct: v })} suffix="%" /></Flag></td>
                                   <td style={{ ...S.td, textAlign: "right" }}>
                                     {ce ? p.M(ce.netRealisation) : "-"}
                                     {ce && ce.leakagePct > 0 && <div style={{ fontSize: 9.5, color: ce.leakagePct > 25 ? BAD.fg : WARN.fg }}>-{ce.leakagePct}% lost</div>}
@@ -1041,7 +1211,8 @@ const ProductsTab: React.FC<{
 const ChannelsTab: React.FC<{
   channels: CaChannel[]; patchCh: (id: string, p: Partial<CaChannel>) => void;
   addChannel: () => void; delCh: (id: string) => void; cur: string;
-}> = ({ channels, patchCh, addChannel, delCh }) => {
+  flagFor: FlagLookup; onAccept: AcceptFn;
+}> = ({ channels, patchCh, addChannel, delCh, flagFor, onAccept }) => {
   if (!channels.length) {
     return (
       <div style={S.card}>
@@ -1081,14 +1252,14 @@ const ChannelsTab: React.FC<{
                 <tr key={c.id}>
                   <td style={S.td}><TextCell value={c.name} onChange={(v) => patchCh(c.id, { name: v })} placeholder="Swiggy" /></td>
                   <td style={S.td}><SelectCell value={c.channel_type ?? "direct"} onChange={(v) => patchCh(c.id, { channel_type: v })} options={CHANNEL_TYPES} /></td>
-                  <td style={S.td}><NumCell value={c.commission_pct} onChange={(v) => patchCh(c.id, { commission_pct: v })} suffix="%" /></td>
+                  <td style={S.td}><Flag findings={flagFor(c.id, "commission_pct")} onAccept={onAccept}><NumCell value={c.commission_pct} onChange={(v) => patchCh(c.id, { commission_pct: v })} suffix="%" /></Flag></td>
                   <td style={S.td}><NumCell value={c.discount_pct} onChange={(v) => patchCh(c.id, { discount_pct: v })} suffix="%" /></td>
                   <td style={S.td}><NumCell value={c.ad_spend_pct} onChange={(v) => patchCh(c.id, { ad_spend_pct: v })} suffix="%" /></td>
                   <td style={S.td}><NumCell value={c.payment_gateway_pct} onChange={(v) => patchCh(c.id, { payment_gateway_pct: v })} suffix="%" /></td>
                   <td style={S.td}><NumCell value={c.packaging_cost} onChange={(v) => patchCh(c.id, { packaging_cost: v })} /></td>
                   <td style={S.td}><NumCell value={c.delivery_subsidy} onChange={(v) => patchCh(c.id, { delivery_subsidy: v })} /></td>
                   <td style={S.td}><NumCell value={c.returns_pct} onChange={(v) => patchCh(c.id, { returns_pct: v })} suffix="%" /></td>
-                  <td style={S.td}><NumCell value={c.gst_pct} onChange={(v) => patchCh(c.id, { gst_pct: v })} suffix="%" /></td>
+                  <td style={S.td}><Flag findings={flagFor(c.id, "gst_pct")} onAccept={onAccept}><NumCell value={c.gst_pct} onChange={(v) => patchCh(c.id, { gst_pct: v })} suffix="%" /></Flag></td>
                   <td style={{ ...S.td, textAlign: "right", fontWeight: 700, color: drag > 25 ? BAD.fg : drag > 12 ? WARN.fg : V("ink", "#e6edf3") }}>
                     {drag.toFixed(1)}%
                   </td>
@@ -1743,129 +1914,57 @@ const StartTab: React.FC<{
  * choice does to the answer, and lets the user knowingly keep their own number.
  * ========================================================================== */
 
-const SEV_TONE: Record<Severity, { bg: string; fg: string }> = { error: BAD, warning: WARN, info: NEU };
-const SEV_WORD: Record<Severity, string> = { error: "Wrong", warning: "Check", info: "Note" };
-
-const FindingRow: React.FC<{
-  f: Finding;
-  onAccept: (f: Finding, reason: string) => void;
-}> = ({ f, onAccept }) => {
-  const [open, setOpen] = useState(false);
-  const [reason, setReason] = useState("");
-  const [asking, setAsking] = useState(false);
-  const tone = SEV_TONE[f.severity];
-
-  return (
-    <div style={{ padding: "10px 0", borderBottom: `1px solid ${V("faint", "#16202c")}` }}>
-      <div style={{ display: "flex", gap: 9, alignItems: "flex-start", flexWrap: "wrap", cursor: "pointer" }}
-        onClick={() => setOpen(!open)}>
-        <Chip tone={tone}>{SEV_WORD[f.severity]}</Chip>
-        <div style={{ flex: "1 1 260px", minWidth: 200 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{f.title}</div>
-          <div style={{ fontSize: 10.5, color: V("muted", "#8b98a5"), marginTop: 2 }}>
-            {f.entityName} &middot; {f.fieldLabel} &middot; currently <strong style={{ color: V("ink", "#e6edf3") }}>{f.currentValue}</strong>
-          </div>
-        </div>
-        <span style={{ fontSize: 10.5, color: V("muted", "#8b98a5") }}>{open ? "Hide" : "Why?"}</span>
-      </div>
-
-      {open && (
-        <div style={{ marginTop: 9, paddingLeft: 4 }}>
-          <div style={{ ...S.note, marginBottom: 10 }}>{f.why}</div>
-
-          {f.impact && (
-            <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 10 }}>
-              <div style={{ flex: "1 1 160px", background: V("bg", "#070c18"), border: `1px solid ${BAD.fg}`,
-                            borderRadius: 6, padding: "9px 11px" }}>
-                <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.5, color: V("muted", "#8b98a5"), fontWeight: 700 }}>
-                  If you keep {f.currentValue}
-                </div>
-                <div style={{ fontSize: 16, fontWeight: 700, marginTop: 4 }}>{f.impact.withCurrent}</div>
-                <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5"), marginTop: 2 }}>{f.impact.label}</div>
-              </div>
-              <div style={{ flex: "1 1 160px", background: V("bg", "#070c18"), border: `1px solid ${OK.fg}`,
-                            borderRadius: 6, padding: "9px 11px" }}>
-                <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.5, color: V("muted", "#8b98a5"), fontWeight: 700 }}>
-                  If you use {f.suggestedValue}
-                </div>
-                <div style={{ fontSize: 16, fontWeight: 700, marginTop: 4, color: OK.fg }}>{f.impact.withSuggested}</div>
-                <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5"), marginTop: 2 }}>{f.impact.label}</div>
-              </div>
-            </div>
-          )}
-
-          {!f.impact && f.suggestedValue && (
-            <div style={{ ...S.note, marginBottom: 10 }}>
-              Suggested: <strong style={{ color: OK.fg }}>{f.suggestedValue}</strong>
-            </div>
-          )}
-
-          {!asking ? (
-            <button style={S.btnGhost} onClick={(e) => { e.stopPropagation(); setAsking(true); }}>
-              My value is correct &mdash; keep it
-            </button>
-          ) : (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-              <input style={{ ...S.inp, flex: "1 1 240px", maxWidth: 360 }} value={reason} autoFocus
-                placeholder="Why is it correct? (optional, for your own record)"
-                onChange={(e) => setReason(e.target.value)} onClick={(e) => e.stopPropagation()} />
-              <button style={S.btn} onClick={(e) => { e.stopPropagation(); onAccept(f, reason); }}>Confirm</button>
-              <button style={S.btnGhost} onClick={(e) => { e.stopPropagation(); setAsking(false); }}>Cancel</button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const DataQualityPanel: React.FC<{
-  findings: Finding[];
+const DataQualityBar: React.FC<{
   summary: { errors: number; warnings: number; infos: number; total: number; trustable: boolean; headline: string };
-  open: boolean; setOpen: (v: boolean) => void;
-  onAccept: (f: Finding, reason: string) => void;
+  findings: Finding[];
   overrideCount: number;
+  goTo: (t: TabKey) => void;
   onUndoAll: () => void;
-}> = ({ findings, summary, open, setOpen, onAccept, overrideCount, onUndoAll }) => {
+}> = ({ summary, findings, overrideCount, goTo, onUndoAll }) => {
   if (!findings.length && !overrideCount) return null;
+
+  const bucket: Record<string, TabKey> = {
+    resource: "inputs", offering: "products", bom: "products",
+    channel: "channels", pool: "setup", portfolio: "diagnostics",
+  };
+  const TAB_NAME: Record<string, string> = {
+    inputs: "What you buy", products: "What you sell",
+    channels: "Where you sell", setup: "Setup", diagnostics: "Diagnostics",
+  };
+  const where = new Map<TabKey, number>();
+  for (const f of findings) {
+    if (f.severity === "info") continue;
+    const t = bucket[f.scope] as TabKey; if (!t) continue;
+    where.set(t, (where.get(t) || 0) + 1);
+  }
 
   const tone = summary.errors > 0 ? BAD : summary.warnings > 0 ? WARN : OK;
 
   return (
-    <div style={{ ...S.card, borderColor: summary.errors > 0 ? BAD.fg : summary.warnings > 0 ? WARN.fg : V("border", "#1e2a38"), marginBottom: 14 }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", cursor: findings.length ? "pointer" : "default" }}
-        onClick={() => findings.length && setOpen(!open)}>
+    <div style={{ ...S.card, borderColor: summary.errors > 0 ? BAD.fg : summary.warnings > 0 ? WARN.fg : V("border", "#1e2a38"),
+                  marginBottom: 14, padding: "11px 14px" }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <Chip tone={tone}>{summary.errors > 0 ? "Data check" : summary.warnings > 0 ? "Data check" : "All clear"}</Chip>
-        <div style={{ flex: "1 1 260px" }}>
+        <div style={{ flex: "1 1 240px" }}>
           <div style={{ fontSize: 12.5, fontWeight: 700 }}>{summary.headline}</div>
           <div style={{ fontSize: 10.5, color: V("muted", "#8b98a5"), marginTop: 2 }}>
-            {summary.errors > 0
-              ? "Figures on Diagnostics are not reliable until these are resolved."
-              : summary.warnings > 0
-                ? "Nothing is blocking you - these are worth a second look."
-                : "No problems found in what you have entered."}
+            {findings.length
+              ? <>Each one is marked with a red <strong style={{ color: BAD.fg }}>!</strong> on the exact box it refers to. Click the marker to see why.</>
+              : "No problems found in what you have entered."}
             {overrideCount > 0 && ` \u00B7 ${overrideCount} accepted as correct by you`}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          {summary.errors > 0 && <Chip tone={BAD}>{summary.errors} wrong</Chip>}
-          {summary.warnings > 0 && <Chip tone={WARN}>{summary.warnings} check</Chip>}
-          {summary.infos > 0 && <Chip tone={NEU}>{summary.infos} note</Chip>}
-          {findings.length > 0 && <span style={{ fontSize: 10.5, color: V("muted", "#8b98a5") }}>{open ? "Hide" : "Show"}</span>}
-        </div>
-      </div>
-
-      {open && findings.length > 0 && (
-        <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${V("border", "#1e2a38")}` }}>
-          {findings.map((f) => <FindingRow key={f.id} f={f} onAccept={onAccept} />)}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          {Array.from(where.entries()).map(([t, n]) => (
+            <button key={t} style={{ ...S.btnGhost, fontSize: 10.5 }} onClick={() => goTo(t)}>
+              {TAB_NAME[t]} <strong style={{ color: BAD.fg }}>{n}</strong>
+            </button>
+          ))}
           {overrideCount > 0 && (
-            <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={S.note}>{overrideCount} check{overrideCount > 1 ? "s" : ""} you have accepted are hidden.</span>
-              <button style={S.btnGhost} onClick={onUndoAll}>Show them again</button>
-            </div>
+            <button style={{ ...S.btnGhost, fontSize: 10.5 }} onClick={onUndoAll}>Un-accept all</button>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 };
