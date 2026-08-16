@@ -16,6 +16,10 @@ import {
   type PortfolioDiagnosis, type Opportunity,
 } from "./lib/CostEngine";
 import {
+  validate, summarise, findingsFor, worstOf,
+  type Finding, type Severity,
+} from "./lib/CostValidator";
+import {
   researchBlueprint, blueprintToRows, blueprintStats,
   type Blueprint, type BlueprintResult, type Verify,
 } from "./lib/BusinessBlueprint";
@@ -221,6 +225,8 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
   const [offeringChannels, setOfferingChannels] = useState<CaOfferingChannel[]>([]);
   const [benchmarks, setBenchmarks] = useState<CaBenchmark[]>([]);
   const [openOffering, setOpenOffering] = useState<string | null>(null);
+  const [overrides, setOverrides] = useState<Set<string>>(new Set());
+  const [dqOpen, setDqOpen] = useState(false);
 
   const toast = useCallback((m: string, k?: string) => { if (showToast) showToast(m, k); }, [showToast]);
 
@@ -236,7 +242,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
         setUserId(uidNow);
         if (!uidNow) { setErr("Sign in to use Cost Architecture."); setLoading(false); return; }
 
-        const [bc, rs, of, bl, cp, ch, oc, bm] = await Promise.all([
+        const [bc, rs, of, bl, cp, ch, oc, bm, vo] = await Promise.all([
           supabase.from("ca_business_context").select("*").eq("user_id", uidNow).maybeSingle(),
           supabase.from("ca_resources").select("*").eq("user_id", uidNow).order("created_at", { ascending: true }),
           supabase.from("ca_offerings").select("*").eq("user_id", uidNow).order("created_at", { ascending: true }),
@@ -245,6 +251,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
           supabase.from("ca_channels").select("*").eq("user_id", uidNow),
           supabase.from("ca_offering_channels").select("*").eq("user_id", uidNow),
           supabase.from("ca_benchmarks").select("*"),
+          supabase.from("ca_validation_overrides").select("finding_id").eq("user_id", uidNow),
         ]);
         if (cancelled) return;
 
@@ -256,6 +263,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
         setChannels((ch.data as CaChannel[]) ?? []);
         setOfferingChannels((oc.data as CaOfferingChannel[]) ?? []);
         setBenchmarks((bm.data as CaBenchmark[]) ?? []);
+        setOverrides(new Set(((vo.data as Array<{ finding_id: string }>) ?? []).map((x) => x.finding_id)));
         setTab((of.data ?? []).length ? "diagnostics" : "start");
       } catch (e: any) {
         if (!cancelled) setErr(e?.message || "Could not load your cost data.");
@@ -474,6 +482,28 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
   const dx: PortfolioDiagnosis = useMemo(() => diagnose(ws), [ws]);
   useEffect(() => { if (onDiagnosis) onDiagnosis(dx); }, [dx, onDiagnosis]);
 
+  const findings = useMemo(() => validate(ws, overrides), [ws, overrides]);
+  const vSummary = useMemo(() => summarise(findings), [findings]);
+
+  const acceptException = useCallback(async (f: Finding, reason: string) => {
+    if (!userId) return;
+    setOverrides((prev) => { const n = new Set(prev); n.add(f.id); return n; });
+    try {
+      const { error } = await supabase.from("ca_validation_overrides").upsert(
+        [{ id: uid(), user_id: userId, finding_id: f.id, rule: f.rule, entity_name: f.entityName, reason: reason || null }],
+        { onConflict: "user_id,finding_id" });
+      if (error) throw error;
+      toast("Kept your value. This will not be flagged again.", "success");
+    } catch (e: any) { toast("Could not save that decision: " + (e?.message || ""), "error"); }
+  }, [userId, toast]);
+
+  const undoException = useCallback(async (findingId: string) => {
+    if (!userId) return;
+    setOverrides((prev) => { const n = new Set(prev); n.delete(findingId); return n; });
+    try { await supabase.from("ca_validation_overrides").delete().eq("user_id", userId).eq("finding_id", findingId); }
+    catch { /* the UI already reflects it */ }
+  }, [userId]);
+
   const cur = ctx?.currency || "INR";
   const M = (v: number) => fmtMoney(v, cur);
 
@@ -523,6 +553,10 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
         </div>
       )}
 
+      <DataQualityPanel findings={findings} summary={vSummary} open={dqOpen} setOpen={setDqOpen}
+        onAccept={acceptException} overrideCount={overrides.size}
+        onUndoAll={() => { overrides.forEach((id) => { void undoException(id); }); }} />
+
       {tab === "start" && (
         <StartTab callAI={callAI} ctx={ctx} applyBlueprint={applyBlueprint}
           hasData={offerings.length > 0} goTo={setTab} companyName={companyName} />
@@ -534,7 +568,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
       )}
 
       {tab === "inputs" && (
-        <InputsTab resources={resources} patchRes={patchRes} addResource={addResource} delRes={delRes} cur={cur} />
+        <InputsTab resources={resources} patchRes={patchRes} addResource={addResource} delRes={delRes} cur={cur} findings={findings} />
       )}
 
       {tab === "products" && (
@@ -656,8 +690,8 @@ const SetupTab: React.FC<{
 
 const InputsTab: React.FC<{
   resources: CaResource[]; patchRes: (id: string, p: Partial<CaResource>) => void;
-  addResource: () => void; delRes: (id: string) => void; cur: string;
-}> = ({ resources, patchRes, addResource, delRes, cur }) => {
+  addResource: () => void; delRes: (id: string) => void; cur: string; findings: Finding[];
+}> = ({ resources, patchRes, addResource, delRes, cur, findings }) => {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   if (!resources.length) {
@@ -697,10 +731,18 @@ const InputsTab: React.FC<{
               const naive = naiveCostPerBaseUnit(r);
               const uplift = naive > 0 ? ((eff / naive) - 1) * 100 : 0;
               const isOpen = expanded === r.id;
+              const rowFindings = findingsFor(findings, r.id);
+              const rowFlag = worstOf(rowFindings);
               return (
                 <React.Fragment key={r.id}>
                   <tr>
-                    <td style={S.td}><TextCell value={r.name} onChange={(v) => patchRes(r.id, { name: v })} placeholder="Butter, welder time, AWS..." /></td>
+                    <td style={S.td}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        {rowFlag && <span title={rowFindings.map((f) => f.title).join(" \u00B7 ")}
+                          style={{ color: rowFlag === "error" ? BAD.fg : rowFlag === "warning" ? WARN.fg : NEU.fg, fontSize: 13, lineHeight: 1, cursor: "help" }}>&#9888;</span>}
+                        <TextCell value={r.name} onChange={(v) => patchRes(r.id, { name: v })} placeholder="Butter, welder time, AWS..." />
+                      </div>
+                    </td>
                     <td style={S.td}><SelectCell value={r.resource_class} onChange={(v) => patchRes(r.id, { resource_class: v as ResourceClass })}
                       options={CLASSES.map((c) => ({ v: c.v, label: c.label }))} /></td>
                     <td style={S.td}><NumCell value={r.purchase_price} onChange={(v) => patchRes(r.id, { purchase_price: v })} /></td>
@@ -1692,5 +1734,138 @@ const StartTab: React.FC<{
         </>
       )}
     </>
+  );
+};
+
+/* ============================================================================
+ * DATA QUALITY PANEL
+ * Flags values that cannot be true, says why in plain language, shows what each
+ * choice does to the answer, and lets the user knowingly keep their own number.
+ * ========================================================================== */
+
+const SEV_TONE: Record<Severity, { bg: string; fg: string }> = { error: BAD, warning: WARN, info: NEU };
+const SEV_WORD: Record<Severity, string> = { error: "Wrong", warning: "Check", info: "Note" };
+
+const FindingRow: React.FC<{
+  f: Finding;
+  onAccept: (f: Finding, reason: string) => void;
+}> = ({ f, onAccept }) => {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [asking, setAsking] = useState(false);
+  const tone = SEV_TONE[f.severity];
+
+  return (
+    <div style={{ padding: "10px 0", borderBottom: `1px solid ${V("faint", "#16202c")}` }}>
+      <div style={{ display: "flex", gap: 9, alignItems: "flex-start", flexWrap: "wrap", cursor: "pointer" }}
+        onClick={() => setOpen(!open)}>
+        <Chip tone={tone}>{SEV_WORD[f.severity]}</Chip>
+        <div style={{ flex: "1 1 260px", minWidth: 200 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{f.title}</div>
+          <div style={{ fontSize: 10.5, color: V("muted", "#8b98a5"), marginTop: 2 }}>
+            {f.entityName} &middot; {f.fieldLabel} &middot; currently <strong style={{ color: V("ink", "#e6edf3") }}>{f.currentValue}</strong>
+          </div>
+        </div>
+        <span style={{ fontSize: 10.5, color: V("muted", "#8b98a5") }}>{open ? "Hide" : "Why?"}</span>
+      </div>
+
+      {open && (
+        <div style={{ marginTop: 9, paddingLeft: 4 }}>
+          <div style={{ ...S.note, marginBottom: 10 }}>{f.why}</div>
+
+          {f.impact && (
+            <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 10 }}>
+              <div style={{ flex: "1 1 160px", background: V("bg", "#070c18"), border: `1px solid ${BAD.fg}`,
+                            borderRadius: 6, padding: "9px 11px" }}>
+                <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.5, color: V("muted", "#8b98a5"), fontWeight: 700 }}>
+                  If you keep {f.currentValue}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, marginTop: 4 }}>{f.impact.withCurrent}</div>
+                <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5"), marginTop: 2 }}>{f.impact.label}</div>
+              </div>
+              <div style={{ flex: "1 1 160px", background: V("bg", "#070c18"), border: `1px solid ${OK.fg}`,
+                            borderRadius: 6, padding: "9px 11px" }}>
+                <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.5, color: V("muted", "#8b98a5"), fontWeight: 700 }}>
+                  If you use {f.suggestedValue}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, marginTop: 4, color: OK.fg }}>{f.impact.withSuggested}</div>
+                <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5"), marginTop: 2 }}>{f.impact.label}</div>
+              </div>
+            </div>
+          )}
+
+          {!f.impact && f.suggestedValue && (
+            <div style={{ ...S.note, marginBottom: 10 }}>
+              Suggested: <strong style={{ color: OK.fg }}>{f.suggestedValue}</strong>
+            </div>
+          )}
+
+          {!asking ? (
+            <button style={S.btnGhost} onClick={(e) => { e.stopPropagation(); setAsking(true); }}>
+              My value is correct &mdash; keep it
+            </button>
+          ) : (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <input style={{ ...S.inp, flex: "1 1 240px", maxWidth: 360 }} value={reason} autoFocus
+                placeholder="Why is it correct? (optional, for your own record)"
+                onChange={(e) => setReason(e.target.value)} onClick={(e) => e.stopPropagation()} />
+              <button style={S.btn} onClick={(e) => { e.stopPropagation(); onAccept(f, reason); }}>Confirm</button>
+              <button style={S.btnGhost} onClick={(e) => { e.stopPropagation(); setAsking(false); }}>Cancel</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const DataQualityPanel: React.FC<{
+  findings: Finding[];
+  summary: { errors: number; warnings: number; infos: number; total: number; trustable: boolean; headline: string };
+  open: boolean; setOpen: (v: boolean) => void;
+  onAccept: (f: Finding, reason: string) => void;
+  overrideCount: number;
+  onUndoAll: () => void;
+}> = ({ findings, summary, open, setOpen, onAccept, overrideCount, onUndoAll }) => {
+  if (!findings.length && !overrideCount) return null;
+
+  const tone = summary.errors > 0 ? BAD : summary.warnings > 0 ? WARN : OK;
+
+  return (
+    <div style={{ ...S.card, borderColor: summary.errors > 0 ? BAD.fg : summary.warnings > 0 ? WARN.fg : V("border", "#1e2a38"), marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", cursor: findings.length ? "pointer" : "default" }}
+        onClick={() => findings.length && setOpen(!open)}>
+        <Chip tone={tone}>{summary.errors > 0 ? "Data check" : summary.warnings > 0 ? "Data check" : "All clear"}</Chip>
+        <div style={{ flex: "1 1 260px" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{summary.headline}</div>
+          <div style={{ fontSize: 10.5, color: V("muted", "#8b98a5"), marginTop: 2 }}>
+            {summary.errors > 0
+              ? "Figures on Diagnostics are not reliable until these are resolved."
+              : summary.warnings > 0
+                ? "Nothing is blocking you - these are worth a second look."
+                : "No problems found in what you have entered."}
+            {overrideCount > 0 && ` \u00B7 ${overrideCount} accepted as correct by you`}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {summary.errors > 0 && <Chip tone={BAD}>{summary.errors} wrong</Chip>}
+          {summary.warnings > 0 && <Chip tone={WARN}>{summary.warnings} check</Chip>}
+          {summary.infos > 0 && <Chip tone={NEU}>{summary.infos} note</Chip>}
+          {findings.length > 0 && <span style={{ fontSize: 10.5, color: V("muted", "#8b98a5") }}>{open ? "Hide" : "Show"}</span>}
+        </div>
+      </div>
+
+      {open && findings.length > 0 && (
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${V("border", "#1e2a38")}` }}>
+          {findings.map((f) => <FindingRow key={f.id} f={f} onAccept={onAccept} />)}
+          {overrideCount > 0 && (
+            <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={S.note}>{overrideCount} check{overrideCount > 1 ? "s" : ""} you have accepted are hidden.</span>
+              <button style={S.btnGhost} onClick={onUndoAll}>Show them again</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 };
