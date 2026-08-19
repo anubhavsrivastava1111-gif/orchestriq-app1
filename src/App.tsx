@@ -409,19 +409,46 @@ const DELIVERABLE_SPECS = {
 };
 
 // ─── SHARED RESEARCH DESK PROMPT ────────────────────────────────────────────
-// Used by Boardroom, Time Machine, and Autopilot as a pre-step: one search-enabled
-// call gathers current, source-cited figures that all downstream analysis references.
+// Used by Boardroom, Time Machine, and Autopilot as a pre-step: search-enabled
+// calls gather current, source-cited findings that all downstream analysis uses.
 // Centralized here so all three features use an identical, battle-tested prompt.
 function researchDeskPrompt(co,compData,question){
-  return "You are the Research Desk for \""+co.name+"\"'s strategic analysis. "+buildCtx(co,compData)+"\nGiven the question below, identify 3-6 SPECIFIC, CURRENT, VERIFIABLE figures that would materially inform this analysis - e.g. costs, pricing benchmarks, market sizes, rates, fees, salary benchmarks, or industry statistics relevant to "+co.industry+" in "+co.location+". Search for each.\n\nSOURCE HIERARCHY (critical): For each figure, prefer PRIMARY/OFFICIAL sources in this order:\n1. The vendor's or provider's own official site (e.g. anthropic.com, aws.amazon.com, razorpay.com, openai.com) for pricing/product specs.\n2. Government, regulatory, or industry-body sources (e.g. RBI, MSME ministry, NASSCOM) for market sizing, regulations, or benchmarks.\n3. Recognized research firms (Gartner, Bain, McKinsey, NASSCOM reports) for market/industry statistics.\n4. Only as a last resort, reputable secondary sources (industry blogs, comparison sites) - and if you use one, note in the bullet that an official source was not found.\nIf your first search result is a third-party blog or aggregator for a pricing/product figure, search again specifically for the official source (e.g. 'site:anthropic.com pricing') before finalizing.\n\nFor each figure, output: the figure itself, the source name, AND the source URL so the user can click through and verify. If a relevant figure cannot be verified via search with a real URL, omit it rather than guessing.\n\nOUTPUT FORMAT (strict): Output ONLY a bulleted list, 3-6 bullets. Each bullet format: '[Figure] — [Source name] ([URL]), accessed "+new Date().toISOString().slice(0,10)+"'. Do NOT include any preamble, commentary, search narration, or text like 'Now I need to search...' or 'Let me compile...' - output starts directly with the first bullet.\n\nQUESTION: \""+question+"\"";
+  const today=new Date().toISOString().slice(0,10);
+  return "You are the Research Desk for \""+co.name+"\"'s strategic analysis. Your output is the sole factual foundation for a board-level debate between senior executives. Anything you get wrong, they will repeat as fact. "+buildCtx(co,compData)+
+  "\n\nYour job: find SPECIFIC, CURRENT, VERIFIABLE findings that would materially change the decision on the question below - costs, pricing, market sizes, growth rates, regulations, adoption data, competitor moves, or industry benchmarks relevant to "+co.industry+" in "+co.location+". Search the live web for each. Prefer sources from the last 12 months and explicitly flag anything older than 24 months as DATED."+
+  "\n\nSOURCE HIERARCHY (critical). Prefer primary sources in this order:\n1. The vendor's or provider's own official site (e.g. anthropic.com, aws.amazon.com, razorpay.com) for pricing and product specs.\n2. Government, regulatory, or industry-body sources (RBI, MeitY, SEBI, MSME ministry, NASSCOM) for regulation, market sizing, or official statistics.\n3. Recognized research firms (Gartner, IDC, Bain, McKinsey, Grand View, IMARC) for market and industry data.\n4. Reputable business press (Reuters, Bloomberg, Mint, Economic Times) for recent events.\n5. Only as a last resort, blogs, aggregators, or comparison sites - and if you use one, write NO OFFICIAL SOURCE FOUND in that finding.\nIf your first result for a pricing or product figure is a third-party blog, search again for the official source (e.g. 'site:anthropic.com pricing') before finalizing."+
+
+  "\n\nQUALITY BAR - every finding must clear all four tests:\n- SPECIFIC: contains a number, a date, a named entity, or a named rule. 'The market is growing' fails. 'Market grew 21.8% CAGR 2025-2030' passes.\n- SOURCED: has a real source name and a real clickable URL you actually retrieved. If you cannot produce a real URL, DELETE the finding. Never guess, reconstruct, or invent a URL.\n- DATED: carries the date the source PUBLISHED the information, not today's date.\n- DECISION-RELEVANT: you can state in one clause why it changes what this business should do. If you cannot, delete it."+
+
+  "\n\nOUTPUT CONTRACT (strict - follow exactly). Output ONLY bullet lines. No heading, no preamble, no closing summary, no narration such as 'I'll search' or 'Let me compile'. Your first character must be a bullet character.\nEach bullet is ONE single line, in exactly this shape:\n\n\u2022 [T1] Finding with the specific figure or rule stated plainly. \u2192 So what: one clause on what this means for this business. Source: Source Name, published YYYY-MM-DD. https://real.url/path\n\nRules for the bullet:\n- Confidence tag is [T1] official or regulatory or vendor-primary, [T2] recognized research firm or reputable press, [T3] blog, forum, or aggregator.\n- 'published' is the date the SOURCE published it. If the source shows no publication date, write 'published date-unknown'. Today's date is "+today+" - this is the access date and must NOT be used as the publication date.\n- If a figure is in a foreign currency, convert to INR in brackets and label it approximate.\n- Never put two findings in one bullet. Never break a bullet across lines.\n- If you genuinely cannot find real information for this angle, output the single line: \u2022 [T3] NO RELIABLE SOURCE FOUND for this angle. \u2192 So what: the executives must treat this area as an evidence gap. Source: none, published date-unknown."+
+
+  "\n\nQUESTION UNDER ANALYSIS: \""+question+"\"";
 }
 
-// Strips any preamble/narration before the first bullet point, and provides a
-// fallback message if the research call fails entirely.
+// ── PREAMBLE / NARRATION STRIP ───────────────────────────────────────────────
+// Search-enabled models emit a text block BEFORE they search ("I'll search for
+// current data on..."). callClaude joins every text block, so that narration
+// lands in the brief. This removes everything before the first real bullet and
+// drops any stray narration lines that survive.
+const NARRATION_RE=/^(i'?ll |i will |i'?m going to |i need to |let me |now (i|let)|first,? (i|let)|searching |i'?ve (found|searched)|based on (my|the) search|here (is|are) )/i;
+function stripPreamble(text){
+  if(!text)return "";
+  const lines=String(text).split("\n");
+  const isBullet=(l)=>/^\s*[\u2022\-\*]/.test(l);
+  const firstBullet=lines.findIndex(isBullet);
+  const body=firstBullet>=0?lines.slice(firstBullet):lines;
+  return body.filter(l=>{
+    const t=l.trim();
+    if(!t)return false;
+    if(isBullet(l))return true;
+    return !NARRATION_RE.test(t);
+  }).join("\n").trim();
+}
+
 // ── SOURCE QUALITY BADGES ────────────────────────────────────────────────────
 // Parses Research Brief bullets and adds 🟢🟡🔴 trust badges based on domain.
-const OFFICIAL_DOMAINS=["rbi.org","gov.in","mca.gov","nseindia","bseindia","anthropic.com","openai.com","aws.amazon","microsoft.com","google.com","razorpay.com","nasscom","gartner.com","mckinsey.com","pwc.com","deloitte.com","ey.com","kpmg.com","worldbank.org","imf.org","statista.com"];
-const PRESS_DOMAINS=["reuters","bloomberg","economic times","livemint","financialexpress","moneycontrol","techcrunch","forbes","hindu","ndtv","businessstandard","inc42","yourstory"];
+const OFFICIAL_DOMAINS=["rbi.org","gov.in","mca.gov","sebi.gov","meity","nseindia","bseindia","anthropic.com","openai.com","aws.amazon","microsoft.com","google.com","razorpay.com","nasscom","gartner.com","idc.com","mckinsey.com","pwc.com","deloitte.com","ey.com","kpmg.com","worldbank.org","imf.org","statista.com"];
+const PRESS_DOMAINS=["reuters","bloomberg","economic times","economictimes","livemint","financialexpress","moneycontrol","techcrunch","forbes","hindu","ndtv","businessstandard","inc42","yourstory"];
 
 function badgeBrief(brief){
   if(!brief)return brief;
@@ -447,18 +474,33 @@ function resolveSearchProvider(keys){
   return null;
 }
 
-// Deep Research Desk v2 — decomposes the question into 6 angles the
-// executives actually need beyond the literal question, runs a real
-// search per angle, and requires every fact to carry a source-reliability
-// tag and a date. Slower (30-90s) by design, in exchange for depth.
+// Deep Research Desk v3 — decomposes the question into 7 angles (including a
+// mandatory disconfirming-evidence pass), runs a real search per angle, then
+// runs a final synthesis pass that reconciles conflicts, ranks what matters,
+// and hands the executives framed tensions to debate rather than raw facts.
 const RESEARCH_ANGLES=[
   {id:"market",label:"Market size, growth rate, and demand trends"},
   {id:"competitors",label:"Direct and indirect competitors, their pricing and positioning"},
-  {id:"pricing",label:"Industry pricing benchmarks and unit economics"},
-  {id:"regulatory",label:"Regulatory, compliance, or legal factors relevant to this business"},
-  {id:"news",label:"Recent news from the last 6-12 months directly relevant to this question"},
-  {id:"customer",label:"Customer adoption trends, buyer behavior, and sentiment"},
+  {id:"pricing",label:"Industry pricing benchmarks and unit economics (gross margin, CAC, payback, churn)"},
+  {id:"regulatory",label:"Regulatory, compliance, licensing, and legal exposure"},
+  {id:"news",label:"Events in the last 6-12 months that change the picture"},
+  {id:"customer",label:"Customer adoption trends, buyer behaviour, and objections"},
+  {id:"contrarian",label:"Disconfirming evidence: failures, shutdowns, declining metrics, and the strongest case AGAINST this working"},
 ];
+
+// Synthesis pass. Runs after all angles. No new search — it reasons over what
+// was actually retrieved, so it cannot introduce unsourced figures.
+function synthesisPrompt(co,question,sections){
+  return "You are the Chief Research Officer reviewing your desk's raw findings before they go to the board of \""+co.name+"\". "+
+  "Below are the raw research sections. You may NOT introduce any figure that does not already appear below. You may NOT search. Your only job is to interrogate, reconcile, and prioritise what is already there.\n\n"+
+  "QUESTION UNDER ANALYSIS: \""+question+"\"\n\nRAW FINDINGS:\n"+sections+
+  "\n\nProduce exactly these five sections, in this order, in markdown. Be concise and decisive. No preamble.\n\n"+
+  "## BOTTOM LINE UP FRONT\nThe 3-5 findings that most change the decision, hardest-hitting first. One line each: the finding, then ' \u2192 ' then the decision implication. Nothing that does not change a decision belongs here.\n\n"+
+  "## CONFLICTING DATA\nAny metric that appears more than once with different values. For each: state the values and sources, pick ONE canonical figure, and give the one-line reason you chose it. If nothing conflicts, write 'No material conflicts detected.'\n\n"+
+  "## THE CASE AGAINST\nThe strongest evidence-backed argument that this should NOT proceed, or should proceed differently. Draw only on the findings above. If the contrarian angle found nothing, say so explicitly and mark it a research failure, not a green light.\n\n"+
+  "## EVIDENCE GAPS\nWhat the board will need that the research could NOT establish. Name each gap and the cheapest way to close it. Distinguish 'no data exists' from 'we did not find it'.\n\n"+
+  "## QUESTIONS FOR THE BOARD\n3-5 framed tensions, each written as a real trade-off with two defensible sides, each anchored to a specific finding above. These are what the executives will argue about, so they must be genuinely contested, not rhetorical. Format: 'Tension: ... | Side A: ... | Side B: ... | Anchored to: <finding>'.";
+}
 
 async function runResearchDesk(ask,co,compData,question,showToast,keys){
   const route=resolveSearchProvider(keys);
@@ -469,37 +511,55 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
       grounded:false,provider:"none"
     };
   }
-  try{showToast&&showToast("Research Desk running deep multi-angle search via "+route.provider+"… this can take up to 60-90s.","info");}catch{}
+  try{showToast&&showToast("Research Desk running deep multi-angle search via "+route.provider+"… this can take up to 2-3 minutes.","info");}catch{}
   const sections=[];
   let anyFail=false;
+  let anyTruncated=false;
   for(const angle of RESEARCH_ANGLES){
     try{
       const anglePrompt=researchDeskPrompt(co,compData,question)+
-        "\n\nFOCUS SPECIFICALLY on this angle: "+angle.label+
-        ". Search the live web for CURRENT information — prefer sources from the last 6-12 months and explicitly flag anything older. "+
-        "For EVERY fact you state, tag its source reliability as [TIER 1: Official/Filing], [TIER 2: Reputable News/Analyst], or [TIER 3: Blog/Forum - Low Confidence], and include the source name and date. "+
-        "If you cannot find real information for this angle, say so explicitly rather than inventing a figure. Keep this section to 4-6 bullet points.";
+        "\n\nFOCUS THIS PASS ENTIRELY ON: "+angle.label+
+        ".\nReturn 4-6 bullets, each following the OUTPUT CONTRACT exactly. Do not cover other angles.";
       const raw=await callAI(route.provider,route.key,anglePrompt,[{role:"user",content:"Research this angle now."}],2600,true);
       const text=(raw&&typeof raw==="object"&&"text" in raw)?raw.text:String(raw||"");
-      sections.push("### "+angle.label+"\n"+text.trim());
+      if(raw&&typeof raw==="object"&&(raw as any).truncated)anyTruncated=true;
+      const clean=stripPreamble(text);
+      sections.push("### "+angle.label+"\n"+(clean||"⚠ No usable findings returned for this angle."));
     }catch(angleErr:any){
       anyFail=true;
       sections.push("### "+angle.label+"\n⚠ Could not retrieve: "+String(angleErr?.message||angleErr));
     }
   }
-  let brief=sections.join("\n\n");
-  const urlCount=(brief.match(/https?:\/\//g)||[]).length;
+  let body=sections.join("\n\n");
+  const urlCount=(body.match(/https?:\/\//g)||[]).length;
   const grounded=urlCount>0;
   if(!grounded){
     try{showToast&&showToast("Research Desk returned no source URLs — session is UNGROUNDED.","warning");}catch{}
-    brief="⚠ **RESEARCH DESK RETURNED NO VERIFIABLE SOURCES**\n\nSearch ran via "+route.provider+" but produced no source URL across any angle, so nothing below can be verified.\n\n---\n"+brief;
-  }else{
-    brief=badgeBrief(brief);
-    if(anyFail)brief="⚠ Some research angles could not be completed — see notes below.\n\n"+brief;
+    return {brief:"⚠ **RESEARCH DESK RETURNED NO VERIFIABLE SOURCES**\n\nSearch ran via "+route.provider+" but produced no source URL across any angle, so nothing below can be verified.\n\n---\n"+body,grounded:false,provider:route.provider};
   }
+  body=badgeBrief(body);
+
+  // ── Synthesis pass ──
+  let synth="";
+  try{
+    try{showToast&&showToast("Research Desk synthesising findings…","info");}catch{}
+    const sRaw=await callAI(route.provider,route.key,synthesisPrompt(co,question,body),[{role:"user",content:"Synthesise now."}],3000,false);
+    const sText=(sRaw&&typeof sRaw==="object"&&"text" in sRaw)?sRaw.text:String(sRaw||"");
+    if(sRaw&&typeof sRaw==="object"&&(sRaw as any).truncated)anyTruncated=true;
+    synth=String(sText||"").trim();
+  }catch(sErr:any){
+    synth="";
+    anyFail=true;
+  }
+
+  const stamp="_Research Desk v3 — "+RESEARCH_ANGLES.length+" search angles + synthesis. Sources retrieved "+new Date().toISOString().slice(0,10)+". Publication dates are shown per finding._";
+  let brief=synth
+    ? synth+"\n\n---\n\n## SOURCE FINDINGS BY ANGLE\n\n"+body+"\n\n"+stamp
+    : "⚠ Synthesis pass failed — raw findings only, no prioritisation.\n\n"+body+"\n\n"+stamp;
+  if(anyTruncated)brief="⚠ **Some research output hit the length limit and may be incomplete.** Treat any cut-off finding as unconfirmed.\n\n"+brief;
+  if(anyFail)brief="⚠ Some research angles could not be completed — see notes below.\n\n"+brief;
   return {brief,grounded,provider:route.provider};
 }
-
 // ── FINANCIAL LIVE FEED ─────────────────────────────────────────────────────
 // Fetches live financial data for Indian markets. Called at session start.
 // Injected into finance-category executives via buildSys().
