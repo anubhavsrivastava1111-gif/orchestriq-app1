@@ -3020,14 +3020,6 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     // Universal nine-bucket cost + viability scaffold. Industry-agnostic: the
     // archetype only hints which buckets dominate, it never changes structure.
     const brArchetype=inferArchetype(brQ+" "+(co.industry||"")+" "+(co.name||""));
-    const domain=classifyDomain(brQ);
-    // Intent was hardcoded to "decide", so a boardroom asked to ANALYSE or PLAN
-    // still received decision frameworks. classifyIntent reads the actual question.
-    const brIntent=classifyIntent(brQ);
-    const frameworks=selectFramework(domain,brIntent);
-    // Universal nine-bucket cost + viability scaffold. Industry-agnostic: the
-    // archetype only hints which buckets dominate, it never changes structure.
-    const brArchetype=inferArchetype(brQ+" "+(co.industry||"")+" "+(co.name||""));
     const brScaffold="\n\n"+buildScaffoldPrompt({archetype:brArchetype})+"\n\n"+buildViabilityPrompt();
     // WORKSPACE DATA BRIDGE — the Boardroom previously received only the company
     // profile, Data Hub fields and Cost Architecture. It could not see the General
