@@ -1284,7 +1284,36 @@ function buildSys(role,co,compData,liveRates=""){
     "\n\nOUTPUT FORMAT — MANDATORY (McKinsey/BCG/Deloitte standard):\nStructure every response with these exact sections:\n\n# Executive Summary\n(2-4 sentences: core finding, headline number in " + cur.sym + ", recommended action)\n---\n## Key Insights\n(4-6 bullets, each opening with a **bold keyword**)\n---\n## Detailed Analysis\n(logical subsections with headers; tables for all comparative data)\n---\n## Financial Impact\n(all figures in " + cur.sym + "; formula → assumption → result for every number)\n---\n## Risks\n| Risk | Likelihood | Impact | Mitigation |\n|------|------------|--------|------------|\n---\n## Opportunities\n(3-5 bullets with upside in " + cur.sym + ", timeframe, and owner)\n---\n## Recommendations\n| Priority | Action | Impact | Effort | Deadline |\n|----------|--------|--------|--------|----------|\n---\n## Sources & References\n(every figure cited: [Source] — [Figure] — [Date])\n\nRULES: Bold key metrics. Use tables for numbers. Never write unbroken paragraphs. Every number must have a unit (" + cur.sym + " or %). Scannable in 90 seconds by a C-suite executive."
   );
 }
-
+// ─── BOARDROOM EXECUTIVE IDENTITY (single extension point) ───────────────────
+// Every multi-agent path (Boardroom, follow-up, chains, workflows) builds an
+// executive's identity HERE and nowhere else. Future upgrades — deliverable
+// contracts, cost-architecture scaffold, per-role research remits — are added
+// to the maps below and reach every path at once, with no further edits to the
+// prompt-construction lines. Empty maps are inert, so this is safe to ship now.
+//
+// Previously these paths sent only the first line of the biography, which meant
+// each executive received their credentials but NOT their mandate (EP[].m).
+// That is why the CFO never produced the financial model their mandate requires.
+ 
+const BOARD_MANDATE_EXTRA: Record<string,string> = {};   // roleId -> extra standing instruction
+const BOARD_DELIVERABLES:  Record<string,string> = {};   // roleId -> required analytical artefact
+const BOARD_RESEARCH_REMIT: Record<string,string> = {};  // roleId -> independent research scope
+ 
+function buildBoardIdentity(role,fallback?){
+  const p=getExecutiveIntel(role.id)||{};
+  const bio=(p.b||fallback?.b||"").trim();
+  const mandate=(p.m||fallback?.m||"").trim();
+  const enrich=(p.enrichment||"").trim();
+  const out:string[]=[];
+  if(bio)out.push("BACKGROUND: "+bio);
+  if(mandate)out.push("YOUR STANDING MANDATE — this defines your job. Discharge it fully in this session; do not abbreviate it because another participant has spoken:\n"+mandate);
+  if(enrich)out.push(enrich);
+  const x=BOARD_MANDATE_EXTRA[role.id];   if(x)out.push(x);
+  const d=BOARD_DELIVERABLES[role.id];    if(d)out.push("REQUIRED DELIVERABLE: "+d);
+  const r=BOARD_RESEARCH_REMIT[role.id];  if(r)out.push("YOUR INDEPENDENT RESEARCH REMIT: "+r);
+  if(!out.length)out.push("World-class "+(role.f||"executive")+", 20+ years experience.");
+  return out.join("\n");
+}
 // ─── CROSS-MODULE INTELLIGENCE LAYER ────────────────────────────────────────
 // Builds a prompt-safe Ledger summary. Defensive field access — works regardless
 // of exact JournalEntry internals (never throws on unknown field names).
@@ -2963,7 +2992,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         const ag=agents[i];const p=EP[ag.id]||{};
         const prev=res.map(r=>"\n--- "+r.ag.t+" ---\n"+r.text).join("\n");
         setBrPh(ag.ic+" "+ag.t+" is analyzing…");announceBoardroomPhase(ag.t+" is analyzing");
-        const sys="You are "+ag.f+" at \""+co.name+"\".\n"+"PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS IN PLAY: "+frameworks.map(f=>f.name).join(", ")+" \u2014 structure your argument through the most relevant of these where it strengthens your position.\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — from a named, cited source\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label.":"Previous contributions:\n"+prev+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Identify the single most important claim from the prior speakers that you must address from your "+ag.dl+" perspective.\n"+"Step 2: Either challenge it with a better figure or reasoning, or build on it with something genuinely new.\n"+"Step 3: Do NOT restate, recompute, or repeat any table, plan, or calculation already presented above.\n"+"Step 4: If a prior speaker's number is wrong or incomplete, state the correct figure and explain why.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\n200-350 words MAX. Brevity signals confidence, not limitation.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
+        const sys="You are "+ag.f+" at \""+co.name+"\".\n"+buildBoardIdentity(ag,p)+"\n"+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS IN PLAY: "+frameworks.map(f=>f.name).join(", ")+" \u2014 structure your argument through the most relevant of these where it strengthens your position.\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — from a named, cited source\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label.":"Previous contributions:\n"+prev+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Identify the single most important claim from the prior speakers that you must address from your "+ag.dl+" perspective.\n"+"Step 2: Either challenge it with a better figure or reasoning, or build on it with something genuinely new.\n"+"Step 3: Do NOT restate, recompute, or repeat any table, plan, or calculation already presented above.\n"+"Step 4: If a prior speaker's number is wrong or incomplete, state the correct figure and explain why.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\n200-350 words MAX. Brevity signals confidence, not limitation.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
         let agText="";
         let agTruncated=false;
         let gotResponse=false;
@@ -3141,7 +3170,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         setBrPh(ag.ic+" "+ag.t+" is responding…");
 
         const sys="You are "+ag.f+" at \""+co.name+"\".\n"
-          +"PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"
+          +buildBoardIdentity(ag,p)+"\n"
           +buildCtx(co,compData)
           +"\n\nDECISION THREAD CONTEXT (all previous stages — do not repeat, only reference):\n"+priorStagesContext
           +"\n\n"+"=".repeat(60)+"\n\n"
@@ -4991,7 +5020,7 @@ if(!role){
 
     const sys=
   "You are "+role.f+" at \""+co.name+"\".\n"+
-  "PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+
+  buildBoardIdentity(role,p)+"\n"+
   buildCtx(co,compData)+"\n"+
   preflightContext+"\n"+
   "WORKFLOW CHAIN: \""+ch.label+"\" Level "+(i+1)+"/"+activeChain.length+"\n"+
@@ -5182,7 +5211,7 @@ const processTask=useCallback(async(task:any)=>{
     // System prompt — identical in both modes except prevWork variable
     const sys=
       "You are "+role.f+" at \""+co.name+"\".\n"+
-      "PROFILE: "+(p.b?.split("\n")[0]||"")+"\n"+
+      buildBoardIdentity(role,p)+"\n"+
       "OPERATING STYLE: Think critically, not agreeably — challenge weak assumptions including your own from prior drafts. When current real-world data would strengthen your answer (rates, regulations, market data, competitor moves, benchmarks), search for it and use it — don't rely on memory for anything time-sensitive. Be decisive and specific; avoid generic frameworks restated without numbers.\n"+
       buildCtx(co,compData)+"\n"+
       "AUTONOMOUS CHAIN Level "+(i+1)+"/"+ch.chain.length+" - "+ch.label+"\n"+
