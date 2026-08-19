@@ -18,6 +18,7 @@ import { generateExcel, generatePptx, generatePdf, generateDocx } from "./lib/Ge
 import { ENGINE_ENABLED, runPipeline, classifyDomain, classifyIntent, selectFramework, selfReview, classifyEvidence } from "./lib/IntelligenceEngine";
 import { buildScaffoldPrompt, buildViabilityPrompt, inferArchetype } from "./lib/BusinessScaffold";
 import { scanSuppliedInputs, buildIntakePrompt, buildRegisterInjection, INTAKE_FAILED_NOTICE } from "./lib/IntakeRegister";
+import { runSearch, formatResultsForPrompt, RETRIEVED_RESULTS_RULES, hasExternalSearch, SEARCH_PROVIDERS, estimateSearchCost } from "./lib/SearchProviders";
 import CostArchitecture from "./CostArchitecture";
 import { loadCostContext, getCostBrief, publishCostDiagnosis, clearCostContext } from "./lib/CostContext";
 
@@ -498,6 +499,36 @@ async function callSearchWithFailover(routes,sys,msgs,maxT,enableSearch,onNote){
   throw lastErr||new Error("No search-capable provider available.");
 }
 
+// ── RETRIEVAL-FIRST SEARCH ───────────────────────────────────────────────────
+// Order of preference when the app does its own searching. Any provider with no
+// key is skipped, so this list is safe even when nothing is configured.
+const SEARCH_CHAIN:any[]=["serper","tavily","brave","dataforseo"];
+ 
+// Search phrasing per research angle. Built in code, not by a model, so the
+// queries are predictable and cost nothing to produce.
+const ANGLE_QUERY_HINTS:Record<string,string[]>={
+  market:["market size growth rate","demand trends forecast"],
+  competitors:["competitors pricing","market leaders comparison"],
+  pricing:["pricing benchmark unit economics","gross margin industry benchmark"],
+  regulatory:["licence registration requirement India","regulation compliance cost"],
+  news:["latest news 2026","recent developments"],
+  customer:["customer adoption survey","buyer behaviour research"],
+  contrarian:["failures shutdown losses","risks why it failed"],
+};
+ 
+// Pulls the meaningful words out of the user's question. Long questions make bad
+// search queries, so this keeps the distinctive terms and drops the filler.
+const QUERY_STOPWORDS=new Set(["what","which","when","where","how","why","should","would","could","the","and","for","are","was","with","that","this","from","have","has","been","will","can","does","did","you","your","our","their","about","into","than","then","them","they","there","here","just","very","much","many","more","most","some","any","all","not","but","its","it's","give","tell","need","want","please","also","only","over","under","between","using","use","get","make","take","think","know","see","look","find","help","idea","business","company"]);
+function buildAngleQueries(question:string,angleId:string,co:any):string[]{
+  const words=String(question||"").toLowerCase()
+    .replace(/[^a-z0-9\s₹.%-]/g," ").split(/\s+/)
+    .filter(w=>w.length>2&&!QUERY_STOPWORDS.has(w));
+  const core=Array.from(new Set(words)).slice(0,7).join(" ");
+  const place=String(co?.location||"").split(",")[0].trim();
+  const hints=ANGLE_QUERY_HINTS[angleId]||["overview"];
+  return hints.map(h=>(core+" "+h+(place?" "+place:"")).trim()).filter(Boolean);
+}
+ 
 // Deep Research Desk v3 — decomposes the question into 7 angles (including a
 // mandatory disconfirming-evidence pass), runs a real search per angle, then
 // runs a final synthesis pass that reconciles conflicts, ranks what matters,
@@ -538,15 +569,42 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   }
   try{showToast&&showToast("Research Desk running deep multi-angle search via "+routes.map(r=>r.provider).join(" → ")+"… this can take up to 2-3 minutes.","info");}catch{}
   let usedProvider=route.provider;
+  const useExternalSearch=hasExternalSearch(SEARCH_CHAIN,keys);
+  let searchProviderUsed="";
+  let searchCount=0;
+  try{
+    if(useExternalSearch)showToast&&showToast("Research Desk: searching the web directly (cheaper, and every source keeps its real URL).","info");
+  }catch{}
   const sections=[];
   let anyFail=false;
   let anyTruncated=false;
   for(const angle of RESEARCH_ANGLES){
     try{
-      const anglePrompt=researchDeskPrompt(co,compData,question)+
+      let anglePrompt=researchDeskPrompt(co,compData,question)+
         "\n\nFOCUS THIS PASS ENTIRELY ON: "+angle.label+
         ".\nReturn 4-6 bullets, each following the OUTPUT CONTRACT exactly. Do not cover other angles.";
-      const fo=await callSearchWithFailover(routes,anglePrompt,[{role:"user",content:"Research this angle now."}],2600,true,
+      // RETRIEVAL FIRST: when a search key is configured, the APP searches and
+      // hands the model real URLs. The model then only has to structure them —
+      // it can no longer choose whether to show a source, which is what caused
+      // 63 "Verified Fact" claims with zero URLs in the previous build.
+      let angleSearchUsed=false;
+      if(useExternalSearch){
+        const qs=buildAngleQueries(question,angle.id,co);
+        const found:any[]=[];const seenUrls=new Set<string>();
+        for(const q of qs){
+          const so=await runSearch(q,SEARCH_CHAIN,keys,6,
+            (prov,msg)=>{try{showToast&&showToast("Search: "+prov+" — "+String(msg).slice(0,60),"warning");}catch{}});
+          if(so.provider&&so.provider!=="none")searchProviderUsed=so.provider;
+          if(!so.fromCache&&so.results.length)searchCount++;
+          for(const rr of so.results){if(!seenUrls.has(rr.url)){seenUrls.add(rr.url);found.push(rr);}}
+        }
+        if(found.length){
+          angleSearchUsed=true;
+          anglePrompt+="\n\n"+formatResultsForPrompt(found,"RETRIEVED SOURCES FOR THIS ANGLE (application-supplied, real URLs):")
+            +"\n\n"+RETRIEVED_RESULTS_RULES;
+        }
+      }
+      const fo=await callSearchWithFailover(routes,anglePrompt,[{role:"user",content:"Research this angle now."}],2600,!angleSearchUsed,
         (prov,msg)=>{try{showToast&&showToast("Research Desk: "+prov+" failed ("+msg.slice(0,60)+") — trying next provider…","warning");}catch{}});
       const raw=fo.out; usedProvider=fo.provider;
       const text=(raw&&typeof raw==="object"&&"text" in raw)?raw.text:String(raw||"");
@@ -581,7 +639,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
     anyFail=true;
   }
 
-  const stamp="_Research Desk v3 — "+RESEARCH_ANGLES.length+" search angles + synthesis. Sources retrieved "+new Date().toISOString().slice(0,10)+". Publication dates are shown per finding._";
+  const stamp="_Research Desk v4 — "+RESEARCH_ANGLES.length+" angles + synthesis. "+(searchProviderUsed?("Web search via "+searchProviderUsed+" ("+searchCount+" queries, approx $"+estimateSearchCost(searchProviderUsed as any,searchCount).toFixed(3)+")."):"Model-native search.")+" Retrieved "+new Date().toISOString().slice(0,10)+". Publication dates are shown per finding._";
   let brief=synth
     ? synth+"\n\n---\n\n## SOURCE FINDINGS BY ANGLE\n\n"+body+"\n\n"+stamp
     : "⚠ Synthesis pass failed — raw findings only, no prioritisation.\n\n"+body+"\n\n"+stamp;
@@ -2469,7 +2527,7 @@ export default function App(){
   const [keysHydrated,setKeysHydrated]=useState(false);
   const [offP,setOffP]=useState<Record<string,boolean>>(()=>{try{return JSON.parse(localStorage.getItem("cos-offp")||"{}");}catch{return {};}});
   const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return WorkspaceMemory.get<string>("oiq-sb-col")==="1";}catch{return false;}});
-  const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:""});
+  const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:"",serper:"",tavily:"",brave:"",dataforseo:""});
 
   // Save API keys to the signed-in user's own profile row. This MUST sit below
   // the keys declaration — referencing it earlier throws "Cannot access before
@@ -5881,7 +5939,28 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               {testSt[id]?.startsWith("fail:")&&<div style={{fontSize:9,color:"#EF4444",marginTop:2,lineHeight:1.4}}>{testSt[id].slice(5)}</div>}
             </div>
           ))}
-          {cfgP.length>1&&(
+          <div style={{padding:"10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:10}}>
+                  <label style={{...S.lbl,marginBottom:2}}>Web Search Service (optional, but strongly recommended)</label>
+                  <div style={{fontSize:8.5,color:"#5A6480",marginBottom:8,lineHeight:1.5}}>
+                    Without a key here, Claude or Gemini searches for you at roughly $10 per 1,000 searches, and decides for itself whether to show a source link.
+                    With a key, the app searches directly, costs far less, and every finding keeps a real clickable URL. The first service with a key is used; the rest are fallbacks.
+                  </div>
+                  {SEARCH_PROVIDERS.filter(sp=>sp.id!=="native").map(sp=>(
+                    <div key={sp.id} style={{marginBottom:8}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                        <span style={{fontSize:10,fontWeight:700,color:"#A0AAC0"}}>{sp.label}</span>
+                        <span style={{fontSize:8.5,color:"#10B981"}}>{sp.freeTier}</span>
+                        <span style={{fontSize:8.5,color:"#5A6480"}}>{sp.costPer1000Usd!==null?("~$"+sp.costPer1000Usd+"/1k"):""}</span>
+                        {sp.signupUrl&&<a href={sp.signupUrl} target="_blank" rel="noopener noreferrer" style={{marginLeft:"auto",fontSize:9,color:"#14B8A6",textDecoration:"none"}}>Get key ↗</a>}
+                      </div>
+                      <input style={{...S.inp,fontSize:11}} type="password" placeholder={sp.keyPlaceholder}
+                        value={keys[sp.id]||""}
+                        onChange={e=>{const nk={...keys,[sp.id]:e.target.value};setKeys(nk);sv("cos-keys",{keys:nk,defaultProvider:defP,multiAI});}}/>
+                      <div style={{fontSize:8,color:"#3A4060",marginTop:2}}>{sp.notes}</div>
+                    </div>
+                  ))}
+                </div>
+                {cfgP.length>1&&(
             <div style={{padding:"8px 10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:10}}>
               <label style={{...S.lbl,marginBottom:5}}>Default Model</label>
               <div style={{display:"flex",gap:4}}>{cfgP.map(p=><button key={p} onClick={()=>setDefP(p)} style={{flex:1,padding:"5px",borderRadius:4,fontSize:10,fontWeight:600,border:"1px solid "+(defP===p?MODELS[p].color:"#1a2030"),background:defP===p?MODELS[p].color+"15":"transparent",color:defP===p?MODELS[p].color:"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{MODELS[p].name}</button>)}</div>
