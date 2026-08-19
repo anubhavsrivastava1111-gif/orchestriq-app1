@@ -3047,7 +3047,30 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     const brWorkspaceBlock=brWorkspace.trim()
       ?"\n\n=== LIVE WORKSPACE DATA (entered by the user in this app — these are REAL figures, not estimates) ===\n"+brWorkspace.trim()+"\n=== END WORKSPACE DATA ===\nUse these figures in preference to any estimate or benchmark. Where a workspace figure contradicts a researched benchmark, say so explicitly and explain which you are relying on and why.\n"
       :"\n\nNOTE: no General Ledger entries or prior session history exist in this workspace, so no internal actuals are available. Say so where a conclusion depends on internal figures.\n";
-    // RESEARCH STEP: one search-enabled call gathers current verifiable figures
+    // ── PHASE 0: INTAKE & VALIDATION ────────────────────────────────────────
+    // Establishes what is KNOWN, UNKNOWN and ASSUMED before any executive speaks,
+    // so the board reasons from an honest evidence base instead of quietly
+    // inventing inputs. Runs with search OFF: it may only classify what already
+    // exists, never introduce a figure. Failure is non-fatal — the board proceeds
+    // with an explicit warning rather than silently ungrounded.
+    let brRegisterBlock="";
+    try{
+      if(!cancelRef.current.br){
+        setBrPh("🔍 Establishing what is known and unknown…");
+        const brScan=scanSuppliedInputs(brQ);
+        const brIntakeSys=buildIntakePrompt(brQ,buildCtx(co,compData)+brWorkspaceBlock,brScan);
+        const brIntakeRaw=await ask(brIntakeSys,[{role:"user",content:"Produce the evidence register now."}],2200);
+        const brRegister=(brIntakeRaw&&typeof brIntakeRaw==="object"&&"text" in brIntakeRaw)?brIntakeRaw.text:String(brIntakeRaw||"");
+        brRegisterBlock=buildRegisterInjection(brRegister);
+        setBrCur(prev=>({...prev,intakeRegister:String(brRegister||"").trim()}));
+      }
+    }catch(e){
+      console.warn("[OIQ] phase 0 intake:",e);
+      brRegisterBlock="\n\n"+INTAKE_FAILED_NOTICE+"\n";
+    }
+ 
+    try{
+      // RESEARCH STEP: one search-enabled call gathers current verifiable figures
       // relevant to the question. All agents then reference this shared brief
       // instead of each searching independently (cost + consistency).
       if(!cancelRef.current.br){
