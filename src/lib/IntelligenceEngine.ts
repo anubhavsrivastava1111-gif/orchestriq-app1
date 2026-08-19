@@ -330,53 +330,91 @@ export function selectFramework(
   const frameworkMap: Record<Domain, [string, string][]> = {
     strategy: [
       ["SWOT", "Situational overview — strengths, weaknesses, opportunities, threats"],
-      ["Porter's Five Forces", "Industry competitive dynamics"],
+      ["Porter's Five Forces", "Industry competitive dynamics and structural profitability"],
       ["Ansoff Matrix", "Growth direction — market penetration vs new markets vs new products"],
+      ["TAM / SAM / SOM", "Size the opportunity from the top down and bottom up; show the calculation"],
+      ["PESTLE", "Political, economic, social, technological, legal and environmental forces"],
+      ["Porter's Diamond", "Why this location and factor conditions do or do not confer advantage"],
+      ["Scenario Analysis", "Model best, base and worst case with the triggers that move between them"],
     ],
     finance: [
-      ["Financial Ratio Analysis", "Quantify performance across liquidity, profitability, leverage"],
-      ["Variance Analysis", "Compare actual vs budget to identify drivers"],
+      ["Cost Structure Analysis", "Decompose total cost into fixed, variable and step-fixed components"],
+      ["Unit Economics", "Cost and contribution per single unit of output, order or customer"],
+      ["Contribution Margin Analysis", "Revenue less variable cost per unit — the engine of break-even"],
+      ["Break-Even Analysis", "Volume and revenue at which the business stops losing money"],
+      ["Sensitivity Analysis", "Which one or two drivers move the outcome most, and by how much"],
+      ["Scenario Analysis", "Low / Expected / High cases with the assumption behind each"],
+      ["Capital Requirement & Payback", "Upfront capital, working capital, and months to recover it"],
+      ["Financial Ratio Analysis", "Liquidity, profitability and leverage — only where statements exist"],
+      ["Variance Analysis", "Actual vs budget to identify drivers — only where a budget exists"],
     ],
     marketing: [
-      ["SWOT", "Situational overview before go-to-market"],
-      ["Ansoff Matrix", "Determine the growth vector this campaign targets"],
-      ["Business Model Canvas", "Validate the value proposition and channels"],
+      ["Segmentation, Targeting, Positioning", "Choose the beachhead segment before spending on demand"],
+      ["TAM / SAM / SOM", "Size the addressable demand and show the derivation"],
+      ["CAC : LTV Analysis", "Cost to acquire versus lifetime value, with payback period"],
+      ["Porter's Five Forces", "Buyer power and substitute threat as they shape pricing"],
+      ["Business Model Canvas", "Validate value proposition, channels and revenue streams"],
+      ["Ansoff Matrix", "Determine the growth vector this spend actually targets"],
     ],
     operations: [
-      ["Value Chain Analysis", "Identify where the business creates and loses value"],
+      ["Value Chain Analysis", "Identify where the business creates, and where it loses, value"],
+      ["Capacity & Throughput Analysis", "Maximum sustainable output and the cost of adding capacity"],
+      ["Theory of Constraints", "Find the single bottleneck that caps the whole system"],
+      ["Cost Structure Analysis", "Operating cost drivers, split fixed versus variable"],
       ["Lean / Six Sigma", "Eliminate waste and reduce process variation"],
+      ["Make vs Buy Analysis", "In-house versus outsourced, on total cost and control"],
     ],
     hr: [
+      ["Workforce Cost Model", "Fully loaded cost per head by role, including statutory cost"],
+      ["Span of Control / Org Design", "Structure and headcount required at each volume level"],
       ["RACI", "Clarify roles and responsibilities across the org"],
       ["Balanced Scorecard", "Align people metrics to strategic objectives"],
     ],
     technology: [
-      ["Value Chain Analysis", "Map where technology creates competitive advantage"],
+      ["Total Cost of Ownership", "Build, run, maintain and retire cost over the full life"],
+      ["Build vs Buy Analysis", "Develop in-house versus licence, on cost, speed and lock-in"],
+      ["Scaling Cost Curve", "How cost per unit moves as volume grows — linear, step, or sub-linear"],
+      ["Technical Risk Register", "Failure modes, likelihood, impact and mitigation"],
+      ["Value Chain Analysis", "Where technology creates defensible advantage"],
     ],
     sales: [
-      ["Ansoff Matrix", "Revenue growth — existing vs new customers vs new products"],
+      ["CAC : LTV Analysis", "Acquisition cost against lifetime value and payback"],
+      ["Pipeline & Conversion Analysis", "Stage conversion rates and the volume required at the top"],
+      ["Ansoff Matrix", "Revenue growth — existing versus new customers and products"],
     ],
     audit: [
-      ["Risk Register", "Identify, score, and mitigate risks systematically"],
+      ["Risk Register", "Identify, score and mitigate risks systematically"],
+      ["Control Gap Analysis", "Where controls are absent, weak, or untested"],
     ],
     legal: [
-      ["Risk Register", "Identify compliance obligations and exposure"],
+      ["Regulatory Register", "Every licence, filing and obligation with cost, lead time and penalty"],
+      ["Risk Register", "Compliance exposure scored by likelihood and impact"],
+      ["Contract Exposure Review", "Liability, indemnity, termination and IP ownership"],
     ],
     customer_success: [
-      ["Balanced Scorecard", "Track retention, NPS, health score, and expansion revenue"],
+      ["Cohort Retention Analysis", "Retention and expansion by cohort over time"],
+      ["Balanced Scorecard", "Retention, NPS, health score and expansion revenue"],
     ],
     executive: [
       ["SWOT", "Board-level situational overview"],
+      ["Scenario Analysis", "Best, base and worst case with the triggers between them"],
+      ["Decision Matrix", "Score options against weighted criteria"],
       ["Balanced Scorecard", "Cross-functional performance scorecard"],
-      ["Scenario Planning", "Model best, base, and worst case outcomes"],
+      ["TAM / SAM / SOM", "Size the opportunity before committing capital"],
     ],
     general: [
       ["SWOT", "Broad situational assessment as a starting point"],
+      ["Cost Structure Analysis", "Decompose the cost base before drawing any conclusion"],
+      ["Break-Even Analysis", "Establish the volume at which this becomes viable"],
     ],
   };
-
-  // For planning/creation intent, add roadmap-oriented frameworks
-  const selected = frameworkMap[domain] ?? frameworkMap.general;
+ 
+  // Copy, never the source array. The previous version returned the map's own
+  // array by reference and pushed onto it, so intent-based frameworks were
+  // appended permanently and accumulated on every subsequent call in the
+  // session ("Decision Matrix, Decision Matrix, Decision Matrix...").
+  const selected: [string, string][] = [...(frameworkMap[domain] ?? frameworkMap.general)];
+ 
   if (intent === "decide") {
     selected.push([
       "Decision Matrix",
@@ -389,8 +427,22 @@ export function selectFramework(
       "Translate strategy into measurable quarterly objectives and key results",
     ]);
   }
-
-  return selected.map(([name, reason]) => ({ name, reason }));
+  if (intent === "analyse") {
+    selected.push([
+      "Root Cause Analysis (5 Whys)",
+      "Drive past the symptom to the underlying cause before recommending action",
+    ]);
+  }
+ 
+  // De-duplicate by framework name, keeping the first reason given.
+  const seen = new Set<string>();
+  const deduped = selected.filter(([name]) => {
+    if (seen.has(name)) return false;
+    seen.add(name);
+    return true;
+  });
+ 
+  return deduped.map(([name, reason]) => ({ name, reason }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
