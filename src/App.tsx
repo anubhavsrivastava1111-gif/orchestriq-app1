@@ -479,7 +479,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
         ". Search the live web for CURRENT information — prefer sources from the last 6-12 months and explicitly flag anything older. "+
         "For EVERY fact you state, tag its source reliability as [TIER 1: Official/Filing], [TIER 2: Reputable News/Analyst], or [TIER 3: Blog/Forum - Low Confidence], and include the source name and date. "+
         "If you cannot find real information for this angle, say so explicitly rather than inventing a figure. Keep this section to 4-6 bullet points.";
-      const raw=await callAI(route.provider,route.key,anglePrompt,[{role:"user",content:"Research this angle now."}],900,true);
+      const raw=await callAI(route.provider,route.key,anglePrompt,[{role:"user",content:"Research this angle now."}],2600,true);
       const text=(raw&&typeof raw==="object"&&"text" in raw)?raw.text:String(raw||"");
       sections.push("### "+angle.label+"\n"+text.trim());
     }catch(angleErr:any){
