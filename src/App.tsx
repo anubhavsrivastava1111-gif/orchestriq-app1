@@ -2008,6 +2008,14 @@ function gatherWorkspace(co,compData,chats,brSessions,workflows,tQueue,extras){
   const parts=[];
   parts.push("COMPANY: "+co.name+" | "+co.industry+" | "+co.stage+" | "+co.location+" | "+co.currency);
   if(Object.keys(compData).length)parts.push("\n=== COMPANY DATA ===\n"+Object.entries(compData).map(([k,v])=>k+": "+v).join("\n"));
+  // Exports previously could not cite the General Ledger — the books were absent
+  // from every generated document. extras.ledger is optional; when absent nothing changes.
+  if(extras?.ledger&&extras.ledger.length){
+    try{
+      const snap=buildLedgerSnapshot(extras.ledger,extras.cur);
+      if(snap)parts.push("\n=== GENERAL LEDGER (actual posted entries) ===\n"+snap);
+    }catch{}
+  }
   if(extras?.boardroom&&brSessions.length){
     parts.push("\n=== BOARDROOM SESSIONS ===");
     brSessions.slice(0,5).forEach(s=>parts.push("Q: "+s.q+"\nSynthesis: "+stripMd(s.synthesis||"").slice(0,1500)));
@@ -3012,7 +3020,40 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     // Universal nine-bucket cost + viability scaffold. Industry-agnostic: the
     // archetype only hints which buckets dominate, it never changes structure.
     const brArchetype=inferArchetype(brQ+" "+(co.industry||"")+" "+(co.name||""));
+    const domain=classifyDomain(brQ);
+    // Intent was hardcoded to "decide", so a boardroom asked to ANALYSE or PLAN
+    // still received decision frameworks. classifyIntent reads the actual question.
+    const brIntent=classifyIntent(brQ);
+    const frameworks=selectFramework(domain,brIntent);
+    // Universal nine-bucket cost + viability scaffold. Industry-agnostic: the
+    // archetype only hints which buckets dominate, it never changes structure.
+    const brArchetype=inferArchetype(brQ+" "+(co.industry||"")+" "+(co.name||""));
     const brScaffold="\n\n"+buildScaffoldPrompt({archetype:brArchetype})+"\n\n"+buildViabilityPrompt();
+    // WORKSPACE DATA BRIDGE — the Boardroom previously received only the company
+    // profile, Data Hub fields and Cost Architecture. It could not see the General
+    // Ledger or prior Boardroom / Time Machine / Autopilot work, so executives
+    // estimated figures that were already posted in the app. getModuleContext()
+    // already supplies all of this to the workflow and task paths; the Boardroom
+    // simply never called it. Domain is mapped onto the category keys it expects.
+    const brModCat=(domain==="finance"||domain==="audit"||domain==="legal")
+      ?(domain==="legal"?"audit":domain)
+      :((domain==="strategy"||domain==="executive")?"strategy_task":domain);
+    let brWorkspace="";
+    try{
+      brWorkspace=getModuleContext(brModCat,{
+        ledgerEntries,brSessions,workflows,tQueue:tQRef.current,
+        tmRes,apRes,tmSessions,apSessions,cur
+      })||"";
+      // Finance data is decision-critical in EVERY boardroom question, not only
+      // finance-category ones, so pull the ledger snapshot in regardless of domain.
+      if(brModCat!=="finance"&&ledgerEntries?.length){
+        const snap=buildLedgerSnapshot(ledgerEntries,cur);
+        if(snap)brWorkspace="=== LIVE LEDGER DATA (real transactions from this company's General Ledger) ===\n"+snap+(brWorkspace?"\n\n"+brWorkspace:"");
+      }
+    }catch(e){console.warn("[OIQ] boardroom workspace bridge:",e);}
+    const brWorkspaceBlock=brWorkspace.trim()
+      ?"\n\n=== LIVE WORKSPACE DATA (entered by the user in this app — these are REAL figures, not estimates) ===\n"+brWorkspace.trim()+"\n=== END WORKSPACE DATA ===\nUse these figures in preference to any estimate or benchmark. Where a workspace figure contradicts a researched benchmark, say so explicitly and explain which you are relying on and why.\n"
+      :"\n\nNOTE: no General Ledger entries or prior session history exist in this workspace, so no internal actuals are available. Say so where a conclusion depends on internal figures.\n";
     try{
       // RESEARCH STEP: one search-enabled call gathers current verifiable figures
       // relevant to the question. All agents then reference this shared brief
@@ -3038,7 +3079,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         const ag=agents[i];const p=EP[ag.id]||{};
         const prev=res.map(r=>"\n--- "+r.ag.t+" ---\n"+r.text).join("\n");
         setBrPh(ag.ic+" "+ag.t+" is analyzing…");announceBoardroomPhase(ag.t+" is analyzing");
-        const sys="You are "+ag.f+" at \""+co.name+"\".\n"+buildBoardIdentity(ag,p)+"\n"+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS AVAILABLE: "+frameworks.map(f=>f.name+" ("+f.reason+")").join("; ")+"\nFRAMEWORK REQUIREMENT: you MUST explicitly apply at least one named framework and SHOW ITS OUTPUT — the populated table, the calculation, the scored matrix, the register. Naming a framework without producing its output does not count. Choose the framework that answers a specific question you actually need answered; if none of the above fits, name and apply a more appropriate one and say why you chose it. Never insert a framework to look thorough.\n"+brScaffold+"\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — from a named, cited source\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label.":"Previous contributions:\n"+prev+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Conduct your own independent analysis of the question from your "+ag.dl+" perspective, and discharge your standing mandate in full. If your mandate requires a financial model, build it. If it requires a process or capacity map, produce it. If it requires a risk or regulatory register, write it. Another executive having touched a topic does NOT relieve you of your own analysis of it.\n"+"Step 2: You MAY re-derive, recompute, or rebuild any figure a prior speaker presented. If your figure differs from theirs, show both side by side and explain the reason for the gap.\n"+"Step 3: Where an input you need is missing, name the missing variable and state how it changes your conclusion. Do not assume through a gap silently.\n"+"Step 4: Only after presenting your own analysis, state where it contradicts a prior speaker and why yours is better founded.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\nLENGTH: up to "+boardWordBudget(ag)+" words. Use the space your analysis actually needs — depth and shown working are what is being judged, not brevity. Never state or estimate your own word count.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
+        const sys="You are "+ag.f+" at \""+co.name+"\".\n"+buildBoardIdentity(ag,p)+"\n"+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS AVAILABLE: "+frameworks.map(f=>f.name+" ("+f.reason+")").join("; ")+"\nFRAMEWORK REQUIREMENT: you MUST explicitly apply at least one named framework and SHOW ITS OUTPUT — the populated table, the calculation, the scored matrix, the register. Naming a framework without producing its output does not count. Choose the framework that answers a specific question you actually need answered; if none of the above fits, name and apply a more appropriate one and say why you chose it. Never insert a framework to look thorough.\n"+brScaffold+brWorkspaceBlock+"\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — from a named, cited source\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label.":"Previous contributions:\n"+prev+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Conduct your own independent analysis of the question from your "+ag.dl+" perspective, and discharge your standing mandate in full. If your mandate requires a financial model, build it. If it requires a process or capacity map, produce it. If it requires a risk or regulatory register, write it. Another executive having touched a topic does NOT relieve you of your own analysis of it.\n"+"Step 2: You MAY re-derive, recompute, or rebuild any figure a prior speaker presented. If your figure differs from theirs, show both side by side and explain the reason for the gap.\n"+"Step 3: Where an input you need is missing, name the missing variable and state how it changes your conclusion. Do not assume through a gap silently.\n"+"Step 4: Only after presenting your own analysis, state where it contradicts a prior speaker and why yours is better founded.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\nLENGTH: up to "+boardWordBudget(ag)+" words. Use the space your analysis actually needs — depth and shown working are what is being judged, not brevity. Never state or estimate your own word count.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
         let agText="";
         let agTruncated=false;
         let gotResponse=false;
@@ -3184,7 +3225,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     }catch(err){
       if(!cancelRef.current.br){setError(err.message);showToast("Boardroom error: "+err.message,"error");}
     }finally{setBrRun(false);setBrPh("");setBrResearching(false);cancelRef.current.br=false;}
-  },[brQ,brAg,brRun,co,compData,brSessions,keys,defP,showToast]);
+  },[brQ,brAg,brRun,co,compData,brSessions,keys,defP,showToast,ledgerEntries,workflows,tmRes,apRes,tmSessions,apSessions,cur]);
 
   // Continue a reopened/finished debate with a follow-up. Same executives respond
   // again using the prior debate + synthesis as context. Appends to the live debate.
@@ -5616,6 +5657,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     setExpGenerating(true);setExpSynthesis("");
     try{
       const corpus=gatherWorkspace(co,compData,chats,brSessions,workflows,tQueue,{
+      ledger:ledgerEntries,cur,
         chats:expSources.chats,boardroom:expSources.boardroom,workflows:expSources.workflows,
         tasks:expSources.tasks,timeMachine:expSources.timeMachine?tmRes:null,autopilot:expSources.autopilot?apRes:null,
       });
