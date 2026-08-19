@@ -1314,6 +1314,20 @@ function buildBoardIdentity(role,fallback?){
   if(!out.length)out.push("World-class "+(role.f||"executive")+", 20+ years experience.");
   return out.join("\n");
 }
+ 
+// ─── BOARDROOM RESPONSE BUDGET ───────────────────────────────────────────────
+// A single flat word cap forced every role into the same shallow shape: an
+// analytical mandate (financial model, capacity map, cost curve) cannot be
+// discharged in 350 words. Budgets are per role and live in one map so they can
+// be tuned later without touching any prompt-construction line.
+const BOARD_WORD_BUDGET: Record<string,number> = {
+  chairman:1200, ceo:1200, cfo:1400, coo:1200, cto:1200, cmo:1100,
+  cso:1000, clo:1000, chro:900, board:900, vp_fin:1200, fin_ctrl:1000,
+};
+const BOARD_WORD_BUDGET_DEFAULT=900;
+function boardWordBudget(role){
+  return BOARD_WORD_BUDGET[role?.id]||BOARD_WORD_BUDGET_DEFAULT;
+}
 // ─── CROSS-MODULE INTELLIGENCE LAYER ────────────────────────────────────────
 // Builds a prompt-safe Ledger summary. Defensive field access — works regardless
 // of exact JournalEntry internals (never throws on unknown field names).
@@ -2992,7 +3006,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         const ag=agents[i];const p=EP[ag.id]||{};
         const prev=res.map(r=>"\n--- "+r.ag.t+" ---\n"+r.text).join("\n");
         setBrPh(ag.ic+" "+ag.t+" is analyzing…");announceBoardroomPhase(ag.t+" is analyzing");
-        const sys="You are "+ag.f+" at \""+co.name+"\".\n"+buildBoardIdentity(ag,p)+"\n"+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS IN PLAY: "+frameworks.map(f=>f.name).join(", ")+" \u2014 structure your argument through the most relevant of these where it strengthens your position.\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — from a named, cited source\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label.":"Previous contributions:\n"+prev+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Identify the single most important claim from the prior speakers that you must address from your "+ag.dl+" perspective.\n"+"Step 2: Either challenge it with a better figure or reasoning, or build on it with something genuinely new.\n"+"Step 3: Do NOT restate, recompute, or repeat any table, plan, or calculation already presented above.\n"+"Step 4: If a prior speaker's number is wrong or incomplete, state the correct figure and explain why.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\n200-350 words MAX. Brevity signals confidence, not limitation.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
+        const sys="You are "+ag.f+" at \""+co.name+"\".\n"+buildBoardIdentity(ag,p)+"\n"+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS IN PLAY: "+frameworks.map(f=>f.name).join(", ")+" \u2014 structure your argument through the most relevant of these where it strengthens your position.\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — from a named, cited source\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label.":"Previous contributions:\n"+prev+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Conduct your own independent analysis of the question from your "+ag.dl+" perspective, and discharge your standing mandate in full. If your mandate requires a financial model, build it. If it requires a process or capacity map, produce it. If it requires a risk or regulatory register, write it. Another executive having touched a topic does NOT relieve you of your own analysis of it.\n"+"Step 2: You MAY re-derive, recompute, or rebuild any figure a prior speaker presented. If your figure differs from theirs, show both side by side and explain the reason for the gap.\n"+"Step 3: Where an input you need is missing, name the missing variable and state how it changes your conclusion. Do not assume through a gap silently.\n"+"Step 4: Only after presenting your own analysis, state where it contradicts a prior speaker and why yours is better founded.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\nLENGTH: up to "+boardWordBudget(ag)+" words. Use the space your analysis actually needs — depth and shown working are what is being judged, not brevity. Never state or estimate your own word count.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
         let agText="";
         let agTruncated=false;
         let gotResponse=false;
@@ -3179,7 +3193,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           +"Step 1: Reference any relevant conclusion from a prior stage if it informs your answer.\n"
           +"Step 2: Add your "+ag.dl+" perspective on the follow-up — be specific and new.\n"
           +"Step 3: Label every key statement: [Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"
-          +"200-350 words MAX.";
+          +"LENGTH: up to "+boardWordBudget(ag)+" words. Never state your own word count.";
 
         let replyFull=null;let lastErr=null;
         for(let attempt=0;attempt<2;attempt++){
