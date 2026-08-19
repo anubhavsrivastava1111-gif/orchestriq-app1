@@ -1378,6 +1378,15 @@ function boardWordBudget(role){
   return BOARD_WORD_BUDGET[role?.id]||BOARD_WORD_BUDGET_DEFAULT;
 }
  
+// Hard output ceiling per role. The word budget is only an instruction — the
+// model ignored it and produced 15,000 words against a 1,400-word budget,
+// exhausted every continuation, and still ended mid-sentence. max_tokens is
+// the only limit the model cannot talk its way past. ~2.2 tokens per word of
+// English prose with markdown tables, plus a small margin to land cleanly.
+function boardMaxTokens(role){
+  return Math.round(boardWordBudget(role)*2.2)+200;
+}
+ 
 // Only Claude and Gemini can genuinely search the live web from this app.
 // Enabling "search" on a provider that cannot search would produce confident
 // fabrication, so the flag is gated on provider here in one place.
@@ -3124,7 +3133,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         const ag=agents[i];const p=EP[ag.id]||{};
         const prev=res.map(r=>"\n--- "+r.ag.t+" ---\n"+r.text).join("\n");
         setBrPh(ag.ic+" "+ag.t+" is analyzing…");announceBoardroomPhase(ag.t+" is analyzing");
-        const sys="You are "+ag.f+" at \""+co.name+"\".\n"+buildBoardIdentity(ag,p)+"\n"+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS AVAILABLE: "+frameworks.map(f=>f.name+" ("+f.reason+")").join("; ")+"\nFRAMEWORK REQUIREMENT: you MUST explicitly apply at least one named framework and SHOW ITS OUTPUT — the populated table, the calculation, the scored matrix, the register. Naming a framework without producing its output does not count. Choose the framework that answers a specific question you actually need answered; if none of the above fits, name and apply a more appropriate one and say why you chose it. Never insert a framework to look thorough.\n"+brScaffold+brWorkspaceBlock+brRegisterBlock+"\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — from a named, cited source\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label.":"Previous contributions:\n"+prev+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Conduct your own independent analysis of the question from your "+ag.dl+" perspective, and discharge your standing mandate in full. If your mandate requires a financial model, build it. If it requires a process or capacity map, produce it. If it requires a risk or regulatory register, write it. Another executive having touched a topic does NOT relieve you of your own analysis of it.\n"+"Step 2: You MAY re-derive, recompute, or rebuild any figure a prior speaker presented. If your figure differs from theirs, show both side by side and explain the reason for the gap.\n"+"Step 3: Where an input you need is missing, name the missing variable and state how it changes your conclusion. Do not assume through a gap silently.\n"+"Step 4: Only after presenting your own analysis, state where it contradicts a prior speaker and why yours is better founded.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\nLENGTH: up to "+boardWordBudget(ag)+" words. Use the space your analysis actually needs — depth and shown working are what is being judged, not brevity. Never state or estimate your own word count.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
+        const sys="You are "+ag.f+" at \""+co.name+"\".\n"+buildBoardIdentity(ag,p)+"\n"+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS AVAILABLE: "+frameworks.map(f=>f.name+" ("+f.reason+")").join("; ")+"\nFRAMEWORK REQUIREMENT: you MUST explicitly apply at least one named framework and SHOW ITS OUTPUT — the populated table, the calculation, the scored matrix, the register. Naming a framework without producing its output does not count. Choose the framework that answers a specific question you actually need answered; if none of the above fits, name and apply a more appropriate one and say why you chose it. Never insert a framework to look thorough.\n"+brScaffold+brWorkspaceBlock+brRegisterBlock+"\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — ONLY permitted when you give BOTH a named source AND a URL on the same line. No URL means it is NOT a verified fact, however confident you are.\n"+"[Recalled — Unverified] — you believe it from prior knowledge but cannot produce a source URL. Use this instead of [Verified Fact] whenever the URL is missing.\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label. Tagging a recalled figure as a Verified Fact is the most serious error you can make in this boardroom.":"Previous contributions:\n"+prev+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Conduct your own independent analysis of the question from your "+ag.dl+" perspective, and discharge your standing mandate in full. If your mandate requires a financial model, build it. If it requires a process or capacity map, produce it. If it requires a risk or regulatory register, write it. Another executive having touched a topic does NOT relieve you of your own analysis of it.\n"+"Step 2: You MAY re-derive, recompute, or rebuild any figure a prior speaker presented. If your figure differs from theirs, show both side by side and explain the reason for the gap.\n"+"Step 3: Where an input you need is missing, name the missing variable and state how it changes your conclusion. Do not assume through a gap silently.\n"+"Step 4: Only after presenting your own analysis, state where it contradicts a prior speaker and why yours is better founded.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\nLENGTH AND SCOPE — HARD LIMITS, not suggestions:\n"+"You have approximately "+boardWordBudget(ag)+" words. You will be cut off at that point mid-sentence, so plan the whole response to fit and reach your conclusion inside it.\n"+"Produce AT MOST 8 sections. No appendices, annexures or addenda.\n"+"Stay strictly inside your own functional mandate — never write another executive\u2019s deliverable. A CFO does not write a marketing roadmap; a CTO does not write a hiring plan.\n"+"Depth means the reasoning behind your numbers, NOT more sections. One well-derived figure beats ten listed ones.\n"+"Never state or estimate your own word count.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
         let agText="";
         let agTruncated=false;
         let gotResponse=false;
@@ -3157,7 +3166,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
             if(!pKey.trim())continue;
             try{
               setBrPh(ag.ic+" "+ag.t+(agText?" — resuming via "+prov+"…":" is analyzing… ("+prov+")"));
-              const replyFull=await callAI(prov,pKey,sys,[{role:"user",content:userMsg}],5000,boardCanSearch(prov)&&!agText.trim())
+              const replyFull=await callAI(prov,pKey,sys,[{role:"user",content:userMsg}],boardMaxTokens(ag),boardCanSearch(prov)&&!agText.trim())
               agText=agText+replyFull.text;
               agTruncated=!!replyFull.truncated;
               gotResponse=true;
@@ -3191,12 +3200,12 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         }
         if(cancelRef.current.br)break;
         let contAttempts=0;
-        while(agTruncated&&contAttempts<3&&!cancelRef.current.br){
+        while(agTruncated&&contAttempts<1&&!cancelRef.current.br){
           contAttempts++;
           setBrPh(ag.ic+" "+ag.t+" is continuing response… (part "+(contAttempts+1)+")");
           try{
             const contSys="You are "+ag.f+" at \""+co.name+"\". You were speaking in a boardroom debate and your response was cut off. Here is what you wrote so far:\n\n"+agText+"\n\nContinue EXACTLY from where you left off. Do not repeat anything already written. Do not restart. Pick up mid-sentence if needed.";
-            const cont=await askFull(contSys,[{role:"user",content:"Continue your response now."}],3000);
+            const cont=await askFull(contSys,[{role:"user",content:"Finish your response now. You have very little space left — close out your current point, state your conclusion, and stop. Do not open a new section."}],1200);
             agText=agText+cont.primary;
             agTruncated=!!cont.truncated;
           }catch(contErr:any){
