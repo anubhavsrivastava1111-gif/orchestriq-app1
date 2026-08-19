@@ -1297,7 +1297,24 @@ function buildSys(role,co,compData,liveRates=""){
  
 const BOARD_MANDATE_EXTRA: Record<string,string> = {};   // roleId -> extra standing instruction
 const BOARD_DELIVERABLES:  Record<string,string> = {};   // roleId -> required analytical artefact
-const BOARD_RESEARCH_REMIT: Record<string,string> = {};  // roleId -> independent research scope
+const BOARD_RESEARCH_REMIT: Record<string,string> = {
+  // What each executive must independently verify with live web search, in
+  // addition to the Research Brief. Add or edit a line here and it reaches
+  // every multi-agent path automatically via buildBoardIdentity().
+  ceo:"Market opportunity and sizing, business-model precedents, competitor strategic moves, comparable ventures that succeeded or failed, and scalability evidence.",
+  chairman:"Governance precedents, comparable board decisions, and the strongest published counter-argument to the emerging consensus.",
+  cfo:"Cost structures and input prices, pricing and margin benchmarks, unit economics of comparable businesses, capital requirements, funding costs, and break-even precedents. Verify every cost line you rely on against a primary source.",
+  vp_fin:"Financial benchmarks, working-capital norms, and cost-of-capital data for this industry and geography.",
+  fin_ctrl:"Accounting treatment, cost-allocation norms, and reporting requirements for this business type.",
+  coo:"Operating cost drivers, capacity and throughput benchmarks, process cycle times, supply-chain and vendor costs, and published operational failure modes.",
+  cto:"Infrastructure, hosting, storage, API and model pricing from vendor primary sources; build-vs-buy costs; scaling cost curves; and security or reliability requirements.",
+  cmo:"Demand evidence, segment sizing, channel costs and CAC benchmarks, competitor pricing and positioning, and conversion benchmarks for this category.",
+  cso:"Macro and regulatory environment, competitive structure, substitute threats, defensibility precedents, and scenario evidence.",
+  clo:"Applicable statutes, licences, registration requirements, their cost and lead time, penalty exposure, contractual norms, and IP position.",
+  chro:"Salary and fully-loaded cost benchmarks by role and geography, statutory employment costs, hiring lead times, and skill availability.",
+  cia:"Control failures and fraud or compliance precedents in comparable businesses.",
+  risk_mgr:"Quantified risk benchmarks, insurance costs, and published loss events in this industry.",
+};
  
 function buildBoardIdentity(role,fallback?){
   const p=getExecutiveIntel(role.id)||{};
@@ -1327,6 +1344,13 @@ const BOARD_WORD_BUDGET: Record<string,number> = {
 const BOARD_WORD_BUDGET_DEFAULT=900;
 function boardWordBudget(role){
   return BOARD_WORD_BUDGET[role?.id]||BOARD_WORD_BUDGET_DEFAULT;
+}
+ 
+// Only Claude and Gemini can genuinely search the live web from this app.
+// Enabling "search" on a provider that cannot search would produce confident
+// fabrication, so the flag is gated on provider here in one place.
+function boardCanSearch(prov){
+  return prov==="claude"||prov==="gemini";
 }
 // ─── CROSS-MODULE INTELLIGENCE LAYER ────────────────────────────────────────
 // Builds a prompt-safe Ledger summary. Defensive field access — works regardless
@@ -2997,7 +3021,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       const researchContext=(brGrounded
         ?"\nVERIFIED RESEARCH BRIEF (current data gathered for this debate - use these figures and cite this brief as your source; do not re-search):\n"
           +researchBrief
-          +"\n\nEVIDENCE BINDING RULE (non-negotiable): The brief above is the ONLY source of verified external figures in this debate. Any price, cost, rate, salary benchmark, valuation multiple, or market size you state must either (a) come from the brief - cite it as 'per Research Brief' - or (b) carry the tag [ESTIMATE - UNVERIFIED]. An untagged number presented as fact is a failure of your role. If a prior speaker stated an untagged number not in the brief, your first duty is to challenge it.\n"
+          +"\n\nEVIDENCE PROTOCOL (non-negotiable): The Research Brief above is your STARTING POINT, not your boundary. You have live web search and you are REQUIRED to independently verify or source the figures that matter most within your own research remit. Rules: (a) a figure taken from the brief is cited as 'per Research Brief'; (b) a figure you retrieve yourself must carry the source name and its URL; (c) a figure you cannot source carries [ESTIMATE - UNVERIFIED] and states the basis of the estimate; (d) an untagged number presented as fact is a failure of your role; (e) if a prior speaker stated a figure you believe is wrong, verify it and present the corrected figure with its source. Prefer vendor, government, regulator and recognised research-firm sources over blogs and aggregators.\n"
         :"\nRESEARCH DESK UNAVAILABLE FOR THIS DEBATE:\n"+researchBrief
           +"\n\nMANDATORY: No live figure was retrieved for this session. Every price, cost, rate, salary, valuation, or market figure in this debate MUST carry the tag [ESTIMATE - UNVERIFIED]. Do not present any number as fact. If a prior speaker presented an untagged number, challenge it explicitly before continuing.\n"
         )+buildDecisionHistoryContext(brQ);
@@ -3039,7 +3063,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
             if(!pKey.trim())continue;
             try{
               setBrPh(ag.ic+" "+ag.t+(agText?" — resuming via "+prov+"…":" is analyzing… ("+prov+")"));
-              const replyFull=await callAI(prov,pKey,sys,[{role:"user",content:userMsg}],5000);
+              const replyFull=await callAI(prov,pKey,sys,[{role:"user",content:userMsg}],5000,boardCanSearch(prov)&&!agText.trim())
               agText=agText+replyFull.text;
               agTruncated=!!replyFull.truncated;
               gotResponse=true;
