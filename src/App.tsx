@@ -468,12 +468,34 @@ function badgeBrief(brief){
 // OpenAI, DeepSeek, and Groq have no real-time search access on the plans
 // used here — routing research to them would produce confident-sounding
 // fabrication, not real research. This is a deliberate, honest limit.
-function resolveSearchProvider(keys){
+function resolveSearchProviders(keys){
+  const out:Array<{provider:string;key:string}>=[];
   const claudeKey=(keys?.claude||EFF_CLAUDE||"").trim();
-  if(claudeKey)return {provider:"claude",key:claudeKey};
+  if(claudeKey)out.push({provider:"claude",key:claudeKey});
   const geminiKey=(keys?.gemini||EFF_GEMINI||"").trim();
-  if(geminiKey)return {provider:"gemini",key:geminiKey};
-  return null;
+  if(geminiKey)out.push({provider:"gemini",key:geminiKey});
+  return out;
+}
+// Kept for any caller that still wants a single preferred provider.
+function resolveSearchProvider(keys){
+  const list=resolveSearchProviders(keys);
+  return list.length?list[0]:null;
+}
+// Runs one research call, falling back through every search-capable provider.
+// Previously a single Claude failure killed research entirely even when a
+// working Gemini key was sitting in Settings.
+async function callSearchWithFailover(routes,sys,msgs,maxT,enableSearch,onNote){
+  let lastErr=null;
+  for(const r of routes){
+    try{
+      const out=await callAI(r.provider,r.key,sys,msgs,maxT,enableSearch);
+      return {out,provider:r.provider};
+    }catch(e:any){
+      lastErr=e;
+      try{onNote&&onNote(r.provider,String(e?.message||e));}catch{}
+    }
+  }
+  throw lastErr||new Error("No search-capable provider available.");
 }
 
 // Deep Research Desk v3 — decomposes the question into 7 angles (including a
@@ -505,7 +527,8 @@ function synthesisPrompt(co,question,sections){
 }
 
 async function runResearchDesk(ask,co,compData,question,showToast,keys){
-  const route=resolveSearchProvider(keys);
+  const routes=resolveSearchProviders(keys);
+  const route=routes[0];
   if(!route){
     try{showToast&&showToast("Research Desk OFFLINE — no Claude or Gemini key. Executives will debate UNVERIFIED figures. Add a key in Settings.","warning");}catch{}
     return {
@@ -513,7 +536,8 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
       grounded:false,provider:"none"
     };
   }
-  try{showToast&&showToast("Research Desk running deep multi-angle search via "+route.provider+"… this can take up to 2-3 minutes.","info");}catch{}
+  try{showToast&&showToast("Research Desk running deep multi-angle search via "+routes.map(r=>r.provider).join(" → ")+"… this can take up to 2-3 minutes.","info");}catch{}
+  let usedProvider=route.provider;
   const sections=[];
   let anyFail=false;
   let anyTruncated=false;
@@ -522,7 +546,9 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
       const anglePrompt=researchDeskPrompt(co,compData,question)+
         "\n\nFOCUS THIS PASS ENTIRELY ON: "+angle.label+
         ".\nReturn 4-6 bullets, each following the OUTPUT CONTRACT exactly. Do not cover other angles.";
-      const raw=await callAI(route.provider,route.key,anglePrompt,[{role:"user",content:"Research this angle now."}],2600,true);
+      const fo=await callSearchWithFailover(routes,anglePrompt,[{role:"user",content:"Research this angle now."}],2600,true,
+        (prov,msg)=>{try{showToast&&showToast("Research Desk: "+prov+" failed ("+msg.slice(0,60)+") — trying next provider…","warning");}catch{}});
+      const raw=fo.out; usedProvider=fo.provider;
       const text=(raw&&typeof raw==="object"&&"text" in raw)?raw.text:String(raw||"");
       if(raw&&typeof raw==="object"&&(raw as any).truncated)anyTruncated=true;
       const clean=stripPreamble(text);
@@ -537,7 +563,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   const grounded=urlCount>0;
   if(!grounded){
     try{showToast&&showToast("Research Desk returned no source URLs — session is UNGROUNDED.","warning");}catch{}
-    return {brief:"⚠ **RESEARCH DESK RETURNED NO VERIFIABLE SOURCES**\n\nSearch ran via "+route.provider+" but produced no source URL across any angle, so nothing below can be verified.\n\n---\n"+body,grounded:false,provider:route.provider};
+    return {brief:"⚠ **RESEARCH DESK RETURNED NO VERIFIABLE SOURCES**\n\nSearch ran via "+usedProvider+" but produced no source URL across any angle, so nothing below can be verified.\n\n---\n"+body,grounded:false,provider:route.provider};
   }
   body=badgeBrief(body);
 
@@ -545,7 +571,8 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   let synth="";
   try{
     try{showToast&&showToast("Research Desk synthesising findings…","info");}catch{}
-    const sRaw=await callAI(route.provider,route.key,synthesisPrompt(co,question,body),[{role:"user",content:"Synthesise now."}],3000,false);
+    const sFo=await callSearchWithFailover(routes,synthesisPrompt(co,question,body),[{role:"user",content:"Synthesise now."}],3000,false,null);
+    const sRaw=sFo.out;
     const sText=(sRaw&&typeof sRaw==="object"&&"text" in sRaw)?sRaw.text:String(sRaw||"");
     if(sRaw&&typeof sRaw==="object"&&(sRaw as any).truncated)anyTruncated=true;
     synth=String(sText||"").trim();
@@ -560,7 +587,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
     : "⚠ Synthesis pass failed — raw findings only, no prioritisation.\n\n"+body+"\n\n"+stamp;
   if(anyTruncated)brief="⚠ **Some research output hit the length limit and may be incomplete.** Treat any cut-off finding as unconfirmed.\n\n"+brief;
   if(anyFail)brief="⚠ Some research angles could not be completed — see notes below.\n\n"+brief;
-  return {brief,grounded,provider:route.provider};
+  return {brief,grounded,provider:usedProvider};
 }
 // ── FINANCIAL LIVE FEED ─────────────────────────────────────────────────────
 // Fetches live financial data for Indian markets. Called at session start.
@@ -961,7 +988,10 @@ async function callGroq(key,sys,msgs,maxT){
   async function callClaude(key,sys,msgs,maxT,enableSearch,modelOverride=""){
   const body:any={model:(modelOverride||MODELS.claude.model),max_tokens:maxT,system:sys,messages:msgs};
   if(enableSearch)body.tools=[{type:"web_search_20250305",name:"web_search",max_uses:5}];
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body)});
+  // Search-enabled calls run server-side searches and can take minutes. Every
+  // other long call in this file carries a timeout; this one did not, so a
+  // stalled connection surfaced as an unexplained "Failed to fetch".
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body),signal:AbortSignal.timeout(enableSearch?180000:90000)});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}throw new Error("Claude "+r.status+": "+(m||r.statusText));}
   const d=await r.json();
   // Response content blocks can include: text, server_tool_use (search query), web_search_tool_result (search results).
