@@ -7,15 +7,48 @@ export const PROVIDER_PRICING: Record<string, {
   inputPer1M: number;
   outputPer1M: number;
   currency: string;
+  kind?: "llm" | "search";
+  perQueryUsd?: number;   // search services bill per query, not per token
+  note?: string;
 }> = {
-  groq:      { label: "Groq (free)",     inputPer1M: 0,     outputPer1M: 0,     currency: "USD" },
-  gemini:    { label: "Gemini Flash",    inputPer1M: 0,     outputPer1M: 0,     currency: "USD" },
-  claude:    { label: "Claude Haiku",    inputPer1M: 0.25,  outputPer1M: 1.25,  currency: "USD" },
-  openai:    { label: "GPT-4o",          inputPer1M: 2.50,  outputPer1M: 10.0,  currency: "USD" },
-  deepseek:  { label: "DeepSeek Chat",   inputPer1M: 0.14,  outputPer1M: 0.28,  currency: "USD" },
-  kimi:      { label: "Kimi Moonshot",   inputPer1M: 0.12,  outputPer1M: 0.12,  currency: "USD" },
-  stability: { label: "Stability AI",    inputPer1M: 0,     outputPer1M: 0,     currency: "USD" },
+  // ── LLM providers (billed per million tokens) ──────────────────────────────
+  nvidia:    { label: "NVIDIA (free tier)", inputPer1M: 0,    outputPer1M: 0,    currency: "USD", kind: "llm", note: "Free NIM tier" },
+  groq:      { label: "Groq",               inputPer1M: 0.59, outputPer1M: 0.79, currency: "USD", kind: "llm" },
+  gemini:    { label: "Gemini Flash",       inputPer1M: 0.38, outputPer1M: 1.88, currency: "USD", kind: "llm" },
+  claude:    { label: "Claude (Haiku)",     inputPer1M: 1.00, outputPer1M: 5.00, currency: "USD", kind: "llm" },
+  claude_sonnet: { label: "Claude Sonnet",  inputPer1M: 2.00, outputPer1M: 10.0, currency: "USD", kind: "llm" },
+  claude_opus:   { label: "Claude Opus",    inputPer1M: 5.00, outputPer1M: 25.0, currency: "USD", kind: "llm" },
+  openai:    { label: "OpenAI GPT-4o",      inputPer1M: 2.50, outputPer1M: 10.0, currency: "USD", kind: "llm" },
+  deepseek:  { label: "DeepSeek Flash",     inputPer1M: 0.22, outputPer1M: 0.66, currency: "USD", kind: "llm", note: "Half price off-peak" },
+  deepseek_pro: { label: "DeepSeek Pro",    inputPer1M: 0.55, outputPer1M: 2.19, currency: "USD", kind: "llm" },
+  kimi:      { label: "Kimi (Moonshot)",    inputPer1M: 0.95, outputPer1M: 4.00, currency: "USD", kind: "llm" },
+  stability: { label: "Stability AI",       inputPer1M: 0,    outputPer1M: 0,    currency: "USD", kind: "llm", note: "Per image, not per token" },
+  fal:       { label: "fal.ai",             inputPer1M: 0,    outputPer1M: 0,    currency: "USD", kind: "llm", note: "Per image/video, not per token" },
+
+  // ── Web search services (billed per query) ────────────────────────────────
+  serper:      { label: "Serper (search)",     inputPer1M: 0, outputPer1M: 0, currency: "USD", kind: "search", perQueryUsd: 0.001,  note: "~$1 per 1,000 searches" },
+  dataforseo:  { label: "DataForSEO (search)", inputPer1M: 0, outputPer1M: 0, currency: "USD", kind: "search", perQueryUsd: 0.0006, note: "~$0.60 per 1,000" },
+  brave:       { label: "Brave (search)",      inputPer1M: 0, outputPer1M: 0, currency: "USD", kind: "search", perQueryUsd: 0.005,  note: "~$5 per 1,000" },
+  tavily:      { label: "Tavily (search)",     inputPer1M: 0, outputPer1M: 0, currency: "USD", kind: "search", perQueryUsd: 0.008,  note: "~$8 per 1,000, 1k/mo free" },
+  claude_search: { label: "Claude web search", inputPer1M: 0, outputPer1M: 0, currency: "USD", kind: "search", perQueryUsd: 0.010,  note: "$10 per 1,000, PLUS tokens" },
+  gemini_search: { label: "Gemini grounding",  inputPer1M: 0, outputPer1M: 0, currency: "USD", kind: "search", perQueryUsd: 0.014,  note: "$14 per 1,000 after free tier" },
 };
+
+// Maps the model string actually used back to its correct pricing tier, so a
+// Sonnet call is not billed at Haiku rates. Falls back to the base provider.
+export function resolvePricingKey(provider: string, model?: string): string {
+  const m = (model || "").toLowerCase();
+  if (provider === "claude") {
+    if (m.includes("opus")) return "claude_opus";
+    if (m.includes("sonnet")) return "claude_sonnet";
+    return "claude";
+  }
+  if (provider === "deepseek") {
+    if (m.includes("pro")) return "deepseek_pro";
+    return "deepseek";
+  }
+  return provider;
+}
 
 export interface TokenRecord {
   id: string;
@@ -29,12 +62,48 @@ export interface TokenRecord {
   ts: string;
   project?: string;
   session?: string;
+  // Added so per-query services (Serper, Tavily, Brave, native web search) can be
+  // recorded alongside token-billed LLM calls in the same ledger.
+  units?: number;          // number of queries/images when not token-billed
+  unitLabel?: string;      // "queries", "images", "videos"
+  kind?: "llm" | "search"; // how this line was billed
+  // Populated so a super-admin can see spend per user, not just per browser.
+  userEmail?: string;
+  userRole?: string;
+  estimated?: boolean;     // true when token counts were guessed, not returned by the API
 }
 
-export function estimateCost(provider: string, inputTokens: number, outputTokens: number): number {
-  const p = PROVIDER_PRICING[provider] ?? PROVIDER_PRICING.groq;
+export function estimateCost(provider: string, inputTokens: number, outputTokens: number, model?: string, units?: number): number {
+  const key = resolvePricingKey(provider, model);
+  // Unknown provider now costs 0 and is visible as "unpriced" rather than being
+  // silently billed at Groq rates, which quietly understated real spend.
+  const p = PROVIDER_PRICING[key] ?? PROVIDER_PRICING[provider];
+  if (!p) return 0;
+  if (p.kind === "search") {
+    return (units ?? 1) * (p.perQueryUsd ?? 0);
+  }
   const cost = ((inputTokens ?? 0) / 1_000_000 * p.inputPer1M) + ((outputTokens ?? 0) / 1_000_000 * p.outputPer1M);
   return isNaN(cost) ? 0 : cost;
+}
+
+// Convenience wrapper for per-query services (search, images, video).
+export function saveUnitRecord(rec: {
+  feature: string; featureIcon?: string; provider: string; model?: string;
+  units: number; unitLabel?: string; userEmail?: string; userRole?: string;
+}) {
+  return saveRecord({
+    feature: rec.feature,
+    featureIcon: rec.featureIcon || "🔍",
+    provider: rec.provider,
+    model: rec.model || rec.provider,
+    inputTokens: 0,
+    outputTokens: 0,
+    units: rec.units,
+    unitLabel: rec.unitLabel || "queries",
+    kind: "search",
+    userEmail: rec.userEmail,
+    userRole: rec.userRole,
+  } as any);
 }
 
 export function estimateTokens(text: string): number {
@@ -50,7 +119,7 @@ export function loadRecords(): TokenRecord[] {
 
 export function saveRecord(rec: Omit<TokenRecord, "id" | "ts" | "session">) {
   const records = loadRecords();
-  const cost = estimateCost(rec.provider, rec.inputTokens ?? 0, rec.outputTokens ?? 0);
+  const cost = estimateCost(rec.provider, rec.inputTokens ?? 0, rec.outputTokens ?? 0, (rec as any).model, (rec as any).units);
   const full: TokenRecord = {
     ...rec,
     costUsd: isNaN(cost) ? 0 : cost,
@@ -79,8 +148,11 @@ function fmtCost(c: number): string {
 }
 
 const PROVIDER_COLORS: Record<string, string> = {
-  groq: "#F97316", gemini: "#4285F4", claude: "#D97757",
-  openai: "#10A37F", deepseek: "#2563EB", kimi: "#8B5CF6", stability: "#EC4899",
+  groq: "#F97316", gemini: "#4285F4", claude: "#D97757", claude_sonnet: "#D97757", claude_opus: "#B45309",
+  openai: "#10A37F", deepseek: "#2563EB", deepseek_pro: "#1D4ED8", kimi: "#8B5CF6",
+  stability: "#EC4899", fal: "#7C3AED", nvidia: "#76B900",
+  serper: "#0EA5E9", tavily: "#14B8A6", brave: "#FB542B", dataforseo: "#6366F1",
+  claude_search: "#D97757", gemini_search: "#4285F4",
 };
 const FEATURE_COLORS: Record<string, string> = {
   "AI Boardroom": "var(--oiq-accent)", "Time Machine": "#8B5CF6",
