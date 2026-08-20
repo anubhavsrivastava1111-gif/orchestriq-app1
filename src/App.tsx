@@ -503,6 +503,11 @@ async function callSearchWithFailover(routes,sys,msgs,maxT,enableSearch,onNote){
 // Order of preference when the app does its own searching. Any provider with no
 // key is skipped, so this list is safe even when nothing is configured.
 const SEARCH_CHAIN:any[]=["serper","tavily","brave","dataforseo"];
+// These live in the same keys object as the AI providers, but they are NOT AI
+// models. Any list of "which AI can I call" must exclude them, or the app tries
+// to look up MODELS["serper"] and crashes on undefined.
+const SEARCH_KEY_IDS=new Set(["serper","tavily","brave","dataforseo"]);
+function isAiProviderKey(id:string){return !SEARCH_KEY_IDS.has(id);}
  
 // Search phrasing per research angle. Built in code, not by a model, so the
 // queries are predictable and cost nothing to produce.
@@ -3214,6 +3219,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
             :brQ;
           // Build list of providers to try this cycle
           const allProviders=Object.keys(keys).filter(p=>{
+            if(!isAiProviderKey(p))return false;
             const k=(p==="groq"?keys.groq||EFF_GROQ:p==="gemini"?keys.gemini||EFF_GEMINI:p==="claude"?keys.claude||EFF_CLAUDE:keys[p]);
             return k?.trim();
           });
@@ -5863,7 +5869,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
   // A provider is usable only if it has a key AND is switched on. Everything
   // downstream (Primary AI, fallback chain, specialist routing) reads cfgP, so
   // switching one off behaves exactly as if its key were never entered.
-  const cfgP=["nvidia",...Object.keys(keys).filter(p=>keys[p]?.trim()&&!offP[p])];
+  const cfgP=["nvidia",...Object.keys(keys).filter(p=>isAiProviderKey(p)&&keys[p]?.trim()&&!offP[p])];
   const sColor=s=>s===TS.APPROVED?"#10B981":s===TS.REVIEWING?"#8B5CF6":s===TS.RUNNING?"#14B8A6":s===TS.REJECTED||s===TS.FAILED?"#EF4444":"#F59E0B";
   const sBg=s=>s===TS.APPROVED?"rgba(16,185,129,0.12)":s===TS.REVIEWING?"rgba(139,92,246,0.1)":s===TS.RUNNING?"rgba(20,184,166,0.1)":s===TS.REJECTED||s===TS.FAILED?"rgba(239,68,68,0.1)":"rgba(245,158,11,0.1)";
 
@@ -7445,7 +7451,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                           setOffP(next);
                           try{localStorage.setItem("cos-offp",JSON.stringify(next));}catch{}
                           if(next[id]&&defP===id){
-                            const fall=["nvidia",...Object.keys(keys).filter(p=>keys[p]?.trim()&&!next[p])];
+                            const fall=["nvidia",...Object.keys(keys).filter(p=>isAiProviderKey(p)&&keys[p]?.trim()&&!next[p])];
                             setDefP(fall[1]||"nvidia");
                           }
                         }}
