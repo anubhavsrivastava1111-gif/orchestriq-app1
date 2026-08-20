@@ -1246,7 +1246,17 @@ function logAiUsage(provider:string,model:string,sys:string,msgs:any,outText:str
     // Native web search bills separately, per search request, on top of tokens.
     const searches=Number(usage?.searches)||0;
     if(searches>0){
-      saveUnitRecord({
+            const sProv=provider==="claude"?"claude_search":provider==="gemini"?"gemini_search":provider;
+      const sRec=saveUnitRecord({
+        feature:USAGE_CTX.feature+" (web search)",featureIcon:"🔍",
+        provider:sProv,
+        model:"native-search",units:searches,unitLabel:"queries",
+        userEmail:USAGE_CTX.userEmail,userRole:USAGE_CTX.userRole,
+      });
+      queueUsageSync({user_email:USAGE_CTX.userEmail,user_role:USAGE_CTX.userRole,
+        feature:USAGE_CTX.feature+" (web search)",feature_icon:"🔍",provider:sProv,model:"native-search",
+        kind:"search",input_tokens:0,output_tokens:0,units:searches,unit_label:"queries",
+        cost_usd:Number((sRec as any)?.costUsd)||0,estimated:false,session_key:(sRec as any)?.session||null});
     }
   }catch{}
 }
