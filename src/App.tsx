@@ -6085,7 +6085,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           </button>
           {showModules&&(
             <div style={{position:"absolute",top:"calc(100% - 2px)",left:10,right:10,background:"var(--oiq-sbBorder)",border:"1px solid var(--sb-bdr)",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:7,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"]].filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
+              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
                 <button key={v} onClick={()=>{setView(v);setShowModules(false);}}
                   style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 11px",background:view===v?"var(--oiq-accent)":"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"inherit",marginBottom:2,transition:"background 0.12s"}}>
                   <span style={{fontSize:15,width:22,textAlign:"center"}}>{ic}</span>
@@ -7188,7 +7188,15 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         )}
 
         {view==="funding"&&<FundingIntelligence co={co} compData={compData} ask={ask}/>}
-        {view==="tokens"&&<TokenAnalytics defP={defP} keys={keys}/>}
+        {view==="tokens"&&(me.role==="super_admin"
+          ?<TokenAnalytics defP={defP} keys={keys} me={me}/>
+          :<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:40}}>
+             <div style={{textAlign:"center",maxWidth:380}}>
+               <div style={{fontSize:34,marginBottom:10}}>🔒</div>
+               <div style={{fontSize:14,fontWeight:800,color:"var(--oiq-ink)",marginBottom:6}}>Restricted</div>
+               <div style={{fontSize:11.5,color:"var(--oiq-muted)",lineHeight:1.7}}>Token Analytics shows API spend across every account on this workspace. It is available to workspace owners only.</div>
+             </div>
+           </div>)}
         {view==="agents"&&(
           <AIAgents
             co={co}
