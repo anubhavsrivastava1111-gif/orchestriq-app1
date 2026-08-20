@@ -604,7 +604,13 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
           if(so.provider&&so.provider!=="none")searchProviderUsed=so.provider;
           if(!so.fromCache&&so.results.length){
             searchCount++;
-            try{saveUnitRecord({feature:"Research Desk (web search)",featureIcon:"🔍",provider:so.provider,model:so.provider,units:1,unitLabel:"queries",userEmail:USAGE_CTX.userEmail,userRole:USAGE_CTX.userRole});}catch{}
+            try{
+              const sr=saveUnitRecord({feature:"Research Desk (web search)",featureIcon:"🔍",provider:so.provider,model:so.provider,units:1,unitLabel:"queries",userEmail:USAGE_CTX.userEmail,userRole:USAGE_CTX.userRole});
+              queueUsageSync({user_email:USAGE_CTX.userEmail,user_role:USAGE_CTX.userRole,
+                feature:"Research Desk (web search)",feature_icon:"🔍",provider:so.provider,model:so.provider,
+                kind:"search",input_tokens:0,output_tokens:0,units:1,unit_label:"queries",
+                cost_usd:Number((sr as any)?.costUsd)||0,estimated:false,session_key:(sr as any)?.session||null});
+            }catch{}
           }
           for(const rr of so.results){if(!seenUrls.has(rr.url)){seenUrls.add(rr.url);found.push(rr);}}
         }
@@ -1226,24 +1232,56 @@ function logAiUsage(provider:string,model:string,sys:string,msgs:any,outText:str
     const estimated=!(realIn>0||realOut>0);
     const inTok=realIn>0?realIn:estimateTokens(promptText);
     const outTok=realOut>0?realOut:estimateTokens(String(outText||""));
-    saveRecord({
+    const rec=saveRecord({
       feature:USAGE_CTX.feature,featureIcon:USAGE_CTX.icon,
       provider,model:model||provider,
       inputTokens:inTok,outputTokens:outTok,
       kind:"llm",estimated,
       userEmail:USAGE_CTX.userEmail,userRole:USAGE_CTX.userRole,
     } as any);
+    queueUsageSync({user_email:USAGE_CTX.userEmail,user_role:USAGE_CTX.userRole,
+      feature:USAGE_CTX.feature,feature_icon:USAGE_CTX.icon,provider,model:model||provider,
+      kind:"llm",input_tokens:inTok,output_tokens:outTok,units:0,
+      cost_usd:Number((rec as any)?.costUsd)||0,estimated,session_key:(rec as any)?.session||null});
     // Native web search bills separately, per search request, on top of tokens.
     const searches=Number(usage?.searches)||0;
     if(searches>0){
       saveUnitRecord({
-        feature:USAGE_CTX.feature+" (web search)",featureIcon:"🔍",
-        provider:provider==="claude"?"claude_search":provider==="gemini"?"gemini_search":provider,
-        model:"native-search",units:searches,unitLabel:"queries",
-        userEmail:USAGE_CTX.userEmail,userRole:USAGE_CTX.userRole,
-      });
     }
   }catch{}
+}
+ 
+// ─── CLOUD SYNC FOR THE USAGE LEDGER ─────────────────────────────────────────
+// localStorage records live in ONE browser, so a workspace owner can never see
+// what other accounts consumed. Rows are mirrored to Supabase (append-only, RLS:
+// each user writes only their own; only a super_admin can read them all).
+// Writes are queued and flushed in batches so a board session does not fire
+// dozens of individual network calls mid-debate.
+let USAGE_QUEUE:any[]=[];
+let USAGE_FLUSH_TIMER:any=null;
+async function flushUsageQueue(){
+  if(!USAGE_QUEUE.length)return;
+  const batch=USAGE_QUEUE.splice(0,USAGE_QUEUE.length);
+  try{
+    const {data:{user}}=await supabase.auth.getUser();
+    if(!user)return; // signed out — the local ledger still has everything
+    await supabase.from("token_usage").insert(batch.map(b=>({...b,user_id:user.id})));
+  }catch(e){
+    // Never let telemetry break a session. Records remain in localStorage.
+    console.warn("[OIQ] usage sync deferred:",e);
+  }
+}
+function queueUsageSync(row:any){
+  try{
+    USAGE_QUEUE.push(row);
+    if(USAGE_FLUSH_TIMER)clearTimeout(USAGE_FLUSH_TIMER);
+    USAGE_FLUSH_TIMER=setTimeout(()=>{flushUsageQueue();},4000);
+    if(USAGE_QUEUE.length>=25)flushUsageQueue();
+  }catch{}
+}
+if(typeof window!=="undefined"){
+  // Flush anything still pending when the tab closes.
+  window.addEventListener("beforeunload",()=>{try{flushUsageQueue();}catch{}});
 }
  
 async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,modelOverride=""){
