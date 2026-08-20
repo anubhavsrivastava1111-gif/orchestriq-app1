@@ -4,7 +4,7 @@ import VoiceEngine from "./VoiceEngine";
 import BoardroomView from "./BoardroomView";
 import FundingIntelligence from "./FundingIntelligence";
 import ServiceDesk from "./ServiceDesk";
-import TokenAnalytics, { saveRecord, estimateCost } from "./TokenAnalytics";
+import TokenAnalytics, { saveRecord, estimateCost, saveUnitRecord } from "./TokenAnalytics";
 import PulseGovernance from "./Pulse";
 import TokenBadge from "./components/TokenBadge";
 import AIAgents from "./AIAgents";
@@ -580,6 +580,8 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   try{
     if(useExternalSearch)showToast&&showToast("Research Desk: searching the web directly (cheaper, and every source keeps its real URL).","info");
   }catch{}
+  const prevUsageFeature=USAGE_CTX.feature, prevUsageIcon=USAGE_CTX.icon;
+  setUsageFeature("Research Desk","📡");
   const sections=[];
   let anyFail=false;
   let anyTruncated=false;
@@ -600,7 +602,10 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
           const so=await runSearch(q,SEARCH_CHAIN,keys,6,
             (prov,msg)=>{try{showToast&&showToast("Search: "+prov+" — "+String(msg).slice(0,60),"warning");}catch{}});
           if(so.provider&&so.provider!=="none")searchProviderUsed=so.provider;
-          if(!so.fromCache&&so.results.length)searchCount++;
+          if(!so.fromCache&&so.results.length){
+            searchCount++;
+            try{saveUnitRecord({feature:"Research Desk (web search)",featureIcon:"🔍",provider:so.provider,model:so.provider,units:1,unitLabel:"queries",userEmail:USAGE_CTX.userEmail,userRole:USAGE_CTX.userRole});}catch{}
+          }
           for(const rr of so.results){if(!seenUrls.has(rr.url)){seenUrls.add(rr.url);found.push(rr);}}
         }
         if(found.length){
@@ -650,6 +655,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
     : "⚠ Synthesis pass failed — raw findings only, no prioritisation.\n\n"+body+"\n\n"+stamp;
   if(anyTruncated)brief="⚠ **Some research output hit the length limit and may be incomplete.** Treat any cut-off finding as unconfirmed.\n\n"+brief;
   if(anyFail)brief="⚠ Some research angles could not be completed — see notes below.\n\n"+brief;
+  setUsageFeature(prevUsageFeature,prevUsageIcon);
   return {brief,grounded,provider:usedProvider};
 }
 // ── FINANCIAL LIVE FEED ─────────────────────────────────────────────────────
@@ -1060,7 +1066,10 @@ async function callGroq(key,sys,msgs,maxT){
   // Response content blocks can include: text, server_tool_use (search query), web_search_tool_result (search results).
   // Only "text" blocks contain the model's actual answer - filter to those, in order, and join.
   const text=d.content?.filter((b:any)=>b.type==="text").map((b:any)=>b.text||"").join("\n")||"";
-  return {text,truncated:d.stop_reason==="max_tokens"};
+  // Anthropic reports exact token counts and the number of billable web searches.
+  // These were being discarded, forcing the ledger to guess.
+  const usage={i:d.usage?.input_tokens||0,o:d.usage?.output_tokens||0,searches:d.usage?.server_tool_use?.web_search_requests||0};
+  return {text,truncated:d.stop_reason==="max_tokens",usage};
 }
 async function callOpenAI(key,sys,msgs,maxT){
   const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.openai.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
@@ -1198,6 +1207,45 @@ async function callStabilityImage(key:string, prompt:string):Promise<string>{
   return b64?("data:image/png;base64,"+b64):"";
 }
 
+// ─── CENTRAL USAGE LEDGER ────────────────────────────────────────────────────
+// Previously only 4 of ~19 AI call sites logged anything, and 3 of those logged
+// `provider: defP` — the DEFAULT provider — instead of the one that actually ran.
+// That is why every session appeared as DeepSeek regardless of who did the work.
+// Logging now happens ONCE inside callAI, so every path in the app is captured
+// automatically and can never drift out of sync again.
+let USAGE_CTX:{feature:string;icon:string;userEmail:string;userRole:string}={feature:"AI Call",icon:"⚡",userEmail:"",userRole:""};
+function setUsageFeature(feature:string,icon?:string){USAGE_CTX.feature=feature||"AI Call";USAGE_CTX.icon=icon||"⚡";}
+function setUsageUser(email:string,role:string){USAGE_CTX.userEmail=email||"";USAGE_CTX.userRole=role||"";}
+ 
+function logAiUsage(provider:string,model:string,sys:string,msgs:any,outText:string,usage?:any){
+  try{
+    const promptText=String(sys||"")+(Array.isArray(msgs)?msgs.map((m:any)=>String(m?.content||"")).join(" "):"");
+    // Use the provider's OWN reported token counts when it returns them; only
+    // fall back to the length/3.8 estimate when it does not.
+    const realIn=Number(usage?.i)||0, realOut=Number(usage?.o)||0;
+    const estimated=!(realIn>0||realOut>0);
+    const inTok=realIn>0?realIn:estimateTokens(promptText);
+    const outTok=realOut>0?realOut:estimateTokens(String(outText||""));
+    saveRecord({
+      feature:USAGE_CTX.feature,featureIcon:USAGE_CTX.icon,
+      provider,model:model||provider,
+      inputTokens:inTok,outputTokens:outTok,
+      kind:"llm",estimated,
+      userEmail:USAGE_CTX.userEmail,userRole:USAGE_CTX.userRole,
+    } as any);
+    // Native web search bills separately, per search request, on top of tokens.
+    const searches=Number(usage?.searches)||0;
+    if(searches>0){
+      saveUnitRecord({
+        feature:USAGE_CTX.feature+" (web search)",featureIcon:"🔍",
+        provider:provider==="claude"?"claude_search":provider==="gemini"?"gemini_search":provider,
+        model:"native-search",units:searches,unitLabel:"queries",
+        userEmail:USAGE_CTX.userEmail,userRole:USAGE_CTX.userRole,
+      });
+    }
+  }catch{}
+}
+ 
 async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,modelOverride=""){
   if(!key?.trim())throw new Error("No API key for "+(MODELS[provider]?.name||provider)+". Add it in Settings.");
   const msgs=rawMsgs.map(m=>({role:m.role==="user"?"user":"assistant",content:m.content}));
@@ -1214,7 +1262,11 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,mode
     if(raw&&typeof raw==="object"&&"text" in raw)return raw as {text:string;truncated:boolean};
     return {text:raw as string,truncated:false};
   })();
-  try{return await Promise.race([callP,timeout]);}
+  try{
+    const out:any=await Promise.race([callP,timeout]);
+    logAiUsage(provider,modelOverride||MODELS[provider]?.model||provider,sys,msgs,out?.text||"",out?.usage);
+    return out;
+  }
   finally{clearTimeout(timerId);}
 }
 
@@ -2722,6 +2774,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
         try{loadCostContext(true);}catch(e){console.warn("[OIQ] cost context:",e);}
         const {data:prof}=await supabase.from("profiles").select("full_name,role,admin_api_keys,user_api_keys").eq("id",user.id).single();
         setMe({email:(prof as any)?.full_name||user.email||"",role:prof?.role||"user"});
+        try{setUsageUser((prof as any)?.full_name||user.email||"",prof?.role||"user");}catch{}
         // Load this user's saved keys. Row Level Security guarantees this row
         // is only ever returned to its owner.
         try{
@@ -2990,6 +3043,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     const nm={role:"user",content:text};
     const upd={...chats,[selRole]:[...msgs,nm]};
     setChats(upd);setInput("");setLoading(true);announceLoading(true,role.t);
+    setUsageFeature("Executive Chat — "+role.t,"💬");
     try{
       const sys=buildSys(role,co,compData,LIVE_RATES.loaded?LIVE_RATES.data:"");
       const apiM=[...msgs,nm].map(m=>({role:m.role==="user"?"user":"assistant",content:m.content})).slice(-16);
@@ -3026,6 +3080,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       return;
     }
     setTmRun(true);setTmRes("");setError(null);setTmResearchBrief("");
+    setUsageFeature("Time Machine","⏳");
     const tmCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
     try{
       if(cancelRef.current.tm)return;
@@ -3044,7 +3099,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       if(!cancelRef.current.tm){
         setTmRes(res);
         sv("cos-tm-live",{dec:tmDec,res,brief:researchBrief});
-        try{saveRecord({feature:"Time Machine",provider:defP,model:MODELS[defP]?.model||defP,inputTokens:estimateTokens(tmDec),outputTokens:estimateTokens(res),cost:estimateCost(defP,estimateTokens(tmDec),estimateTokens(res))||0});}catch{}
+        // (usage is now logged centrally inside callAI, with the real provider)
         const session={id:Date.now(),dec:tmDec,res,brief:researchBrief,ts:new Date().toISOString()};
         setTmSessions(prev=>{const ns=[session,...prev].slice(0,20);sv("cos-tm",ns);return ns;});
       }
@@ -3065,6 +3120,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       return;
     }
     setApRun(true);setApRes("");setError(null);setApResearchBrief("");
+    setUsageFeature("Decision Autopilot","🤖");
     const apCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
     try{
       if(cancelRef.current.ap)return;
@@ -3089,8 +3145,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           const entry={id:Date.now(),ts:Date.now(),res,brief:researchBrief,stage:co.stage,company:co.name};
           setApSessions(prev=>{const ns=[entry,...prev].slice(0,30);sv("cos-ap",ns);return ns;});
         }catch{}
-        try{const apI=estimateTokens(co.name);const apO=estimateTokens(res);
-        saveRecord({feature:"Decision Autopilot",provider:defP,model:MODELS[defP]?.model||defP,inputTokens:apI,outputTokens:apO,cost:estimateCost(defP,apI,apO)||0});}catch{}
+        // (usage is now logged centrally inside callAI, with the real provider)
       }
     }catch(err){
       if(!cancelRef.current.ap){setError(err.message);showToast("Autopilot: "+err.message,"error");}
@@ -3109,6 +3164,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       return;
     }
     setBrRun(true);setError(null);
+    setUsageFeature("AI Boardroom","🏛️");
     setBrCur({q:brQ,researchBrief:"",format:"threaded",stages:[]});
     const agents=brAg.map(id=>AR.find(r=>r.id===id)).filter(Boolean);
     const res=[];
@@ -3334,10 +3390,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         const finalCur={q:brQ,researchBrief,format:"threaded",stages:[stage1]};
         setBrCur(finalCur);
         try{sv("cos-br-live",finalCur);}catch{}
-        try{
-          const bI=estimateTokens(brQ);const bO=estimateTokens(syn+(res||[]).map(r=>r.text||"").join(""));
-          saveRecord({feature:"AI Boardroom — "+brQ.slice(0,35),provider:defP,model:MODELS[defP]?.model||defP,inputTokens:bI,outputTokens:bO,cost:estimateCost(defP,bI,bO)||0});
-        }catch{}
+        // (usage is now logged centrally inside callAI, with the real provider)
         const ns=[finalSession,...brSessions].slice(0,20);setBrSessions(ns);sv("cos-br",ns);
       }
     }catch(err){
@@ -3730,6 +3783,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
   // ─── PROJECT ENGINE — Phase 2: Execution Engine ────────────────────────────
   const runProjectExecution=useCallback(async(project)=>{
     if(projectExecuting)return;
+    setUsageFeature("Project Engine","🏗️");
     setProjectExecuting(true);
     setProjectExecCancel(false);
     projectExecCancelRef.current=false;
@@ -5179,6 +5233,7 @@ const runWorkflow=useCallback(async(customChainOverride?:string[],preflightAnswe
     ?"\n\n=== PRE-FLIGHT CONTEXT (user answers to executive questions) ===\n"+preflightAnswers.questions.map((q,i)=>"Q ("+q.persona+"): "+q.q+"\nA: "+(preflightAnswers.answers[i]||"Not provided")).join("\n\n")+"\n\nCRITICAL: Use these answers as the primary input for the deliverable. Build everything around what the user said here."
     :"";
   cancelRef.current.wf=false;
+  setUsageFeature("Flow: "+(ch?.label||wfCat),"⚡");
   setWfRunning(true);setError(null);setWfPauseMsg("");
 
   const wfId=Date.now();
@@ -5248,9 +5303,7 @@ if(!role){
       reply=replyFull.primary;
       const usedProv=replyFull.usedProvider||defP;
       const usedModel=MODELS[usedProv]?.model||usedProv;
-      const inputTok=estimateTokens(sys);
-      const outputTok=estimateTokens(reply);
-      saveRecord({feature:"Flow: "+ch.label+" L"+(i+1)+" — "+role.t,provider:usedProv,model:usedModel,inputTokens:inputTok,outputTokens:outputTok,cost:estimateCost(usedProv,inputTok,outputTok)||0});
+      // (usage is now logged centrally inside callAI, with the real provider)
     }catch(err:any){
       stepFailed=true;
       failMsg=err.message||"Unknown error";
@@ -5361,6 +5414,7 @@ const processTask=useCallback(async(task:any)=>{
     sv("cos-tq",tQRef.current);
   };
 
+  setUsageFeature("Task Queue: "+ch.label,"🤖");
   upd({status:TS.RUNNING,startedAt:new Date().toISOString()});
   addN("Chain started: "+ch.label,"running");
 
