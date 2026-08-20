@@ -5945,6 +5945,11 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               {testSt[id]?.startsWith("fail:")&&<div style={{fontSize:9,color:"#EF4444",marginTop:2,lineHeight:1.4}}>{testSt[id].slice(5)}</div>}
             </div>
           ))}
+                {cfgP.length>1&&(
+ 
+>>> REPLACE WITH THIS (23 lines):
+ 
+                ))}
           <div style={{padding:"10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:10}}>
                   <label style={{...S.lbl,marginBottom:2}}>Web Search Service (optional, but strongly recommended)</label>
                   <div style={{fontSize:8.5,color:"#5A6480",marginBottom:8,lineHeight:1.5}}>
