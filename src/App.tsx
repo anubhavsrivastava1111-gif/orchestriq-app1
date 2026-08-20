@@ -5946,32 +5946,6 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
             </div>
           ))}
                 {cfgP.length>1&&(
- 
->>> REPLACE WITH THIS (23 lines):
- 
-                ))}
-          <div style={{padding:"10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:10}}>
-                  <label style={{...S.lbl,marginBottom:2}}>Web Search Service (optional, but strongly recommended)</label>
-                  <div style={{fontSize:8.5,color:"#5A6480",marginBottom:8,lineHeight:1.5}}>
-                    Without a key here, Claude or Gemini searches for you at roughly $10 per 1,000 searches, and decides for itself whether to show a source link.
-                    With a key, the app searches directly, costs far less, and every finding keeps a real clickable URL. The first service with a key is used; the rest are fallbacks.
-                  </div>
-                  {SEARCH_PROVIDERS.filter(sp=>sp.id!=="native").map(sp=>(
-                    <div key={sp.id} style={{marginBottom:8}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
-                        <span style={{fontSize:10,fontWeight:700,color:"#A0AAC0"}}>{sp.label}</span>
-                        <span style={{fontSize:8.5,color:"#10B981"}}>{sp.freeTier}</span>
-                        <span style={{fontSize:8.5,color:"#5A6480"}}>{sp.costPer1000Usd!==null?("~$"+sp.costPer1000Usd+"/1k"):""}</span>
-                        {sp.signupUrl&&<a href={sp.signupUrl} target="_blank" rel="noopener noreferrer" style={{marginLeft:"auto",fontSize:9,color:"#14B8A6",textDecoration:"none"}}>Get key ↗</a>}
-                      </div>
-                      <input style={{...S.inp,fontSize:11}} type="password" placeholder={sp.keyPlaceholder}
-                        value={keys[sp.id]||""}
-                        onChange={e=>{const nk={...keys,[sp.id]:e.target.value};setKeys(nk);sv("cos-keys",{keys:nk,defaultProvider:defP,multiAI});}}/>
-                      <div style={{fontSize:8,color:"#3A4060",marginTop:2}}>{sp.notes}</div>
-                    </div>
-                  ))}
-                </div>
-                {cfgP.length>1&&(
             <div style={{padding:"8px 10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:10}}>
               <label style={{...S.lbl,marginBottom:5}}>Default Model</label>
               <div style={{display:"flex",gap:4}}>{cfgP.map(p=><button key={p} onClick={()=>setDefP(p)} style={{flex:1,padding:"5px",borderRadius:4,fontSize:10,fontWeight:600,border:"1px solid "+(defP===p?MODELS[p].color:"#1a2030"),background:defP===p?MODELS[p].color+"15":"transparent",color:defP===p?MODELS[p].color:"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{MODELS[p].name}</button>)}</div>
@@ -7474,6 +7448,27 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                     {testSt[id]?.startsWith("fail:")&&<div style={{fontSize:9,color:"#EF4444",marginTop:2,lineHeight:1.4}}>{testSt[id].slice(5)}</div>}
                   </div>
                 ))}
+          <div style={{padding:"10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:10}}>
+                  <label style={{...S.lbl,marginBottom:2}}>Web Search Service (optional, but strongly recommended)</label>
+                  <div style={{fontSize:8.5,color:"#5A6480",marginBottom:8,lineHeight:1.5}}>
+                    Without a key here, Claude or Gemini searches for you at roughly $10 per 1,000 searches, and decides for itself whether to show a source link.
+                    With a key, the app searches directly, costs far less, and every finding keeps a real clickable URL. The first service with a key is used; the rest are fallbacks.
+                  </div>
+                  {SEARCH_PROVIDERS.filter(sp=>sp.id!=="native").map(sp=>(
+                    <div key={sp.id} style={{marginBottom:8}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                        <span style={{fontSize:10,fontWeight:700,color:"#A0AAC0"}}>{sp.label}</span>
+                        <span style={{fontSize:8.5,color:"#10B981"}}>{sp.freeTier}</span>
+                        <span style={{fontSize:8.5,color:"#5A6480"}}>{sp.costPer1000Usd!==null?("~$"+sp.costPer1000Usd+"/1k"):""}</span>
+                        {sp.signupUrl&&<a href={sp.signupUrl} target="_blank" rel="noopener noreferrer" style={{marginLeft:"auto",fontSize:9,color:"#14B8A6",textDecoration:"none"}}>Get key ↗</a>}
+                      </div>
+                      <input style={{...S.inp,fontSize:11}} type="password" placeholder={sp.keyPlaceholder}
+                        value={keys[sp.id]||""}
+                        onChange={e=>{const nk={...keys,[sp.id]:e.target.value};setKeys(nk);sv("cos-keys",{keys:nk,defaultProvider:defP,multiAI});}}/>
+                      <div style={{fontSize:8,color:"#3A4060",marginTop:2}}>{sp.notes}</div>
+                    </div>
+                  ))}
+                </div>
                 {cfgP.length>1&&(
                   <div style={{padding:"10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:10}}>
                     <label style={{...S.lbl,marginBottom:2}}>Primary AI</label>
