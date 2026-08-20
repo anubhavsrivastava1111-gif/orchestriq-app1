@@ -161,9 +161,9 @@ const FEATURE_COLORS: Record<string, string> = {
 };
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
-export default function TokenAnalytics({ defP, keys }: { defP: string; keys: Record<string, string> }) {
+export default function TokenAnalytics({ defP, keys, me }: { defP: string; keys: Record<string, string>; me?: { email: string; role: string } }) {
   const [records, setRecords] = useState<TokenRecord[]>([]);
-  const [view, setView] = useState<"session" | "today" | "all" | "project" | "provider" | "feature">("session");
+  const [view, setView] = useState<"session" | "today" | "all" | "project" | "provider" | "feature" | "user">("session");
 
   const reload = useCallback(() => setRecords(loadRecords()), []);
   useEffect(() => {
@@ -197,6 +197,26 @@ export default function TokenAnalytics({ defP, keys }: { defP: string; keys: Rec
     byProv[r.provider].calls++;
   });
 
+  // Per-user breakdown. Records carry userEmail from Session 13 onward; anything
+  // recorded before that is grouped as "Unattributed" rather than silently dropped.
+  const byUser: Record<string, { in: number; out: number; cost: number; calls: number; role: string }> = {};
+  records.forEach(r => {
+    const key = (r.userEmail || "").trim() || "Unattributed (pre-tracking)";
+    if (!byUser[key]) byUser[key] = { in: 0, out: 0, cost: 0, calls: 0, role: r.userRole || "" };
+    byUser[key].in += r.inputTokens ?? 0;
+    byUser[key].out += r.outputTokens ?? 0;
+    byUser[key].cost += r.costUsd ?? 0;
+    byUser[key].calls++;
+  });
+
+  // Search spend is billed per query, not per token, so it is summarised separately.
+  const searchRec = records.filter(r => r.kind === "search");
+  const searchSpend = searchRec.reduce((s, r) => s + (r.costUsd ?? 0), 0);
+  const searchQueries = searchRec.reduce((s, r) => s + (r.units ?? 0), 0);
+  const estimatedShare = records.length
+    ? Math.round(records.filter(r => r.estimated).length / records.length * 100)
+    : 0;
+
   // Feature breakdown
   const byFeat: Record<string, { in: number; out: number; cost: number; calls: number; icon: string }> = {};
   records.forEach(r => {
@@ -210,8 +230,11 @@ export default function TokenAnalytics({ defP, keys }: { defP: string; keys: Rec
   const maxFeatTok = Math.max(...Object.values(byFeat).map(v => v.in + v.out), 1);
 
   const exportCSV = () => {
-    const csv = ["Feature,Provider,Model,Input,Output,Total,Cost USD,Time",
-      ...records.map(r => `${r.feature},${r.provider},${r.model},${r.inputTokens ?? 0},${r.outputTokens ?? 0},${(r.inputTokens ?? 0) + (r.outputTokens ?? 0)},${(r.costUsd ?? 0).toFixed(6)},${r.ts}`)
+    const q = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = ["User,Role,Feature,Provider,Model,Billing,Input,Output,Queries,Cost USD,Estimated,Time",
+      ...records.map(r => [q(r.userEmail || "Unattributed"), q(r.userRole || ""), q(r.feature), q(r.provider), q(r.model),
+        q(r.kind || "llm"), r.inputTokens ?? 0, r.outputTokens ?? 0, r.units ?? 0,
+        (r.costUsd ?? 0).toFixed(6), r.estimated ? "yes" : "no", q(r.ts)].join(","))
     ].join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -280,12 +303,52 @@ export default function TokenAnalytics({ defP, keys }: { defP: string; keys: Rec
 
             {/* View tabs */}
             <div style={{ display: "flex", gap: 5, marginBottom: 14, flexWrap: "wrap" as const }}>
-              {(["session", "today", "all", "provider", "feature"] as const).map(v => (
+              {(["session", "today", "all", "provider", "feature", "user"] as const).map(v => (
                 <button key={v} onClick={() => setView(v)} style={S.tab(view === v)}>
-                  {v === "session" ? "Session" : v === "today" ? "Today" : v === "all" ? "All Calls" : v === "provider" ? "By Provider" : "By Feature"}
+                  {v === "session" ? "Session" : v === "today" ? "Today" : v === "all" ? "All Calls" : v === "provider" ? "By API Key" : v === "feature" ? "By Module" : "By User"}
                 </button>
               ))}
             </div>
+
+            {/* Search spend + data-quality strip */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" as const }}>
+              <div style={{ ...S.metric, flex: 1, minWidth: 150 }}>
+                <span style={S.label}>Web Search Spend</span>
+                <div style={S.val}>{fmtCost(searchSpend)}</div>
+                <div style={S.sub}>{searchQueries} queries billed</div>
+              </div>
+              <div style={{ ...S.metric, flex: 1, minWidth: 150 }}>
+                <span style={S.label}>Token Accuracy</span>
+                <div style={S.val}>{100 - estimatedShare}%</div>
+                <div style={S.sub}>{estimatedShare}% estimated, rest reported by provider</div>
+              </div>
+            </div>
+
+            {/* Per-user breakdown */}
+            {view === "user" && (
+              <div style={S.card}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--oiq-ink)", marginBottom: 4 }}>Spend by User</div>
+                <div style={{ fontSize: 10, color: "var(--oiq-muted)", marginBottom: 12, lineHeight: 1.6 }}>
+                  This shows activity recorded in <strong>this browser</strong> only. Cross-device, all-account reporting needs the Supabase sync.
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr", gap: 4, fontSize: 9, fontWeight: 700, color: "var(--oiq-muted)", textTransform: "uppercase" as const, letterSpacing: "0.08em", marginBottom: 6 }}>
+                  <span>User</span><span style={{ textAlign: "right" as const }}>Input</span><span style={{ textAlign: "right" as const }}>Output</span><span style={{ textAlign: "right" as const }}>Calls</span><span style={{ textAlign: "right" as const }}>Cost</span>
+                </div>
+                {Object.entries(byUser).sort((a, b) => b[1].cost - a[1].cost).map(([user, d]) => (
+                  <div key={user} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr", gap: 4, padding: "8px 0", borderBottom: "1px solid var(--oiq-border)", fontSize: 11, alignItems: "center" }}>
+                    <div>
+                      <div style={{ color: "var(--oiq-ink)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{user === (me?.email || "") && user ? user + " (you)" : user}</div>
+                      <div style={{ fontSize: 9, color: "var(--oiq-muted)" }}>{d.role || "—"}</div>
+                    </div>
+                    <div style={{ textAlign: "right" as const, color: "#3B82F6" }}>{fmt(d.in)}</div>
+                    <div style={{ textAlign: "right" as const, color: "var(--oiq-accent)" }}>{fmt(d.out)}</div>
+                    <div style={{ textAlign: "right" as const, color: "var(--oiq-muted)" }}>{d.calls}</div>
+                    <div style={{ textAlign: "right" as const, color: "var(--oiq-ink)", fontWeight: 700 }}>{fmtCost(d.cost)}</div>
+                  </div>
+                ))}
+                {!Object.keys(byUser).length && <div style={{ fontSize: 11, color: "var(--oiq-muted)", padding: "10px 0" }}>No usage recorded yet.</div>}
+              </div>
+            )}
 
             {/* Provider breakdown */}
             {view === "provider" && (
