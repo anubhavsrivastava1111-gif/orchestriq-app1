@@ -469,11 +469,64 @@ function badgeBrief(brief){
 // OpenAI, DeepSeek, and Groq have no real-time search access on the plans
 // used here — routing research to them would produce confident-sounding
 // fabrication, not real research. This is a deliberate, honest limit.
+// ─── PROVIDER CONTROL GATE (single source of truth) ──────────────────────────
+// The Settings on/off toggle used to be decorative: `offP` was read in exactly
+// ONE place — the Primary AI button row — while EIGHT other paths read the keys
+// object directly. That is why a switched-off Claude key was still being billed
+// for research. Every provider decision in the app now passes through here, so
+// "off" means off by construction and any future path inherits the behaviour.
+//
+// It is deliberately module-level (not React state) because callAI, callMulti
+// and runResearchDesk are plain functions outside the component tree.
+let OFF_PROVIDERS:Record<string,boolean>={};
+try{OFF_PROVIDERS=JSON.parse(localStorage.getItem("cos-offp")||"{}")||{};}catch{}
+function setOffProviders(next:Record<string,boolean>){
+  OFF_PROVIDERS=next||{};
+  try{localStorage.setItem("cos-offp",JSON.stringify(OFF_PROVIDERS));}catch{}
+}
+function isProviderOff(id:string){return !!OFF_PROVIDERS[id];}
+ 
+// Returns the usable key for a provider, or "" when the user has switched it off.
+// System-supplied fallback keys (EFF_*) are honoured ONLY when the provider is on —
+// previously a user with no key of their own and the toggle off could still be
+// billed on a system key they never configured.
+function providerKey(keys:any,id:string):string{
+  if(isProviderOff(id))return "";
+  const own=(keys?.[id]||"").trim();
+  if(own)return own;
+  if(id==="gemini"&&EFF_GEMINI?.trim())return EFF_GEMINI.trim();
+  if(id==="groq"&&EFF_GROQ?.trim())return EFF_GROQ.trim();
+  if(id==="claude"&&EFF_CLAUDE?.trim())return EFF_CLAUDE.trim();
+  if(id==="fal"&&EFF_FAL?.trim())return EFF_FAL.trim();
+  if(id==="nvidia")return "nvidia"; // free tier, no key required
+  return "";
+}
+function providerEnabled(keys:any,id:string):boolean{
+  return !!providerKey(keys,id);
+}
+// The ONLY approved way to build a key map for routing. Switched-off providers
+// are absent entirely, so any downstream code that iterates it cannot use them.
+// Explicit allow-list. The keys object also holds NON-provider entries such as
+// keys.nvidiaModel (a model string, not a credential) and the four web-search
+// keys. Filtering by "is not a search key" would have let nvidiaModel through as
+// if it were a callable provider. An allow-list cannot drift that way.
+const AI_PROVIDER_IDS=["claude","openai","gemini","groq","deepseek","kimi","stability","fal"];
+function enabledKeys(keys:any):Record<string,string>{
+  const out:Record<string,string>={};
+  AI_PROVIDER_IDS.forEach(id=>{
+    const k=providerKey(keys,id);
+    if(k)out[id]=k;
+  });
+  return out;
+}
+ 
 function resolveSearchProviders(keys){
   const out:Array<{provider:string;key:string}>=[];
-  const claudeKey=(keys?.claude||EFF_CLAUDE||"").trim();
+  // Gated: a provider switched off in Settings is never used for research.
+  // This exact line is why a disabled Claude key was still running your searches.
+  const claudeKey=providerKey(keys,"claude");
   if(claudeKey)out.push({provider:"claude",key:claudeKey});
-  const geminiKey=(keys?.gemini||EFF_GEMINI||"").trim();
+  const geminiKey=providerKey(keys,"gemini");
   if(geminiKey)out.push({provider:"gemini",key:geminiKey});
   return out;
 }
@@ -1319,11 +1372,9 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,mode
 }
 
 async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskType=""){
-  const effectiveKeys={...keys};
-  if(EFF_GEMINI?.trim())effectiveKeys.gemini=EFF_GEMINI;
-  if(EFF_GROQ?.trim())effectiveKeys.groq=EFF_GROQ;
-  if(EFF_CLAUDE?.trim())effectiveKeys.claude=EFF_CLAUDE;
-  if(EFF_FAL?.trim())effectiveKeys.fal=EFF_FAL;
+  // Gated: switched-off providers are absent from this map entirely, so task
+  // routing, the fallback chain and the media chain all skip them automatically.
+  const effectiveKeys:any=enabledKeys(keys);
 
   // Auto-detect task type from prompt if not explicitly provided
   const userPrompt=msgs?.find((m:any)=>m.role==="user")?.content||"";
@@ -1349,7 +1400,7 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
   const paidConfigured=["claude","openai"].filter(p=>effectiveKeys[p]?.trim());
   let active=taskRoutedProvider||getActiveProvider(defP,effectiveKeys,EFF_GROQ,EFF_GEMINI);
   if(!taskRoutedProvider){
-    if(EFF_CLAUDE?.trim()&&!keys.claude?.trim()&&!keys.openai?.trim()){
+    if(providerEnabled(keys,"claude")&&!keys.claude?.trim()&&!keys.openai?.trim()){
       active="claude";
     }else if(paidConfigured.length&&!paidConfigured.includes(defP)&&!effectiveKeys[active]?.trim()){
       active=paidConfigured[0];
@@ -3074,8 +3125,8 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
   // Vision-capable call for Pulse Agentic (Dispatch). Uses Claude directly since it
   // supports image content blocks; falls back with a clear error if no Claude key.
   const askVision=async(sys:string,userText:string,images:{data:string;mediaType:string}[])=>{
-    const claudeKey=(keys.claude?.trim())||EFF_CLAUDE;
-    if(!claudeKey)throw new Error("Pulse Agentic requires a Claude API key (for image reading). Add one in Settings.");
+    const claudeKey=providerKey(keys,"claude");
+    if(!claudeKey)throw new Error(isProviderOff("claude")?"Pulse Agentic needs Claude for image reading, but Claude is switched OFF in Settings. Switch it on to use this feature.":"Pulse Agentic requires a Claude API key (for image reading). Add one in Settings.");
     const content:any[]=images.map(img=>({type:"image",source:{type:"base64",media_type:img.mediaType,data:img.data}}));
     content.push({type:"text",text:userText});
     const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":claudeKey.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:MODELS.claude.model,max_tokens:2000,system:sys,messages:[{role:"user",content}]})});
@@ -3322,15 +3373,13 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
               +"\n\nContinue EXACTLY from where you stopped. Do not repeat anything above. Continue seamlessly.")
             :brQ;
           // Build list of providers to try this cycle
-          const allProviders=Object.keys(keys).filter(p=>{
-            if(!isAiProviderKey(p))return false;
-            const k=(p==="groq"?keys.groq||EFF_GROQ:p==="gemini"?keys.gemini||EFF_GEMINI:p==="claude"?keys.claude||EFF_CLAUDE:keys[p]);
-            return k?.trim();
-          });
+          // Gated: the debate failover chain now skips switched-off providers.
+          const brKeys=enabledKeys(keys);
+          const allProviders=Object.keys(brKeys);
           let cycleSuccess=false;
           for(const prov of allProviders){
             if(cancelRef.current.br)break;
-            const pKey=(prov==="groq"?(keys.groq||EFF_GROQ):prov==="gemini"?(keys.gemini||EFF_GEMINI):prov==="claude"?(keys.claude||EFF_CLAUDE):keys[prov])||"";
+            const pKey=brKeys[prov]||"";
             if(!pKey.trim())continue;
             try{
               setBrPh(ag.ic+" "+ag.t+(agText?" — resuming via "+prov+"…":" is analyzing… ("+prov+")"));
@@ -4139,10 +4188,8 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
     // Helper: call AI with retry + failover + waiting
     const callDelAI=async(sys,userMsg,maxT,delLabel,delTask)=>{
       const providerOrder=[];
-      const allKeys={...keys};
-      if(EFF_GROQ?.trim())allKeys.groq=EFF_GROQ;
-      if(EFF_GEMINI?.trim())allKeys.gemini=EFF_GEMINI;
-      if(EFF_CLAUDE?.trim())allKeys.claude=EFF_CLAUDE;
+      // Gated: Project Engine deliverables skip switched-off providers.
+      const allKeys:any=enabledKeys(keys);
       // Primary-aware routing (honors the user's Primary AI + specialist chains).
       // The old hardcoded "deepseek first" ladder bypassed the router entirely.
       const preferred=resolveRoute(delTask||"general",defP);
@@ -4428,10 +4475,8 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
       const del=completedDels[i];
       setProjectExecPhase("🔍 QA: "+del.name+" ("+(i+1)+"/"+completedDels.length+")");
       try{
-        const allKeys={...keys};
-        if(EFF_GROQ?.trim())allKeys.groq=EFF_GROQ;
-        if(EFF_GEMINI?.trim())allKeys.gemini=EFF_GEMINI;
-        if(EFF_CLAUDE?.trim())allKeys.claude=EFF_CLAUDE;
+        // Gated: the QA reviewer skips switched-off providers.
+        const allKeys:any=enabledKeys(keys);
         const provs=["deepseek","claude","openai","gemini","groq","kimi"].filter(p=>allKeys[p]?.trim());
         if(!provs.length){updateDelQA(del._modId,del.id,{passed:true,score:70,checkedAt:new Date().toISOString(),flags:[],summary:"QA skipped — no key"},del.status);continue;}
         const qaProv=provs[0];
@@ -4581,7 +4626,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
                 available_data:_allContent.slice(0,8000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
-                api_key:keys.claude||keys.openai||keys.gemini||keys.groq||""
+                api_key:providerKey(keys,"claude")||providerKey(keys,"openai")||providerKey(keys,"gemini")||providerKey(keys,"groq")||""
               }),
               signal:AbortSignal.timeout(120000)
             });
@@ -4676,7 +4721,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
                 available_data:_allContent.slice(0,8000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
-                api_key:keys.claude||keys.openai||keys.gemini||keys.groq||""
+                api_key:providerKey(keys,"claude")||providerKey(keys,"openai")||providerKey(keys,"gemini")||providerKey(keys,"groq")||""
               }),
               signal:AbortSignal.timeout(120000)
             });
@@ -5816,9 +5861,9 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
   // ─── RAILWAY DOCUMENT ENGINE — the ONLY document generator in the app ───
   const railwayGenerate=useCallback(async(format:string,opts:{title?:string;objective?:string;body?:string;currency?:string;currencySymbol?:string})=>{
     const RAILWAY_URL="https://orchestriq-gen-service-production.up.railway.app";
-    const claudeKey=(keys.claude||EFF_CLAUDE||"").trim();
-    const openaiKey=(keys.openai||"").trim();
-    const deepseekKey=(keys.deepseek||"").trim();
+    const claudeKey=providerKey(keys,"claude");
+    const openaiKey=providerKey(keys,"openai");
+    const deepseekKey=providerKey(keys,"deepseek");
     if(!claudeKey&&!openaiKey&&!deepseekKey)throw new Error("No API key configured — add a Claude, OpenAI, or DeepSeek key in Settings to generate documents.");
     // Excellent tier prefers Claude first (highest quality); Standard/Professional prefer DeepSeek first (cheaper).
     const providerOrder = RESPONSE_QUALITY==="excellent" ? "claude,openai,deepseek" : "deepseek,claude,openai";
@@ -5835,9 +5880,9 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         available_data:(opts.body||"").slice(0,8000),
         currency:opts.currency||co.currency||"INR",
         currency_symbol:opts.currencySymbol||cur.sym||"₹",
-        claude_key:claudeKey,
-        openai_key:openaiKey,
-        deepseek_key:deepseekKey,
+        claude_key:isProviderOff("claude")?"":claudeKey,
+        openai_key:isProviderOff("openai")?"":openaiKey,
+        deepseek_key:isProviderOff("deepseek")?"":deepseekKey,
         provider_order:providerOrder
     });
     const _attempt=async()=>{
@@ -7538,7 +7583,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                           const next={...offP,[id]:!offP[id]};
                           if(!next[id])delete next[id];
                           setOffP(next);
-                          try{localStorage.setItem("cos-offp",JSON.stringify(next));}catch{}
+                          setOffProviders(next); // keep the gate in sync immediately
+                          try{showToast(MODELS[id]?.name+(next[id]?" switched OFF — it will not be used or billed anywhere":" switched ON"),next[id]?"warning":"success");}catch{}
                           if(next[id]&&defP===id){
                             const fall=["nvidia",...Object.keys(keys).filter(p=>isAiProviderKey(p)&&keys[p]?.trim()&&!next[p])];
                             setDefP(fall[1]||"nvidia");
@@ -7603,7 +7649,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                     <label style={{...S.lbl,marginBottom:4}}>Automatic Specialist Routing</label>
                     <div style={{border:"1px solid #1a2030",borderRadius:5,overflow:"hidden",marginBottom:8}}>
                       {(()=>{
-                        const hasK=(p)=>!!(keys[p]?.trim()||(p==="claude"&&EFF_CLAUDE?.trim())||(p==="gemini"&&EFF_GEMINI?.trim())||(p==="groq"&&EFF_GROQ?.trim())||(p==="fal"&&EFF_FAL?.trim()));
+                        const hasK=(p)=>providerEnabled(keys,p);
                         const CAPS=[["General & Writing","general"],["Research","research"],["Code","code"],["Excel & Financial","excel_advanced"],["PowerPoint","powerpoint"],["Word / PDF","financial"],["Image Generation","image_gen"],["Video Generation","video_gen"]];
                         return CAPS.map(([label,task],i)=>{
                           const route=resolveRoute(task,defP);
