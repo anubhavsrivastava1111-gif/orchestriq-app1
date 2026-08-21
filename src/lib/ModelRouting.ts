@@ -156,3 +156,4 @@ export function fmtMoney(usd: number, currency: string, symbol: string, fxToLoca
   if (v >= 1000) return symbol + Math.round(v).toLocaleString("en-IN");
   return symbol + v.toFixed(v < 10 ? 2 : 0);
 }
+
