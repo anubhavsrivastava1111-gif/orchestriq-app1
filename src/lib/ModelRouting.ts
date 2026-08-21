@@ -13,7 +13,7 @@
 // file cannot change behaviour until something imports it.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { PROVIDER_PRICING, resolvePricingKey } from "./TokenAnalytics";
+import { PROVIDER_PRICING, resolvePricingKey } from "../TokenAnalytics";
 
 export type StageId =
   | "research_extract"    // turn retrieved results into structured bullets
