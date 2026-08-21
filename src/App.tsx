@@ -616,12 +616,23 @@ function synthesisPrompt(co,question,sections){
 }
 
 async function runResearchDesk(ask,co,compData,question,showToast,keys){
-  const routes=resolveSearchProviders(keys);
+  let routes=resolveSearchProviders(keys);
+  // When an external search service (Serper/Tavily/Brave/DataForSEO) is configured,
+  // the app does the searching itself — so the reasoning model no longer needs its
+  // own web access. ANY enabled LLM can structure the retrieved results. Previously
+  // this returned "Research Desk OFFLINE" even with a valid Serper key, purely
+  // because Claude and Gemini were switched off. Cheapest capable model first.
+  if(!routes.length&&hasExternalSearch(SEARCH_CHAIN,keys)){
+    const ek=enabledKeys(keys);
+    ["deepseek","kimi","groq","openai","gemini","claude"].forEach(p=>{
+      if(ek[p])routes.push({provider:p,key:ek[p]});
+    });
+  }
   const route=routes[0];
   if(!route){
     try{showToast&&showToast("Research Desk OFFLINE — no Claude or Gemini key. Executives will debate UNVERIFIED figures. Add a key in Settings.","warning");}catch{}
     return {
-      brief:"⚠ **RESEARCH DESK OFFLINE — NO SEARCH-CAPABLE PROVIDER**\n\nNo Claude or Gemini API key is configured, so no live figure could be retrieved for this question.\n\n**Every number produced below is model-generated and UNVERIFIED.** Do not use any figure in this session for a real decision, valuation, budget, or external document until independently confirmed.\n\nFix: Settings → API Keys → add a Claude key (preferred) or Gemini key, then re-run.",
+      brief:"⚠ **RESEARCH DESK OFFLINE — NO SEARCH-CAPABLE PROVIDER**\n\nNo way to reach the live web is currently configured, so no live figure could be retrieved for this question.\n\n**Every number produced below is model-generated and UNVERIFIED.** Do not use any figure in this session for a real decision, valuation, budget, or external document until independently confirmed.\n\nFix — either option works:\n1. CHEAPEST: Settings → Web Search Service → add a Serper key (~$1 per 1,000 searches, 2,500 free). Any AI provider you already have can then do the reasoning.\n2. Settings → API Keys → switch on Claude or Gemini and let the model search for itself (~$10–14 per 1,000 searches).",
       grounded:false,provider:"none"
     };
   }
@@ -2889,24 +2900,29 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
         if(prof?.role==="super_admin"&&prof?.admin_api_keys){
           const ak=prof.admin_api_keys as any;
           const loadedKeys=ak.keys||ak;
-          setKeys(prev=>({
-            claude:loadedKeys.claude||prev.claude||"",
-            openai:loadedKeys.openai||prev.openai||"",
-            gemini:loadedKeys.gemini||prev.gemini||"",
-            groq:loadedKeys.groq||prev.groq||"",
-            deepseek:loadedKeys.deepseek||prev.deepseek||"",
-            kimi:loadedKeys.kimi||prev.kimi||"",
-            stability:loadedKeys.stability||prev.stability||"",
-            fal:loadedKeys.fal||prev.fal||"",
-          }));
+          // BUG FIX: this used to RETURN A NEW OBJECT WITH ONLY THESE 8 FIELDS,
+          // silently deleting serper / tavily / brave / dataforseo (and nvidiaModel)
+          // from state on every login. The debounced save-back then wrote that
+          // truncated object to Supabase, erasing the saved search keys for good —
+          // which is why a Serper key never survived a refresh.
+          // Spreading prev first preserves every key that is not listed here.
+          setKeys(prev=>{
+            const merged:any={...prev};
+            Object.keys(loadedKeys||{}).forEach(k=>{
+              if(typeof loadedKeys[k]==="string"&&loadedKeys[k].trim())merged[k]=loadedKeys[k];
+            });
+            return merged;
+          });
           if(ak.defaultProvider)setDefP(ak.defaultProvider);
           if(ak.multiAI!==undefined)setMultiAI(ak.multiAI);
         }
       }
     }catch{}
     try{const k=WorkspaceMemory.get<any>("cos-keys");if(k){
-      const p=JSON.parse(k);
-      const loadedKeys={claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",...(p.keys||{})};
+      // WorkspaceMemory.get already returns a parsed object. Calling JSON.parse on
+      // it threw, and the whole local key restore was silently swallowed by catch{}.
+      const p=(typeof k==="string")?JSON.parse(k):k;
+      const loadedKeys={claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:"",serper:"",tavily:"",brave:"",dataforseo:"",...(p.keys||{})};
       setKeys(loadedKeys);setDefP(p.defaultProvider||"claude");setMultiAI(p.multiAI||false);
       if(Object.values(loadedKeys).some(v=>v?.trim()))setPage("app");
       const active=Object.keys(loadedKeys).filter(pid=>loadedKeys[pid]?.trim());
