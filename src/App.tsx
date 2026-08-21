@@ -21,6 +21,7 @@ import { scanSuppliedInputs, buildIntakePrompt, buildRegisterInjection, INTAKE_F
 import { runSearch, formatResultsForPrompt, RETRIEVED_RESULTS_RULES, hasExternalSearch, SEARCH_PROVIDERS, estimateSearchCost } from "./lib/SearchProviders";
 import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney } from "./lib/ModelRouting";
 import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
+import { detectDocumentRequest, buildDocumentBrief, buildSynthesisOverride, suggestedFormats, CONSULTING_STANDARD } from "./lib/DocumentLibrary";
 import CostArchitecture from "./CostArchitecture";
 import { loadCostContext, getCostBrief, publishCostDiagnosis, clearCostContext } from "./lib/CostContext";
 
@@ -1755,7 +1756,10 @@ const BOARD_WORD_BUDGET: Record<string,number> = {
   chairman:1200, ceo:1200, cfo:1400, coo:1200, cto:1200, cmo:1100,
   cso:1000, clo:1000, chro:900, board:900, vp_fin:1200, fin_ctrl:1000,
 };
-const BOARD_WORD_BUDGET_DEFAULT=900;
+// 900 words could not hold a competency framework plus two salary tables, which is
+// what the CHRO is mandated to produce. The hard scope limits (max 8 sections, no
+// appendices) are what prevent runaway length - not a punitive word floor.
+const BOARD_WORD_BUDGET_DEFAULT=1100;
 function boardWordBudget(role){
   return BOARD_WORD_BUDGET[role?.id]||BOARD_WORD_BUDGET_DEFAULT;
 }
@@ -3507,6 +3511,15 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     // Universal nine-bucket cost + viability scaffold. Industry-agnostic: the
     // archetype only hints which buckets dominate, it never changes structure.
     const brArchetype=inferArchetype(brQ+" "+(co.industry||"")+" "+(co.name||""));
+    // Is this a request for a DOCUMENT rather than a decision? A business plan is
+    // not a debate, so if one is being asked for, the executives are told which
+    // sections are theirs and the Chairman assembles the document instead of
+    // summarising an argument. When no document is detected, nothing changes.
+    const brDoc=detectDocumentRequest(brQ);
+    const brDocBrief=brDoc.matched?("\n\n"+buildDocumentBrief(brDoc)+"\n"):"";
+    try{
+      if(brDoc.matched)showToast("Producing a "+brDoc.documentName+(brDoc.bundle.length?" (part of: "+brDoc.bundleLabel+")":"")+" \u2014 executives will write to that structure.","info");
+    }catch{}
     const brScaffold="\n\n"+buildScaffoldPrompt({archetype:brArchetype})+"\n\n"+buildViabilityPrompt();
     // WORKSPACE DATA BRIDGE — the Boardroom previously received only the company
     // profile, Data Hub fields and Cost Architecture. It could not see the General
@@ -3580,7 +3593,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         const ag=agents[i];const p=EP[ag.id]||{};
         const prev=res.map(r=>"\n--- "+r.ag.t+" ---\n"+r.text).join("\n");
         setBrPh(ag.ic+" "+ag.t+" is analyzing…");announceBoardroomPhase(ag.t+" is analyzing");
-        const sys="You are "+ag.f+" at \""+co.name+"\".\n"+buildBoardIdentity(ag,p)+"\n"+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS AVAILABLE: "+frameworks.map(f=>f.name+" ("+f.reason+")").join("; ")+"\nFRAMEWORK REQUIREMENT: you MUST explicitly apply at least one named framework and SHOW ITS OUTPUT — the populated table, the calculation, the scored matrix, the register. Naming a framework without producing its output does not count. Choose the framework that answers a specific question you actually need answered; if none of the above fits, name and apply a more appropriate one and say why you chose it. Never insert a framework to look thorough.\n"+fxRuleBlock()+brScaffold+brWorkspaceBlock+brRegisterBlock+"\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — ONLY permitted when you give BOTH a named source AND a URL on the same line. No URL means it is NOT a verified fact, however confident you are.\n"+"[Recalled — Unverified] — you believe it from prior knowledge but cannot produce a source URL. Use this instead of [Verified Fact] whenever the URL is missing.\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label. Tagging a recalled figure as a Verified Fact is the most serious error you can make in this boardroom.":"Previous contributions:\n"+prev+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Conduct your own independent analysis of the question from your "+ag.dl+" perspective, and discharge your standing mandate in full. If your mandate requires a financial model, build it. If it requires a process or capacity map, produce it. If it requires a risk or regulatory register, write it. Another executive having touched a topic does NOT relieve you of your own analysis of it.\n"+"Step 2: You MAY re-derive, recompute, or rebuild any figure a prior speaker presented. If your figure differs from theirs, show both side by side and explain the reason for the gap.\n"+"Step 3: Where an input you need is missing, name the missing variable and state how it changes your conclusion. Do not assume through a gap silently.\n"+"Step 4: Only after presenting your own analysis, state where it contradicts a prior speaker and why yours is better founded.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\nLENGTH AND SCOPE — HARD LIMITS, not suggestions:\n"+"You have approximately "+boardWordBudget(ag)+" words. You will be cut off at that point mid-sentence, so plan the whole response to fit and reach your conclusion inside it.\n"+"Produce AT MOST 8 sections. No appendices, annexures or addenda.\n"+"Stay strictly inside your own functional mandate — never write another executive\u2019s deliverable. A CFO does not write a marketing roadmap; a CTO does not write a hiring plan.\n"+"Depth means the reasoning behind your numbers, NOT more sections. One well-derived figure beats ten listed ones.\n"+"Never state or estimate your own word count.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
+        const sys="You are "+ag.f+" at \""+co.name+"\".\n"+buildBoardIdentity(ag,p)+"\n"+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS AVAILABLE: "+frameworks.map(f=>f.name+" ("+f.reason+")").join("; ")+"\nFRAMEWORK REQUIREMENT: you MUST explicitly apply at least one named framework and SHOW ITS OUTPUT — the populated table, the calculation, the scored matrix, the register. Naming a framework without producing its output does not count. Choose the framework that answers a specific question you actually need answered; if none of the above fits, name and apply a more appropriate one and say why you chose it. Never insert a framework to look thorough.\n"+brDocBrief+fxRuleBlock()+brScaffold+brWorkspaceBlock+brRegisterBlock+"\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — ONLY permitted when you give BOTH a named source AND a URL on the same line. No URL means it is NOT a verified fact, however confident you are.\n"+"[Recalled — Unverified] — you believe it from prior knowledge but cannot produce a source URL. Use this instead of [Verified Fact] whenever the URL is missing.\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label. Tagging a recalled figure as a Verified Fact is the most serious error you can make in this boardroom.":"Previous contributions:\n"+prev+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Conduct your own independent analysis of the question from your "+ag.dl+" perspective, and discharge your standing mandate in full. If your mandate requires a financial model, build it. If it requires a process or capacity map, produce it. If it requires a risk or regulatory register, write it. Another executive having touched a topic does NOT relieve you of your own analysis of it.\n"+"Step 2: You MAY re-derive, recompute, or rebuild any figure a prior speaker presented. If your figure differs from theirs, show both side by side and explain the reason for the gap.\n"+"Step 3: Where an input you need is missing, name the missing variable and state how it changes your conclusion. Do not assume through a gap silently.\n"+"Step 4: Only after presenting your own analysis, state where it contradicts a prior speaker and why yours is better founded.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\nLENGTH AND SCOPE — HARD LIMITS, not suggestions:\n"+"You have approximately "+boardWordBudget(ag)+" words. You will be cut off at that point mid-sentence, so plan the whole response to fit and reach your conclusion inside it.\n"+"Produce AT MOST 8 sections. No appendices, annexures or addenda.\n"+"Stay strictly inside your own functional mandate — never write another executive\u2019s deliverable. A CFO does not write a marketing roadmap; a CTO does not write a hiring plan.\n"+"Depth means the reasoning behind your numbers, NOT more sections. One well-derived figure beats ten listed ones.\n"+"Never state or estimate your own word count.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
         let agText="";
         let agTruncated=false;
         let gotResponse=false;
@@ -3613,6 +3626,17 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
             try{
               setBrPh(ag.ic+" "+ag.t+(agText?" — resuming via "+prov+"…":" is analyzing… ("+prov+")"));
               const replyFull=await callAI(prov,pKey,sys,[{role:"user",content:userMsg}],boardMaxTokens(ag),boardCanSearch(prov)&&!agText.trim())
+              // A provider can return HTTP 200 with an EMPTY body - DeepSeek does this
+              // when the input is large relative to the output budget. The old code
+              // accepted that as success, broke out of the loop, and wrote a BLANK
+              // executive card. Seven of nine executives came back blank this way.
+              // An empty answer is now a failure: try the next provider, then retry.
+              const gotText=String(replyFull?.text||"").trim();
+              if(gotText.length<40){
+                try{showToast(ag.t+": "+prov+" returned an empty answer - trying another provider...","warning");}catch{}
+                markProviderExhausted(prov);
+                continue;
+              }
               agText=agText+replyFull.text;
               agTruncated=!!replyFull.truncated;
               gotResponse=true;
@@ -3637,21 +3661,27 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           }
         }
         // If all 3 cycles failed, record placeholder
-        if(!gotResponse){
-          agText=(agText?"[Response incomplete — API limit reached]\n\n"+agText
-            :"_("+ag.t+" could not respond — all providers at limit. Try again in 1 min or add another API key in Settings.)_");
+        // Final safety net: a card must never render empty. If every provider and
+        // every retry produced nothing, say so plainly on the card itself.
+        if(!gotResponse||String(agText||"").trim().length<40){
+          agText=(String(agText||"").trim().length>=40?"[Response incomplete — API limit reached]\n\n"+agText
+            :"\u26a0 **"+ag.t+" did not produce an answer.**\n\nEvery configured provider either failed or returned an empty response for this executive. This is usually a rate limit or an oversized prompt.\n\nWhat to try: reduce the number of executives, switch off the Research Desk for this run, or add a second provider key in Settings. This executive contributed nothing to the synthesis below.");
           agTruncated=false;
           gotResponse=true;
           showToast(ag.t+" paused — API limit. Adding a second provider key in Settings prevents this.","warning");
         }
         if(cancelRef.current.br)break;
+        // Session 8B cut continuations from 3 to 1 to stop 15,000-word runaways.
+        // That fixed the runaway but overcorrected: the CHRO was cut mid-sentence.
+        // The runaway came from the old "continue" wording inviting fresh material,
+        // not from the attempt count - so 2 attempts with "finish now" is safe.
         let contAttempts=0;
-        while(agTruncated&&contAttempts<1&&!cancelRef.current.br){
+        while(agTruncated&&contAttempts<2&&!cancelRef.current.br){
           contAttempts++;
           setBrPh(ag.ic+" "+ag.t+" is continuing response… (part "+(contAttempts+1)+")");
           try{
             const contSys="You are "+ag.f+" at \""+co.name+"\". You were speaking in a boardroom debate and your response was cut off. Here is what you wrote so far:\n\n"+agText+"\n\nContinue EXACTLY from where you left off. Do not repeat anything already written. Do not restart. Pick up mid-sentence if needed.";
-            const cont=await askFull(contSys,[{role:"user",content:"Finish your response now. You have very little space left — close out your current point, state your conclusion, and stop. Do not open a new section."}],1200);
+            const cont=await askFull(contSys,[{role:"user",content:"Finish your response now. Close out your current point, complete any table you started, state your conclusion, and stop. Do not open a new section."}],1800);
             agText=agText+cont.primary;
             agTruncated=!!cont.truncated;
           }catch(contErr:any){
@@ -3679,7 +3709,11 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         setBrPh("Synthesizing consensus…");
         const allPos=res.map(r=>r.ag.t+":\n"+r.text).join("\n\n---\n\n");
         const synSys="You are Chief of Staff at "+JSON.stringify(co.name)+". "+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN CLASSIFIED: "+domain+"\nRECOMMENDED FRAMEWORKS (for reference — apply where relevant to strengthen the synthesis): "+frameworks.map(f=>f.name).join(", ")+"\n\nSynthesize the boardroom debate into a board-ready executive report. Use this EXACT format with all sections present:\n\n"+"# Executive Summary\n"+"(3-4 sentences: the single decision, headline number in "+synCur.sym+", recommended action)\n\n"+"## Business Domain\n"+"Domain: "+domain+" | Frameworks referenced: "+frameworks.map(f=>f.name).join(" · ")+"\n\n"+"## Key Insights\n"+"(4-6 bullet points, each opening with a bold keyword. New synthesis only — do not restate individual exec arguments.)\n\n"+"## Conflicts Resolved\n"+"| Disagreement | Position A (who) | Position B (who) | RULING | Why | What would change this ruling |\n|---|---|---|---|---|---|\n"+"(One row per genuine disagreement. You are the ARBITRATOR, not a reporter: for every row you MUST state which position the board adopts and the evidence reason. Both are right is NOT a ruling and is not permitted — if the evidence genuinely cannot separate the two positions, rule for the one that fails more cheaply if it turns out wrong, and say that is why you ruled that way. If the executives did not disagree anywhere, say so explicitly and flag it as a warning sign that the debate lacked real challenge.)\n\n"+"## Evidence Quality Review\n"+"(Review the evidence labels used in the debate. List any [Assumption] or [Estimate] that materially affects the recommendation and note what validation is needed.)\n\n"+"## Cost Architecture\n"+"| Cost bucket | Low | Expected | High | Fixed/Variable | Reducible? | Lever |\n|---|---|---|---|---|---|---|\n"+"(Consolidate the executives nine-bucket work into ONE agreed cost stack. Where two executives gave different figures for the same bucket, choose one and note the other in brackets. Omit buckets that genuinely do not apply, but state which you omitted and why.)\n\n"+"## Break-Even and Viability\n"+"(State each of these with its formula shown: contribution per unit, contribution margin percent, total fixed cost per period, break-even volume, break-even revenue, and time to reach it. If an input is unknown, say which, and give the break-even at the low and the high end of its plausible range instead of a single false number.)\n\n"+"## What We Still Do Not Know\n"+"(Carry forward the UNKNOWN items from the Phase 0 evidence register that were NOT resolved during the debate. For each: the variable, why it is load-bearing, the cheapest way to obtain it, and how the recommendation changes if it lands at the bad end.)\n\n"+"## Quantified Recommendation\n"+"(Single recommended path. Show: formula, assumption, result for every figure in "+synCur.sym+")\n\n"+"## Financial Impact\n"+"| Phase | Actions | Investment "+synCur.sym+" | Expected Return | Owner |\n|-------|---------|--------------------------|-----------------|-------|\n"+"(30-60-90 day plan, one row per phase)\n\n"+"## Risk Register\n"+"| Risk | Likelihood | Impact | Mitigation | Owner |\n|------|------------|--------|------------|-------|\n"+"(max 5 rows)\n\n"+"## Opportunities\n"+"(3-5 bullets, each with upside in "+synCur.sym+", timeframe, and owner)\n\n"+"## This Week's Decision\n"+"(Single action required now. Cost of inaction: "+synCur.sym+" per week. Owner and deadline.)\n\n"+"## Recommendations\n"+"| Priority | Action | Impact | Effort | Deadline |\n|----------|--------|--------|--------|----------|\n"+"(ranked by priority)\n\n"+"## Sources and References\n"+"(every figure cited: Source name, figure, URL or evidence label)\n\n"+fxRuleBlock()+"FORMATTING RULES: Bold all key metrics. Use tables for all numbers. Never write unbroken paragraph blocks. Every number must have a unit ("+synCur.sym+" or %). Under 2600 words. All sections must be present and complete. Figures from VERIFIED RESEARCH BRIEF: cite source and URL. All others: label [Assumption] or [Estimate (unverified)].\n\nDECISION STATUS (mandatory final line). GATING RULE — apply this BEFORE you choose:\nCount the load-bearing figures in your Quantified Recommendation, meaning the figures the decision actually rests on. If MORE THAN HALF of them carry [Assumption], [Estimate] or [Recalled — Unverified] rather than a real source URL, you MAY NOT choose Proceed or Proceed with Conditions. You must choose Needs More Information, and the What We Still Do Not Know section becomes the primary output of this report. Confidence is earned by evidence, not by tone.\nThen write exactly:\nDECISION STATUS: [choose one: Proceed | Proceed with Conditions | Needs More Information | Do Not Proceed | No Consensus]\nReason: [one sentence explaining this status, and if the gating rule forced you to Needs More Information, say so and name the unverified figures]\n\nBOARD KPIS (mandatory, after DECISION STATUS). Output exactly this block and nothing after it:\n===BOARD_KPIS===\n[{\"label\":\"SHORT UPPERCASE LABEL\",\"value\":\"figure with unit\",\"why\":\"max 7 words on why this is the number the board must watch\"}]\n===END_KPIS===\nRules: exactly 4 objects. Choose the 4 figures that most determine the decision — capital required, break-even point, headline return, and the single largest risk figure. Value must be a complete figure with its unit, never a fragment. Label must describe the figure, never a job title. Only use figures that appear in your synthesis above.\n\nCRUX (mandatory, after the KPI block):\n===CRUX===\n(3 sentences: the decision, the number that drives it, and the one condition that must hold. No markdown.)\n===END_CRUX===";
-        let syn=await ask(synSys,[{role:"user",content:"Question: \""+brQ+"\"\nDebate:\n"+allPos}],7000);
+        // When a document was requested, the Chairman's generic debate template is
+        // replaced by that document's own required structure. This is the fix for a
+        // business plan arriving as a debate summary with empty headings.
+        const synSysFinal=brDoc.matched?(synSys+"\n\n"+buildSynthesisOverride(brDoc,synCur.sym)):synSys;
+        let syn=await ask(synSysFinal,[{role:"user",content:(brDoc.matched?("Produce the "+brDoc.documentName+" now, using the executive contributions below as your source material.\n\nOriginal request: \""+brQ+"\""):("Question: \""+brQ+"\""))+"\nDebate:\n"+allPos}],brDoc.matched?9000:7000);
         // Intelligence Engine quality review — same standard as Workflow and Task
         // Queue final levels. HARDENED: the reviewed version must prove it is a
         // complete, well-formed improvement (all structural markers present,
