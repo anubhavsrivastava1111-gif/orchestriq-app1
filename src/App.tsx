@@ -19,6 +19,8 @@ import { ENGINE_ENABLED, runPipeline, classifyDomain, classifyIntent, selectFram
 import { buildScaffoldPrompt, buildViabilityPrompt, inferArchetype } from "./lib/BusinessScaffold";
 import { scanSuppliedInputs, buildIntakePrompt, buildRegisterInjection, INTAKE_FAILED_NOTICE } from "./lib/IntakeRegister";
 import { runSearch, formatResultsForPrompt, RETRIEVED_RESULTS_RULES, hasExternalSearch, SEARCH_PROVIDERS, estimateSearchCost } from "./lib/SearchProviders";
+import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney } from "./lib/ModelRouting";
+import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
 import CostArchitecture from "./CostArchitecture";
 import { loadCostContext, getCostBrief, publishCostDiagnosis, clearCostContext } from "./lib/CostContext";
 
@@ -660,8 +662,11 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   // because Claude and Gemini were switched off. Cheapest capable model first.
   if(!routes.length&&hasExternalSearch(SEARCH_CHAIN,keys)){
     const ek=enabledKeys(keys);
+    // Your chosen extraction model leads; the rest remain as failover.
+    const pref=stageRoute(keys,"research_extract");
+    if(pref)routes.push({provider:pref.provider,key:pref.key});
     ["deepseek","kimi","groq","openai","gemini","claude"].forEach(p=>{
-      if(ek[p])routes.push({provider:p,key:ek[p]});
+      if(ek[p]&&!routes.some(r=>r.provider===p))routes.push({provider:p,key:ek[p]});
     });
   }
   const route=routes[0];
@@ -677,6 +682,8 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   const useExternalSearch=hasExternalSearch(SEARCH_CHAIN,keys);
   let searchProviderUsed="";
   let searchCount=0;
+  let libReused=0;
+  let libSaved=0;
   try{
     if(useExternalSearch)showToast&&showToast("Research Desk: searching the web directly (cheaper, and every source keeps its real URL).","info");
   }catch{}
@@ -695,6 +702,17 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
       // it can no longer choose whether to show a source, which is what caused
       // 63 "Verified Fact" claims with zero URLs in the previous build.
       let angleSearchUsed=false;
+      // LIBRARY READ - reuse facts already established for this market.
+      let libBlock="";
+      if(LIBRARY_ENABLED){
+        try{
+          const libFacts=await fetchFacts(supabase,{industry:co?.industry||"",geography:co?.location||"",angle:angle.id,limit:5});
+          if(libFacts.length){
+            libBlock="\n\n"+formatLibraryFacts(libFacts);
+            libReused+=libFacts.length;
+          }
+        }catch{}
+      }
       if(useExternalSearch){
         const qs=buildAngleQueries(question,angle.id,co);
         const found:any[]=[];const seenUrls=new Set<string>();
@@ -710,6 +728,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
           if(so.provider&&so.provider!=="none")searchProviderUsed=so.provider;
           if(!so.fromCache&&so.results.length){
             searchCount++;
+            if(LIBRARY_ENABLED){try{logQuery(supabase,{query_text:q,angle:angle.id,industry:co?.industry||"",geography:co?.location||"",provider:so.provider,results_count:so.results.length,usable_count:so.results.filter((x:any)=>!isJunk(x.url)).length,junk_count:so.results.filter((x:any)=>isJunk(x.url)).length});}catch{}}
             try{
               const sr=saveUnitRecord({feature:"Research Desk (web search)",featureIcon:"🔍",provider:so.provider,model:so.provider,units:1,unitLabel:"queries",userEmail:USAGE_CTX.userEmail,userRole:USAGE_CTX.userRole});
               queueUsageSync({user_email:USAGE_CTX.userEmail,user_role:USAGE_CTX.userRole,
@@ -726,9 +745,10 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
         if(found.length){
           angleSearchUsed=true;
           anglePrompt+="\n\n"+formatResultsForPrompt(found,"RETRIEVED SOURCES FOR THIS ANGLE (application-supplied, real URLs):")
-            +"\n\n"+RETRIEVED_RESULTS_RULES;
+            +"\n\n"+RETRIEVED_RESULTS_RULES+libBlock;
         }
       }
+      if(!angleSearchUsed&&libBlock)anglePrompt+=libBlock;
       const fo=await callSearchWithFailover(routes,anglePrompt,[{role:"user",content:"Research this angle now."}],2600,!angleSearchUsed,
         (prov,msg)=>{try{showToast&&showToast("Research Desk: "+prov+" failed ("+msg.slice(0,60)+") — trying next provider…","warning");}catch{}});
       const raw=fo.out; usedProvider=fo.provider;
@@ -756,7 +776,11 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
     try{showToast&&showToast("Research Desk synthesising findings…","info");}catch{}
     // 3000 tokens was cutting the synthesis off mid-sentence - one Time Machine
     // brief stopped at bullet 2 and never rendered its remaining four sections.
-    const sFo=await callSearchWithFailover(routes,synthesisPrompt(co,question,body),[{role:"user",content:"Synthesise now."}],4500,false,null);
+    // The synthesis stage is routed separately: it reconciles conflicts, which is
+    // harder than extraction, so you may want a stronger model here than for angles.
+    const synRoute=stageRoute(keys,"research_synthesis");
+    const synRoutes=synRoute?[{provider:synRoute.provider,key:synRoute.key},...routes.filter(r=>r.provider!==synRoute.provider)]:routes;
+    const sFo=await callSearchWithFailover(synRoutes,synthesisPrompt(co,question,body),[{role:"user",content:"Synthesise now."}],4500,false,null);
     const sRaw=sFo.out;
     const sText=(sRaw&&typeof sRaw==="object"&&"text" in sRaw)?sRaw.text:String(sRaw||"");
     if(sRaw&&typeof sRaw==="object"&&(sRaw as any).truncated)anyTruncated=true;
@@ -766,7 +790,20 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
     anyFail=true;
   }
 
-  const stamp="_Research Desk v4 — "+RESEARCH_ANGLES.length+" angles + synthesis. "+(searchProviderUsed?("Web search via "+searchProviderUsed+" ("+searchCount+" queries, approx $"+estimateSearchCost(searchProviderUsed as any,searchCount).toFixed(3)+")."):"Model-native search.")+" Retrieved "+new Date().toISOString().slice(0,10)+". Publication dates are shown per finding._";
+  // LIBRARY WRITE - store the FACTS only. The "So what" clause is discarded
+  // because it is written about the user's own business; anything naming the
+  // company or addressing the reader is rejected by sanitiseFact().
+  if(LIBRARY_ENABLED){
+    try{
+      const {data:{user}}=await supabase.auth.getUser();
+      if(user){
+        const facts=extractFacts(body,RESEARCH_ANGLES,co?.industry||"",co?.location||"",co?.name||"");
+        libSaved=await saveFacts(supabase,facts,user.id);
+      }
+    }catch(e){console.warn("[OIQ] library write skipped:",e);}
+  }
+ 
+  const stamp="_Research Desk v5 — "+RESEARCH_ANGLES.length+" angles + synthesis. "+(searchProviderUsed?("Web search via "+searchProviderUsed+" ("+searchCount+" queries, approx $"+estimateSearchCost(searchProviderUsed as any,searchCount).toFixed(3)+")."):"Model-native search.")+(LIBRARY_ENABLED?(" Library: "+libReused+" facts reused, "+libSaved+" saved."):"")+" Retrieved "+new Date().toISOString().slice(0,10)+". Publication dates are shown per finding._";
   let brief=synth
     ? synth+"\n\n---\n\n## SOURCE FINDINGS BY ANGLE\n\n"+body+"\n\n"+stamp
     : "⚠ Synthesis pass failed — raw findings only, no prioritisation.\n\n"+body+"\n\n"+stamp;
@@ -1330,6 +1367,27 @@ async function callStabilityImage(key:string, prompt:string):Promise<string>{
 // That is why every session appeared as DeepSeek regardless of who did the work.
 // Logging now happens ONCE inside callAI, so every path in the app is captured
 // automatically and can never drift out of sync again.
+// Per-stage model profile. Module-level because runResearchDesk is a plain
+// function outside the React tree. Defaults to Balanced until the user chooses.
+let STAGE_PROFILE:any={...DEFAULT_PROFILE};
+function setStageProfile(p:any){STAGE_PROFILE={...DEFAULT_PROFILE,...(p||{})};try{localStorage.setItem("cos-stage-profile",JSON.stringify(STAGE_PROFILE));}catch{}}
+try{const sp=JSON.parse(localStorage.getItem("cos-stage-profile")||"null");if(sp)STAGE_PROFILE={...DEFAULT_PROFILE,...sp};}catch{}
+ 
+// Knowledge library master switch. OFF by default so nothing is written until you
+// choose to turn it on - a shared fact base inherits whatever quality you feed it.
+let LIBRARY_ENABLED=false;
+try{LIBRARY_ENABLED=localStorage.getItem("cos-library")==="1";}catch{}
+function setLibraryEnabled(on:boolean){LIBRARY_ENABLED=!!on;try{localStorage.setItem("cos-library",on?"1":"0");}catch{}}
+ 
+// Picks the provider+key for one pipeline stage, honouring the on/off gate.
+function stageRoute(keys:any,stage:any):{provider:string;key:string;model:string}|null{
+  const prov=resolveStageProvider(stage,STAGE_PROFILE,(id:string)=>providerEnabled(keys,id));
+  if(!prov)return null;
+  const k=providerKey(keys,prov);
+  if(!k)return null;
+  return {provider:prov,key:k,model:stageModelOverride(stage,prov)};
+}
+ 
 let USAGE_CTX:{feature:string;icon:string;userEmail:string;userRole:string}={feature:"AI Call",icon:"⚡",userEmail:"",userRole:""};
 function setUsageFeature(feature:string,icon?:string){USAGE_CTX.feature=feature||"AI Call";USAGE_CTX.icon=icon||"⚡";}
 function setUsageUser(email:string,role:string){USAGE_CTX.userEmail=email||"";USAGE_CTX.userRole=role||"";}
@@ -2787,6 +2845,8 @@ export default function App(){
   const [showExecs,setShowExecs]=useState(false);
   const [keysHydrated,setKeysHydrated]=useState(false);
   const [offP,setOffP]=useState<Record<string,boolean>>(()=>{try{return JSON.parse(localStorage.getItem("cos-offp")||"{}");}catch{return {};}});
+  const [stageProfile,setStageProfileState]=useState<any>(()=>{try{return {...DEFAULT_PROFILE,...(JSON.parse(localStorage.getItem("cos-stage-profile")||"null")||{})};}catch{return {...DEFAULT_PROFILE};}});
+  const [libraryOn,setLibraryOn]=useState<boolean>(()=>{try{return localStorage.getItem("cos-library")==="1";}catch{return false;}});
   const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return WorkspaceMemory.get<string>("oiq-sb-col")==="1";}catch{return false;}});
   const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:"",serper:"",tavily:"",brave:"",dataforseo:""});
 
@@ -7770,6 +7830,83 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                     </label>
                   </div>
                 )}
+                <div style={{padding:"10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:10}}>
+                  <label style={{...S.lbl,marginBottom:2}}>Cost Control &mdash; which model does which job</label>
+                  <div style={{fontSize:8.5,color:"#5A6480",marginBottom:8,lineHeight:1.5}}>
+                    Turning search results into bullets is copying &mdash; the cheapest model does it as well as the dearest one.
+                    Ruling on nine conflicting executives is judgement, and there a stronger model earns its price.
+                    Spend where the output is actually read.
+                  </div>
+                  <div style={{display:"flex",gap:4,marginBottom:9}}>
+                    {Object.entries(PRESETS).map(([pid,pr]:any)=>{
+                      const on=STAGES.every((s:any)=>stageProfile[s.id]===pr.stages[s.id]);
+                      return (
+                        <button key={pid} onClick={()=>{setStageProfileState({...pr.stages});setStageProfile(pr.stages);}}
+                          style={{flex:1,padding:"7px 6px",borderRadius:5,border:"1px solid "+(on?"#14B8A6":"#1a2030"),background:on?"rgba(20,184,166,0.1)":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                          <div style={{fontSize:10,fontWeight:700,color:on?"#14B8A6":"#A0AAC0"}}>{pr.label}{on?" ✓":""}</div>
+                          <div style={{fontSize:7.5,color:"#5A6480",marginTop:2,lineHeight:1.4}}>{pr.note}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {STAGES.map((s:any)=>(
+                    <div key={s.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:10,fontWeight:600,color:"#A0AAC0"}}>{s.label}</div>
+                        <div style={{fontSize:7.5,color:"#3A4060"}}>{s.why}</div>
+                      </div>
+                      <select value={stageProfile[s.id]||""} onChange={e=>{const np={...stageProfile,[s.id]:e.target.value};setStageProfileState(np);setStageProfile(np);}}
+                        style={{...S.inp,width:130,padding:"4px 6px",fontSize:10,cursor:"pointer",flexShrink:0}}>
+                        {cfgP.filter((p:string)=>p!=="nvidia"||true).map((p:string)=>(
+                          <option key={p} value={p}>{MODELS[p]?.name||p}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                  {(()=>{
+                    const est=estimateSessionCost(stageProfile,{executives:brAg.length||4,researchOn:true},(id:string)=>providerEnabled(keys,id));
+                    const estNoR=estimateSessionCost(stageProfile,{executives:brAg.length||4,researchOn:false},(id:string)=>providerEnabled(keys,id));
+                    const fx=(()=>{try{const m=String(LIVE_RATES.data||"").match(/USD\/INR:\s*₹([\d.]+)/);return m?parseFloat(m[1]):95;}catch{return 95;}})();
+                    return (
+                      <div style={{marginTop:9,paddingTop:9,borderTop:"1px solid #1a2030"}}>
+                        <div style={{fontSize:9,fontWeight:700,color:"#5A6480",textTransform:"uppercase",letterSpacing:0.8,marginBottom:6}}>Estimated cost per board session &mdash; {brAg.length||4} executives</div>
+                        {est.lines.map((l:any)=>(
+                          <div key={l.stage} style={{display:"flex",fontSize:9.5,color:"#8892B0",padding:"2px 0"}}>
+                            <span style={{flex:1}}>{l.label}</span>
+                            <span style={{width:70,color:"#5A6480"}}>{MODELS[l.provider]?.name||l.provider}</span>
+                            <span style={{width:70,textAlign:"right",color:"#A0AAC0"}}>{fmtMoney(l.usd,co.currency,cur.sym,fx)}</span>
+                          </div>
+                        ))}
+                        <div style={{display:"flex",fontSize:9.5,color:"#8892B0",padding:"2px 0"}}>
+                          <span style={{flex:1}}>Web search</span><span style={{width:70,color:"#5A6480"}}>serper</span>
+                          <span style={{width:70,textAlign:"right",color:"#A0AAC0"}}>{fmtMoney(est.searchUsd,co.currency,cur.sym,fx)}</span>
+                        </div>
+                        <div style={{display:"flex",fontSize:12,fontWeight:800,color:"#14B8A6",paddingTop:6,marginTop:4,borderTop:"1px dashed #1a2030"}}>
+                          <span style={{flex:1}}>Total per session</span>
+                          <span>{fmtMoney(est.totalUsd,co.currency,cur.sym,fx)}</span>
+                        </div>
+                        <div style={{fontSize:8.5,color:"#5A6480",marginTop:4}}>
+                          Without the Research Desk: {fmtMoney(estNoR.totalUsd,co.currency,cur.sym,fx)}. Estimates from your own measured sessions; actuals appear in Tokens.
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+                <div style={{padding:"10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:10}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{flex:1}}>
+                      <label style={{...S.lbl,marginBottom:2}}>Knowledge Library</label>
+                      <div style={{fontSize:8.5,color:"#5A6480",lineHeight:1.5}}>
+                        Keeps the sourced FACTS from each research run &mdash; never your question, your company or your figures &mdash;
+                        so the next question about the same market starts from what is already established. Off by default.
+                      </div>
+                    </div>
+                    <button onClick={()=>{const on=!libraryOn;setLibraryOn(on);setLibraryEnabled(on);showToast(on?"Knowledge Library ON — sourced market facts will be saved and reused":"Knowledge Library OFF — nothing will be saved",on?"success":"info");}}
+                      style={{width:38,height:20,borderRadius:10,border:"none",background:libraryOn?"#14B8A6":"#1a2030",cursor:"pointer",position:"relative",flexShrink:0}}>
+                      <span style={{position:"absolute",top:2,left:libraryOn?20:2,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+                    </button>
+                  </div>
+                </div>
                 <div style={{padding:"10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030"}}>
                   <label style={{...S.lbl,marginBottom:6}}>Voice Language</label>
                   <select style={{...S.inp,padding:"8px"}} value={vLang} onChange={e=>{setVLang(e.target.value);sv("cos-vl",e.target.value);}}>
