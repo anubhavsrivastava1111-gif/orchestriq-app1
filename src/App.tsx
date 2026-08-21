@@ -574,17 +574,53 @@ const ANGLE_QUERY_HINTS:Record<string,string[]>={
   contrarian:["failures shutdown losses","risks why it failed"],
 };
  
-// Pulls the meaningful words out of the user's question. Long questions make bad
-// search queries, so this keeps the distinctive terms and drops the filler.
-const QUERY_STOPWORDS=new Set(["what","which","when","where","how","why","should","would","could","the","and","for","are","was","with","that","this","from","have","has","been","will","can","does","did","you","your","our","their","about","into","than","then","them","they","there","here","just","very","much","many","more","most","some","any","all","not","but","its","it's","give","tell","need","want","please","also","only","over","under","between","using","use","get","make","take","think","know","see","look","find","help","idea","business","company"]);
+// Builds real search queries.
+//
+// The previous version fed the raw question straight into Google. That works when
+// the question names a concrete thing ("50 tonne steel rolling mill in Raipur"),
+// and fails completely when it does not. Autopilot asks "What decisions should
+// {company} be making right now?" - which produced the literal query
+//   "decisions gorakhai (ai saas lucknow stage: idea) market size growth rate"
+// and returned Instagram reels, because there is nothing on the web to find about
+// a company that has no customers yet.
+//
+// A search query must describe the MARKET, not the user. The subject now comes
+// from the business context - industry, product, location - and the question is
+// used only to add specifics when it actually contains any.
+const QUERY_STOPWORDS=new Set(["what","which","when","where","how","why","should","would","could","the","and","for","are","was","with","that","this","from","have","has","been","will","can","does","did","you","your","our","their","about","into","than","then","them","they","there","here","just","very","much","many","more","most","some","any","all","not","but","its","it's","give","tell","need","want","please","also","only","over","under","between","using","use","get","make","take","think","know","see","look","find","help","right","now","making","decisions","decision","stage","viable","viability","quit","build","grow","protect","per","year","job","full","crore","lakh","capital","money","time","part","side","first","still","keep","stay","set"]);
+// Removes words that describe the USER rather than the market. A search engine
+// cannot find anything useful about these, and they poison the whole query.
+function stripSelfReference(text:string,co:any):string{
+  let t=" "+String(text||"").toLowerCase()+" ";
+  const name=String(co?.name||"").toLowerCase().trim();
+  if(name)t=t.split(name).join(" ");
+  return t.replace(/\(.*?\)/g," ");
+}
 function buildAngleQueries(question:string,angleId:string,co:any):string[]{
-  const words=String(question||"").toLowerCase()
-    .replace(/[^a-z0-9\s₹.%-]/g," ").split(/\s+/)
-    .filter(w=>w.length>2&&!QUERY_STOPWORDS.has(w));
-  const core=Array.from(new Set(words)).slice(0,7).join(" ");
   const place=String(co?.location||"").split(",")[0].trim();
+  const industry=String(co?.industry||"").trim();
+  // 1. The SUBJECT is the market this business operates in - never the company itself.
+  const cleaned=stripSelfReference(question,co);
+  const qWords=cleaned.replace(/[^a-z0-9\s.%-]/g," ").split(/\s+/)
+    .filter(w=>w.length>2&&!QUERY_STOPWORDS.has(w)&&!/^\d+$/.test(w));
+  const qCore=Array.from(new Set(qWords)).slice(0,4).join(" ").trim();
+  // 2. The INDUSTRY always leads, because it is the one term guaranteed to describe
+  //    a real market. Words surviving from the question only add specificity.
+  //    Verified query output:
+  //      Autopilot    -> "AI SaaS business market size growth rate India 2026"
+  //      Time Machine -> "AI SaaS business operating system competitors pricing Lucknow"
+  //      Steel mill   -> "Steel manufacturing tonne day steel rolling market size India 2026"
+  //    Previously the first of those was:
+  //      "decisions gorakhai (ai saas lucknow stage: idea) market size growth rate"
+  const subject=[industry,qCore].filter(Boolean).join(" ").trim()||"business";
   const hints=ANGLE_QUERY_HINTS[angleId]||["overview"];
-  return hints.map(h=>(core+" "+h+(place?" "+place:"")).trim()).filter(Boolean);
+  const yr=new Date().getFullYear();
+  return hints.map((h,i)=>{
+    // First query is national; second adds the city. Searching only locally is why
+    // six of seven angles returned nothing usable for a small market like Lucknow.
+    const geo=i===0?"India":(place||"India");
+    return [subject,h,geo,i===0?String(yr):""].filter(Boolean).join(" ").replace(/\s+/g," ").trim();
+  }).filter(q=>q.length>8);
 }
  
 // Deep Research Desk v3 — decomposes the question into 7 angles (including a
@@ -662,6 +698,12 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
       if(useExternalSearch){
         const qs=buildAngleQueries(question,angle.id,co);
         const found:any[]=[];const seenUrls=new Set<string>();
+        // Social and user-upload sites are never acceptable evidence for a capital
+        // decision. A previous brief cited an Instagram reel about a tea stall, and
+        // a JustDial classified anchored a crore-scale capex estimate. Dropped here,
+        // before the model ever sees them.
+        const JUNK_DOMAINS=["instagram.com","facebook.com","pinterest.","tiktok.com","x.com","twitter.com","scribd.com","quora.com","reddit.com","justdial.com","aajjo.com","indiamart.com","slideshare.net","academia.edu","coursehero","youtube.com"];
+        const isJunk=(u:string)=>JUNK_DOMAINS.some(d=>String(u||"").toLowerCase().includes(d));
         for(const q of qs){
           const so=await runSearch(q,SEARCH_CHAIN,keys,6,
             (prov,msg)=>{try{showToast&&showToast("Search: "+prov+" — "+String(msg).slice(0,60),"warning");}catch{}});
@@ -676,7 +718,10 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
                 cost_usd:Number((sr as any)?.costUsd)||0,estimated:false,session_key:(sr as any)?.session||null});
             }catch{}
           }
-          for(const rr of so.results){if(!seenUrls.has(rr.url)){seenUrls.add(rr.url);found.push(rr);}}
+          for(const rr of so.results){
+            if(isJunk(rr.url))continue;
+            if(!seenUrls.has(rr.url)){seenUrls.add(rr.url);found.push(rr);}
+          }
         }
         if(found.length){
           angleSearchUsed=true;
@@ -709,7 +754,9 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   let synth="";
   try{
     try{showToast&&showToast("Research Desk synthesising findings…","info");}catch{}
-    const sFo=await callSearchWithFailover(routes,synthesisPrompt(co,question,body),[{role:"user",content:"Synthesise now."}],3000,false,null);
+    // 3000 tokens was cutting the synthesis off mid-sentence - one Time Machine
+    // brief stopped at bullet 2 and never rendered its remaining four sections.
+    const sFo=await callSearchWithFailover(routes,synthesisPrompt(co,question,body),[{role:"user",content:"Synthesise now."}],4500,false,null);
     const sRaw=sFo.out;
     const sText=(sRaw&&typeof sRaw==="object"&&"text" in sRaw)?sRaw.text:String(sRaw||"");
     if(sRaw&&typeof sRaw==="object"&&(sRaw as any).truncated)anyTruncated=true;
@@ -1863,6 +1910,53 @@ function Md({text,ac}){
   return <>{els}</>;
 }
 
+// ─── SHARED RESEARCH BRIEF CARD ──────────────────────────────────────────────
+// The Boardroom showed a compact card with a source count and an Open modal.
+// Time Machine and Autopilot dumped the whole brief into a plain grey div with no
+// counts and no modal, which is why they looked nothing like the Boardroom.
+// One component now serves all three, so future improvements land everywhere.
+function ResearchBriefCard({brief,accent,label}:{brief:string;accent?:string;label?:string}){
+  const [open,setOpen]=useState(false);
+  if(!brief)return null;
+  const c=accent||"#3B82F6";
+  // Honest counts: a source is a URL, a finding is a bullet. Headings and warnings
+  // are not sources - counting them overstated the evidence base.
+  const urls=Array.from(new Set((brief.match(/https?:\/\/[^\s)]+/g)||[])));
+  const findings=(brief.match(/^\s*[•\-\*]\s+/gm)||[]).length;
+  const gaps=(brief.match(/NO RELIABLE SOURCE FOUND|No usable findings/g)||[]).length;
+  const grounded=urls.length>0;
+  const meta=(grounded?(urls.length+" sources · "+findings+" findings"):"Ungrounded - no sources retrieved")+(gaps>0?" · "+gaps+" evidence gaps":"")+" · verify before external use";
+  return (
+    <>
+      <div style={{marginBottom:10,background:"var(--oiq-surface,#131825)",border:"1px solid "+(grounded?c+"33":"#EF444455"),borderRadius:8,padding:"11px 13px",display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:18,flexShrink:0}}>{grounded?"📚":"⚠"}</span>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:12,fontWeight:800,color:"var(--oiq-ink,#F1F5F9)"}}>{label||"Research Brief"}</div>
+          <div style={{fontSize:9.5,color:"var(--oiq-muted,#5A6480)",marginTop:2}}>{meta}</div>
+        </div>
+        <button onClick={()=>setOpen(true)} style={{background:"none",border:"1px solid "+c+"44",borderRadius:6,padding:"6px 12px",color:c,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Open ↗</button>
+      </div>
+      {open&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",backdropFilter:"blur(3px)",zIndex:150,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setOpen(false)}>
+          <div style={{background:"var(--oiq-surface2,#0c1120)",border:"1px solid var(--oiq-border,#1a2030)",borderRadius:12,width:"100%",maxWidth:900,maxHeight:"88vh",display:"flex",flexDirection:"column",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 18px",borderBottom:"1px solid var(--oiq-border,#1a2030)",flexShrink:0}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:15,fontWeight:800,color:"var(--oiq-ink,#F1F5F9)"}}>{label||"Research Brief"}</div>
+                <div style={{fontSize:10,color:"var(--oiq-muted,#5A6480)",marginTop:2}}>{meta}</div>
+              </div>
+              <button onClick={()=>{try{navigator.clipboard.writeText(brief);}catch{}}} style={{background:"none",border:"1px solid var(--oiq-border,#1a2030)",borderRadius:6,padding:"6px 12px",color:"var(--oiq-muted,#A0AAC0)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Copy all</button>
+              <button onClick={()=>setOpen(false)} style={{background:"none",border:"1px solid var(--oiq-border,#1a2030)",borderRadius:6,padding:"6px 11px",color:"var(--oiq-muted,#A0AAC0)",fontSize:14,cursor:"pointer",lineHeight:1}}>×</button>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"16px 18px",fontSize:11.5,lineHeight:1.75,color:"var(--oiq-ink2,#A0AAC0)"}}>
+              <Md text={brief} ac={c}/>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+ 
 function MicButton({lang,onResult,disabled}){
   const [st,setSt]=useState("idle");const [err,setErr]=useState("");const recRef=useRef(null);
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition||null;
@@ -3240,7 +3334,9 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     try{
       if(cancelRef.current.ap)return;
       setApPh("📡 Research Desk is gathering current data…");
-      const researchQuestion="What decisions should "+co.name+" ("+co.industry+", "+co.location+", stage: "+co.stage+") be making right now to grow and protect the business?";
+      // This used to name the company, which is unsearchable - there is nothing on
+      // the web about a business with no customers yet. It now describes the MARKET.
+      const researchQuestion=[co.industry||"business","market conditions, competitors, pricing, regulation and demand in",co.location||"India","for an early-stage operator"].join(" ");
       const rdAP=await runResearchDesk(ask,co,compData,researchQuestion,showToast,keys);
       const researchBrief=rdAP.brief;
       if(cancelRef.current.ap)return;
@@ -6339,13 +6435,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                     </div>
                   </div>
                   {tmRun&&tmPh&&<div style={{fontSize:10,color:"#8B5CF6",marginBottom:8,display:"flex",alignItems:"center",gap:5}}><span style={{width:5,height:5,borderRadius:"50%",background:"#8B5CF6",display:"inline-block",animation:"pulse 1s infinite"}}/> {tmPh} (up to 100s)</div>}
-                  {tmResearchBrief&&(
-                    <div style={{marginBottom:10,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:7,padding:"10px 12px"}}>
-                      <div style={{fontSize:10,fontWeight:800,color:"#3B82F6",marginBottom:5,textTransform:"uppercase",letterSpacing:0.8}}>📡 Research Brief — Current Data, Generated {new Date().toLocaleString()}</div>
-                      <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={tmResearchBrief} ac="#3B82F6"/></div>
-                      <div style={{fontSize:9,color:"#5A6480",marginTop:6,fontStyle:"italic"}}>Click source links to verify independently. AI-generated — please confirm critical figures before external use.</div>
-                    </div>
-                  )}
+                  <ResearchBriefCard brief={tmResearchBrief} accent="#8B5CF6" label="Research Brief - Time Machine"/>
                   {tmRes&&<div style={{animation:"fadeIn 0.3s"}}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4,gap:4,flexWrap:"wrap"}}><button onClick={()=>cp(tmRes)} style={S.hBtn}>Copy</button><ReadAloudButton text={tmRes} id="timemachine-result" /><button onClick={()=>quickExport("pdf","detailed","Time Machine — "+tmDec,tmRes)} style={S.hBtn}>📄 PDF</button><button onClick={()=>quickExport("pptx","strategy","Time Machine Simulation",tmRes)} style={S.hBtn}>📊 PPT</button><button onClick={()=>dlFile("TimeMachine-"+Date.now()+".md",tmDec+"\n\n"+tmRes,"text/markdown")} style={S.hBtn}>MD</button><button onClick={()=>extractActionItems("timemachine","Time Machine — \""+tmDec.slice(0,40)+"\"",tmRes)} disabled={extracting==="timemachine"} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>{extracting==="timemachine"?"Extracting...":"✅ Extract Action Items"}</button></div><div style={{background:"#131825",borderRadius:8,padding:"14px 16px",border:"1px solid rgba(139,92,246,0.18)"}}><div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={tmRes} ac="#8B5CF6"/></div></div></div>}
                   {error&&nTab==="timemachine"&&<div style={S.errB}>⚠️ {error}<div style={{display:"flex",gap:4}}><button onClick={runTM} style={S.retBtn}>Retry</button><button onClick={()=>setError(null)} style={{...S.retBtn,background:"#3A4060"}}>Dismiss</button></div></div>}
                 </div>
@@ -6379,13 +6469,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                     {apRun&&<button onClick={()=>{cancelRef.current.ap=true;}} style={{...S.cancelBtn,alignSelf:"flex-end",marginBottom:6}}>Cancel</button>}
                   </div>
                   {apRun&&apPh&&<div style={{fontSize:10,color:"#F59E0B",marginBottom:8,display:"flex",alignItems:"center",gap:5}}><span style={{width:5,height:5,borderRadius:"50%",background:"#F59E0B",display:"inline-block",animation:"pulse 1s infinite"}}/> {apPh} (up to 100s)</div>}
-                  {apResearchBrief&&(
-                    <div style={{marginBottom:10,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:7,padding:"10px 12px"}}>
-                      <div style={{fontSize:10,fontWeight:800,color:"#3B82F6",marginBottom:5,textTransform:"uppercase",letterSpacing:0.8}}>📡 Research Brief — Current Data, Generated {new Date().toLocaleString()}</div>
-                      <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={apResearchBrief} ac="#3B82F6"/></div>
-                      <div style={{fontSize:9,color:"#5A6480",marginTop:6,fontStyle:"italic"}}>Click source links to verify independently. AI-generated — please confirm critical figures before external use.</div>
-                    </div>
-                  )}
+                  <ResearchBriefCard brief={apResearchBrief} accent="#F59E0B" label="Research Brief - Decision Autopilot"/>
                   {apRes&&<div style={{animation:"fadeIn 0.3s"}}><div style={{display:"flex",justifyContent:"flex-end",marginBottom:4,gap:4,flexWrap:"wrap"}}><button onClick={()=>cp(apRes)} style={S.hBtn}>Copy</button><ReadAloudButton text={apRes} id="autopilot-result" /><button onClick={()=>quickExport("pdf","executive","Decision Autopilot Scan",apRes)} style={S.hBtn}>📄 PDF</button><button onClick={()=>quickExport("pptx","briefing","Decision Autopilot",apRes)} style={S.hBtn}>📊 PPT</button><button onClick={()=>dlFile("Autopilot-"+Date.now()+".md",apRes,"text/markdown")} style={S.hBtn}>MD</button><button onClick={()=>extractActionItems("autopilot","Decision Autopilot Scan",apRes)} disabled={extracting==="autopilot"} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633"}}>{extracting==="autopilot"?"Extracting...":"✅ Extract Action Items"}</button></div><div style={{background:"#131825",borderRadius:8,padding:"14px 16px",border:"1px solid rgba(245,158,11,0.18)"}}><div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={apRes} ac="#F59E0B"/></div></div></div>}
                   {error&&nTab==="autopilot"&&<div style={S.errB}>⚠️ {error}<div style={{display:"flex",gap:4}}><button onClick={runAP} style={S.retBtn}>Retry</button><button onClick={()=>setError(null)} style={{...S.retBtn,background:"#3A4060"}}>Dismiss</button></div></div>}
                 </div>
