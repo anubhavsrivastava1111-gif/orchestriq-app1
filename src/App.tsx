@@ -23,6 +23,7 @@ import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverr
 import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
 import { detectDocumentRequest, buildDocumentBrief, buildSynthesisOverride, suggestedFormats, CONSULTING_STANDARD } from "./lib/DocumentLibrary";
 import { NVIDIA_DEFAULT_MODEL, nvidiaModelOptions, nvidiaShouldReason, nvidiaTokenBudget } from "./lib/NvidiaModels";
+import { getDisclosure, trainingLabel, providersNeedingCaution, attributionLine } from "./lib/ProviderDisclosure";
 import CostArchitecture from "./CostArchitecture";
 import { loadCostContext, getCostBrief, publishCostDiagnosis, clearCostContext } from "./lib/CostContext";
 
@@ -814,6 +815,8 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
     : "⚠ Synthesis pass failed — raw findings only, no prioritisation.\n\n"+body+"\n\n"+stamp;
   if(anyTruncated)brief="⚠ **Some research output hit the length limit and may be incomplete.** Treat any cut-off finding as unconfirmed.\n\n"+brief;
   try{const fxw=fxPlausibilityWarnings(brief);if(fxw)brief=fxw+"\n"+brief;}catch{}
+  // Every generated output states who produced it and how they handle the data.
+  try{brief=brief+"\n\n"+attributionLine(usedProvider,"");}catch{}
   if(anyFail)brief="⚠ Some research angles could not be completed — see notes below.\n\n"+brief;
   setUsageFeature(prevUsageFeature,prevUsageIcon);
   return {brief,grounded,provider:usedProvider};
@@ -2971,6 +2974,12 @@ export default function App(){
   const [offP,setOffP]=useState<Record<string,boolean>>(()=>{try{return JSON.parse(localStorage.getItem("cos-offp")||"{}");}catch{return {};}});
   const [stageProfile,setStageProfileState]=useState<any>(()=>{try{return {...DEFAULT_PROFILE,...(JSON.parse(localStorage.getItem("cos-stage-profile")||"null")||{})};}catch{return {...DEFAULT_PROFILE};}});
   const [libraryOn,setLibraryOn]=useState<boolean>(()=>{try{return localStorage.getItem("cos-library")==="1";}catch{return false;}});
+  // Data-handling consent, recorded against the EXACT set of providers active when
+  // it was given. Switch a new provider on and consent is asked again, because the
+  // answer to "where does my data go" has changed.
+  const [dataConsent,setDataConsent]=useState<string>(()=>{try{return localStorage.getItem("oiq-data-consent")||"";}catch{return "";}});
+  const [showConsent,setShowConsent]=useState(false);
+  const [showDisclosure,setShowDisclosure]=useState(false);
   const [sbCollapsed,setSbCollapsed]=useState(()=>{try{return WorkspaceMemory.get<string>("oiq-sb-col")==="1";}catch{return false;}});
   const [keys,setKeys]=useState({claude:"",openai:"",gemini:"",groq:"",deepseek:"",kimi:"",stability:"",fal:"",serper:"",tavily:"",brave:"",dataforseo:""});
 
@@ -3563,6 +3572,8 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       showToast(`Free trial limit reached (${gate.used}/${gate.limit} sessions used). Upgrade your plan at orchestriq.gorakhai.com or add your own API key in Settings to continue.`,"warning");
       return;
     }
+    // First submission with this set of providers: show the disclosure and stop.
+    if(consentNeeded){setShowConsent(true);return;}
     setBrRun(true);setError(null);
     setUsageFeature("AI Boardroom","🏛️");
     setBrCur({q:brQ,researchBrief:"",format:"threaded",stages:[]});
@@ -6357,6 +6368,12 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
   // downstream (Primary AI, fallback chain, specialist routing) reads cfgP, so
   // switching one off behaves exactly as if its key were never entered.
   const cfgP=["nvidia",...Object.keys(keys).filter(p=>isAiProviderKey(p)&&keys[p]?.trim()&&!offP[p])];
+  // AI providers PLUS any web-search service with a key: everything that receives
+  // user text. Search services get only the query, and the disclosure says so.
+  const activeProviderIds=["nvidia",...Object.keys(keys).filter(p=>keys[p]?.trim()&&!offP[p])]
+    .filter(p=>!!getDisclosure(p)).filter((v,i,a)=>a.indexOf(v)===i);
+  const consentSignature=activeProviderIds.slice().sort().join("|");
+  const consentNeeded=activeProviderIds.length>0&&dataConsent!==consentSignature;
   const sColor=s=>s===TS.APPROVED?"#10B981":s===TS.REVIEWING?"#8B5CF6":s===TS.RUNNING?"#14B8A6":s===TS.REJECTED||s===TS.FAILED?"#EF4444":"#F59E0B";
   const sBg=s=>s===TS.APPROVED?"rgba(16,185,129,0.12)":s===TS.REVIEWING?"rgba(139,92,246,0.1)":s===TS.RUNNING?"rgba(20,184,166,0.1)":s===TS.REJECTED||s===TS.FAILED?"rgba(239,68,68,0.1)":"rgba(245,158,11,0.1)";
 
@@ -6507,6 +6524,17 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{!cfgP.length?"No key — add in Settings":cfgP.length===1?MODELS[cfgP[0]]?.name:MODELS[defP]?.name+" · "+cfgP.length+" keys"}</span>
           <span style={{marginLeft:"auto",flexShrink:0}}>{cur.sym}{co.currency}</span>
         </div>
+        {/* Always visible, on EVERY module: who receives what you type. */}
+        {!!activeProviderIds.length&&(
+          <button onClick={()=>setShowDisclosure(true)} title="See exactly where your data goes"
+            style={{padding:"6px 14px",fontSize:8.5,lineHeight:1.5,color:"var(--oiq-sbDim)",background:"none",border:"none",borderBottom:"1px solid var(--sb-bdr)",textAlign:"left",cursor:"pointer",fontFamily:"inherit",width:"100%",flexShrink:0,display:"flex",alignItems:"center",gap:5}}>
+            <span style={{flexShrink:0}}>{providersNeedingCaution(activeProviderIds).length?"\u26a0":"\ud83d\udd12"}</span>
+            <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
+              {activeProviderIds.map(p=>getDisclosure(p)?.name||p).join(" \u00b7 ")}
+            </span>
+            <span style={{flexShrink:0,textDecoration:"underline"}}>details</span>
+          </button>
+        )}
 
         {/* ── MODULE DROPDOWN TRIGGER ── */}
         <div style={{position:"relative",padding:"10px 10px",flexShrink:0}}>
@@ -7328,7 +7356,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         const body=wfActive.steps.map(s=>s.output).join("\n\n");
         const fn=type==="excel"?generateExcel:type==="pptx"?generatePptx:type==="pdf"?generatePdf:generateDocx;
         showToast("Building "+lb.replace(/[^\w]/g,"")+"…","info");
-        const r=await fn({objective:wfActive.task,company_context:co.name+" | "+co.industry+" | "+co.stage+" | "+co.location,available_data:body,currency:co.currency,currency_symbol:cur.sym,api_key:keys.claude||keys.openai||keys.gemini||keys.groq||""});
+        const r=await fn({objective:wfActive.task,company_context:co.name+" | "+co.industry+" | "+co.stage+" | "+co.location,available_data:body,currency:co.currency,currency_symbol:cur.sym,api_key:docServiceKey(keys)});
         if(!r.success)showToast(r.error||"Generation failed","error");
       }} style={{...S.hBtn,color:"#14B8A6",borderColor:"#14B8A633",flex:1,textAlign:"center"}}>{lb}</button>
     ))}
@@ -7873,6 +7901,55 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         </div>
       )}
 
+      {/* ── DATA HANDLING: DISCLOSURE + FIRST-USE CONSENT ── */}
+      {(showConsent||showDisclosure)&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.72)",backdropFilter:"blur(3px)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"var(--oiq-surface2,#0c1120)",border:"1px solid var(--oiq-border,#1a2030)",borderRadius:12,width:"100%",maxWidth:720,maxHeight:"88vh",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+            <div style={{padding:"16px 20px",borderBottom:"1px solid var(--oiq-border,#1a2030)"}}>
+              <div style={{fontSize:15,fontWeight:800,color:"var(--oiq-ink,#F1F5F9)"}}>Where your data goes</div>
+              <div style={{fontSize:10.5,color:"var(--oiq-muted,#5A6480)",marginTop:3,lineHeight:1.6}}>
+                OrchestrIQ does not run its own AI models. What you type is sent to the third-party providers switched on in Settings, and handled under their terms, not ours.
+              </div>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"14px 20px"}}>
+              {activeProviderIds.map((pid:string)=>{
+                const d=getDisclosure(pid); if(!d)return null;
+                const t=trainingLabel(d.training);
+                const col=t.tone==="good"?"#10B981":t.tone==="bad"?"#EF4444":"#F59E0B";
+                return (
+                  <div key={pid} style={{border:"1px solid var(--oiq-border,#1a2030)",borderRadius:8,padding:"11px 13px",marginBottom:9}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,flexWrap:"wrap"}}>
+                      <span style={{fontSize:12,fontWeight:800,color:"var(--oiq-ink,#F1F5F9)"}}>{d.name}</span>
+                      <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:col+"22",color:col,fontWeight:700}}>{t.text}</span>
+                      <span style={{marginLeft:"auto",fontSize:9,color:"var(--oiq-muted,#5A6480)"}}>checked {d.verified}</span>
+                    </div>
+                    <div style={{fontSize:10,color:"var(--oiq-muted,#8892B0)",lineHeight:1.65}}>
+                      <div><strong>{d.company}</strong> &middot; processed in {d.dataResidency}</div>
+                      <div style={{marginTop:3}}>{d.trainingNote}</div>
+                      {d.disputed&&<div style={{marginTop:4,color:"#F59E0B"}}>&#9888; {d.disputed}</div>}
+                      {d.regulatoryNote&&<div style={{marginTop:4,color:"#F59E0B"}}>&#9888; {d.regulatoryNote}</div>}
+                      <div style={{marginTop:4}}><a href={d.policyUrl} target="_blank" rel="noopener noreferrer" style={{color:"#14B8A6"}}>Their privacy policy &#8599;</a></div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div style={{fontSize:9.5,color:"var(--oiq-muted,#5A6480)",lineHeight:1.7,marginTop:6}}>
+                Do not paste anything you would not be willing to send to the companies named above. Where a stance is marked disputed or not published, read the provider&rsquo;s terms yourself &mdash; we summarise, we do not warrant. You can switch any provider off in Settings at any time.<br/><br/>
+                This is a factual summary to help you make an informed choice. It is not legal advice, and provider terms can change without notice.
+              </div>
+            </div>
+            <div style={{padding:"12px 20px",borderTop:"1px solid var(--oiq-border,#1a2030)",display:"flex",gap:8,justifyContent:"flex-end"}}>
+              {showConsent
+                ?<>
+                  <button onClick={()=>{setShowConsent(false);setShowSettings(true);}} style={{background:"none",border:"1px solid var(--oiq-border,#1a2030)",borderRadius:6,padding:"8px 14px",color:"var(--oiq-muted,#A0AAC0)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Change providers</button>
+                  <button onClick={()=>{try{localStorage.setItem("oiq-data-consent",consentSignature);}catch{}setDataConsent(consentSignature);setShowConsent(false);}} style={{background:"var(--oiq-accent,#14B8A6)",border:"none",borderRadius:6,padding:"8px 16px",color:"#04141B",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>I understand &mdash; continue</button>
+                </>
+                :<button onClick={()=>setShowDisclosure(false)} style={{background:"none",border:"1px solid var(--oiq-border,#1a2030)",borderRadius:6,padding:"8px 16px",color:"var(--oiq-muted,#A0AAC0)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Close</button>}
+            </div>
+          </div>
+        </div>
+      )}
+ 
       {/* ── SETTINGS MODAL ── */}
       {showSettings&&(
         <div style={S.modalBg} onClick={()=>setShowSettings(false)}>
