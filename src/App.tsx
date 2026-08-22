@@ -2108,7 +2108,24 @@ function Md({text,ac}){
       const vals=d.map(r=>String(r[ci]??"").replace(/\*\*/g,"").trim()).filter(v=>v&&v!=="-"&&v!=="\u2014");
       return vals.length>0&&vals.every(v=>NUMERIC.test(v));
     });
-    els.push(<div key={"t"+els.length} style={{overflowX:"auto",margin:"10px 0",borderRadius:6,border:"1px solid "+BDR}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5,tableLayout:"auto"}}><thead><tr>{h.map((v,i)=><th key={i} style={{textAlign:alignRight[i]?"right":"left",verticalAlign:"bottom",padding:"8px 9px",borderBottom:"2px solid "+BDR,color:c,fontWeight:800,fontSize:9.5,textTransform:"uppercase",letterSpacing:".04em",background:SURF,whiteSpace:"nowrap"}}>{cell(v)}</th>)}</tr></thead><tbody>{d.map((row,ri)=><tr key={ri}>{row.map((cl,ci)=><td key={ci} style={{padding:"7px 9px",borderBottom:"1px solid "+BDR,color:BODY,fontSize:11.5,lineHeight:1.55,verticalAlign:"top",textAlign:alignRight[ci]?"right":"left",whiteSpace:alignRight[ci]?"nowrap":"normal",fontVariantNumeric:alignRight[ci]?"tabular-nums":"normal"}}>{cell(cl)}</td>)}</tr>)}</tbody></table></div>);
+    // The tables LOOKED misaligned for a reason that was not text-alignment: there
+    // were no VERTICAL rules and the widths were fully automatic, so one long cell
+    // (a formula, an assumption) stretched to half the table while its neighbours
+    // squeezed. With nothing separating the columns, the eye cannot tie a heading
+    // to the data underneath it. Three changes fix it together:
+    //   1. a subtle vertical rule between every column
+    //   2. fixed layout with computed widths, so no column can run away
+    //   3. numeric columns held narrow, text columns given the remaining space
+    const nCols=h.length;
+    const wide=h.map((_,ci)=>{
+      if(alignRight[ci])return 1;                       // numbers stay compact
+      const avg=d.reduce((s,r)=>s+String(r[ci]??"").length,0)/Math.max(d.length,1);
+      return avg>60?3:avg>28?2:1.4;                     // long prose gets more room
+    });
+    const wTot=wide.reduce((a,b)=>a+b,0)||nCols;
+    const colW=wide.map(w=>(w/wTot*100).toFixed(1)+"%");
+    const RULE="1px solid "+BDR;
+    els.push(<div key={"t"+els.length} style={{overflowX:"auto",margin:"12px 0",borderRadius:6,border:RULE}}><table style={{width:"100%",minWidth:Math.min(nCols*130,760),borderCollapse:"collapse",fontSize:11.5,tableLayout:"fixed"}}><colgroup>{colW.map((w,i)=><col key={i} style={{width:w}}/>)}</colgroup><thead><tr>{h.map((v,i)=><th key={i} style={{textAlign:alignRight[i]?"right":"left",verticalAlign:"bottom",padding:"8px 10px",borderBottom:"2px solid "+BDR,borderRight:i<nCols-1?RULE:"none",color:c,fontWeight:800,fontSize:9.5,textTransform:"uppercase",letterSpacing:".04em",background:SURF,lineHeight:1.35,wordBreak:"break-word"}}>{cell(v)}</th>)}</tr></thead><tbody>{d.map((row,ri)=><tr key={ri}>{row.map((cl,ci)=><td key={ci} style={{padding:"7px 10px",borderBottom:RULE,borderRight:ci<nCols-1?RULE:"none",color:BODY,fontSize:11.5,lineHeight:1.55,verticalAlign:"top",textAlign:alignRight[ci]?"right":"left",fontVariantNumeric:alignRight[ci]?"tabular-nums":"normal",wordBreak:"break-word",overflowWrap:"anywhere"}}>{cell(cl)}</td>)}</tr>)}</tbody></table></div>);
  
     try{const ch=autoChartFromTable(h,d,typeof c==="string"&&c.startsWith("#")?c:"#14B8A6","ch"+els.length);if(ch)els.push(ch);}catch{}
     tbl=[];inT=false;
@@ -6394,8 +6411,12 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
       await railwayGenerate(fmt,{title,objective:title,body,currency:co.currency,currencySymbol:cur.sym});
       showToast("Downloaded ✓","success");
     }catch(railErr:any){
-      recordEngineDowngrade(title,fmt,railErr);
-      showToast("Could not generate the "+(mode==="pdf"?"PDF":"PowerPoint")+": "+String(e?.message||e||"unknown error").slice(0,180),"error");
+      // MY BUG, from Session 33: this block catches `railErr` but referenced `e`,
+      // which does not exist here. The catch block itself threw a ReferenceError,
+      // so nothing was shown and nothing was downloaded - PDF and PPT appeared to
+      // do nothing at all while MD kept working.
+      try{recordEngineDowngrade(title,fmt,railErr);}catch{}
+      showToast("Could not generate the "+(mode==="pdf"?"PDF":"PowerPoint")+": "+String(railErr?.message||railErr||"unknown error").slice(0,180),"error");
     }
   },[co,cur,showToast,railwayGenerate]);
 
