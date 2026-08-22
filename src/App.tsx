@@ -150,8 +150,8 @@ const CURRENCIES = [{code:"INR",sym:"₹",name:"Indian Rupee"},{code:"USD",sym:"
 const MODELS = {
   claude:{name:"Claude",company:"Anthropic",model:"claude-haiku-4-5-20251001",placeholder:"sk-ant-...",color:"#D97757",keyUrl:"https://console.anthropic.com/settings/keys"},
   openai:{name:"ChatGPT",company:"OpenAI",model:"gpt-4o",placeholder:"sk-...",color:"#10A37F",keyUrl:"https://platform.openai.com/api-keys"},
-  gemini:{name:"Gemini",company:"Google",model:"gemini-1.5-flash",placeholder:"AIza...",color:"#4285F4",keyUrl:"https://aistudio.google.com/app/apikey"},
-  groq:{name:"Groq",company:"Groq",model:"llama-3.3-70b-versatile",placeholder:"gsk_...",color:"#F97316",keyUrl:"https://console.groq.com/keys"},
+  gemini:{name:"Gemini",company:"Google",model:"gemini-3.6-flash",placeholder:"AIza...",color:"#4285F4",keyUrl:"https://aistudio.google.com/app/apikey"},
+  groq:{name:"Groq",company:"Groq",model:"openai/gpt-oss-120b",placeholder:"gsk_...",color:"#F97316",keyUrl:"https://console.groq.com/keys"},
   deepseek:{name:"DeepSeek",company:"DeepSeek AI",model:"deepseek-v4-flash",placeholder:"sk-...",color:"#2563EB",keyUrl:"https://platform.deepseek.com/api_keys",note:"Low cost · Strong reasoning · Available in India"},
   kimi:{name:"Kimi",company:"Moonshot AI",model:"moonshot-v1-8k",placeholder:"sk-...",color:"#8B5CF6",keyUrl:"https://platform.moonshot.cn/console/api-keys",note:"Fast · Affordable · Strong multilingual"},
   stability:{name:"Stability AI",company:"Stability AI",model:"stable-diffusion-xl-1024-v1-0",placeholder:"sk-...",color:"#EC4899",keyUrl:"https://platform.stability.ai/account/credits",note:"Image generation · ~₹3/image · Optional"},
@@ -751,7 +751,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
         }
       }
       if(!angleSearchUsed&&libBlock)anglePrompt+=libBlock;
-      const fo=await callSearchWithFailover(routes,anglePrompt,[{role:"user",content:"Research this angle now."}],2600,!angleSearchUsed,
+      const fo=await callSearchWithFailover(routes,anglePrompt,[{role:"user",content:"Research this angle now."}],5200,!angleSearchUsed,
         (prov,msg)=>{try{showToast&&showToast("Research Desk: "+prov+" failed ("+msg.slice(0,60)+") — trying next provider…","warning");}catch{}});
       const raw=fo.out; usedProvider=fo.provider;
       const text=(raw&&typeof raw==="object"&&"text" in raw)?raw.text:String(raw||"");
@@ -1254,7 +1254,10 @@ function getExecutiveIntel(roleId: string): { b: string; m: string; enrichment: 
 async function callNvidia(sys,msgs,maxT,modelOverride?:string){
   const r=await fetch("/api/nvidia",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sys,messages:msgs,model:modelOverride||MODELS.nvidia.model,max_tokens:maxT})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error;}catch{m=t.slice(0,200);}if(r.status===429)throw new Error("NVIDIA: Free daily limit reached. Add your own key in Settings for unlimited use.");if(r.status===503)throw new Error("NVIDIA: Free tier not yet configured on this deployment.");throw new Error(m||("NVIDIA "+r.status));}
-  const d=await r.json();return d.choices?.[0]?.message?.content||"";
+  const d=await r.json();
+  const ntext=d.choices?.[0]?.message?.content||"";
+  if(!ntext.trim())throw new Error("NVIDIA returned an empty answer (finish_reason: "+(d.choices?.[0]?.finish_reason||"unknown")+").");
+  return ntext;
 }
 async function callGroq(key,sys,msgs,maxT){
   const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.groq.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
@@ -1284,7 +1287,7 @@ async function callOpenAI(key,sys,msgs,maxT){
   const d=await r.json();return d.choices?.[0]?.message?.content||"";
 }
 async function callGemini(key,sys,msgs,maxT,enableSearch=false){
-  const models=["gemini-2.0-flash"];
+  const models=["gemini-3.6-flash","gemini-2.5-flash"];
   let lastErr=null;
   for(const model of models){
     try{
@@ -1305,7 +1308,23 @@ async function callGemini(key,sys,msgs,maxT,enableSearch=false){
 async function callDeepSeek(key,sys,msgs,maxT,modelOverride=""){
   const r=await fetch("https://api.deepseek.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:(modelOverride||MODELS.deepseek.model),max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("DeepSeek: Invalid API key.");if(r.status===429)throw new Error("DeepSeek: Rate limit. Wait a moment.");throw new Error("DeepSeek "+r.status+": "+(m||r.statusText));}
-  const d=await r.json();return d.choices?.[0]?.message?.content||"";
+  const d=await r.json();
+  const ch=d.choices?.[0];
+  const content=ch?.message?.content||"";
+  if(!content.trim()){
+    // DeepSeek V4 is a REASONING model: it spends output tokens thinking before it
+    // writes anything, and that thinking lands in message.reasoning_content. If the
+    // max_tokens budget runs out during thinking, the API returns HTTP 200 with
+    // content:"" and still bills every token. Your DeepSeek dashboard showed 42
+    // requests and 221,263 tokens billed while the app displayed blank cards.
+    // Throwing here makes the failover loop retry instead of accepting silence.
+    const reasoned=(ch?.message?.reasoning_content||"").trim();
+    const fin=ch?.finish_reason||"";
+    if(reasoned&&fin==="length")throw new Error("DeepSeek ran out of output budget while reasoning and produced no answer. Raise the response budget or shorten the prompt.");
+    if(reasoned)return reasoned;
+    throw new Error("DeepSeek returned an empty answer (finish_reason: "+(fin||"unknown")+").");
+  }
+  return content;
 }
 async function callKimi(key,sys,msgs,maxT){
   const r=await fetch("https://api.moonshot.cn/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.kimi.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
@@ -1764,13 +1783,17 @@ function boardWordBudget(role){
   return BOARD_WORD_BUDGET[role?.id]||BOARD_WORD_BUDGET_DEFAULT;
 }
  
-// Hard output ceiling per role. The word budget is only an instruction — the
-// model ignored it and produced 15,000 words against a 1,400-word budget,
-// exhausted every continuation, and still ended mid-sentence. max_tokens is
-// the only limit the model cannot talk its way past. ~2.2 tokens per word of
-// English prose with markdown tables, plus a small margin to land cleanly.
+// Hard output ceiling per role. The word budget alone is only an instruction and a
+// model will ignore it - that is why this exists.
+//
+// BUT reasoning models (DeepSeek V4, R1, o-series) spend output tokens THINKING
+// before they write anything. At 2.2 tokens per word the whole budget was consumed
+// by reasoning and the answer came back EMPTY while every token was billed.
+// 4.5 leaves room to think AND to answer. Runaway length is prevented by the scope
+// rules in the prompt (max 8 sections, no appendices) - starving the budget
+// produced blank cards, not shorter ones.
 function boardMaxTokens(role){
-  return Math.round(boardWordBudget(role)*2.2)+200;
+  return Math.round(boardWordBudget(role)*4.5)+400;
 }
  
 // Only Claude and Gemini can genuinely search the live web from this app.
