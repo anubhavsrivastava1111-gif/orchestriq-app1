@@ -2103,7 +2103,18 @@ function Md({text,ac}){
   const NUMERIC=/^[\s]*[₹$€£]?\s*[-+(]?[\d,]+(\.\d+)?\s*(%|cr|crore|lakh|lakhs|k|mn|bn|tpd|tpa|x)?\s*[)]?[\s]*$/i;
   const fT=()=>{
     if(!tbl.length)return;
-    const h=tbl[0],d=tbl.slice(2);
+    const h=tbl[0];
+    // Some models omit the |---|---| separator row entirely. Detecting it rather
+    // than assuming row 1 stops the first data row being swallowed.
+    const hasSep=tbl.length>1&&tbl[1].every(x=>/^[\s:-]+$/.test(String(x)));
+    // Every row is padded or trimmed to the header width. A short row used to
+    // shift its own cells left; a long row used to push a phantom column.
+    const d=tbl.slice(hasSep?2:1).map(r=>{
+      const row=r.slice(0,h.length);
+      while(row.length<h.length)row.push("");
+      return row;
+    });
+ 
     const alignRight=h.map((_,ci)=>{
       const vals=d.map(r=>String(r[ci]??"").replace(/\*\*/g,"").trim()).filter(v=>v&&v!=="-"&&v!=="\u2014");
       return vals.length>0&&vals.every(v=>NUMERIC.test(v));
@@ -2134,7 +2145,19 @@ function Md({text,ac}){
     const l=lines[i];
     if(l.startsWith("```")){if(inC){els.push(<pre key={"c"+els.length} style={{background:SURF,border:"1px solid "+BDR,borderRadius:6,padding:"10px",margin:"6px 0",fontSize:10.5,fontFamily:"monospace",overflowX:"auto",color:BODY}}>{cL.join("\n")}</pre>);cL=[];inC=false;}else inC=true;continue;}
     if(inC){cL.push(l);continue;}
-    if(l.includes("|")&&l.trim().startsWith("|")){if(!inT){fT();inT=true;}const cells=l.split("|").filter((_,j,a)=>j>0&&j<a.length-1);tbl.push(cells);continue;}else if(inT)fT();
+    if(l.includes("|")&&l.trim().startsWith("|")){
+      if(!inT){fT();inT=true;}
+      // THE ACTUAL CAUSE OF THE MISALIGNED TABLES.
+      // The old parser was: split("|").filter((_,j,a)=>j>0&&j<a.length-1)
+      // That drops the first and last fragment, which is right ONLY when the row
+      // both starts and ends with a pipe. Models very often omit the closing one:
+      //     | Low conversion | Medium | High | Offer free trial
+      // produced THREE cells instead of four - the mitigation text was silently
+      // deleted and every remaining cell slid one column to the left. With fixed
+      // column widths that is exactly the "headings over the wrong column" you saw.
+      const cells=l.trim().replace(/^\|/,"").replace(/\|\s*$/,"").split("|");
+      tbl.push(cells);continue;
+    }else if(inT)fT();
     if(l.startsWith("### "))els.push(<h4 key={i} style={{margin:"14px 0 5px",color:c,fontSize:12.5,fontWeight:800,letterSpacing:".01em"}}>{cell(l.slice(4))}</h4>);
     else if(l.startsWith("## "))els.push(<h3 key={i} style={{margin:"18px 0 6px",color:INK,fontSize:14.5,fontWeight:800,lineHeight:1.35}}>{cell(l.slice(3))}</h3>);
     else if(l.startsWith("# "))els.push(<h2 key={i} style={{margin:"18px 0 7px",color:INK,fontSize:16.5,fontWeight:800,lineHeight:1.3}}>{cell(l.slice(2))}</h2>);
@@ -2303,7 +2326,12 @@ function mdToHtmlBlocks(text,accent){
   const flushTable=()=>{
     if(!tableBuf.length)return;
     const rows=tableBuf.filter(r=>!r.trim().match(/^\|[\s|:\-]+\|$/)); // drop the |---|---| separator
-    const cells=rows.map(r=>r.split("|").filter((c,j,a)=>j>0&&j<a.length-1).map(c=>c.trim()));
+    // Same bug as the on-screen renderer: a row without a closing pipe lost its
+    // last cell. This path builds the HTML that becomes your PDF and PowerPoint,
+    // so the exported document had the identical missing-column problem.
+    const raw=rows.map(r=>r.trim().replace(/^\|/,"").replace(/\|\s*$/,"").split("|").map(c=>c.trim()));
+    const nCol=raw.length?raw[0].length:0;
+    const cells=raw.map(rw=>{const x=rw.slice(0,nCol);while(x.length<nCol)x.push("");return x;});
     if(cells.length){
       let html="<table class='pq-tbl'><thead><tr>";
       cells[0].forEach(c=>html+="<th>"+fmtInline(c)+"</th>");
