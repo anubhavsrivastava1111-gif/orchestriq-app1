@@ -512,7 +512,12 @@ function providerEnabled(keys:any,id:string):boolean{
 // keys.nvidiaModel (a model string, not a credential) and the four web-search
 // keys. Filtering by "is not a search key" would have let nvidiaModel through as
 // if it were a callable provider. An allow-list cannot drift that way.
-const AI_PROVIDER_IDS=["claude","openai","gemini","groq","deepseek","kimi","stability","fal"];
+// NVIDIA belongs here even though it has no entry in the keys object - it needs
+// no key, and providerKey() returns "nvidia" whenever it is switched on. Leaving
+// it out meant enabledKeys() never contained it, so the Boardroom's provider list
+// came back EMPTY when NVIDIA was the only provider enabled - and every executive
+// reported "did not produce an answer" without a single request being sent.
+const AI_PROVIDER_IDS=["nvidia","claude","openai","gemini","groq","deepseek","kimi","stability","fal"];
 function enabledKeys(keys:any):Record<string,string>{
   const out:Record<string,string>={};
   AI_PROVIDER_IDS.forEach(id=>{
@@ -1303,7 +1308,9 @@ async function callOpenAI(key,sys,msgs,maxT){
   const d=await r.json();return d.choices?.[0]?.message?.content||"";
 }
 async function callGemini(key,sys,msgs,maxT,enableSearch=false){
-  const models=["gemini-3.6-flash","gemini-2.5-flash"];
+  // gemini-2.5-flash is also retired ("no longer available to new users"), so it
+  // is not a usable fallback. 3.6 is the current model.
+  const models=["gemini-3.6-flash"];
   let lastErr=null;
   for(const model of models){
     try{
@@ -3663,6 +3670,14 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           // Gated: the debate failover chain now skips switched-off providers.
           const brKeys=enabledKeys(keys);
           const allProviders=Object.keys(brKeys);
+          // If this list is empty, no request is ever sent and every executive
+          // reports "did not produce an answer" for a reason that has nothing to
+          // do with the provider. Say what is actually wrong instead.
+          if(!allProviders.length){
+            agText="\u26a0 **No AI provider is available.**\n\nEvery provider is either switched off in Settings or has no key. Nothing was sent, and nothing was charged.\n\nFix: Settings \u2192 API \u2192 switch on at least one provider. NVIDIA (Free) needs no key.";
+            gotResponse=true;
+            break;
+          }
           let cycleSuccess=false;
           for(const prov of allProviders){
             if(cancelRef.current.br)break;
