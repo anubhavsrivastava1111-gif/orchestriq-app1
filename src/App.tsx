@@ -22,6 +22,7 @@ import { runSearch, formatResultsForPrompt, RETRIEVED_RESULTS_RULES, hasExternal
 import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney } from "./lib/ModelRouting";
 import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
 import { detectDocumentRequest, buildDocumentBrief, buildSynthesisOverride, suggestedFormats, CONSULTING_STANDARD } from "./lib/DocumentLibrary";
+import { NVIDIA_DEFAULT_MODEL, nvidiaModelOptions, nvidiaShouldReason, nvidiaTokenBudget } from "./lib/NvidiaModels";
 import CostArchitecture from "./CostArchitecture";
 import { loadCostContext, getCostBrief, publishCostDiagnosis, clearCostContext } from "./lib/CostContext";
 
@@ -156,16 +157,13 @@ const MODELS = {
   kimi:{name:"Kimi",company:"Moonshot AI",model:"moonshot-v1-8k",placeholder:"sk-...",color:"#8B5CF6",keyUrl:"https://platform.moonshot.cn/console/api-keys",note:"Fast · Affordable · Strong multilingual"},
   stability:{name:"Stability AI",company:"Stability AI",model:"stable-diffusion-xl-1024-v1-0",placeholder:"sk-...",color:"#EC4899",keyUrl:"https://platform.stability.ai/account/credits",note:"Image generation · ~₹3/image · Optional"},
   fal:{name:"fal.ai",company:"fal.ai",placeholder:"key-...",color:"#7C3AED",keyUrl:"https://fal.ai/dashboard/keys"},
-  nvidia:{name:"NVIDIA (Free)",company:"NVIDIA",model:"meta/llama-3.3-70b-instruct",color:"#76B900",note:"No key needed \u2014 free tier via NVIDIA NIM"},
+  nvidia:{name:"NVIDIA (Free)",company:"NVIDIA",model:NVIDIA_DEFAULT_MODEL,color:"#76B900",note:"No key needed \u2014 free tier via NVIDIA NIM"},
 };
-const NVIDIA_MODELS=[
-  {id:"meta/llama-3.3-70b-instruct",label:"Llama 3.3 70B",note:"Best all-rounder"},
-  {id:"nvidia/llama-3.1-nemotron-70b-instruct",label:"Nemotron 70B",note:"NVIDIA-tuned reasoning"},
-  {id:"deepseek-ai/deepseek-r1",label:"DeepSeek R1",note:"Strong step-by-step reasoning"},
-  {id:"mistralai/mixtral-8x22b-instruct-v0.1",label:"Mixtral 8x22B",note:"Fast, capable"},
-  {id:"meta/llama-3.1-405b-instruct",label:"Llama 3.1 405B",note:"Largest, most capable"},
-  {id:"nvidia/nemotron-4-340b-instruct",label:"Nemotron 4 340B",note:"NVIDIA flagship"},
-];
+// This list was hardcoded and had gone stale: it still offered nemotron-4-340b
+// and llama-3.1-nemotron-70b, neither of which NVIDIA serves any more, while the
+// entire Nemotron 3 family was missing. It now comes from src/lib/NvidiaModels.ts,
+// so the dropdown can never drift from what the proxy will actually accept.
+const NVIDIA_MODELS=nvidiaModelOptions();
 // ─── DONATION QR ────────────────────────────────────────────────────────────
 // Paste your QR code as a base64 data URI between the quotes below to hard-code it,
 // e.g. "data:image/png;base64,iVBORw0KGgo...". Until then, upload it once via
@@ -1251,12 +1249,30 @@ function getExecutiveIntel(roleId: string): { b: string; m: string; enrichment: 
 
 // ─── API FUNCTIONS ──────────────────────────────────────────────────────────
 
-async function callNvidia(sys,msgs,maxT,modelOverride?:string){
-  const r=await fetch("/api/nvidia",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sys,messages:msgs,model:modelOverride||MODELS.nvidia.model,max_tokens:maxT})});
+async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string){
+  // Reasoning models spend output tokens THINKING before they answer. The task
+  // decides whether that is worth paying for; the registry decides how much
+  // headroom the answer then needs on top. Deciding it here means no module has
+  // to know anything about reasoning modes.
+  const nvModel=modelOverride||MODELS.nvidia.model;
+  const nvTask=task||USAGE_CTX.feature||"general";
+  const nvReason=nvidiaShouldReason(nvModel,nvTask);
+  const nvBudget=nvidiaTokenBudget(nvModel,maxT,nvReason);
+  const r=await fetch("/api/nvidia",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sys,messages:msgs,model:nvModel,max_tokens:nvBudget,reasoning:nvReason,task:nvTask})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error;}catch{m=t.slice(0,200);}if(r.status===429)throw new Error("NVIDIA: Free daily limit reached. Add your own key in Settings for unlimited use.");if(r.status===503)throw new Error("NVIDIA: Free tier not yet configured on this deployment.");throw new Error(m||("NVIDIA "+r.status));}
   const d=await r.json();
   const ntext=d.choices?.[0]?.message?.content||"";
   if(!ntext.trim())throw new Error("NVIDIA returned an empty answer (finish_reason: "+(d.choices?.[0]?.finish_reason||"unknown")+").");
+  // The proxy reports the model it really ran. It can no longer substitute one
+  // silently, but recording it means every executive recommendation stays
+  // attributable to a named model.
+  try{
+    NVIDIA_LAST_RUN={
+      model:r.headers.get("x-oiq-model")||nvModel,
+      reasoning:r.headers.get("x-oiq-reasoning")||"",
+      budget:r.headers.get("x-oiq-budget")||"",
+    };
+  }catch{}
   return ntext;
 }
 async function callGroq(key,sys,msgs,maxT){
@@ -1460,6 +1476,7 @@ function stageRoute(keys:any,stage:any):{provider:string;key:string;model:string
   return {provider:prov,key:k,model:stageModelOverride(stage,prov)};
 }
  
+let NVIDIA_LAST_RUN:{model:string;reasoning:string;budget:string}={model:"",reasoning:"",budget:""};
 let USAGE_CTX:{feature:string;icon:string;userEmail:string;userRole:string}={feature:"AI Call",icon:"⚡",userEmail:"",userRole:""};
 function setUsageFeature(feature:string,icon?:string){USAGE_CTX.feature=feature||"AI Call";USAGE_CTX.icon=icon||"⚡";}
 function setUsageUser(email:string,role:string){USAGE_CTX.userEmail=email||"";USAGE_CTX.userRole=role||"";}
@@ -1547,13 +1564,18 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,mode
     timerId=setTimeout(()=>rej(new Error("Request timed out after "+(timeoutMs/1000)+"s. The AI provider may be busy — try switching to Gemini (free tier).")),timeoutMs);
   });
   const callP=(async()=>{
-    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT,enableSearch):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT,modelOverride):provider==="kimi"?await callKimi(key,sys,msgs,maxT):provider==="fal"?await(async()=>{const prompt=rawMsgs?.find((m:any)=>m.role==="user")?.content||"generate image";const url=await callFalImage(key,prompt);return{text:`🖼️ Image URL: ${url}`,truncated:false};})():provider==="nvidia"?{text:await callNvidia(sys,msgs,maxT),truncated:false}:Promise.reject(new Error("Unknown provider: "+provider));
+    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT,enableSearch):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT,modelOverride):provider==="kimi"?await callKimi(key,sys,msgs,maxT):provider==="fal"?await(async()=>{const prompt=rawMsgs?.find((m:any)=>m.role==="user")?.content||"generate image";const url=await callFalImage(key,prompt);return{text:`🖼️ Image URL: ${url}`,truncated:false};})():provider==="nvidia"?{text:await callNvidia(sys,msgs,maxT,modelOverride,USAGE_CTX.feature),truncated:false}:Promise.reject(new Error("Unknown provider: "+provider));
     if(raw&&typeof raw==="object"&&"text" in raw)return raw as {text:string;truncated:boolean};
     return {text:raw as string,truncated:false};
   })();
   try{
     const out:any=await Promise.race([callP,timeout]);
-    logAiUsage(provider,modelOverride||MODELS[provider]?.model||provider,sys,msgs,out?.text||"",out?.usage);
+    // For NVIDIA the model is whatever the proxy reports, plus the reasoning mode,
+    // so the ledger shows exactly which model produced each answer.
+    const loggedModel=(provider==="nvidia"&&NVIDIA_LAST_RUN.model)
+      ?(NVIDIA_LAST_RUN.model+(NVIDIA_LAST_RUN.reasoning==="on"?" (reasoning)":""))
+      :(modelOverride||MODELS[provider]?.model||provider);
+    logAiUsage(provider,loggedModel,sys,msgs,out?.text||"",out?.usage);
     return out;
   }
   finally{clearTimeout(timerId);}
