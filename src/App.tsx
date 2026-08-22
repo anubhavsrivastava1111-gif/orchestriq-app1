@@ -2095,10 +2095,21 @@ function Md({text,ac}){
   const lines=text.split("\n");
   const els=[];let tbl=[],inT=false,inC=false,cL=[];
   const cell=(v)=><span dangerouslySetInnerHTML={{__html:mdInline(String(v).trim())}}/>;
+  // A column whose values are all numeric (money, percentages, counts) is aligned
+  // RIGHT, the way any financial table is set. Headers align with their own column
+  // and sit on the same baseline as the first row of data - they were defaulting
+  // to middle alignment while the cells were top-aligned, which is why headings
+  // appeared to float above the wrong line whenever a cell wrapped.
+  const NUMERIC=/^[\s]*[₹$€£]?\s*[-+(]?[\d,]+(\.\d+)?\s*(%|cr|crore|lakh|lakhs|k|mn|bn|tpd|tpa|x)?\s*[)]?[\s]*$/i;
   const fT=()=>{
     if(!tbl.length)return;
     const h=tbl[0],d=tbl.slice(2);
-    els.push(<div key={"t"+els.length} style={{overflowX:"auto",margin:"10px 0",borderRadius:6,border:"1px solid "+BDR}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}><thead><tr>{h.map((v,i)=><th key={i} style={{textAlign:"left",padding:"7px 9px",borderBottom:"2px solid "+BDR,color:c,fontWeight:800,fontSize:9.5,textTransform:"uppercase",letterSpacing:".04em",background:SURF}}>{cell(v)}</th>)}</tr></thead><tbody>{d.map((row,ri)=><tr key={ri}>{row.map((cl,ci)=><td key={ci} style={{padding:"6px 9px",borderBottom:"1px solid "+BDR,color:BODY,fontSize:11.5,lineHeight:1.55,verticalAlign:"top"}}>{cell(cl)}</td>)}</tr>)}</tbody></table></div>);
+    const alignRight=h.map((_,ci)=>{
+      const vals=d.map(r=>String(r[ci]??"").replace(/\*\*/g,"").trim()).filter(v=>v&&v!=="-"&&v!=="\u2014");
+      return vals.length>0&&vals.every(v=>NUMERIC.test(v));
+    });
+    els.push(<div key={"t"+els.length} style={{overflowX:"auto",margin:"10px 0",borderRadius:6,border:"1px solid "+BDR}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5,tableLayout:"auto"}}><thead><tr>{h.map((v,i)=><th key={i} style={{textAlign:alignRight[i]?"right":"left",verticalAlign:"bottom",padding:"8px 9px",borderBottom:"2px solid "+BDR,color:c,fontWeight:800,fontSize:9.5,textTransform:"uppercase",letterSpacing:".04em",background:SURF,whiteSpace:"nowrap"}}>{cell(v)}</th>)}</tr></thead><tbody>{d.map((row,ri)=><tr key={ri}>{row.map((cl,ci)=><td key={ci} style={{padding:"7px 9px",borderBottom:"1px solid "+BDR,color:BODY,fontSize:11.5,lineHeight:1.55,verticalAlign:"top",textAlign:alignRight[ci]?"right":"left",whiteSpace:alignRight[ci]?"nowrap":"normal",fontVariantNumeric:alignRight[ci]?"tabular-nums":"normal"}}>{cell(cl)}</td>)}</tr>)}</tbody></table></div>);
+ 
     try{const ch=autoChartFromTable(h,d,typeof c==="string"&&c.startsWith("#")?c:"#14B8A6","ch"+els.length);if(ch)els.push(ch);}catch{}
     tbl=[];inT=false;
   };
@@ -6323,7 +6334,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         showToast((isPdf?"PDF":"PowerPoint")+" generated via Python engine ✓","success");
       }catch(railErr:any){
         recordEngineDowngrade(userTitle,isPdf?"pdf":"pptx",railErr);
-        showToast("We couldn't generate this "+(isPdf?"PDF":"PowerPoint")+" at the quality standard required right now. Please try again in a little while.","error");
+        showToast("Could not generate the "+(isPdf?"PDF":"PowerPoint")+": "+String(railErr?.message||railErr||"unknown error").slice(0,180),"error");
         setExpStep("");setExpGenerating(false);
         return;
       }
@@ -6384,7 +6395,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
       showToast("Downloaded ✓","success");
     }catch(railErr:any){
       recordEngineDowngrade(title,fmt,railErr);
-      showToast("We couldn't generate this "+(mode==="pdf"?"PDF":"PowerPoint")+" at the quality standard required right now. Please try again in a little while.","error");
+      showToast("Could not generate the "+(mode==="pdf"?"PDF":"PowerPoint")+": "+String(e?.message||e||"unknown error").slice(0,180),"error");
     }
   },[co,cur,showToast,railwayGenerate]);
 
@@ -6571,7 +6582,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
             <span style={{fontSize:9,color:"var(--oiq-sbDim)",transition:"transform 0.2s",transform:showModules?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
           </button>
           {showModules&&(
-            <div style={{position:"absolute",top:"calc(100% - 2px)",left:10,right:10,background:"var(--oiq-sbBorder)",border:"1px solid var(--sb-bdr)",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:7,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
+            <div style={{position:"absolute",top:"calc(100% - 2px)",left:10,right:10,background:"var(--oiq-sbBg,var(--oiq-surface2,#0c1120))",backdropFilter:"none",border:"1px solid var(--sb-bdr)",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:7,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
               {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
                 <button key={v} onClick={()=>{setView(v);setShowModules(false);}}
                   style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 11px",background:view===v?"var(--oiq-accent)":"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"inherit",marginBottom:2,transition:"background 0.12s"}}>
