@@ -1475,6 +1475,22 @@ try{LIBRARY_ENABLED=localStorage.getItem("cos-library")==="1";}catch{}
 function setLibraryEnabled(on:boolean){LIBRARY_ENABLED=!!on;try{localStorage.setItem("cos-library",on?"1":"0");}catch{}}
  
 // Picks the provider+key for one pipeline stage, honouring the on/off gate.
+// The Railway document service (Word / PDF / PowerPoint / Excel) needs a key it
+// can use SERVER-SIDE. Four call sites each built their own chain of
+// claude -> openai -> gemini -> groq and all four LEFT OUT DEEPSEEK, even though
+// the export engine already sends deepseek_key and the service accepts it.
+// So a user running on DeepSeek alone got an empty key and a failed document,
+// with no explanation. NVIDIA cannot be used here at all: it has no user key and
+// Railway cannot reach your Cloudflare proxy - so that case is named honestly
+// rather than failing silently.
+function docServiceKey(keys:any):string{
+  return providerKey(keys,"claude")||providerKey(keys,"openai")||providerKey(keys,"deepseek")
+       ||providerKey(keys,"gemini")||providerKey(keys,"groq")||"";
+}
+function docServiceMissingMsg():string{
+  return "Document generation needs a provider key that the document service can use: Claude, OpenAI, DeepSeek, Gemini or Groq. NVIDIA (Free) cannot be used for documents because it runs through this site's own proxy and the document service cannot reach it. Add or switch on one of those five in Settings, then try again.";
+}
+ 
 function stageRoute(keys:any,stage:any):{provider:string;key:string;model:string}|null{
   const prov=resolveStageProvider(stage,STAGE_PROFILE,(id:string)=>providerEnabled(keys,id));
   if(!prov)return null;
@@ -4950,7 +4966,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
                 available_data:_allContent.slice(0,8000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
-                api_key:providerKey(keys,"claude")||providerKey(keys,"openai")||providerKey(keys,"gemini")||providerKey(keys,"groq")||""
+                api_key:docServiceKey(keys)
               }),
               signal:AbortSignal.timeout(120000)
             });
@@ -5045,7 +5061,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
                 available_data:_allContent.slice(0,8000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
-                api_key:providerKey(keys,"claude")||providerKey(keys,"openai")||providerKey(keys,"gemini")||providerKey(keys,"groq")||""
+                api_key:docServiceKey(keys)
               }),
               signal:AbortSignal.timeout(120000)
             });
@@ -5172,7 +5188,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
                 available_data:_allContent.slice(0,8000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
-                api_key:keys.claude||keys.openai||keys.gemini||keys.groq||""
+                api_key:docServiceKey(keys)
               }),
               signal:AbortSignal.timeout(120000)
             });
@@ -5359,7 +5375,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
                 available_data:_allContent.slice(0,8000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
-                api_key:keys.claude||keys.openai||keys.gemini||keys.groq||""
+                api_key:docServiceKey(keys)
               }),
               signal:AbortSignal.timeout(120000)
             });
