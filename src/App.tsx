@@ -2064,37 +2064,63 @@ function parseMdToSlidesGlobal(md:string,coName:string,title:string){
   return {title,slides};
 }
 
+// ─── MARKDOWN RENDERER ───────────────────────────────────────────────────────
+// Two faults this fixes, both visible on screen:
+//
+// 1. EVERY COLOUR WAS HARDCODED FOR THE DARK THEME. "#A0AAC0" text and "#F1F5F9"
+//    headings are correct on a near-black background and nearly invisible on the
+//    Executive Editorial cream. The whole app moved to CSS variables; this one
+//    function never did, which is why the body text washed out.
+//
+// 2. TABLE CELLS WERE RENDERED AS PLAIN TEXT. `{cell.trim()}` printed the raw
+//    string, so **72%** appeared with literal asterisks in every table. Cells now
+//    go through the same inline parser as everything else.
+function mdInline(s){
+  return String(s??"")
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/\*\*(.+?)\*\*/g,'<strong style="color:var(--oiq-ink,#F1F5F9);font-weight:700">$1</strong>')
+    .replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g,'$1<em>$2</em>')
+    .replace(/`(.+?)`/g,'<code style="background:var(--oiq-surface2,#080c18);padding:1px 4px;border-radius:3px;font-size:.92em;font-family:monospace">$1</code>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer" style="color:var(--oiq-accent,#14B8A6)">$1</a>')
+    .replace(/(^|\s)(https?:\/\/[^\s<]+)/g,'$1<a href="$2" target="_blank" rel="noopener noreferrer" style="color:var(--oiq-accent,#14B8A6);word-break:break-all">$2</a>');
+}
 function Md({text,ac}){
   if(!text)return null;
-  const c=ac||"#14B8A6";
+  const c=ac||"var(--oiq-accent,#14B8A6)";
+  const INK="var(--oiq-ink,#F1F5F9)";
+  const BODY="var(--oiq-ink2,#A0AAC0)";
+  const MUTED="var(--oiq-muted,#8892B0)";
+  const BDR="var(--oiq-border,#1a2030)";
+  const SURF="var(--oiq-surface,#0d1220)";
   const lines=text.split("\n");
   const els=[];let tbl=[],inT=false,inC=false,cL=[];
+  const cell=(v)=><span dangerouslySetInnerHTML={{__html:mdInline(String(v).trim())}}/>;
   const fT=()=>{
     if(!tbl.length)return;
     const h=tbl[0],d=tbl.slice(2);
-    els.push(<div key={"t"+els.length} style={{overflowX:"auto",margin:"8px 0",borderRadius:6,border:"1px solid #1a2030"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}><thead><tr>{h.map((v,i)=><th key={i} style={{textAlign:"left",padding:"6px 8px",borderBottom:"2px solid "+c+"33",color:c,fontWeight:700,fontSize:9,textTransform:"uppercase",background:"#0d1220"}}>{v.trim()}</th>)}</tr></thead><tbody>{d.map((row,ri)=><tr key={ri}>{row.map((cell,ci)=><td key={ci} style={{padding:"5px 8px",borderBottom:"1px solid #14192a",color:"#A0AAC0",fontSize:11}}>{cell.trim()}</td>)}</tr>)}</tbody></table></div>);
-    try{const ch=autoChartFromTable(h,d,c,"ch"+els.length);if(ch)els.push(ch);}catch{}
+    els.push(<div key={"t"+els.length} style={{overflowX:"auto",margin:"10px 0",borderRadius:6,border:"1px solid "+BDR}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}><thead><tr>{h.map((v,i)=><th key={i} style={{textAlign:"left",padding:"7px 9px",borderBottom:"2px solid "+BDR,color:c,fontWeight:800,fontSize:9.5,textTransform:"uppercase",letterSpacing:".04em",background:SURF}}>{cell(v)}</th>)}</tr></thead><tbody>{d.map((row,ri)=><tr key={ri}>{row.map((cl,ci)=><td key={ci} style={{padding:"6px 9px",borderBottom:"1px solid "+BDR,color:BODY,fontSize:11.5,lineHeight:1.55,verticalAlign:"top"}}>{cell(cl)}</td>)}</tr>)}</tbody></table></div>);
+    try{const ch=autoChartFromTable(h,d,typeof c==="string"&&c.startsWith("#")?c:"#14B8A6","ch"+els.length);if(ch)els.push(ch);}catch{}
     tbl=[];inT=false;
   };
   for(let i=0;i<lines.length;i++){
     const l=lines[i];
-    if(l.startsWith("```")){if(inC){els.push(<pre key={"c"+els.length} style={{background:"#080c18",borderRadius:6,padding:"10px",margin:"6px 0",fontSize:10,fontFamily:"monospace",color:"#8892B0",overflowX:"auto",border:"1px solid #14192a"}}>{cL.join("\n")}</pre>);cL=[];inC=false;}else{fT();inC=true;}continue;}
+    if(l.startsWith("```")){if(inC){els.push(<pre key={"c"+els.length} style={{background:SURF,border:"1px solid "+BDR,borderRadius:6,padding:"10px",margin:"6px 0",fontSize:10.5,fontFamily:"monospace",overflowX:"auto",color:BODY}}>{cL.join("\n")}</pre>);cL=[];inC=false;}else inC=true;continue;}
     if(inC){cL.push(l);continue;}
-    if(l.includes("|")&&l.trim().startsWith("|")){if(!inT){fT();inT=true;}const cells=l.split("|").filter((_,j,a)=>j>0&&j<a.length-1);if(cells.every(x=>x.trim().match(/^[-:]+$/))){tbl.push(cells);continue;}tbl.push(cells);continue;}else if(inT)fT();
-    if(l.startsWith("### "))els.push(<h4 key={i} style={{margin:"12px 0 4px",color:c,fontSize:12,fontWeight:700}}>{l.slice(4)}</h4>);
-    else if(l.startsWith("## "))els.push(<h3 key={i} style={{margin:"14px 0 5px",color:"#F1F5F9",fontSize:14,fontWeight:700}}>{l.slice(3)}</h3>);
-    else if(l.startsWith("# "))els.push(<h2 key={i} style={{margin:"14px 0 5px",color:"#F1F5F9",fontSize:16,fontWeight:800}}>{l.slice(2)}</h2>);
-    else if(l.match(/^[-*]\s/))els.push(<div key={i} style={{paddingLeft:14,position:"relative",margin:"2px 0",lineHeight:1.6}}><span style={{position:"absolute",left:3,color:c,fontSize:6,top:7}}>●</span><span dangerouslySetInnerHTML={{__html:l.replace(/^[-*]\s+/,"").replace(/\*\*(.+?)\*\*/g,"<strong style=\"color:#F1F5F9\">$1</strong>").replace(/`(.+?)`/g,"<code style=\"background:#080c18;padding:1px 4px;border-radius:3px;font-size:10px;font-family:monospace;color:#8892B0\">$1</code>")}}/></div>);
-    else if(l.match(/^\d+\.\s/)){const n=l.match(/^(\d+)\./)[1];els.push(<div key={i} style={{paddingLeft:20,position:"relative",margin:"2px 0",lineHeight:1.6}}><span style={{position:"absolute",left:0,color:c,fontWeight:700,fontSize:11,fontFamily:"monospace"}}>{n}.</span><span dangerouslySetInnerHTML={{__html:l.replace(/^\d+\.\s+/,"").replace(/\*\*(.+?)\*\*/g,"<strong style=\"color:#F1F5F9\">$1</strong>")}}/></div>);}
-    else if(l.startsWith("> "))els.push(<div key={i} style={{borderLeft:"3px solid "+c+"40",paddingLeft:10,margin:"5px 0",color:"#8892B0",fontStyle:"italic"}}>{l.slice(2)}</div>);
-    else if(l.startsWith("---"))els.push(<hr key={i} style={{border:"none",borderTop:"1px solid #1a2030",margin:"8px 0"}}/>);
-    else if(l.trim()==="")els.push(<div key={i} style={{height:4}}/>);
-    else els.push(<div key={i} style={{margin:"2px 0",lineHeight:1.65}} dangerouslySetInnerHTML={{__html:l.replace(/\*\*(.+?)\*\*/g,"<strong style=\"color:#F1F5F9\">$1</strong>").replace(/\*(.+?)\*/g,"<em>$1</em>").replace(/`(.+?)`/g,"<code style=\"background:#080c18;padding:1px 4px;border-radius:3px;font-size:10px;font-family:monospace;color:#8892B0\">$1</code>")}}/>);
+    if(l.includes("|")&&l.trim().startsWith("|")){if(!inT){fT();inT=true;}const cells=l.split("|").filter((_,j,a)=>j>0&&j<a.length-1);tbl.push(cells);continue;}else if(inT)fT();
+    if(l.startsWith("### "))els.push(<h4 key={i} style={{margin:"14px 0 5px",color:c,fontSize:12.5,fontWeight:800,letterSpacing:".01em"}}>{cell(l.slice(4))}</h4>);
+    else if(l.startsWith("## "))els.push(<h3 key={i} style={{margin:"18px 0 6px",color:INK,fontSize:14.5,fontWeight:800,lineHeight:1.35}}>{cell(l.slice(3))}</h3>);
+    else if(l.startsWith("# "))els.push(<h2 key={i} style={{margin:"18px 0 7px",color:INK,fontSize:16.5,fontWeight:800,lineHeight:1.3}}>{cell(l.slice(2))}</h2>);
+    else if(l.match(/^[-*]\s/))els.push(<div key={i} style={{paddingLeft:15,position:"relative",margin:"3px 0",lineHeight:1.7,color:BODY}}><span style={{position:"absolute",left:3,color:c}}>&bull;</span>{cell(l.replace(/^[-*]\s/,""))}</div>);
+    else if(l.match(/^\d+\.\s/)){const n=l.match(/^(\d+)\./)[1];els.push(<div key={i} style={{paddingLeft:22,position:"relative",margin:"3px 0",lineHeight:1.7,color:BODY}}><span style={{position:"absolute",left:2,color:c,fontWeight:700,fontSize:10.5}}>{n}.</span>{cell(l.replace(/^\d+\.\s/,""))}</div>);}
+    else if(l.startsWith("> "))els.push(<div key={i} style={{borderLeft:"3px solid "+c,paddingLeft:11,margin:"7px 0",color:MUTED,fontStyle:"italic",lineHeight:1.65}}>{cell(l.slice(2))}</div>);
+    else if(l.startsWith("---"))els.push(<hr key={i} style={{border:"none",borderTop:"1px solid "+BDR,margin:"12px 0"}}/>);
+    else if(l.trim()==="")els.push(<div key={i} style={{height:6}}/>);
+    else els.push(<div key={i} style={{margin:"3px 0",lineHeight:1.72,color:BODY}} dangerouslySetInnerHTML={{__html:mdInline(l)}}/>);
   }
   fT();
   return <>{els}</>;
 }
-
+ 
 // ─── SHARED RESEARCH BRIEF CARD ──────────────────────────────────────────────
 // The Boardroom showed a compact card with a source count and an Open modal.
 // Time Machine and Autopilot dumped the whole brief into a plain grey div with no
