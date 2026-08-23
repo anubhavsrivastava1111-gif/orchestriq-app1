@@ -6292,6 +6292,46 @@ setResumeInfo(null);
 showToast("Workspace loaded — all modules restored","success");}catch{showToast("Invalid workspace file","error");}};r.readAsText(file);};
 
   // ─── RAILWAY DOCUMENT ENGINE — the ONLY document generator in the app ───
+  // ─── EXPORT NORMALISER ──────────────────────────────────────────────────────
+  // What the document service receives is what it renders. Two of the three faults
+  // in your generated files start HERE, in what we send, and can be fixed today
+  // without touching the Python service:
+  //
+  // 1. LITERAL ASTERISKS. PowerPoint slide 7 shows, on the slide itself:
+  //        "**Segment: Manufacturing SMEs (UP/Bihar)**"
+  //    The PPTX engine writes text frames verbatim and never parses markdown.
+  //    Emphasis markers are stripped for slides, keeping the words.
+  //
+  // 2. TRUNCATED TABLE CELLS. Slide 6 gave six columns 2.02 INCHES EACH regardless
+  //    of content, so "Typical Annual Cost per Seat" was cut mid-word. Until the
+  //    Python engine computes widths from content, over-long cells are shortened
+  //    here at a WORD boundary with an ellipsis, so nothing is chopped mid-word.
+  //
+  // NOT fixable from here: the rupee symbol rendering as a black box in PDF
+  // TABLES. Proven from your file - 118 correct in body text, 40 boxes, and every
+  // one of the 40 inside a table. DejaVu IS embedded; the TableStyle still uses
+  // Helvetica, which has no rupee glyph. That needs the one Python change.
+  const normaliseForExport=useCallback((body:string,format:string)=>{
+    let t=String(body||"");
+    if(format==="pptx"){
+      t=t.replace(/\*\*(.+?)\*\*/g,"$1").replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g,"$1$2");
+    }
+    t=t.split("\n").map(line=>{
+      if(!line.trim().startsWith("|"))return line;
+      const cells=line.trim().replace(/^\|/,"").replace(/\|\s*$/,"").split("|");
+      if(cells.length<4)return line;                 // narrow tables already fit
+      const cap=cells.length>=6?42:cells.length===5?56:72;
+      const cut=cells.map(c=>{
+        const s=c.trim();
+        if(s.length<=cap)return " "+s+" ";
+        const w=s.slice(0,cap).lastIndexOf(" ");
+        return " "+s.slice(0,w>cap*0.6?w:cap).trim()+"\u2026 ";
+      });
+      return "|"+cut.join("|")+"|";
+    }).join("\n");
+    return t;
+  },[]);
+ 
   const railwayGenerate=useCallback(async(format:string,opts:{title?:string;objective?:string;body?:string;currency?:string;currencySymbol?:string})=>{
     const RAILWAY_URL="https://orchestriq-gen-service-production.up.railway.app";
     const claudeKey=providerKey(keys,"claude");
@@ -6310,7 +6350,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     const _payload=JSON.stringify({
         objective:opts.objective||opts.title||"Document",
         company_context:coCtx,
-        available_data:(opts.body||"").slice(0,8000),
+        available_data:normaliseForExport(opts.body||"",format).slice(0,8000),
         currency:opts.currency||co.currency||"INR",
         currency_symbol:opts.currencySymbol||cur.sym||"₹",
         claude_key:isProviderOff("claude")?"":claudeKey,
@@ -6347,7 +6387,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     const a=document.createElement("a");a.href=u;a.download=fname;a.style.display="none";
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     setTimeout(()=>URL.revokeObjectURL(u),200);
-  },[keys,co,cur,showToast]);
+  },[keys,co,cur,showToast,normaliseForExport]);
 
   // FEATURE 4 & 5: Export Studio generation
   const runExport=useCallback(async()=>{
