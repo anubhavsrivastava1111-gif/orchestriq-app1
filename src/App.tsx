@@ -97,7 +97,8 @@ async function saveBYOKeyToSupabase(apiKey: string): Promise<void> {
     console.warn('[OIQ] Failed to save BYO key:', e);
   }
 }
-import Ledger, { type JournalEntry } from "./Ledger";
+import Ledger, { type JournalEntry, COA, computeBalances, getAllAccounts } from "./Ledger";
+import { deriveFinancials, reconcile, buildFinancialBrief, financialHeadline, parseAmount } from "./lib/FinancialEngine";
 import FinanceSuite from "./FinanceSuite";
 import CommandCenter from "./CommandCenter";
 import Dispatch, { type DispatchTemplate } from "./Dispatch";
@@ -1743,9 +1744,30 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 
+// ─── LEDGER FINANCIALS, PUBLISHED ONCE ──────────────────────────────────────
+// Module-level, because buildCtx and runResearchDesk are plain functions outside
+// the React tree - the same pattern getCostBrief() already uses successfully.
+// Recomputed whenever journal entries change, never inside a render.
+let FIN_BRIEF="";
+let FIN_HEADLINE="";
+let FIN_CONFLICTS=0;
+function publishFinancials(entries:any[],customAccounts:any[],compData:any,sym:string,months=12){
+  try{
+    if(!entries||!entries.length){FIN_BRIEF="";FIN_HEADLINE="";FIN_CONFLICTS=0;return;}
+    const accounts=getAllAccounts(customAccounts||[]);
+    const balances=computeBalances(entries,accounts);
+    const metrics=deriveFinancials(balances,{months,sym});
+    const recon=reconcile(metrics,compData||{});
+    FIN_BRIEF=buildFinancialBrief(metrics,recon,sym);
+    FIN_HEADLINE=financialHeadline(metrics,sym);
+    FIN_CONFLICTS=recon.filter(r=>r.severity==="conflict").length;
+  }catch(e){console.warn("[OIQ] financials:",e);FIN_BRIEF="";FIN_HEADLINE="";FIN_CONFLICTS=0;}
+}
+function getFinancialBrief(){return FIN_BRIEF;}
+ 
 function buildCtx(co,compData){
   const cur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
-  return "COMPANY: "+co.name+" | INDUSTRY: "+co.industry+" | STAGE: "+co.stage+"\nHQ: "+(co.location||"Not set")+" | CURRENCY: "+cur.code+" ("+cur.sym+") | MARKETS: "+(co.markets||"Not specified")+"\nDATA:\n"+(Object.keys(compData).length===0?"(None)":Object.entries(compData).map(([k,v])=>"  "+k+": "+v).join("\n"))+(getCostBrief()?"\n\n"+getCostBrief()+"\n":"")+"\nRULES: All figures in "+cur.sym+cur.code+". Account for "+(co.location||"company location")+" macro+micro context. Show all math. Structure 0-90d then 3-12mo then 1-3yr.";
+  return getFinancialBrief()+"COMPANY: "+co.name+" | INDUSTRY: "+co.industry+" | STAGE: "+co.stage+"\nHQ: "+(co.location||"Not set")+" | CURRENCY: "+cur.code+" ("+cur.sym+") | MARKETS: "+(co.markets||"Not specified")+"\nDATA:\n"+(Object.keys(compData).length===0?"(None)":Object.entries(compData).map(([k,v])=>"  "+k+": "+v).join("\n"))+(getCostBrief()?"\n\n"+getCostBrief()+"\n":"")+"\nRULES: All figures in "+cur.sym+cur.code+". Account for "+(co.location||"company location")+" macro+micro context. Show all math. Structure 0-90d then 3-12mo then 1-3yr.";
 }
 function buildSys(role,co,compData,liveRates=""){
   const p = getExecutiveIntel(role.id);
@@ -3099,6 +3121,11 @@ export default function App(){
   const [compData,setCompData]=useState({});
   const [ledgerEntries,setLedgerEntries]=useState<JournalEntry[]>([]);
   const [customAccounts,setCustomAccounts]=useState<any[]>([]);
+  // Recompute the published financials whenever the books, the plan figures or
+  // the currency change. Nothing else has to know the engine exists.
+  useEffect(()=>{
+    publishFinancials(ledgerEntries,customAccounts,compData,cur.sym,12);
+  },[ledgerEntries,customAccounts,compData,cur.sym]);
   const [dispatchTemplates,setDispatchTemplates]=useState<DispatchTemplate[]>([]);
   const [actionItems,setActionItems]=useState<ActionItem[]>([]);
   const [extractModal,setExtractModal]=useState<{items:ExtractedItem[];sourceType:ActionItem["source"];sourceLabel:string}|null>(null);
