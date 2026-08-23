@@ -3121,11 +3121,6 @@ export default function App(){
   const [compData,setCompData]=useState({});
   const [ledgerEntries,setLedgerEntries]=useState<JournalEntry[]>([]);
   const [customAccounts,setCustomAccounts]=useState<any[]>([]);
-  // Recompute the published financials whenever the books, the plan figures or
-  // the currency change. Nothing else has to know the engine exists.
-  useEffect(()=>{
-    publishFinancials(ledgerEntries,customAccounts,compData,cur.sym,12);
-  },[ledgerEntries,customAccounts,compData,cur.sym]);
   const [dispatchTemplates,setDispatchTemplates]=useState<DispatchTemplate[]>([]);
   const [actionItems,setActionItems]=useState<ActionItem[]>([]);
   const [extractModal,setExtractModal]=useState<{items:ExtractedItem[];sourceType:ActionItem["source"];sourceLabel:string}|null>(null);
@@ -3226,6 +3221,15 @@ export default function App(){
 
   // Derived currency — declared early so callbacks (runExport, quickExport) can reference it safely
   const cur=useMemo(()=>CURRENCIES.find(cv=>cv.code===co.currency)||CURRENCIES[0],[co.currency]);
+  // Recompute the published Ledger financials whenever the books, the plan
+  // figures or the currency change.
+  // POSITION MATTERS: this must sit BELOW the declarations of ledgerEntries,
+  // customAccounts, compData and cur. A dependency array is evaluated during
+  // render, so placing it above `cur` threw "Cannot access 'cur' before
+  // initialization" and took the whole page down.
+  useEffect(()=>{
+    publishFinancials(ledgerEntries,customAccounts,compData,cur.sym,12);
+  },[ledgerEntries,customAccounts,compData,cur]);
   // FIX BUG 7: toast state
   const [toasts,setToasts]=useState([]);
   // API health indicator
