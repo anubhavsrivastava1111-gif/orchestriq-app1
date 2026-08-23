@@ -1,58 +1,47 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// CLOUDFLARE PAGES FUNCTION — NVIDIA NIM proxy  (v2, registry-driven)
+// CLOUDFLARE PAGES FUNCTION — NVIDIA NIM proxy  (v3, SECURED)
 // ─────────────────────────────────────────────────────────────────────────────
-// Auto-routes to https://<your-site>/api/nvidia because this file lives at
-// functions/api/nvidia.ts in the repo root (NOT inside src/).
+// SECURITY AUDIT FINDING C-2 — CRITICAL, fixed here.
 //
-// WHY THIS FILE EXISTS
-// NVIDIA's API key must never reach the browser. A VITE_-prefixed variable would
-// be baked into the public bundle and extractable from dev tools. This function
-// keeps the key server-side: a Cloudflare Pages Secret, readable only inside this
-// function's execution context. The frontend calls this endpoint with no key.
+// v2 had NO authentication of any kind and CORS "*". Anyone on the internet
+// could POST to https://<your-site>/api/nvidia from any origin and spend your
+// NVIDIA credits. The rate-limit code existed only as a commented-out note.
 //
-// SETUP (one-time, Cloudflare dashboard):
-//   Workers & Pages → orchestriq → Settings → Environment variables → Production
-//   Add: NVIDIA_API_KEY = nvapi-xxxxxxxx   (type: SECRET, not Plaintext)
+// Four controls added, in the order an attacker meets them:
+//
+//   1. ORIGIN LOCK      requests must come from your own site, not "*"
+//   2. AUTHENTICATION   a valid Supabase JWT is required; the signature is
+//                       verified against the project JWKS, so a forged or
+//                       expired token is rejected
+//   3. PER-USER QUOTA   N requests per user per day, counted in KV
+//   4. PER-IP QUOTA     a second ceiling per IP, so one person cannot farm
+//                       accounts to multiply their allowance
+//
+// DEGRADES SAFELY: if the KV namespace is not bound, quotas are skipped but
+// authentication is still enforced. Auth is never optional.
+//
+// SETUP (Cloudflare dashboard → your Pages project → Settings):
+//   Environment variables (Production):
+//     NVIDIA_API_KEY        = nvapi-…                (type: Secret)
+//     SUPABASE_URL          = https://<ref>.supabase.co   (Plaintext)
+//     ALLOWED_ORIGIN        = https://orchestriq.gorakhai.com (Plaintext)
+//     NVIDIA_DAILY_PER_USER = 25                     (Plaintext, optional)
+//     NVIDIA_DAILY_PER_IP   = 60                     (Plaintext, optional)
+//   Bindings → KV namespace: create "OIQ_QUOTA", bind as OIQ_QUOTA
 //   Then REDEPLOY — variables only apply to builds created after they are saved.
-//   Free key: https://build.nvidia.com
-//
-// ── WHAT CHANGED IN v2, AND WHY ─────────────────────────────────────────────
-//
-// 1. NO SILENT MODEL SUBSTITUTION.
-//    v1 did:  const chosenModel = ALLOWED_MODELS.has(model) ? model : DEFAULT;
-//    You could select Nemotron, receive Llama, and never be told. An executive
-//    recommendation whose author is unknown is not auditable. Unknown models now
-//    return HTTP 400 naming the model and listing what is available.
-//
-// 2. MODEL-AWARE TOKEN BUDGET.
-//    v1 capped every model at 4000 output tokens. Reasoning models spend output
-//    tokens THINKING before they write; when the cap ran out mid-thought the API
-//    returned 200 with an empty body and billed every token. That is what filled
-//    the Boardroom with blank cards. The budget now covers reasoning AND answer,
-//    per model, and never exceeds what the model can actually emit.
-//
-// 3. EMPTY RESPONSES ARE ERRORS.
-//    If content comes back empty, this returns 502 with the finish_reason instead
-//    of passing silence upstream to be rendered as a blank executive.
-//
-// 4. OBSERVABILITY.
-//    Every response carries x-oiq-model, x-oiq-reasoning and x-oiq-budget, so the
-//    app can record which model actually produced each recommendation.
-//
-// NOTE ON PRODUCTION USE: NVIDIA's free trial terms exclude production use and
-// permit prompts to be used for model improvement. Correct for development and
-// evaluation. Do NOT route paying users' business data through it.
 // ═══════════════════════════════════════════════════════════════════════════
 
 interface Env {
   NVIDIA_API_KEY: string;
+  SUPABASE_URL?: string;
+  ALLOWED_ORIGIN?: string;
+  NVIDIA_DAILY_PER_USER?: string;
+  NVIDIA_DAILY_PER_IP?: string;
+  OIQ_QUOTA?: KVNamespace;
 }
 
 const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
 
-// Mirrors src/lib/NvidiaModels.ts. Cloudflare Pages Functions are bundled
-// separately from src/, so this cannot import from there — it is duplicated on
-// purpose and must be kept in step with the registry.
 type Spec = { max: number; reason: boolean; overhead: number };
 const MODELS: Record<string, Spec> = {
   "nvidia/nemotron-3-super-120b-a12b": { max: 16000, reason: true,  overhead: 2500 },
@@ -66,68 +55,167 @@ const MODELS: Record<string, Spec> = {
   "meta/llama-3.3-70b-instruct":       { max: 8000,  reason: false, overhead: 0 },
 };
 const DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b";
-const HARD_CEILING = 16000; // absolute cost guard, whatever a model claims
+const HARD_CEILING = 16000;
 
-const cors = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
-const json = (body: unknown, status: number, extra: Record<string, string> = {}) =>
+function corsFor(env: Env, request: Request) {
+  // ORIGIN LOCK. "*" allowed any site on the internet to call this endpoint
+  // with a stolen token, or a script to hammer it from anywhere.
+  const allowed = (env.ALLOWED_ORIGIN || "").trim();
+  const origin = request.headers.get("Origin") || "";
+  const ok = !allowed || origin === allowed;
+  return {
+    ok,
+    headers: {
+      "Access-Control-Allow-Origin": allowed || origin || "null",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Vary": "Origin",
+    },
+  };
+}
+
+const json = (body: unknown, status: number, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", ...cors, ...extra },
+    status, headers: { "Content-Type": "application/json", ...headers },
   });
+
+// ── JWT verification against the Supabase JWKS ───────────────────────────────
+// The signature is checked, not just decoded. Decoding alone would accept a
+// token an attacker wrote themselves.
+let _jwks: { keys: any[] } | null = null;
+let _jwksAt = 0;
+
+async function getJwks(supabaseUrl: string) {
+  if (_jwks && Date.now() - _jwksAt < 3600_000) return _jwks;
+  const r = await fetch(supabaseUrl.replace(/\/$/, "") + "/auth/v1/.well-known/jwks.json",
+    { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error("jwks fetch failed: " + r.status);
+  _jwks = await r.json(); _jwksAt = Date.now();
+  return _jwks!;
+}
+
+function b64urlToBytes(s: string): Uint8Array {
+  const pad = s.replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(pad + "=".repeat((4 - (pad.length % 4)) % 4));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function verifyJwt(token: string, supabaseUrl: string): Promise<{ sub: string; role?: string } | null> {
+  try {
+    const [h, p, s] = token.split(".");
+    if (!h || !p || !s) return null;
+    const header = JSON.parse(new TextDecoder().decode(b64urlToBytes(h)));
+    const payload = JSON.parse(new TextDecoder().decode(b64urlToBytes(p)));
+
+    if (!payload?.sub) return null;
+    if (payload.exp && Date.now() / 1000 > payload.exp) return null;   // expired
+    if (payload.aud && payload.aud !== "authenticated") return null;   // anon rejected
+
+    const jwks = await getJwks(supabaseUrl);
+    const jwk = jwks.keys.find((k: any) => k.kid === header.kid) || jwks.keys[0];
+    if (!jwk) return null;
+
+    const alg = header.alg === "RS256"
+      ? { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }
+      : { name: "ECDSA", namedCurve: "P-256" };
+    const key = await crypto.subtle.importKey("jwk", jwk, alg as any, false, ["verify"]);
+    const valid = await crypto.subtle.verify(
+      header.alg === "RS256" ? "RSASSA-PKCS1-v1_5" : { name: "ECDSA", hash: "SHA-256" } as any,
+      key, b64urlToBytes(s), new TextEncoder().encode(h + "." + p),
+    );
+    return valid ? { sub: payload.sub, role: payload.role } : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Quota counters ───────────────────────────────────────────────────────────
+async function bump(kv: KVNamespace | undefined, key: string, limit: number): Promise<{ ok: boolean; used: number }> {
+  if (!kv) return { ok: true, used: 0 };                 // no KV bound → skip quota, keep auth
+  const used = parseInt((await kv.get(key)) || "0", 10) || 0;
+  if (used >= limit) return { ok: false, used };
+  await kv.put(key, String(used + 1), { expirationTtl: 86400 });
+  return { ok: true, used: used + 1 };
+}
 
 export async function onRequestPost(context: { request: Request; env: Env }): Promise<Response> {
   const { request, env } = context;
+  const cors = corsFor(env, request);
+
+  // 1 ── ORIGIN
+  if (!cors.ok) return json({ error: "Origin not allowed." }, 403, cors.headers);
 
   if (!env.NVIDIA_API_KEY) {
-    return json({
-      error: "NVIDIA is not configured on this deployment. Add NVIDIA_API_KEY as a Secret in Cloudflare (Settings → Environment variables → Production), then redeploy. Free key at build.nvidia.com.",
-    }, 503);
+    return json({ error: "NVIDIA is not configured on this deployment. Add NVIDIA_API_KEY as a Secret in Cloudflare, then redeploy." }, 503, cors.headers);
   }
 
+  // 2 ── AUTHENTICATION. Never optional.
+  const auth = request.headers.get("Authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!token) return json({ error: "Sign in required." }, 401, cors.headers);
+  if (!env.SUPABASE_URL) {
+    return json({ error: "Server misconfigured: SUPABASE_URL is not set, so requests cannot be authenticated. Refusing to proceed." }, 503, cors.headers);
+  }
+  const user = await verifyJwt(token, env.SUPABASE_URL);
+  if (!user) return json({ error: "Session invalid or expired. Sign in again." }, 401, cors.headers);
+
+  // 3 ── QUOTAS
+  const day = new Date().toISOString().slice(0, 10);
+  const perUser = parseInt(env.NVIDIA_DAILY_PER_USER || "25", 10);
+  const perIp = parseInt(env.NVIDIA_DAILY_PER_IP || "60", 10);
+  const ip = request.headers.get("cf-connecting-ip") || "unknown";
+
+  const u = await bump(env.OIQ_QUOTA, "nvq:u:" + user.sub + ":" + day, perUser);
+  if (!u.ok) {
+    return json({ error: "Daily free-tier limit reached (" + perUser + " requests). Add your own API key in Settings to continue, or try again tomorrow." },
+      429, { ...cors.headers, "x-oiq-quota": "user" });
+  }
+  const i = await bump(env.OIQ_QUOTA, "nvq:i:" + ip + ":" + day, perIp);
+  if (!i.ok) {
+    return json({ error: "Too many requests from this network today. Add your own API key in Settings to continue." },
+      429, { ...cors.headers, "x-oiq-quota": "ip" });
+  }
+
+  // 4 ── PAYLOAD
   let body: any;
   try { body = await request.json(); }
-  catch { return json({ error: "Invalid request body" }, 400); }
+  catch { return json({ error: "Invalid request body" }, 400, cors.headers); }
 
   const { sys, messages, model, max_tokens, reasoning, task } = body || {};
-  if (!Array.isArray(messages)) return json({ error: "messages array required" }, 400);
+  if (!Array.isArray(messages)) return json({ error: "messages array required" }, 400, cors.headers);
+  if (messages.length > 40) return json({ error: "Too many messages in one request." }, 413, cors.headers);
+  const approxChars = JSON.stringify(messages).length + String(sys || "").length;
+  if (approxChars > 400_000) return json({ error: "Request too large." }, 413, cors.headers);
 
-  // ── 1. NO SILENT SUBSTITUTION ──
   const requested = String(model || "").trim() || DEFAULT_MODEL;
   const spec = MODELS[requested];
   if (!spec) {
     return json({
-      error: "NVIDIA model not supported on this deployment: \"" + requested + "\". Nothing was sent and nothing was billed. Choose one of the available models.",
-      requestedModel: requested,
+      error: "NVIDIA model not supported on this deployment: \"" + requested + "\". Nothing was sent and nothing was billed.",
       availableModels: Object.keys(MODELS),
-    }, 400);
+    }, 400, cors.headers);
   }
 
-  // ── 2. MODEL-AWARE BUDGET ──
-  const wantThink = reasoning === undefined
-    ? spec.reason
-    : (reasoning === true || reasoning === "on");
+  const wantThink = reasoning === undefined ? spec.reason : (reasoning === true || reasoning === "on");
   const reasoningOn = wantThink && spec.reason;
   const wanted = Math.max(Number(max_tokens) || 1500, 512);
   const budget = Math.min(wanted + (reasoningOn ? spec.overhead : 0), spec.max, HARD_CEILING);
 
   const payload: any = {
-    model: requested,
-    max_tokens: budget,
+    model: requested, max_tokens: budget,
     temperature: reasoningOn ? 0.6 : 0.4,
     messages: [{ role: "system", content: sys || "" }, ...messages],
   };
-  // Nemotron and several NIM reasoning models read this switch. Models that do
-  // not recognise it ignore it, so sending it is safe.
   if (spec.reason) payload.chat_template_kwargs = { thinking: reasoningOn };
 
   const obs = {
+    ...cors.headers,
     "x-oiq-model": requested,
     "x-oiq-reasoning": reasoningOn ? "on" : "off",
     "x-oiq-budget": String(budget),
+    "x-oiq-quota-used": String(u.used) + "/" + String(perUser),
     "x-oiq-task": String(task || "general").slice(0, 40),
   };
 
@@ -138,23 +226,16 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(120000),
     });
-
     const text = await upstream.text();
 
     if (!upstream.ok) {
       let reason = text.slice(0, 300);
       try { reason = JSON.parse(text)?.error?.message || reason; } catch { /* keep raw */ }
-      // 402 = free credits exhausted. Say so plainly rather than as a generic failure.
-      if (upstream.status === 402) {
-        return json({ error: "NVIDIA free credits are exhausted for this key. Switch provider in Settings, or request more credits at forums.developer.nvidia.com." }, 402, obs);
-      }
-      if (upstream.status === 429) {
-        return json({ error: "NVIDIA rate limit reached (about 40 requests per minute on the free tier). Retrying shortly, or switch provider in Settings." }, 429, obs);
-      }
+      if (upstream.status === 402) return json({ error: "NVIDIA free credits are exhausted for this key." }, 402, obs);
+      if (upstream.status === 429) return json({ error: "NVIDIA rate limit reached (about 40 requests per minute on the free tier)." }, 429, obs);
       return json({ error: "NVIDIA " + upstream.status + ": " + reason }, upstream.status, obs);
     }
 
-    // ── 3. EMPTY IS AN ERROR, NOT A BLANK CARD ──
     try {
       const d = JSON.parse(text);
       const ch = d?.choices?.[0];
@@ -163,38 +244,23 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
         const reasoned = String(ch?.message?.reasoning_content || "").trim();
         const fin = ch?.finish_reason || "unknown";
         if (reasoned && fin === "length") {
-          return json({
-            error: "NVIDIA (" + requested + ") used its whole output budget of " + budget + " tokens on reasoning and produced no answer. Reduce the prompt, or turn reasoning off for this task.",
-          }, 502, obs);
+          return json({ error: "NVIDIA (" + requested + ") used its whole output budget of " + budget + " tokens on reasoning and produced no answer." }, 502, obs);
         }
-        return json({
-          error: "NVIDIA (" + requested + ") returned an empty answer (finish_reason: " + fin + ").",
-        }, 502, obs);
+        return json({ error: "NVIDIA (" + requested + ") returned an empty answer (finish_reason: " + fin + ")." }, 502, obs);
       }
-    } catch { /* if it will not parse, pass it through and let the caller decide */ }
+    } catch { /* unparseable — pass through */ }
 
-    return new Response(text, {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...cors, ...obs },
-    });
+    return new Response(text, { status: 200, headers: { "Content-Type": "application/json", ...obs } });
   } catch (e: any) {
     const msg = String(e?.message || e);
     if (msg.includes("timeout") || msg.includes("aborted")) {
-      return json({ error: "NVIDIA did not respond within 120 seconds. Large reasoning models can be slow on the free endpoint under load." }, 504, obs);
+      return json({ error: "NVIDIA did not respond within 120 seconds." }, 504, obs);
     }
     return json({ error: "NVIDIA proxy network error: " + msg }, 502, obs);
   }
 }
 
-export async function onRequestOptions(): Promise<Response> {
-  return new Response(null, { headers: cors });
+export async function onRequestOptions(context: { request: Request; env: Env }): Promise<Response> {
+  const cors = corsFor(context.env, context.request);
+  return new Response(null, { status: cors.ok ? 204 : 403, headers: cors.headers });
 }
-
-// ─── FAST-FOLLOW: per-visitor daily quota via Cloudflare KV ──────────────────
-// Once real traffic exists, add a KV namespace binding (NVIDIA_QUOTA) and:
-//   const ip = request.headers.get("cf-connecting-ip") || "unknown";
-//   const key = "nvq:" + ip + ":" + new Date().toISOString().slice(0,10);
-//   const used = parseInt((await env.NVIDIA_QUOTA.get(key)) || "0");
-//   if (used >= 20) return json({error:"Daily free limit reached — add your own key in Settings."}, 429);
-//   await env.NVIDIA_QUOTA.put(key, String(used+1), { expirationTtl: 86400 });
-// This stops one visitor draining the shared free-tier allowance.
