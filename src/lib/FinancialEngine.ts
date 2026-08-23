@@ -209,20 +209,28 @@ export function parseAmount(raw: any): number | null {
 }
 
 const PLAN_KEYS: Record<string, string[]> = {
-  revenue: ["monthly revenue", "revenue", "annual revenue", "arr", "mrr"],
-  cogs: ["cogs", "cost of goods sold", "cost of goods"],
-  opex: ["monthly operating costs", "operating costs", "opex", "operating expenses"],
+  revenue: ["monthly revenue", "annual revenue", "revenue", "arr", "mrr", "turnover"],
+  cogs: ["cost of goods sold", "cogs", "cost of goods", "direct cost"],
+  opex: ["monthly operating costs", "operating expenses", "operating costs", "opex"],
 };
 
 export function reconcile(metrics: Metric[], compData: Record<string, any>): Reconciliation[] {
   const out: Reconciliation[] = [];
-  const lower: Record<string, any> = {};
-  Object.keys(compData || {}).forEach(k => { lower[k.toLowerCase().trim()] = compData[k]; });
+  // Data Hub labels are typed by a person, so an exact-key lookup fails on
+  // anything descriptive. Your own field is "COGS (Cost of Goods Sold)", which
+  // never matched the key "cogs" and so no reconciliation was reported at all.
+  // Matching is now on CONTAINS, longest label first so "cost of goods sold"
+  // wins over "cost of goods".
+  const entries = Object.keys(compData || {}).map(k => ({ k: k.toLowerCase().trim(), v: compData[k] }));
 
   Object.entries(PLAN_KEYS).forEach(([key, labels]) => {
     const m = metrics.find(x => x.key === key);
     if (!m || m.value == null) return;
-    const hit = labels.map(l => lower[l]).find(v => v != null);
+    let hit: any = null;
+    for (const l of labels) {
+      const e = entries.find(x => x.k === l) || entries.find(x => x.k.includes(l));
+      if (e && e.v != null && String(e.v).trim() !== "") { hit = e.v; break; }
+    }
     const plan = parseAmount(hit);
     if (plan == null || plan === 0) return;
     const variance = (m.value - plan) / plan * 100;
