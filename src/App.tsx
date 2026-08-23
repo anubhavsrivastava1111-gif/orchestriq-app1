@@ -136,15 +136,29 @@ import {
 } from "./lib/ProviderManager";
 
 const VERSION = "4.3.0";
-const SYS_GEMINI = import.meta.env.VITE_GEMINI_API_KEY || "";
-const SYS_GROQ = import.meta.env.VITE_GROQ_API_KEY || "";
-const SYS_CLAUDE = import.meta.env.VITE_CLAUDE_API_KEY || "";
-const USE_SYS_KEY = import.meta.env.VITE_USE_SYSTEM_KEY === "true";
-const EFF_GEMINI = USE_SYS_KEY && SYS_GEMINI ? SYS_GEMINI : "";
-const EFF_GROQ = USE_SYS_KEY && SYS_GROQ ? SYS_GROQ : "";
-const EFF_CLAUDE = USE_SYS_KEY && SYS_CLAUDE ? SYS_CLAUDE : "";
-const EFF_FAL   = import.meta.env.VITE_FAL_API_KEY || ""; // fal.ai — image & video generation
-console.log("[OIQ-DIAG] USE_SYS_KEY:",USE_SYS_KEY,"| SYS_GEMINI present:",!!SYS_GEMINI,"| SYS_GROQ present:",!!SYS_GROQ,"| SYS_CLAUDE present:",!!SYS_CLAUDE,"| EFF_GEMINI:",!!EFF_GEMINI,"| EFF_GROQ:",!!EFF_GROQ,"| EFF_CLAUDE:",!!EFF_CLAUDE);
+// ─── SECURITY AUDIT C-1 (CRITICAL) ──────────────────────────────────────────
+// These four lines used to read VITE_GEMINI_API_KEY, VITE_GROQ_API_KEY,
+// VITE_CLAUDE_API_KEY and VITE_FAL_API_KEY. ANY variable prefixed with VITE_ is
+// INLINED INTO THE PUBLIC JAVASCRIPT BUNDLE at build time - it is not a runtime
+// secret, it is a string anyone can read in DevTools. The diagnostic console
+// line below them also announced which keys existed.
+//
+// A VITE_ variable can NEVER hold a credential. System-supplied keys must sit
+// behind a Pages Function, the way /api/nvidia does, where the key stays on the
+// server. Until such a proxy exists for these providers, the app uses the user's
+// own key only - which is the BYOK model this product is built on anyway.
+//
+// ACTION REQUIRED ALONGSIDE THIS EDIT: rotate the Gemini, Groq and fal.ai keys,
+// then delete VITE_GEMINI_API_KEY, VITE_GROQ_API_KEY, VITE_CLAUDE_API_KEY and
+// VITE_FAL_API_KEY from Cloudflare Pages environment variables.
+const SYS_GEMINI = "";
+const SYS_GROQ = "";
+const SYS_CLAUDE = "";
+const USE_SYS_KEY = false;
+const EFF_GEMINI = "";
+const EFF_GROQ = "";
+const EFF_CLAUDE = "";
+const EFF_FAL = "";
 const BRAND = "OrchestrIQ";
 const TAGLINE = "The orchestration layer of intelligent business.";
 
@@ -1267,7 +1281,13 @@ async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string){
   const nvTask=task||USAGE_CTX.feature||"general";
   const nvReason=nvidiaShouldReason(nvModel,nvTask);
   const nvBudget=nvidiaTokenBudget(nvModel,maxT,nvReason);
-  const r=await fetch("/api/nvidia",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sys,messages:msgs,model:nvModel,max_tokens:nvBudget,reasoning:nvReason,task:nvTask})});
+  // The proxy now REQUIRES a verified Supabase session. Without this header the
+  // request is rejected with 401 - which is the point: an anonymous script can
+  // no longer spend the NVIDIA key.
+  let nvAuth="";
+  try{const {data:{session}}=await supabase.auth.getSession();nvAuth=session?.access_token||"";}catch{}
+  if(!nvAuth)throw new Error("NVIDIA (Free) requires you to be signed in. Sign in, or add your own provider key in Settings.");
+  const r=await fetch("/api/nvidia",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+nvAuth},body:JSON.stringify({sys,messages:msgs,model:nvModel,max_tokens:nvBudget,reasoning:nvReason,task:nvTask})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error;}catch{m=t.slice(0,200);}if(r.status===429)throw new Error("NVIDIA: Free daily limit reached. Add your own key in Settings for unlimited use.");if(r.status===503)throw new Error("NVIDIA: Free tier not yet configured on this deployment.");throw new Error(m||("NVIDIA "+r.status));}
   const d=await r.json();
   const ntext=d.choices?.[0]?.message?.content||"";
@@ -3220,6 +3240,10 @@ export default function App(){
   const [localDn,setLocalDn]=useState({ownerName:"",ownerEmail:"",upiId:"",bankName:"",accountNo:"",ifsc:"",accountType:"",paypalMe:"",stripeLink:"",note:"",qrImage:"",enabled:false});
 
   // Derived currency — declared early so callbacks (runExport, quickExport) can reference it safely
+  // Hard ceiling on AI requests per board session. Sized for 9 executives with
+  // research on, plus generous retries - but finite, which it was not before.
+  const BR_MAX_CALLS=120;
+  const brCallBudget=useRef(BR_MAX_CALLS);
   const cur=useMemo(()=>CURRENCIES.find(cv=>cv.code===co.currency)||CURRENCIES[0],[co.currency]);
   // Recompute the published Ledger financials whenever the books, the plan
   // figures or the currency change.
@@ -3687,6 +3711,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     }
     // First submission with this set of providers: show the disclosure and stop.
     if(consentNeeded){setShowConsent(true);return;}
+    brCallBudget.current=BR_MAX_CALLS;
     setBrRun(true);setError(null);
     setUsageFeature("AI Boardroom","🏛️");
     setBrCur({q:brQ,researchBrief:"",format:"threaded",stages:[]});
@@ -3798,7 +3823,16 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           msg.toLowerCase().includes("maximum")||
           msg.toLowerCase().includes("413");
         let cyclesDone=0;
-        while(!gotResponse&&!cancelRef.current.br&&cyclesDone<3){
+        // SECURITY H-2: retries were bounded per executive but NOT globally.
+        // 9 executives x 3 cycles x N providers x 2 continuations is an
+        // unbounded-in-practice spend from a single click. One ceiling for the
+        // whole session, so a stuck provider cannot run up a bill.
+        if(brCallBudget.current<=0){
+          agText="\u26a0 **Session call limit reached.**\n\nThis board session has already made "+BR_MAX_CALLS+" AI requests, which is the safety ceiling. Reduce the number of executives or switch off the Research Desk, then run it again.";
+          gotResponse=true;
+          break;
+        }
+        while(!gotResponse&&!cancelRef.current.br&&cyclesDone<3&&brCallBudget.current>0){
           cyclesDone++;
           // Build prompt: first attempt uses original question;
           // subsequent attempts ask to continue from partial text.
@@ -3825,6 +3859,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
             if(!pKey.trim())continue;
             try{
               setBrPh(ag.ic+" "+ag.t+(agText?" — resuming via "+prov+"…":" is analyzing… ("+prov+")"));
+              brCallBudget.current--;
               const replyFull=await callAI(prov,pKey,sys,[{role:"user",content:userMsg}],boardMaxTokens(ag),boardCanSearch(prov)&&!agText.trim())
               // A provider can return HTTP 200 with an EMPTY body - DeepSeek does this
               // when the input is large relative to the output budget. The old code
