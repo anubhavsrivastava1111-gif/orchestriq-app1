@@ -3242,6 +3242,9 @@ export default function App(){
   // Derived currency — declared early so callbacks (runExport, quickExport) can reference it safely
   // Hard ceiling on AI requests per board session. Sized for 9 executives with
   // research on, plus generous retries - but finite, which it was not before.
+  // Current consent state, readable from callbacks that were created before the
+  // state existed. Kept in step by an effect further down the file.
+  const consentRef=useRef<{needed:boolean;signature:string}>({needed:false,signature:""});
   const BR_MAX_CALLS=120;
   const brCallBudget=useRef(BR_MAX_CALLS);
   const cur=useMemo(()=>CURRENCIES.find(cv=>cv.code===co.currency)||CURRENCIES[0],[co.currency]);
@@ -3710,7 +3713,17 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       return;
     }
     // First submission with this set of providers: show the disclosure and stop.
-    if(consentNeeded){setShowConsent(true);return;}
+    // BUG FIX - THIS IS WHY THE BOARDROOM WOULD NOT START.
+    // runBR is a useCallback whose dependency array does NOT list consentNeeded,
+    // so it captured the FIRST value it ever saw: true. Accepting the disclosure
+    // updated the state, but runBR was never rebuilt, so it kept reading the old
+    // `true` forever - modal, accept, close, click Start, modal again.
+    // It cannot simply be added to the dependency array either: consentNeeded is
+    // declared at line ~6568, far BELOW runBR, and a dependency array is
+    // evaluated during render - that is the same "cannot access before
+    // initialization" crash we hit with `cur`. A ref reads the current value
+    // without creating that ordering problem.
+    if(consentRef.current.needed){setShowConsent(true);return;}
     brCallBudget.current=BR_MAX_CALLS;
     setBrRun(true);setError(null);
     setUsageFeature("AI Boardroom","🏛️");
@@ -6566,6 +6579,31 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     .filter(p=>!!getDisclosure(p)).filter((v,i,a)=>a.indexOf(v)===i);
   const consentSignature=activeProviderIds.slice().sort().join("|");
   const consentNeeded=activeProviderIds.length>0&&dataConsent!==consentSignature;
+  useEffect(()=>{consentRef.current={needed:consentNeeded,signature:consentSignature};},[consentNeeded,consentSignature]);
+ 
+  // AUDIT TRAIL. An acknowledgement that is not recorded is not evidence. This
+  // writes an append-only row naming the user, the exact providers shown, the
+  // stance and policy URL displayed for each, and when. The table has no UPDATE
+  // and no DELETE policy, so it cannot be altered after the fact.
+  const recordConsent=useCallback(async(ids:string[])=>{
+    try{
+      const {data:{user}}=await supabase.auth.getUser();
+      if(!user)return;
+      const terms:any={};
+      ids.forEach(pid=>{
+        const d=getDisclosure(pid);
+        if(d)terms[pid]={name:d.name,company:d.company,residency:d.dataResidency,
+                         training:d.training,policy:d.policyUrl,checked:d.verified};
+      });
+      await supabase.from("consent_log").insert({
+        user_id:user.id,user_email:user.email||"",
+        consent_type:"ai_provider_data_handling",
+        providers:ids,provider_terms:terms,
+        disclosure_ver:"2026-08",app_version:VERSION,
+        user_agent:(navigator?.userAgent||"").slice(0,300),
+      });
+    }catch(e){console.warn("[OIQ] consent log:",e);}
+  },[]);
   const sColor=s=>s===TS.APPROVED?"#10B981":s===TS.REVIEWING?"#8B5CF6":s===TS.RUNNING?"#14B8A6":s===TS.REJECTED||s===TS.FAILED?"#EF4444":"#F59E0B";
   const sBg=s=>s===TS.APPROVED?"rgba(16,185,129,0.12)":s===TS.REVIEWING?"rgba(139,92,246,0.1)":s===TS.RUNNING?"rgba(20,184,166,0.1)":s===TS.REJECTED||s===TS.FAILED?"rgba(239,68,68,0.1)":"rgba(245,158,11,0.1)";
 
@@ -8134,7 +8172,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               {showConsent
                 ?<>
                   <button onClick={()=>{setShowConsent(false);setShowSettings(true);}} style={{background:"none",border:"1px solid var(--oiq-border,#1a2030)",borderRadius:6,padding:"8px 14px",color:"var(--oiq-muted,#A0AAC0)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Change providers</button>
-                  <button onClick={()=>{try{localStorage.setItem("oiq-data-consent",consentSignature);}catch{}setDataConsent(consentSignature);setShowConsent(false);}} style={{background:"var(--oiq-accent,#14B8A6)",border:"none",borderRadius:6,padding:"8px 16px",color:"#04141B",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>I understand &mdash; continue</button>
+                  <button onClick={()=>{try{localStorage.setItem("oiq-data-consent",consentSignature);}catch{}setDataConsent(consentSignature);consentRef.current={needed:false,signature:consentSignature};recordConsent(activeProviderIds);setShowConsent(false);}} style={{background:"var(--oiq-accent,#14B8A6)",border:"none",borderRadius:6,padding:"8px 16px",color:"#04141B",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>I understand &mdash; continue</button>
                 </>
                 :<button onClick={()=>setShowDisclosure(false)} style={{background:"none",border:"1px solid var(--oiq-border,#1a2030)",borderRadius:6,padding:"8px 16px",color:"var(--oiq-muted,#A0AAC0)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Close</button>}
             </div>
