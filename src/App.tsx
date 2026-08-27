@@ -583,7 +583,20 @@ const SEARCH_CHAIN:any[]=["serper","tavily","brave","dataforseo"];
 // models. Any list of "which AI can I call" must exclude them, or the app tries
 // to look up MODELS["serper"] and crashes on undefined.
 const SEARCH_KEY_IDS=new Set(["serper","tavily","brave","dataforseo"]);
-function isAiProviderKey(id:string){return !SEARCH_KEY_IDS.has(id);}
+// THIS IS THE SETTINGS-PAGE CRASH, AT ITS SOURCE.
+// This was a BLOCKLIST: "anything that is not a search provider is an AI
+// provider". That is only true if the keys object holds nothing but provider
+// keys - and it does not. The NVIDIA model dropdown saves the SELECTED MODEL
+// into the same object under the key "nvidiaModel". So once you touch that
+// dropdown:
+//     keys = { deepseek:"sk-...", serper:"...", nvidiaModel:"nvidia/nemotron-3-..." }
+//     cfgP = ["nvidia","deepseek","nvidiaModel"]      &lt;- a model ID, not a provider
+//     MODELS["nvidiaModel"]      -> undefined
+//     MODELS["nvidiaModel"].name -> "Cannot read properties of undefined"
+// and the whole Settings render dies. An ALLOWLIST cannot fail this way: only
+// the nine real providers pass, whatever else is stored alongside them.
+const AI_PROVIDER_SET=new Set(AI_PROVIDER_IDS);
+function isAiProviderKey(id:string){return AI_PROVIDER_SET.has(id);}
  
 // Search phrasing per research angle. Built in code, not by a model, so the
 // queries are predictable and cost nothing to produce.
@@ -3788,7 +3801,14 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         setBrPh("🔍 Establishing what is known and unknown…");
         const brScan=scanSuppliedInputs(brQ);
         const brIntakeSys=buildIntakePrompt(brQ,buildCtx(co,compData)+brWorkspaceBlock,brScan);
-        const brIntakeRaw=await ask(brIntakeSys,[{role:"user",content:"Produce the evidence register now."}],2200);
+        // Session 27 raised the executive budget to 4.5 tokens per word because
+        // reasoning models spend output tokens THINKING before they write. This
+        // literal 2200 was missed. DeepSeek V4 needs ~3000 tokens just to think,
+        // so the whole budget was gone before one word of the register was
+        // written - which is the console warning you sent me: "DeepSeek ran out
+        // of output budget while reasoning and produced no answer."
+        // 5200 matches what the research angles already use.
+        const brIntakeRaw=await ask(brIntakeSys,[{role:"user",content:"Produce the evidence register now."}],5200);
         const brRegister=(brIntakeRaw&&typeof brIntakeRaw==="object"&&"text" in brIntakeRaw)?brIntakeRaw.text:String(brIntakeRaw||"");
         brRegisterBlock=buildRegisterInjection(brRegister);
         setBrCur(prev=>({...prev,intakeRegister:String(brRegister||"").trim()}));
@@ -6682,7 +6702,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 {cfgP.length>1&&(
             <div style={{padding:"8px 10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:10}}>
               <label style={{...S.lbl,marginBottom:5}}>Default Model</label>
-              <div style={{display:"flex",gap:4}}>{cfgP.map(p=><button key={p} onClick={()=>setDefP(p)} style={{flex:1,padding:"5px",borderRadius:4,fontSize:10,fontWeight:600,border:"1px solid "+(defP===p?MODELS[p].color:"#1a2030"),background:defP===p?MODELS[p].color+"15":"transparent",color:defP===p?MODELS[p].color:"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{MODELS[p].name}</button>)}</div>
+              <div style={{display:"flex",gap:4}}>{cfgP.map(p=><button key={p} onClick={()=>setDefP(p)} style={{flex:1,padding:"5px",borderRadius:4,fontSize:10,fontWeight:600,border:"1px solid "+(defP===p?(MODELS[p]?.color||"#14B8A6"):"#1a2030"),background:defP===p?(MODELS[p]?.color||"#14B8A6")+"15":"transparent",color:defP===p?(MODELS[p]?.color||"#14B8A6"):"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{(MODELS[p]?.name||p)}</button>)}</div>
             </div>
           )}
           {[["name","Company Name *","e.g. Nexus Technologies"],["industry","Industry *","e.g. EdTech, FinTech, SaaS"],["location","HQ Location *","e.g. Gurugram, India"],["markets","Target Markets (optional)","e.g. India + UAE"]].map(([f,lb,ph])=>(
@@ -8266,8 +8286,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                     <div style={{fontSize:8.5,color:"#5A6480",marginBottom:6,lineHeight:1.5}}>Your Primary AI handles all general reasoning, research, writing and orchestration. Specialist tasks are automatically routed to the best available model, then control returns to your Primary AI.</div>
                     <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
                       {cfgP.map(p=>{const pm=PROVIDER_META[p];return(
-                        <button key={p} onClick={()=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} style={{flex:"1 1 110px",padding:"7px 6px",borderRadius:5,border:"1px solid "+(defP===p?MODELS[p].color:"#1a2030"),background:defP===p?MODELS[p].color+"15":"transparent",cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"left"}}>
-                          <div style={{fontSize:10,fontWeight:700,color:defP===p?MODELS[p].color:"#A0AAC0"}}>{MODELS[p].name}{defP===p?" ✓":""}</div>
+                        <button key={p} onClick={()=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} style={{flex:"1 1 110px",padding:"7px 6px",borderRadius:5,border:"1px solid "+(defP===p?(MODELS[p]?.color||"#14B8A6"):"#1a2030"),background:defP===p?((MODELS[p]?.color||"#14B8A6")+"15"):"transparent",cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"left"}}>
+                          <div style={{fontSize:10,fontWeight:700,color:defP===p?(MODELS[p]?.color||"#14B8A6"):"#A0AAC0"}}>{MODELS[p]?.name||p}{defP===p?" ✓":""}</div>
                           {pm&&<div style={{fontSize:7.5,color:"#5A6480",marginTop:2}}>Cost {pm.cost} · {pm.speed} · {pm.quality}</div>}
                           {pm&&<div style={{fontSize:7.5,color:"#5A6480",marginTop:1,lineHeight:1.4}}>{pm.blurb}</div>}
                           {p==="nvidia"&&<div style={{fontSize:7.5,color:"#76B900",marginTop:2,fontWeight:700}}>\u2728 No key needed</div>}
