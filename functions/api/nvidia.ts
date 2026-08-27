@@ -60,9 +60,12 @@ const HARD_CEILING = 16000;
 function corsFor(env: Env, request: Request) {
   // ORIGIN LOCK. "*" allowed any site on the internet to call this endpoint
   // with a stolen token, or a script to hammer it from anywhere.
+  // Same-origin fetches from the app send NO Origin header at all, and an unset
+  // ALLOWED_ORIGIN must never mean "block everything". Both were treated as a
+  // foreign origin, which is a second way this endpoint could go dark.
   const allowed = (env.ALLOWED_ORIGIN || "").trim();
-  const origin = request.headers.get("Origin") || "";
-  const ok = !allowed || origin === allowed;
+  const origin = (request.headers.get("Origin") || "").trim();
+  const ok = !allowed || !origin || origin === allowed;
   return {
     ok,
     headers: {
@@ -148,17 +151,20 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   if (!cors.ok) return json({ error: "Origin not allowed." }, 403, cors.headers);
 
   if (!env.NVIDIA_API_KEY) {
-    return json({ error: "NVIDIA is not configured on this deployment. Add NVIDIA_API_KEY as a Secret in Cloudflare, then redeploy." }, 503, cors.headers);
+    return json({ error: "NVIDIA is not configured on this deployment: the NVIDIA_API_KEY secret is missing in Cloudflare Pages (Settings -> Environment variables -> Production), or the project has not been redeployed since it was added." }, 503, cors.headers);
   }
 
   // 2 ── AUTHENTICATION. Never optional.
   const auth = request.headers.get("Authorization") || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
   if (!token) return json({ error: "Sign in required." }, 401, cors.headers);
-  if (!env.SUPABASE_URL) {
-    return json({ error: "Server misconfigured: SUPABASE_URL is not set, so requests cannot be authenticated. Refusing to proceed." }, 503, cors.headers);
-  }
-  const user = await verifyJwt(token, env.SUPABASE_URL);
+  // The Supabase project URL is NOT a secret - it is already hardcoded in
+  // src/lib/supabase.ts and visible to every visitor. Requiring it as an
+  // environment variable added a setup step that, when missed, took NVIDIA down
+  // completely. It now falls back to the known project URL, so the only variable
+  // this endpoint truly needs is NVIDIA_API_KEY, exactly as before.
+  const supaUrl = (env.SUPABASE_URL || "https://wfpqesnttzarfdfsghzw.supabase.co").trim();
+  const user = await verifyJwt(token, supaUrl);
   if (!user) return json({ error: "Session invalid or expired. Sign in again." }, 401, cors.headers);
 
   // 3 ── QUOTAS
