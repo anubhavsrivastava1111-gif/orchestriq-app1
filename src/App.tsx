@@ -6596,6 +6596,10 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     // If ANY of this fails - bad JSON, provider down, unusable structure - we
     // fall through to the original /generate/* path untouched. This can only
     // add a better outcome; it cannot remove the existing one.
+    // Carries the ACTUAL failure reason out of the try block. Without this the
+    // user saw only "could not build in your browser" with no cause, and the
+    // real explanation was buried in a console warning nobody reads.
+    let _bpWhy="";
     if(format!=="xlsx"){
       try{
         const _bpBrief=opts.brief||[
@@ -6605,11 +6609,25 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           "SOURCE MATERIAL:",
           normaliseForExport(opts.body||"",format).slice(0,120000),
         ].join("\n");
+        // WHY THE TASK TYPE MATTERS HERE, AND WHY THIS FAILED FOR YOU.
+        //
+        // The call went to NVIDIA with reasoning ON. nvidiaTokenBudget then adds
+        // the model's 2,500-token reasoning overhead, so a 7,000-token request
+        // became a 9,000-token generation - on a 120B reasoning model, over a
+        // prompt carrying up to 120,000 characters, inside the 75-second proxy
+        // timeout from Session 49. It could not finish in time.
+        //
+        // nvidiaShouldReason() already has the switch: any task name beginning
+        // with "format" disables reasoning. Designing a JSON structure is
+        // formatting work - the thinking that matters happened upstream, in the
+        // boardroom and the executive conversations. So we name the task
+        // honestly and the model stops paying for deliberation it does not need.
         const _bpRes=await buildBlueprint(format as BlueprintFormat,
           {brief:_bpBrief,title:opts.title||"Document",currencySymbol:opts.currencySymbol||cur.sym},
-          (sys,msgs,maxT)=>ask(sys,msgs,maxT),
+          (sys,msgs,maxT)=>ask(sys,msgs,maxT,false,"format_blueprint"),
           {onProgress:(m)=>setExpStep(m)});
         if(_bpRes.ok&&_bpRes.blueprint){
+          setExpStep("\uD83D\uDCC4 Rendering the document\u2026");
           const rr=await fetch(RAILWAY_URL+"/render/"+format,{
             method:"POST",headers:{"Content-Type":"application/json"},
             // No claude_key. No openai_key. No deepseek_key. Nothing to leak.
@@ -6622,15 +6640,27 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               setExpStep("");
               return bb;
             }
+            _bpWhy="the renderer returned an empty file";
+          }else{
+            const _t=await rr.text().catch(()=>"");
+            _bpWhy="the renderer refused it ("+httpErrText(_t,rr.status)+")";
           }
+        }else{
+          _bpWhy=_bpRes.reason||"unknown";
         }
-        console.warn("[OIQ] browser blueprint unavailable, using server path:",_bpRes.reason);
+        console.warn("[OIQ] browser blueprint unavailable, using server path:",_bpWhy);
       }catch(bpErr:any){
-        console.warn("[OIQ] browser blueprint failed, using server path:",String(bpErr?.message||bpErr).slice(0,160));
+        _bpWhy=String(bpErr?.message||bpErr).slice(0,200);
+        console.warn("[OIQ] browser blueprint failed, using server path:",_bpWhy);
       }
     }
     // ─── SERVER PATH (unchanged) ───────────────────────────────────────────
-    if(!claudeKey&&!openaiKey&&!deepseekKey)throw new Error("Could not build the document in your browser, and no Claude, OpenAI or DeepSeek key is configured for the server path. Add a key in Settings, or try again.");
+    if(!claudeKey&&!openaiKey&&!deepseekKey)throw new Error(
+      "Could not build the document in your browser"+(_bpWhy?": "+_bpWhy:"")+
+      ". There is no Claude, OpenAI or DeepSeek key configured for the server fallback either. "+
+      (/timed out|did not finish|did not respond|75 seconds/i.test(_bpWhy)
+        ? "Your NVIDIA model was too slow for this amount of content. In Settings \u2192 API, switch the NVIDIA model to meta/llama-3.3-70b-instruct (fast, no reasoning) and try again."
+        : "Try again, or add a provider key in Settings."));
     // Excellent tier prefers Claude first (highest quality); Standard/Professional prefer DeepSeek first (cheaper).
     const providerOrder = RESPONSE_QUALITY==="excellent" ? "claude,openai,deepseek" : "deepseek,claude,openai";
     const coCtx=[co.name||"",co.industry||"",co.stage||"",co.location||""].filter(Boolean).join(" | ");
