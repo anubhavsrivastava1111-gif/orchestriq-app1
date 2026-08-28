@@ -1286,6 +1286,27 @@ function getExecutiveIntel(roleId: string): { b: string; m: string; enrichment: 
 
 // ─── API FUNCTIONS ──────────────────────────────────────────────────────────
 
+// WHY THIS EXISTS — the "<!DOCTYPE html> <!--[if lt IE 7]>..." you kept seeing.
+// Nine call sites did this on a failed response:
+//     try{ m=JSON.parse(t).error }catch{ m=t.slice(0,200) }
+// When a provider or Cloudflare returns an HTML error page instead of JSON,
+// JSON.parse throws and the catch prints the first 200 characters of raw HTML
+// straight into your UI. That doctype dump was never a bug in the AI call — it
+// was an infrastructure error page being displayed verbatim.
+// This turns an HTML body into a sentence a person can act on.
+function httpErrText(t:string,status:number):string{
+  const s=String(t||"").trim();
+  if(!s)return "HTTP "+status+" with an empty response body.";
+  const looksHtml=/^\s*(<!doctype|<html|<\?xml)/i.test(s)||/<\/html>/i.test(s);
+  if(looksHtml){
+    if(status===524||status===522)return "The request took longer than the 100-second limit at the network edge and was cut off. Try a shorter prompt, fewer executives, or a faster model.";
+    if(status===502||status===503||status===504)return "The service is temporarily unavailable (HTTP "+status+"). This is an infrastructure error, not a problem with your prompt. Try again in a moment.";
+    if(status===403)return "Blocked before reaching the service (HTTP 403) — usually a firewall or origin rule.";
+    const title=(s.match(/<title[^>]*>([^<]{3,120})<\/title>/i)||[])[1];
+    return "The service returned a web page instead of data (HTTP "+status+")"+(title?": "+title.trim():"")+". This is an infrastructure error, not a problem with your prompt.";
+  }
+  return s.slice(0,200);
+}
 async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string){
   // Reasoning models spend output tokens THINKING before they answer. The task
   // decides whether that is worth paying for; the registry decides how much
@@ -1302,7 +1323,7 @@ async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string){
   try{const {data:{session}}=await supabase.auth.getSession();nvAuth=session?.access_token||"";}catch{}
   if(!nvAuth)throw new Error("NVIDIA (Free) requires you to be signed in. Sign in, or add your own provider key in Settings.");
   const r=await fetch("/api/nvidia",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+nvAuth},body:JSON.stringify({sys,messages:msgs,model:nvModel,max_tokens:nvBudget,reasoning:nvReason,task:nvTask})});
-  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error;}catch{m=t.slice(0,200);}if(r.status===429)throw new Error("NVIDIA: Free daily limit reached. Add your own key in Settings for unlimited use.");if(r.status===503)throw new Error("NVIDIA: Free tier not yet configured on this deployment.");throw new Error(m||("NVIDIA "+r.status));}
+  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error;}catch{m=httpErrText(t,r.status);}if(r.status===429)throw new Error("NVIDIA: Free daily limit reached. Add your own key in Settings for unlimited use.");if(r.status===503)throw new Error("NVIDIA: Free tier not yet configured on this deployment.");throw new Error(m||("NVIDIA "+r.status));}
   const d=await r.json();
   const ntext=d.choices?.[0]?.message?.content||"";
   if(!ntext.trim())throw new Error("NVIDIA returned an empty answer (finish_reason: "+(d.choices?.[0]?.finish_reason||"unknown")+").");
@@ -1320,7 +1341,7 @@ async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string){
 }
 async function callGroq(key,sys,msgs,maxT){
   const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.groq.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
-  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("Groq: Invalid API key.");if(r.status===429)throw new Error("Groq: Rate limit hit. Wait a moment.");throw new Error("Groq "+r.status+": "+(m||r.statusText));}
+  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}if(r.status===401)throw new Error("Groq: Invalid API key.");if(r.status===429)throw new Error("Groq: Rate limit hit. Wait a moment.");throw new Error("Groq "+r.status+": "+(m||r.statusText));}
   const d=await r.json();return d.choices?.[0]?.message?.content||"";
 }
   async function callClaude(key,sys,msgs,maxT,enableSearch,modelOverride=""){
@@ -1330,7 +1351,7 @@ async function callGroq(key,sys,msgs,maxT){
   // other long call in this file carries a timeout; this one did not, so a
   // stalled connection surfaced as an unexplained "Failed to fetch".
   const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body),signal:AbortSignal.timeout(enableSearch?180000:90000)});
-  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}throw new Error("Claude "+r.status+": "+(m||r.statusText));}
+  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}throw new Error("Claude "+r.status+": "+(m||r.statusText));}
   const d=await r.json();
   // Response content blocks can include: text, server_tool_use (search query), web_search_tool_result (search results).
   // Only "text" blocks contain the model's actual answer - filter to those, in order, and join.
@@ -1342,7 +1363,7 @@ async function callGroq(key,sys,msgs,maxT){
 }
 async function callOpenAI(key,sys,msgs,maxT){
   const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.openai.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
-  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("OpenAI: Invalid API key.");if(r.status===429)throw new Error("OpenAI: Quota exceeded. Add billing credits.");throw new Error("OpenAI "+r.status+": "+(m||r.statusText));}
+  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}if(r.status===401)throw new Error("OpenAI: Invalid API key.");if(r.status===429)throw new Error("OpenAI: Quota exceeded. Add billing credits.");throw new Error("OpenAI "+r.status+": "+(m||r.statusText));}
   const d=await r.json();return d.choices?.[0]?.message?.content||"";
 }
 async function callGemini(key,sys,msgs,maxT,enableSearch=false){
@@ -1358,7 +1379,7 @@ async function callGemini(key,sys,msgs,maxT,enableSearch=false){
       const _body:any={systemInstruction:{parts:[{text:sys}]},contents:msgs.map(m=>({role:m.role==="user"?"user":"model",parts:[{text:m.content}]})),generationConfig:{maxOutputTokens:maxT,temperature:0.7}};
       if(enableSearch)_body.tools=[{google_search:{}}];
       const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent?key="+key.trim(),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(_body)});
-      if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===403)throw new Error("Gemini: API key invalid.");if(r.status===429){lastErr=new Error("Gemini: Free quota exceeded.");continue;}if(r.status===400&&(m.includes("not found")||m.includes("deprecated"))){lastErr=new Error("Gemini model "+model+" unavailable");continue;}lastErr=new Error("Gemini/"+model+" "+r.status+": "+(m||r.statusText));continue;}
+      if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}if(r.status===403)throw new Error("Gemini: API key invalid.");if(r.status===429){lastErr=new Error("Gemini: Free quota exceeded.");continue;}if(r.status===400&&(m.includes("not found")||m.includes("deprecated"))){lastErr=new Error("Gemini model "+model+" unavailable");continue;}lastErr=new Error("Gemini/"+model+" "+r.status+": "+(m||r.statusText));continue;}
       const d=await r.json();const text=d.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("\n")||"";if(!text){lastErr=new Error("Gemini/"+model+": empty response");continue;}return text;
     }catch(e){if(e.message.includes("Failed to fetch")||e.message.includes("NetworkError"))throw new Error("Gemini: Network error.");if(e.message.includes("Invalid")||e.message.includes("quota"))throw e;lastErr=e;}
   }
@@ -1366,9 +1387,28 @@ async function callGemini(key,sys,msgs,maxT,enableSearch=false){
 }
 
 // FIX BUG 2,3,5: universal 60s timeout on every AI call
+// DeepSeek V4 is a REASONING model. It spends output tokens thinking BEFORE it
+// writes one word of the answer, and that thinking is billed against the same
+// max_tokens budget. Roughly 3,000 tokens go on thinking alone.
+//
+// The NVIDIA path already understood this: nvidiaTokenBudget() ADDS the model's
+// reasoning overhead to whatever the caller asked for. callDeepSeek did not —
+// it passed maxT through raw. So any module asking for less than about 3,500
+// tokens got an empty answer every single time, while still being billed.
+//
+// There are EIGHT such call sites in this file: 800, 800, 1800, 2000, 2500,
+// 2500, 2800 and 3000. Every one of them was guaranteed to fail on DeepSeek.
+// Session 44 raised one of them by hand. That is whack-a-mole — the next module
+// anyone adds re-creates the bug. The floor belongs HERE, once, where the
+// model's behaviour is actually known.
+const DEEPSEEK_REASONING_OVERHEAD=3200;
 async function callDeepSeek(key,sys,msgs,maxT,modelOverride=""){
+  // Reserve the thinking budget on top of the answer the caller asked for, and
+  // keep a floor so a tiny request still leaves room to reply.
+  const _want=Math.max(Number(maxT)||1500,600);
+  maxT=Math.min(_want+DEEPSEEK_REASONING_OVERHEAD,8192);
   const r=await fetch("https://api.deepseek.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:(modelOverride||MODELS.deepseek.model),max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
-  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("DeepSeek: Invalid API key.");if(r.status===429)throw new Error("DeepSeek: Rate limit. Wait a moment.");throw new Error("DeepSeek "+r.status+": "+(m||r.statusText));}
+  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}if(r.status===401)throw new Error("DeepSeek: Invalid API key.");if(r.status===429)throw new Error("DeepSeek: Rate limit. Wait a moment.");throw new Error("DeepSeek "+r.status+": "+(m||r.statusText));}
   const d=await r.json();
   const ch=d.choices?.[0];
   const content=ch?.message?.content||"";
@@ -1389,7 +1429,7 @@ async function callDeepSeek(key,sys,msgs,maxT,modelOverride=""){
 }
 async function callKimi(key,sys,msgs,maxT){
   const r=await fetch("https://api.moonshot.cn/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.kimi.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
-  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}if(r.status===401)throw new Error("Kimi: Invalid API key.");if(r.status===429)throw new Error("Kimi: Rate limit. Wait a moment.");throw new Error("Kimi "+r.status+": "+(m||r.statusText));}
+  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}if(r.status===401)throw new Error("Kimi: Invalid API key.");if(r.status===429)throw new Error("Kimi: Rate limit. Wait a moment.");throw new Error("Kimi "+r.status+": "+(m||r.statusText));}
   const d=await r.json();return d.choices?.[0]?.message?.content||"";
 }
 
@@ -1408,7 +1448,7 @@ async function callFalImage(key:string, prompt:string, model="fal-ai/flux-pro", 
   });
   if(!r.ok){
     const t = await r.text().catch(()=>"");
-    let m=""; try{m=JSON.parse(t).detail||JSON.parse(t).error||"";}catch{m=t.slice(0,200);}
+    let m=""; try{m=JSON.parse(t).detail||JSON.parse(t).error||"";}catch{m=httpErrText(t,r.status);}
     throw new Error(`fal.ai image error: ${m||r.status}`);
   }
   const d = await r.json();
@@ -1754,12 +1794,34 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
     }
     return{primary:text,truncated:stillTruncated,usedProvider:active};
   }catch(err:any){
-    if(isRateLimit(err.message)){
-      markProviderExhausted(active);
+    // THIS IS WHY A FAILED CALL LANDED ON YOUR SCREEN INSTEAD OF RECOVERING.
+    // Failover only ran when isRateLimit() matched — "rate limit", "429", "quota
+    // exceeded". A timeout, a 502, a Cloudflare HTML error page or a reasoning
+    // model returning an empty answer matched NONE of those, so the error was
+    // rethrown straight to the UI with no attempt at another provider. Every
+    // other configured provider sat idle while the request failed.
+    //
+    // These are all TRANSIENT and provider-specific: another provider will very
+    // likely succeed on the same prompt. Deliberately EXCLUDED are invalid-key
+    // and no-key-configured errors — those must surface, because retrying them
+    // elsewhere hides a configuration problem the user has to fix.
+    const isTransient=(m:string)=>{
+      const s=(m||"").toLowerCase();
+      if(s.includes("invalid api key")||s.includes("sign in")||s.includes("no api key"))return false;
+      return s.includes("daily limit")||s.includes("daily free-tier limit")||s.includes("limit reached")
+        ||s.includes("timeout")||s.includes("did not respond")||s.includes("did not finish")
+        ||s.includes("network")||s.includes("failed to fetch")||s.includes("temporarily unavailable")
+        ||s.includes("infrastructure error")||s.includes("empty answer")
+        ||s.includes("output budget")||s.includes("produced no answer")
+        ||/\b(500|502|503|504|522|524)\b/.test(s);
+    };
+    if(isRateLimit(err.message)||isTransient(err.message)){
+      if(isRateLimit(err.message))markProviderExhausted(active);
       const fallbackOrder=[];
       if(active==="groq")fallbackOrder.push("gemini");
       if(active==="gemini")fallbackOrder.push("groq");
-      ["claude","openai"].forEach(p=>{if(p!==active&&effectiveKeys[p]?.trim())fallbackOrder.push(p);});
+      ["claude","openai","deepseek","groq","gemini","nvidia"].forEach(p=>{
+        if(p!==active&&!fallbackOrder.includes(p)&&(p==="nvidia"||effectiveKeys[p]?.trim()))fallbackOrder.push(p);});
       for(const fallback of fallbackOrder){
         const fallbackKey=effectiveKeys[fallback]?.trim();
         if(!fallbackKey)continue;
@@ -1767,7 +1829,11 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
           const r=await callAI(fallback,fallbackKey,sys,msgs,maxT,enableSearch&&fallback==="claude");
           return{primary:r.text,usedProvider:fallback};
         }catch(err2:any){
+          // WAS: rethrow unless rate-limited, which abandoned the remaining
+          // providers after one failure. Now a transient failure moves to the
+          // next candidate, so one slow model cannot take the whole chain down.
           if(isRateLimit(err2.message)){markProviderExhausted(fallback);continue;}
+          if(isTransient(err2.message))continue;
           throw err2;
         }
       }
@@ -3642,7 +3708,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     const content:any[]=images.map(img=>({type:"image",source:{type:"base64",media_type:img.mediaType,data:img.data}}));
     content.push({type:"text",text:userText});
     const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":claudeKey.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:MODELS.claude.model,max_tokens:2000,system:sys,messages:[{role:"user",content}]})});
-    if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=t.slice(0,200);}throw new Error("Claude "+r.status+": "+(m||r.statusText));}
+    if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}throw new Error("Claude "+r.status+": "+(m||r.statusText));}
     const d=await r.json();return d.content?.map((b:any)=>b.text||"").join("\n")||"";
   };
 
