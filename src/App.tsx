@@ -71,6 +71,7 @@ function buildDecisionHistoryContext(question:string):string{
 }
 import BusinessExecutionEngine, { type ExecutionPlan, type DeliverableSpec, repairTruncatedJson, pdfSafeText } from "./lib/BusinessExecutionEngine";
 import DocIQ, { AUDIENCE_OPTIONS, type AudienceId } from "./lib/DocumentIntelligence";
+import { buildBlueprint, type BlueprintFormat } from "./lib/BlueprintBuilder";
 
 // ─── SESSION GATE ────────────────────────────────────────────────────────────
 async function checkSessionGate(): Promise<{allowed:boolean;reason?:string;plan?:string;used?:number;limit?:number}> {
@@ -6576,7 +6577,60 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     const claudeKey=providerKey(keys,"claude");
     const openaiKey=providerKey(keys,"openai");
     const deepseekKey=providerKey(keys,"deepseek");
-    if(!claudeKey&&!openaiKey&&!deepseekKey)throw new Error("No API key configured — add a Claude, OpenAI, or DeepSeek key in Settings to generate documents.");
+ 
+    // ─── BROWSER-FIRST PATH ────────────────────────────────────────────────
+    // Two problems solved by one change.
+    //
+    //  1. NVIDIA could not generate documents. Its key lives in Cloudflare and
+    //     is reachable only from THIS browser via /api/nvidia. Railway is a
+    //     different machine with no NVIDIA key, so the old path could only ever
+    //     use Claude, OpenAI or DeepSeek - which is why the guard below used to
+    //     hard-fail when none of those three had a key.
+    //  2. Customer API keys were POSTed to Railway. TLS covers them in flight;
+    //     the exposure is at rest, in any request log. Open HIGH finding since
+    //     Session 47.
+    //
+    // Building the blueprint HERE fixes both: every provider is reachable, and
+    // Railway receives a finished structure with no credentials attached.
+    //
+    // If ANY of this fails - bad JSON, provider down, unusable structure - we
+    // fall through to the original /generate/* path untouched. This can only
+    // add a better outcome; it cannot remove the existing one.
+    if(format!=="xlsx"){
+      try{
+        const _bpBrief=opts.brief||[
+          "Produce a "+format.toUpperCase()+" titled: "+(opts.title||"Document"),
+          "Company: "+[co.name||"",co.industry||"",co.stage||""].filter(Boolean).join(" | "),
+          "",
+          "SOURCE MATERIAL:",
+          normaliseForExport(opts.body||"",format).slice(0,120000),
+        ].join("\n");
+        const _bpRes=await buildBlueprint(format as BlueprintFormat,
+          {brief:_bpBrief,title:opts.title||"Document",currencySymbol:opts.currencySymbol||cur.sym},
+          (sys,msgs,maxT)=>ask(sys,msgs,maxT),
+          {onProgress:(m)=>setExpStep(m)});
+        if(_bpRes.ok&&_bpRes.blueprint){
+          const rr=await fetch(RAILWAY_URL+"/render/"+format,{
+            method:"POST",headers:{"Content-Type":"application/json"},
+            // No claude_key. No openai_key. No deepseek_key. Nothing to leak.
+            body:JSON.stringify({blueprint:_bpRes.blueprint,title:opts.title||"",
+              subtitle:opts.objective||"",currency_symbol:opts.currencySymbol||cur.sym||"\u20b9"}),
+            signal:AbortSignal.timeout(120000)});
+          if(rr.ok){
+            const bb=await rr.arrayBuffer();
+            if(bb.byteLength>2000){
+              setExpStep("");
+              return bb;
+            }
+          }
+        }
+        console.warn("[OIQ] browser blueprint unavailable, using server path:",_bpRes.reason);
+      }catch(bpErr:any){
+        console.warn("[OIQ] browser blueprint failed, using server path:",String(bpErr?.message||bpErr).slice(0,160));
+      }
+    }
+    // ─── SERVER PATH (unchanged) ───────────────────────────────────────────
+    if(!claudeKey&&!openaiKey&&!deepseekKey)throw new Error("Could not build the document in your browser, and no Claude, OpenAI or DeepSeek key is configured for the server path. Add a key in Settings, or try again.");
     // Excellent tier prefers Claude first (highest quality); Standard/Professional prefer DeepSeek first (cheaper).
     const providerOrder = RESPONSE_QUALITY==="excellent" ? "claude,openai,deepseek" : "deepseek,claude,openai";
     const coCtx=[co.name||"",co.industry||"",co.stage||"",co.location||""].filter(Boolean).join(" | ");
@@ -6635,7 +6689,11 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     const a=document.createElement("a");a.href=u;a.download=fname;a.style.display="none";
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     setTimeout(()=>URL.revokeObjectURL(u),200);
-  },[keys,co,cur,showToast,normaliseForExport]);
+  // ask and setExpStep are used by the browser-first path above. Omitting them
+  // would capture the FIRST render's ask() forever - the same stale-closure
+  // class of bug as the stuck consent button in Session 43, where the callback
+  // kept reading a value that had long since changed.
+  },[keys,co,cur,showToast,normaliseForExport,ask,setExpStep]);
 
   // FEATURE 4 & 5: Export Studio generation
   const runExport=useCallback(async()=>{
