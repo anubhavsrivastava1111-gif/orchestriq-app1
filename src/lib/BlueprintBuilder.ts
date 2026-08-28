@@ -256,12 +256,30 @@ export async function buildBlueprint(
   onProgress("\uD83E\uDDE0 Designing the document structure\u2026");
 
   let lastErr = "";
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // THE RETRY USED TO SEND THE SAME PROMPT AGAIN. If the first attempt failed
+  // because the prompt was too large to finish inside the provider's time
+  // window - which is exactly what happens to NVIDIA's reasoning models on a
+  // 120,000-character brief - then repeating it verbatim fails identically.
+  // A retry that changes nothing is not a retry.
+  //
+  // Each attempt now shrinks the evidence. The audience brief and the schema
+  // are at the TOP of the brief, so trimming from the end removes the least
+  // important material first: the tail of the source content, not the
+  // instructions. Attempt 3 is small enough that any provider can complete it.
+  const SIZES = [120000, 35000, 14000];
+  for (let attempt = 0; attempt < SIZES.length; attempt++) {
     try {
+      const trimmed = cfg.brief.length > SIZES[attempt]
+        ? cfg.brief.slice(0, SIZES[attempt]) +
+          "\n\n[Source material truncated to fit. Build the document from what is above.]"
+        : cfg.brief;
       const user = attempt === 0
-        ? cfg.brief
-        : cfg.brief + "\n\nYour previous reply was not valid JSON. Return ONLY the JSON object, " +
-          "starting with { and ending with }. No explanation.";
+        ? trimmed
+        : trimmed + "\n\nReturn ONLY the JSON object, starting with { and ending with }. " +
+          "No explanation, no markdown fence.";
+      if (attempt > 0) {
+        onProgress("\u26A0\uFE0F Retrying with less content (attempt " + (attempt + 1) + " of " + SIZES.length + ")\u2026");
+      }
       const raw = await ask(sys, [{ role: "user", content: user }], isDeck ? 7000 : 8000);
       const text = typeof raw === "string" ? raw : (raw?.text || raw?.content?.[0]?.text || "");
       const parsed = extractJson(String(text));
@@ -273,12 +291,12 @@ export async function buildBlueprint(
       onProgress("\u2713 Structure ready \u2014 " + n + (isDeck ? " slides" : " sections") + ", rendering\u2026");
       return { blueprint: bp, ok: true, reason: "browser blueprint (" + n + ")" };
     } catch (e: any) {
-      lastErr = String(e?.message || e).slice(0, 160);
-      // A transient provider failure is worth one more try; a key problem is not.
-      if (/invalid api key|sign in/i.test(lastErr)) break;
+      lastErr = String(e?.message || e).slice(0, 200);
+      // A key or sign-in problem will not improve with a smaller prompt.
+      if (/invalid api key|sign in|no api key/i.test(lastErr)) break;
     }
   }
-  return { blueprint: null, ok: false, reason: lastErr || "unknown" };
+  return { blueprint: null, ok: false, reason: lastErr || "the model did not return a usable document structure" };
 }
 
 export default { buildBlueprint, normaliseBlueprint };
