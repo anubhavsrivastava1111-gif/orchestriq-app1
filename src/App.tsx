@@ -70,6 +70,7 @@ function buildDecisionHistoryContext(question:string):string{
   }catch{return "";}
 }
 import BusinessExecutionEngine, { type ExecutionPlan, type DeliverableSpec, repairTruncatedJson, pdfSafeText } from "./lib/BusinessExecutionEngine";
+import DocIQ, { AUDIENCE_OPTIONS, type AudienceId } from "./lib/DocumentIntelligence";
 
 // ─── SESSION GATE ────────────────────────────────────────────────────────────
 async function checkSessionGate(): Promise<{allowed:boolean;reason?:string;plan?:string;used?:number;limit?:number}> {
@@ -1946,7 +1947,16 @@ function getModuleContext(category,{ledgerEntries,brSessions,workflows,tQueue,tm
     const recentBR=(brSessions||[]).slice(0,3);
     if(recentBR.length){
       parts.push("=== RECENT BOARDROOM SESSIONS (strategic context) ===");
-      recentBR.forEach(s=>parts.push("Q: \""+s.q+"\"\n"+(s.synthesis?stripMd(s.synthesis).slice(0,500):"")));
+      // SAME BUG AS THE EXPORT PATH, in a worse place. This block injects prior
+      // board decisions into every strategic AI prompt. It read s.synthesis,
+      // which does not exist - the value lives at s.stages[].synthesis. So the
+      // heading "RECENT BOARDROOM SESSIONS" was pushed with an EMPTY body, and
+      // your executives have never been able to see what the board already
+      // decided. They have been re-deciding settled questions from scratch.
+      recentBR.forEach((s:any)=>{
+        const syn=(Array.isArray(s?.stages)?s.stages:[]).map((st:any)=>st?.synthesis||"").filter(Boolean).join("\n")||s?.synthesis||"";
+        const dec=(Array.isArray(s?.stages)?s.stages:[]).map((st:any)=>st?.decisionStatus).filter(Boolean).join(", ");
+        parts.push("Q: \""+(s?.q||"")+"\"\n"+(syn?stripMd(syn).slice(0,1200):"(no synthesis recorded)")+(dec?"\nDECISION: "+dec:""));});
     }
     // Draw on the saved record, not just whatever happens to be on screen.
     // tmRes/apRes are view state — after a reload they hold one cached result
@@ -2697,24 +2707,61 @@ function gatherWorkspace(co,compData,chats,brSessions,workflows,tQueue,extras){
       if(snap)parts.push("\n=== GENERAL LEDGER (actual posted entries) ===\n"+snap);
     }catch{}
   }
+  // BOARDROOM - REWRITTEN. The old line read s.synthesis, which DOES NOT EXIST on
+  // a saved session. runBR stores it at s.stages[].synthesis. So every export
+  // received the literal text "Synthesis: " followed by nothing: the Chairman's
+  // arbitration, the executive debate, the research brief and the decision
+  // status were all sitting in memory and all silently dropped. This reads the
+  // correct path and keeps the debate, which is where the disagreement lives.
   if(extras?.boardroom&&brSessions.length){
     parts.push("\n=== BOARDROOM SESSIONS ===");
-    brSessions.slice(0,5).forEach(s=>parts.push("Q: "+s.q+"\nSynthesis: "+stripMd(s.synthesis||"").slice(0,1500)));
+    brSessions.slice(0,8).forEach((s:any)=>{
+      const stages:any[]=Array.isArray(s?.stages)?s.stages:[];
+      const synth=stages.map(st=>st?.synthesis||"").filter(Boolean).join("\n\n")||s?.synthesis||"";
+      const debate=stages.flatMap((st:any)=>Array.isArray(st?.debate)?st.debate:[])
+        .map((d:any)=>{const who=d?.role||d?.name||d?.agent||d?.executive||"Executive";
+          const tx=d?.text||d?.content||d?.output||d?.response||"";
+          return tx?who+": "+stripMd(String(tx)):"";}).filter(Boolean).join("\n\n");
+      const dec=stages.map(st=>st?.decisionStatus).filter(Boolean).join(", ");
+      parts.push(["QUESTION: "+(s?.q||""),
+        s?.researchBrief?"RESEARCH BRIEF:\n"+stripMd(String(s.researchBrief)):"",
+        debate?"EXECUTIVE DEBATE:\n"+debate:"",
+        synth?"CHAIRMAN SYNTHESIS:\n"+stripMd(synth):"",
+        dec?"DECISION: "+dec:""].filter(Boolean).join("\n\n"));
+    });
   }
   if(extras?.chats){
     const ids=Object.keys(chats).filter(k=>chats[k]?.length);
-    if(ids.length){parts.push("\n=== EXECUTIVE CONVERSATIONS ===");ids.slice(0,8).forEach(id=>{const r=AR.find(x=>x.id===id);const last=chats[id].filter(m=>m.role==="assistant").slice(-1)[0];if(r&&last)parts.push(r.t+": "+stripMd(last.content).slice(0,1200));});}
+    // EXECUTIVE CHAT - REWRITTEN. The old line kept ONLY the last assistant reply,
+    // capped at 1200 characters, and discarded every question you asked. A ten
+    // message conversation with the CFO reached the document as one truncated
+    // fragment - about 3% of what was said. Both sides of the full thread now
+    // travel, because an answer without its question is not evidence.
+    if(ids.length){parts.push("\n=== EXECUTIVE CONVERSATIONS ===");
+      ids.slice(0,12).forEach(id=>{
+        const r=AR.find(x=>x.id===id); if(!r)return;
+        const thread=(chats[id]||[]).map((m:any)=>{
+          const speaker=m?.role==="user"?"USER ASKED":r.t+" RESPONDED";
+          const body=stripMd(String(m?.content||""));
+          return body?speaker+":\n"+body:"";}).filter(Boolean).join("\n\n");
+        if(thread)parts.push("--- "+r.t+" ("+(chats[id]||[]).length+" messages) ---\n"+thread);
+      });}
   }
   if(extras?.workflows&&workflows.length){
     parts.push("\n=== WORKFLOW OUTPUTS ===");
-    workflows.slice(0,4).forEach(w=>{const fin=w.steps[w.steps.length-1];if(fin)parts.push(w.chainLabel+" — "+w.task+"\n"+stripMd(fin.output).slice(0,1200));});
+    workflows.slice(0,6).forEach((w:any)=>{
+      const body=(w.steps||[]).map((s:any)=>"LEVEL "+(s?.level??"?")+" — "+(s?.role?.t||"Step")+":\n"+stripMd(String(s?.output||""))).filter(Boolean).join("\n\n");
+      if(body)parts.push(w.chainLabel+" — "+w.task+"\n"+body);});
   }
   if(extras?.tasks&&tQueue.length){
     const done=tQueue.filter(t=>t.finalOutput);
-    if(done.length){parts.push("\n=== AUTOPILOT TASKS ===");done.slice(0,4).forEach(t=>parts.push(t.chainLabel+" — "+t.task+"\n"+stripMd(t.finalOutput).slice(0,1000)));}
+    if(done.length){parts.push("\n=== AUTOPILOT TASKS ===");
+      done.slice(0,6).forEach((t:any)=>{
+        const steps=(t.steps||[]).map((s:any)=>"LEVEL "+(s?.level??"?")+" — "+(s?.role?.t||"Step")+":\n"+stripMd(String(s?.output||""))).filter(Boolean).join("\n\n");
+        parts.push(t.chainLabel+" — "+t.task+"\n"+[steps,"FINAL OUTPUT:\n"+stripMd(String(t.finalOutput))].filter(Boolean).join("\n\n"));});}
   }
-  if(extras?.timeMachine)parts.push("\n=== TIME MACHINE ===\n"+stripMd(extras.timeMachine).slice(0,1500));
-  if(extras?.autopilot)parts.push("\n=== DECISION AUTOPILOT ===\n"+stripMd(extras.autopilot).slice(0,1500));
+  if(extras?.timeMachine)parts.push("\n=== TIME MACHINE ===\n"+stripMd(extras.timeMachine));
+  if(extras?.autopilot)parts.push("\n=== DECISION AUTOPILOT ===\n"+stripMd(extras.autopilot));
   return parts.join("\n");
 }
 // ─── CHART DETECTION ────────────────────────────────────────────────────────
@@ -3284,6 +3331,10 @@ export default function App(){
   const [expPptType,setExpPptType]=useState("briefing");
   const [expSources,setExpSources]=useState({chats:true,boardroom:true,workflows:true,tasks:true,timeMachine:true,autopilot:true});
   const [expTitle,setExpTitle]=useState("");
+  // WHO the document is for. Until now every export was hardcoded to "board",
+  // so an investor deck and an operations review were generated identically.
+  // "auto" derives it from the document type you picked.
+  const [expAudience,setExpAudience]=useState<string>("auto");
   const [expGenerating,setExpGenerating]=useState(false);
   const [expSynthesis,setExpSynthesis]=useState("");
   const [expStep,setExpStep]=useState("");
@@ -4197,7 +4248,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     const projCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
     const boardroomDecisions=(brSessions||[]).slice(0,5).map(s=>({
       question:s.q,
-      synthesis:s.synthesis?stripMd(s.synthesis).slice(0,600):"",
+      synthesis:(()=>{const sy=(Array.isArray(s?.stages)?s.stages:[]).map((st:any)=>st?.synthesis||"").filter(Boolean).join("\n")||s?.synthesis||"";return sy?stripMd(sy).slice(0,1200):"";})(),
       decisionStatus:s.stages?.[0]?.decisionStatus||"",
       ts:s.ts,
     }));
@@ -5155,7 +5206,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               body:JSON.stringify({
                 objective:del.description||del.name,
                 company_context:_coCtx,
-                available_data:_allContent.slice(0,8000),
+                available_data:_allContent.slice(0,120000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
                 api_key:docServiceKey(keys)
@@ -5250,7 +5301,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               body:JSON.stringify({
                 objective:del.description||del.name,
                 company_context:_coCtx,
-                available_data:_allContent.slice(0,8000),
+                available_data:_allContent.slice(0,120000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
                 api_key:docServiceKey(keys)
@@ -5377,7 +5428,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               body:JSON.stringify({
                 objective:del.description||del.name,
                 company_context:_coCtx,
-                available_data:_allContent.slice(0,8000),
+                available_data:_allContent.slice(0,120000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
                 api_key:docServiceKey(keys)
@@ -5564,7 +5615,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               body:JSON.stringify({
                 objective:del.description||del.name,
                 company_context:_coCtx,
-                available_data:_allContent.slice(0,8000),
+                available_data:_allContent.slice(0,120000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
                 api_key:docServiceKey(keys)
@@ -6431,7 +6482,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     return t;
   },[]);
  
-  const railwayGenerate=useCallback(async(format:string,opts:{title?:string;objective?:string;body?:string;currency?:string;currencySymbol?:string})=>{
+  const railwayGenerate=useCallback(async(format:string,opts:{title?:string;objective?:string;body?:string;currency?:string;currencySymbol?:string;audience?:string;docPurpose?:string;brief?:string})=>{
     const RAILWAY_URL="https://orchestriq-gen-service-production.up.railway.app";
     const claudeKey=providerKey(keys,"claude");
     const openaiKey=providerKey(keys,"openai");
@@ -6449,7 +6500,16 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     const _payload=JSON.stringify({
         objective:opts.objective||opts.title||"Document",
         company_context:coCtx,
-        available_data:normaliseForExport(opts.body||"",format).slice(0,8000),
+        // WAS .slice(0,8000). 8,000 characters is roughly three pages. The whole
+        // workspace - every executive conversation, the boardroom debate, the
+        // ledger - was cut to three pages before the model ever saw it, and the
+        // model then filled the gap with plausible invention. That is the
+        // "missing key information" problem at its source. 120,000 characters is
+        // comfortably inside the context window of every provider we route to.
+        available_data:normaliseForExport(opts.body||"",format).slice(0,120000),
+        audience:opts.audience||"general",
+        doc_purpose:opts.docPurpose||"",
+        generation_brief:opts.brief||"",
         currency:opts.currency||co.currency||"INR",
         currency_symbol:opts.currencySymbol||cur.sym||"₹",
         claude_key:isProviderOff("claude")?"":claudeKey,
@@ -6513,7 +6573,19 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
       let usedRailway=false;
       try{
         const railFmt=isPdf?"pdf":"pptx";
-        await railwayGenerate(railFmt,{title:userTitle,objective:userTitle,body:corpus,currency:co.currency,currencySymbol:cur.sym});
+        // Build the audience brief: who reads this, what they need, what this
+        // format demands. Previously the document type you selected above was
+        // discarded here and never reached the generator at all - which is why
+        // "Investor Deck" and "Operational Review" produced the same document.
+        const _aud=(expAudience==="auto"?DocIQ.inferAudience(dtype):expAudience) as AudienceId;
+        const _brief=DocIQ.buildGenerationBrief({
+          format:railFmt as any,docPurpose:dtype,audience:_aud,title:userTitle,
+          companyContext:[co.name||"",co.industry||"",co.stage||"",co.location||""].filter(Boolean).join(" | "),
+          evidence:corpus,currencySymbol:cur.sym});
+        setExpStep("🎯 Writing for: "+(DocIQ.AUDIENCE_SPECS[_aud]?.label||_aud)+"…");
+        await railwayGenerate(railFmt,{title:userTitle,objective:userTitle,body:corpus,
+          currency:co.currency,currencySymbol:cur.sym,
+          audience:_aud,docPurpose:dtype,brief:_brief});
         usedRailway=true;
         showToast((isPdf?"PDF":"PowerPoint")+" generated via Python engine ✓","success");
       }catch(railErr:any){
@@ -6567,7 +6639,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
       setExpStep("");
     }catch(e){showToast("Export failed: "+e.message,"error");setExpStep("");}
     finally{setExpGenerating(false);}
-  },[expGenerating,expMode,expDocType,expPptType,expSources,expTitle,co,compData,chats,brSessions,workflows,tQueue,tmRes,apRes,cur,keys,defP,showToast,expStyleResult,railwayGenerate]);
+  },[expGenerating,expMode,expDocType,expPptType,expAudience,expSources,expTitle,co,compData,chats,brSessions,workflows,tQueue,tmRes,apRes,cur,keys,defP,showToast,expStyleResult,railwayGenerate]);
 
   // Quick single-source export (used inline in chat/boardroom/etc.)
   // RAILWAY ONLY. We never emit a browser-rendered (lower-quality) file.
@@ -8108,6 +8180,17 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 <button key={t.id} onClick={()=>expMode==="pdf"?setExpDocType(t.id):setExpPptType(t.id)} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 10px",borderRadius:6,border:"1px solid "+(sel?c+"66":"#1a2030"),background:sel?c+"0d":"#0a0e1a",cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"left"}}>
                   <span style={{fontSize:15}}>{t.ic}</span><div><div style={{fontSize:10,fontWeight:700,color:sel?c:"#A0AAC0"}}>{t.label}</div>{t.desc&&<div style={{fontSize:8,color:"#5A6480"}}>{t.desc}</div>}</div>
                 </button>);})}
+            </div>
+            <label style={S.lbl}>Audience — who is this for?</label>
+            <div style={{fontSize:8.5,color:"#5A6480",marginBottom:6,lineHeight:1.5}}>This changes what the document contains, not just its tone. An investor pack leads with market size and unit economics; an operations review leads with steps, owners and dates. Same evidence, different document.</div>
+            <select value={expAudience} onChange={e=>setExpAudience(e.target.value)} style={{...S.inp,marginBottom:4,cursor:"pointer"}}>
+              <option value="auto">Auto — match the document type</option>
+              {AUDIENCE_OPTIONS.map(a=><option key={a.id} value={a.id}>{a.label}</option>)}
+            </select>
+            <div style={{fontSize:8,color:"#5A6480",marginBottom:12,lineHeight:1.4}}>
+              {expAudience==="auto"
+                ?"Will use: "+(DocIQ.AUDIENCE_SPECS[DocIQ.inferAudience(expMode==="pdf"?expDocType:expPptType)]?.label||"General")
+                :(AUDIENCE_OPTIONS.find(a=>a.id===expAudience)?.hint||"")}
             </div>
             <label style={S.lbl}>Document Title (optional)</label>
             <input style={{...S.inp,marginBottom:12}} value={expTitle} onChange={e=>setExpTitle(e.target.value)} placeholder={(expMode==="pdf"?PDF_TYPES.find(t=>t.id===expDocType)?.label:PPT_TYPES.find(t=>t.id===expPptType)?.label)+" — "+co.name}/>
