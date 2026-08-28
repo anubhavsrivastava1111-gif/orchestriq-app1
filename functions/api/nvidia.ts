@@ -207,7 +207,14 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   const wantThink = reasoning === undefined ? spec.reason : (reasoning === true || reasoning === "on");
   const reasoningOn = wantThink && spec.reason;
   const wanted = Math.max(Number(max_tokens) || 1500, 512);
-  const budget = Math.min(wanted + (reasoningOn ? spec.overhead : 0), spec.max, HARD_CEILING);
+  // A 16,000-token reasoning generation on a 550B model does not finish inside
+  // the ~90 seconds Cloudflare allows. Asking for more than can be delivered in
+  // the time available guarantees the timeout above. TIME_SAFE_CEILING is what
+  // these models can actually complete on this platform; raising it does not
+  // produce longer answers, it produces HTML error pages.
+  const TIME_SAFE_CEILING = 9000;
+  const budget = Math.min(wanted + (reasoningOn ? spec.overhead : 0),
+                          spec.max, HARD_CEILING, TIME_SAFE_CEILING);
 
   const payload: any = {
     model: requested, max_tokens: budget,
@@ -230,7 +237,16 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + env.NVIDIA_API_KEY },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(120000),
+      // WAS 120000. THIS IS WHY YOU SAW RAW HTML INSTEAD OF AN ERROR MESSAGE.
+      // Cloudflare kills a Worker subrequest at about 90 seconds, and the edge
+      // returns 524 at 100. Waiting 120 meant Cloudflare ALWAYS won the race:
+      // the Worker was terminated before it could return its own JSON, and
+      // Cloudflare substituted an HTML error page. The app then printed the
+      // first 200 characters of that page - the "<!DOCTYPE html> <!--[if lt
+      // IE 7]>..." dump. The proxy could never report a timeout because it was
+      // never alive long enough to do so.
+      // 75 seconds leaves headroom to build and return a real JSON error.
+      signal: AbortSignal.timeout(75000),
     });
     const text = await upstream.text();
 
@@ -260,7 +276,10 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   } catch (e: any) {
     const msg = String(e?.message || e);
     if (msg.includes("timeout") || msg.includes("aborted")) {
-      return json({ error: "NVIDIA did not respond within 120 seconds." }, 504, obs);
+      return json({ error: "NVIDIA (" + requested + ") did not finish within 75 seconds. "
+        + "Reasoning models are slow on long prompts. Shorten the prompt, reduce the number "
+        + "of executives, or switch to a faster model such as meta/llama-3.3-70b-instruct." },
+        504, obs);
     }
     return json({ error: "NVIDIA proxy network error: " + msg }, 502, obs);
   }
