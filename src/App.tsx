@@ -2761,6 +2761,22 @@ function parseCapabilityBrief(raw){
   }catch{}
   return{output,capability};
 }
+// Twelve export paths hardcoded audience:"board". A cash-flow model for the CFO,
+// an investor pack and an operations runbook were all generated as board papers.
+// The deliverable already says what it is - in its name and description - so read
+// it rather than assuming. Falls back to "board" when nothing indicates
+// otherwise, so behaviour is never worse than it was.
+function _delAudience(del:any):any{
+  const t=((del?.name||"")+" "+(del?.description||"")+" "+(del?.outputFor||"")).toLowerCase();
+  if(/investor|vc |funding|fundrais|pitch|term sheet|series [a-d]|due dilig/.test(t))return "investor";
+  if(/lender|bank|loan|credit|debt|working capital limit/.test(t))return "lender";
+  if(/regulat|compliance|audit|statutory|gst|filing|tax return/.test(t))return "regulator";
+  if(/client|customer|proposal|sow|engagement/.test(t))return "client";
+  if(/sop|runbook|process|workflow|operation|checklist|implementation plan/.test(t))return "operations";
+  if(/budget|forecast|cash flow|p&l|balance sheet|variance|financial model|unit econom/.test(t))return "cfo";
+  if(/team|internal|handover|onboarding|training/.test(t))return "internal_team";
+  return "board";
+}
 function gatherWorkspace(co,compData,chats,brSessions,workflows,tQueue,extras){
   const parts=[];
   parts.push("COMPANY: "+co.name+" | "+co.industry+" | "+co.stage+" | "+co.location+" | "+co.currency);
@@ -3401,6 +3417,13 @@ export default function App(){
   // so an investor deck and an operations review were generated identically.
   // "auto" derives it from the document type you picked.
   const [expAudience,setExpAudience]=useState<string>("auto");
+  // WHO the document is for, asked at the moment of export.
+  // Every export button outside Export Studio produced a board document
+  // regardless of the real reader: the Session 45 audience system was built but
+  // wired into Export Studio only. This holds the pending export while the user
+  // answers, then releases it.
+  const [xfer,setXfer]=useState<any>(null);
+  const [xferAud,setXferAud]=useState<string>("auto");
   const [expGenerating,setExpGenerating]=useState(false);
   const [expSynthesis,setExpSynthesis]=useState("");
   const [expStep,setExpStep]=useState("");
@@ -5298,8 +5321,8 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               ensureXLSX,ensurePptx,ensureJsPDF,
               (name:any,buf:any)=>{zip.folder(folder).file(String(name).replace(/[^a-zA-Z0-9._-]/g,"-"),buf);_w=true;},
               stripMd);
-            const _spec:DeliverableSpec={type:"excel",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
-    const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"finance",persona:"Senior FP&A Director",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+            const _spec:DeliverableSpec={type:"excel",title:del.name,purpose:del.description||del.name,audience:_delAudience(del),qualityStandard:"cfo_model",priority:"primary"};
+    const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"finance",persona:"Senior FP&A Director",audience:_delAudience(del),qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
             setProjectExecPhase("\ud83d\udcc4 Building publication-quality Word document: "+del.name);
             const _beeRes:any=await _bee.generateDocx(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
             _docDone=_w;
@@ -5521,8 +5544,8 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               ensureXLSX,ensurePptx,ensureJsPDF,
               (name:any,buf:any)=>{zip.folder(folder).file(String(name).replace(/[^a-zA-Z0-9._-]/g,"-"),buf);_w=true;},
               stripMd);
-            const _spec:DeliverableSpec={type:"pptx",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"mckinsey_deck",priority:"primary"};
-            const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"mckinsey_deck",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+            const _spec:DeliverableSpec={type:"pptx",title:del.name,purpose:del.description||del.name,audience:_delAudience(del),qualityStandard:"mckinsey_deck",priority:"primary"};
+            const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:_delAudience(del),qualityStandard:"mckinsey_deck",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
             setProjectExecPhase("\ud83d\udcca Building publication-quality presentation: "+del.name);
             const _beeRes:any=await _bee.generatePPTX(_plan,_spec,_pubCtx,content,(m:string)=>setProjectExecPhase(m));
             _pptxDone=_w;
@@ -5706,8 +5729,8 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               ensureXLSX,ensurePptx,ensureJsPDF,
               (name:any,buf:any)=>{zip.folder(folder).file(String(name).replace(/[^a-zA-Z0-9._-]/g,"-"),buf);_w=true;},
               stripMd);
-            const _spec:DeliverableSpec={type:"pdf",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
-            const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+            const _spec:DeliverableSpec={type:"pdf",title:del.name,purpose:del.description||del.name,audience:_delAudience(del),qualityStandard:"cfo_model",priority:"primary"};
+            const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:_delAudience(del),qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
             const _beeRes:any=await _bee.generatePDF(_plan,_spec,_pubCtx,content,()=>{});
     _pdfDone=_w;
     if(!_w&&_beeRes?.error){throw new Error(_beeRes.error);}
@@ -6710,11 +6733,29 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
   // Quick single-source export (used inline in chat/boardroom/etc.)
   // RAILWAY ONLY. We never emit a browser-rendered (lower-quality) file.
   // If the Python engine is unavailable, the user gets a clear retry message.
-  const quickExport=useCallback(async(mode,dtype,title,body)=>{
+  // Opens the audience dialog. Nothing is generated until the user answers, so
+  // no document is ever produced without knowing who will read it.
+  const quickExport=useCallback((mode,dtype,title,body)=>{
+    setXferAud("auto");
+    setXfer({mode,dtype:dtype||"detailed",title,body});
+  },[]);
+ 
+  // Runs AFTER the user has chosen. The old quickExport body lives here.
+  const runQuickExport=useCallback(async(mode,dtype,title,body,audience)=>{
     const fmt=mode==="pdf"?"pdf":"pptx";
     try{
-      await railwayGenerate(fmt,{title,objective:title,body,currency:co.currency,currencySymbol:cur.sym});
-      showToast("Downloaded ✓","success");
+      // Build the same audience brief Export Studio builds. Before this, these
+      // buttons sent raw text with no audience, no document purpose and no
+      // format doctrine - which is why a chat exported for an investor and one
+      // exported for the operations team came out as the same document.
+      const _aud=(audience==="auto"?DocIQ.inferAudience(dtype):audience) as AudienceId;
+      const _brief=DocIQ.buildGenerationBrief({
+        format:fmt as any,docPurpose:dtype,audience:_aud,title,
+        companyContext:[co.name||"",co.industry||"",co.stage||"",co.location||""].filter(Boolean).join(" | "),
+        evidence:body,currencySymbol:cur.sym});
+      await railwayGenerate(fmt,{title,objective:title,body,currency:co.currency,currencySymbol:cur.sym,
+        audience:_aud,docPurpose:dtype,brief:_brief});
+      showToast("Downloaded for "+(DocIQ.AUDIENCE_SPECS[_aud]?.label||_aud)+" ✓","success");
     }catch(railErr:any){
       // MY BUG, from Session 33: this block catches `railErr` but referenced `e`,
       // which does not exist here. The catch block itself threw a ReferenceError,
@@ -6724,7 +6765,73 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
       showToast("Could not generate the "+(mode==="pdf"?"PDF":"PowerPoint")+": "+String(railErr?.message||railErr||"unknown error").slice(0,180),"error");
     }
   },[co,cur,showToast,railwayGenerate]);
-
+ 
+  // The dialog itself. Deliberately small: two questions, sensible defaults, and
+  // it never blocks - "Auto" is always one click away, so a user who does not
+  // care is not slowed down, while a user who does gets a different document.
+  const ExportAudienceDialog=()=>{
+    if(!xfer)return null;
+    const fmtLabel=xfer.mode==="pdf"?"PDF":"PowerPoint";
+    const purposeList=xfer.mode==="pdf"?PDF_TYPES:PPT_TYPES;
+    const effective=xferAud==="auto"?DocIQ.inferAudience(xfer.dtype):xferAud;
+    const spec=DocIQ.AUDIENCE_SPECS[effective];
+    return(
+      <div style={{position:"fixed",inset:0,background:"rgba(4,7,15,0.78)",zIndex:9000,
+        display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
+        onClick={()=>setXfer(null)}>
+        <div onClick={e=>e.stopPropagation()} style={{background:"var(--oiq-panel,#0f1420)",
+          border:"1px solid var(--oiq-line,#1a2030)",borderRadius:10,padding:18,
+          width:"100%",maxWidth:520,maxHeight:"88vh",overflowY:"auto"}}>
+          <div style={{fontSize:14,fontWeight:800,color:"var(--oiq-ink,#F1F5F9)",marginBottom:3}}>
+            Who is this {fmtLabel} for?</div>
+          <div style={{fontSize:10,color:"#5A6480",marginBottom:14,lineHeight:1.55}}>
+            This changes what goes IN the document, not just its tone. An investor pack
+            leads with market size and unit economics. An operations review leads with
+            steps, owners and dates. Same evidence, different document.
+          </div>
+ 
+          <label style={S.lbl}>Document type</label>
+          <select value={xfer.dtype} onChange={e=>setXfer({...xfer,dtype:e.target.value})}
+            style={{...S.inp,marginBottom:12,cursor:"pointer"}}>
+            {purposeList.map((t:any)=><option key={t.id} value={t.id}>{t.label}</option>)}
+          </select>
+ 
+          <label style={S.lbl}>Audience</label>
+          <select value={xferAud} onChange={e=>setXferAud(e.target.value)}
+            style={{...S.inp,marginBottom:8,cursor:"pointer"}}>
+            <option value="auto">Auto — match the document type</option>
+            {AUDIENCE_OPTIONS.map(a=><option key={a.id} value={a.id}>{a.label}</option>)}
+          </select>
+ 
+          {spec&&(
+            <div style={{background:"rgba(20,184,166,0.06)",border:"1px solid rgba(20,184,166,0.22)",
+              borderRadius:6,padding:"9px 11px",marginBottom:14}}>
+              <div style={{fontSize:9,fontWeight:800,color:"#14B8A6",marginBottom:4,
+                textTransform:"uppercase",letterSpacing:0.6}}>Writing for: {spec.label}</div>
+              <div style={{fontSize:9.5,color:"#A0AAC0",lineHeight:1.55,marginBottom:5}}>
+                Opens with: {spec.opensWith}</div>
+              <div style={{fontSize:9,color:"#5A6480",lineHeight:1.5}}>
+                Evidence standard: <b style={{color:"#A0AAC0"}}>{spec.evidenceBar}</b>
+                {spec.evidenceBar==="auditable"?" — every figure must be traceable to a source."
+                 :spec.evidenceBar==="defensible"?" — every figure must survive a challenge."
+                 :" — directional figures acceptable if labelled."}
+              </div>
+            </div>
+          )}
+ 
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setXfer(null)} style={{...S.hBtn,flex:1,textAlign:"center",padding:"9px"}}>
+              Cancel</button>
+            <button onClick={()=>{const x=xfer;const a=xferAud;setXfer(null);
+              runQuickExport(x.mode,x.dtype,x.title,x.body,a);}}
+              style={{...S.hBtn,flex:2,textAlign:"center",padding:"9px",background:"#14B8A6",
+                color:"#04070F",fontWeight:800,border:"1px solid #14B8A6"}}>
+              Generate {fmtLabel}</button>
+          </div>
+        </div>
+      </div>);
+  };
+ 
   const curRole=AR.find(r=>r.id===selRole);
   const curMsgs=selRole?(chats[selRole]||[]):[];
   // A provider is usable only if it has a key AND is switched on. Everything
@@ -7366,8 +7473,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                           ensureXLSX,ensurePptx,ensureJsPDF,
                                           (_fname:any,buf:any)=>{dlFile(nm+".pdf",buf,"application/pdf");_w=true;},
                                           stripMd);
-                                        const _spec:DeliverableSpec={type:"pdf",title:del.name,purpose:del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
-                                        const _plan:ExecutionPlan={objectiveRestated:del.name,domain:"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+                                        const _spec:DeliverableSpec={type:"pdf",title:del.name,purpose:del.name,audience:_delAudience(del),qualityStandard:"cfo_model",priority:"primary"};
+                                        const _plan:ExecutionPlan={objectiveRestated:del.name,domain:"strategy",persona:"Senior Consultant",audience:_delAudience(del),qualityStandard:"cfo_model",decisionContext:del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
                                         await _bee.generatePDF(_plan,_spec,_pubCtx,cnt,()=>{});
                                         _pdfOk=_w;
                                       }catch(_e:any){recordEngineDowngrade(del.name,"pdf",_e);}
@@ -7407,8 +7514,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                           ensureXLSX,ensurePptx,ensureJsPDF,
                                           (_fname:any,buf:any)=>{dlFile(nm+".xlsx",buf,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");_w=true;},
                                           stripMd);
-                                        const _spec:DeliverableSpec={type:"xlsx",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
-                                        const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"finance",persona:"Senior FP&A Director",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+                                        const _spec:DeliverableSpec={type:"xlsx",title:del.name,purpose:del.description||del.name,audience:_delAudience(del),qualityStandard:"cfo_model",priority:"primary"};
+                                        const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"finance",persona:"Senior FP&A Director",audience:_delAudience(del),qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
                                         const _res:any=await _bee.generateExcel(_plan,_spec,_pubCtx,cnt,projectExecution?.context?.company?.currency||"INR",projectExecution?.context?.company?.currencySymbol||"₹",()=>{});
                                         _xlsxOk=_w;
                                         if(!_w&&_res?.error)throw new Error(_res.error);
@@ -7440,8 +7547,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                           ensureXLSX,ensurePptx,ensureJsPDF,
                                           (_fname:any,buf:any)=>{dlFile(nm+".pptx",buf,"application/vnd.openxmlformats-officedocument.presentationml.presentation");_w=true;},
                                           stripMd);
-                                        const _spec:DeliverableSpec={type:"pptx",title:del.name,purpose:del.description||del.name,audience:"board",qualityStandard:"cfo_model",priority:"primary"};
-                                        const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:"board",qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
+                                        const _spec:DeliverableSpec={type:"pptx",title:del.name,purpose:del.description||del.name,audience:_delAudience(del),qualityStandard:"cfo_model",priority:"primary"};
+                                        const _plan:ExecutionPlan={objectiveRestated:del.description||del.name,domain:(["finance","audit","strategy","marketing","operations","hr","legal","technology","sales","risk"] as const).find(d=>(del.capabilityType||"").toLowerCase().includes(d)||del.name.toLowerCase().includes(d))||"strategy",persona:"Senior Consultant",audience:_delAudience(del),qualityStandard:"cfo_model",decisionContext:del.description||del.name,deliverables:[_spec],missingInfo:[],executionOrder:[del.name],validationCriteria:[]};
                                         await _bee.generatePPTX(_plan,_spec,_pubCtx,cnt,()=>{});
                                         _pptxOk=_w;
                                       }catch(_e:any){recordEngineDowngrade(del.name,"pptx",_e);}
@@ -8700,6 +8807,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
       )}
       {extractModal&&<ExtractReviewModal extracted={extractModal.items} sourceType={extractModal.sourceType} sourceLabel={extractModal.sourceLabel} onConfirm={confirmExtractedItems} onCancel={()=>setExtractModal(null)} AR={AR} S={S}/>}
       {showDonate&&<DonateModal cfg={dnCfg} presets={DONATION_PRESETS} onClose={()=>setShowDonate(false)} cur={cur} amt={dnAmt} setAmt={setDnAmt} custom={dnCustom} setCustom={setDnCustom} S={S}/>}
+      <ExportAudienceDialog/>
       <TokenBadge defP={defP} setDefP={p=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} keys={keys} onOpen={()=>{setView("tokens");}} />
       <Toaster toasts={toasts} onDismiss={id=>setToasts(prev=>prev.filter(t=>t.id!==id))}/>
       <style>{CSS}</style>
