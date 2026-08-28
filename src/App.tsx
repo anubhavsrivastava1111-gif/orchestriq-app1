@@ -8536,7 +8536,12 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                     </div>
                   ))}
                 </div>
-                {cfgP.length>1&&(
+                {/* WAS cfgP.length>1. If NVIDIA was your ONLY provider - no other
+                    keys entered, which is exactly how a new user starts - cfgP had
+                    one entry and this entire panel disappeared, taking the NVIDIA
+                    model list with it. A single-provider user could not see or
+                    change anything about the provider they were actually using. */}
+                {cfgP.length>0&&(
                   <div style={{padding:"10px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:10}}>
                     <label style={{...S.lbl,marginBottom:2}}>Primary AI</label>
                     <div style={{fontSize:8.5,color:"#5A6480",marginBottom:6,lineHeight:1.5}}>Your Primary AI handles all general reasoning, research, writing and orchestration. Specialist tasks are automatically routed to the best available model, then control returns to your Primary AI.</div>
@@ -8549,12 +8554,33 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                           {p==="nvidia"&&<div style={{fontSize:7.5,color:"#76B900",marginTop:2,fontWeight:700}}>\u2728 No key needed</div>}
                         </button>);})}
                     </div>
-                    {defP==="nvidia"&&(
+                    {/* WAS defP==="nvidia". The model list only appeared when NVIDIA
+                        was your PRIMARY AI. With DeepSeek primary and NVIDIA still in
+                        the fallback chain - which is a completely normal setup - the
+                        control vanished, and there was no way to see or change which
+                        NVIDIA model you were on. NVIDIA is ALWAYS available (it needs
+                        no key), so the list should always be reachable. */}
+                    {cfgP.includes("nvidia")&&(
                       <div style={{marginBottom:8}}>
-                        <label style={{...S.lbl,marginBottom:3}}>NVIDIA model</label>
+                        <label style={{...S.lbl,marginBottom:3}}>
+                          NVIDIA model{defP!=="nvidia"?" (used for fallback and free-tier calls)":""}
+                        </label>
                         <select value={keys.nvidiaModel||MODELS.nvidia.model} onChange={e=>{const nk={...keys,nvidiaModel:e.target.value};setKeys(nk);sv("cos-keys",{keys:nk,defaultProvider:defP,multiAI});}} style={{...S.inp,cursor:"pointer"}}>
                           {NVIDIA_MODELS.map(m=><option key={m.id} value={m.id}>{m.label} \u2014 {m.note}</option>)}
                         </select>
+                        {/* The dropdown label alone does not tell you what you are
+                            running. NVIDIA models differ sharply: the 550B reasons
+                            deeply but is slow enough to hit the 75-second proxy
+                            timeout on long prompts, while llama-3.3-70b is fast and
+                            does not reason at all. Showing the characteristics here
+                            means the choice is informed rather than a guess. */}
+                        {(()=>{const sel=NVIDIA_MODELS.find(m=>m.id===(keys.nvidiaModel||MODELS.nvidia.model));
+                          return sel?<div style={{fontSize:8,color:"#5A6480",marginTop:3,lineHeight:1.45}}>
+                            {sel.note}{/reasoning/.test(sel.note)?" \u00b7 slower on long prompts":" \u00b7 fast"}
+                          </div>:null;})()}
+                        <div style={{fontSize:8,color:"#5A6480",marginTop:3,lineHeight:1.45}}>
+                          {NVIDIA_MODELS.length} models available, free, no key required.
+                        </div>
                       </div>
                     )}
                     <label style={{...S.lbl,marginBottom:4}}>Automatic Specialist Routing</label>
