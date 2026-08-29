@@ -6600,7 +6600,17 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     // user saw only "could not build in your browser" with no cause, and the
     // real explanation was buried in a console warning nobody reads.
     let _bpWhy="";
-    if(format!=="xlsx"){
+    // MY MISTAKE IN SESSION 53B, STATED PLAINLY: I made an unproven path the
+    // SILENT DEFAULT for every user and every provider. It should have been
+    // opt-in from the first line. A beta path must never quietly replace one
+    // that works - that is the no-downgrade rule we agreed, and I broke it.
+    //
+    // Default OFF. With this unset - which it is for everyone, nobody has ever
+    // set it - railwayGenerate behaves EXACTLY as it did in Session 52, the
+    // version you confirmed working. No settings change is needed from you;
+    // deploying this is the restoration.
+    const _browserDocs=(()=>{try{return localStorage.getItem("oiq-browser-docs")==="1";}catch{return false;}})();
+    if(_browserDocs&&format!=="xlsx"){
       try{
         const _bpBrief=opts.brief||[
           "Produce a "+format.toUpperCase()+" titled: "+(opts.title||"Document"),
@@ -8441,6 +8451,23 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 <button key={t.id} onClick={()=>expMode==="pdf"?setExpDocType(t.id):setExpPptType(t.id)} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 10px",borderRadius:6,border:"1px solid "+(sel?c+"66":"#1a2030"),background:sel?c+"0d":"#0a0e1a",cursor:"pointer",fontFamily:"Manrope,sans-serif",textAlign:"left"}}>
                   <span style={{fontSize:15}}>{t.ic}</span><div><div style={{fontSize:10,fontWeight:700,color:sel?c:"#A0AAC0"}}>{t.label}</div>{t.desc&&<div style={{fontSize:8,color:"#5A6480"}}>{t.desc}</div>}</div>
                 </button>);})}
+            </div>
+            <div style={{padding:"9px 11px",background:"#0a0e1a",borderRadius:6,border:"1px solid #1a2030",marginBottom:12}}>
+              <label style={{display:"flex",alignItems:"flex-start",gap:8,cursor:"pointer"}}>
+                <input type="checkbox" defaultChecked={(()=>{try{return localStorage.getItem("oiq-browser-docs")==="1";}catch{return false;}})()}
+                  onChange={e=>{try{localStorage.setItem("oiq-browser-docs",e.target.checked?"1":"0");}catch{}
+                    showToast(e.target.checked?"Browser builder ON — NVIDIA can now generate documents":"Browser builder OFF — using the server engine","info");}}
+                  style={{marginTop:2,cursor:"pointer"}}/>
+                <span>
+                  <span style={{fontSize:10,fontWeight:700,color:"#F1F5F9"}}>Build documents in your browser (beta)</span>
+                  <span style={{display:"block",fontSize:8.5,color:"#5A6480",marginTop:3,lineHeight:1.5}}>
+                    OFF by default. When ON, the document structure is designed in your browser —
+                    this lets NVIDIA generate documents and stops your API keys being sent to the
+                    render server. When OFF, the proven server engine is used. If exports fail or
+                    look worse after enabling it, switch it back off; nothing else changes.
+                  </span>
+                </span>
+              </label>
             </div>
             <label style={S.lbl}>Audience — who is this for?</label>
             <div style={{fontSize:8.5,color:"#5A6480",marginBottom:6,lineHeight:1.5}}>This changes what the document contains, not just its tone. An investor pack leads with market size and unit economics; an operations review leads with steps, owners and dates. Same evidence, different document.</div>
