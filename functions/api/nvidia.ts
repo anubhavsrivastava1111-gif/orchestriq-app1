@@ -150,10 +150,6 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   // 1 ── ORIGIN
   if (!cors.ok) return json({ error: "Origin not allowed." }, 403, cors.headers);
 
-  if (!env.NVIDIA_API_KEY) {
-    return json({ error: "NVIDIA is not configured on this deployment: the NVIDIA_API_KEY secret is missing in Cloudflare Pages (Settings -> Environment variables -> Production), or the project has not been redeployed since it was added." }, 503, cors.headers);
-  }
-
   // 2 ── AUTHENTICATION. Never optional.
   const auth = request.headers.get("Authorization") || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
@@ -167,28 +163,61 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   const user = await verifyJwt(token, supaUrl);
   if (!user) return json({ error: "Session invalid or expired. Sign in again." }, 401, cors.headers);
 
-  // 3 ── QUOTAS
+  // 3 ── PAYLOAD, READ BEFORE QUOTAS.
+  // A Request body can be read ONCE. The quota decision depends on whether the
+  // caller supplied their own key, and that is inside the body - so the body
+  // must be parsed before quotas, not after. Reading it twice would throw and
+  // take NVIDIA down completely.
+  let body: any;
+  try { body = await request.json(); }
+  catch { return json({ error: "Invalid request body" }, 400, cors.headers); }
+
+  // BRING-YOUR-OWN-KEY.
+  // NVIDIA previously worked only on the shared free-tier key held in
+  // Cloudflare, which only the deployment owner can set. Every other user was
+  // capped by the daily quota, and documents could never be generated because
+  // the render service has no NVIDIA credential of its own.
+  //
+  // A caller may now supply their own key. It is used for THIS request only:
+  // never stored, never logged, never echoed into a response header - the
+  // observability headers below carry model, budget and quota figures only.
+  // It is accepted only if it matches NVIDIA's real key shape, so a stray
+  // string cannot silently replace the shared key with something meaningless.
+  const rawUserKey = String((body && body.user_key) || "").trim();
+  const userKey = /^nvapi-[A-Za-z0-9_\-]{20,}$/.test(rawUserKey) ? rawUserKey : "";
+
+  // The shared key is required ONLY for free-tier callers. Someone using their
+  // own key does not need this deployment to have one at all.
+  if (!env.NVIDIA_API_KEY && !userKey) {
+    return json({ error: "NVIDIA is not configured on this deployment: the NVIDIA_API_KEY secret is missing in Cloudflare Pages (Settings -> Environment variables -> Production), or the project has not been redeployed since it was added. You can instead add your own NVIDIA API key in Settings." }, 503, cors.headers);
+  }
+
+  // 4 ── QUOTAS
   const day = new Date().toISOString().slice(0, 10);
   const perUser = parseInt(env.NVIDIA_DAILY_PER_USER || "25", 10);
   const perIp = parseInt(env.NVIDIA_DAILY_PER_IP || "60", 10);
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
 
-  const u = await bump(env.OIQ_QUOTA, "nvq:u:" + user.sub + ":" + day, perUser);
+  // The quota exists to protect the SHARED key from being drained. A user
+  // spending their own credits consumes nothing of ours, so charging them
+  // against our daily limit would be plainly wrong - and it is the very limit
+  // the error message tells them to escape by adding a key.
+  // Authentication above is still enforced either way: without it this endpoint
+  // would be an open relay anyone could point at NVIDIA through our domain.
+  const u = userKey ? { ok: true, used: 0 }
+    : await bump(env.OIQ_QUOTA, "nvq:u:" + user.sub + ":" + day, perUser);
   if (!u.ok) {
-    return json({ error: "Daily free-tier limit reached (" + perUser + " requests). Add your own API key in Settings to continue, or try again tomorrow." },
+    return json({ error: "Daily free-tier limit reached (" + perUser + " requests). Add your own NVIDIA API key in Settings to continue, or try again tomorrow." },
       429, { ...cors.headers, "x-oiq-quota": "user" });
   }
-  const i = await bump(env.OIQ_QUOTA, "nvq:i:" + ip + ":" + day, perIp);
+  const i = userKey ? { ok: true, used: 0 }
+    : await bump(env.OIQ_QUOTA, "nvq:i:" + ip + ":" + day, perIp);
   if (!i.ok) {
-    return json({ error: "Too many requests from this network today. Add your own API key in Settings to continue." },
+    return json({ error: "Too many requests from this network today. Add your own NVIDIA API key in Settings to continue." },
       429, { ...cors.headers, "x-oiq-quota": "ip" });
   }
 
-  // 4 ── PAYLOAD
-  let body: any;
-  try { body = await request.json(); }
-  catch { return json({ error: "Invalid request body" }, 400, cors.headers); }
-
+  // 5 ── VALIDATE
   const { sys, messages, model, max_tokens, reasoning, task } = body || {};
   if (!Array.isArray(messages)) return json({ error: "messages array required" }, 400, cors.headers);
   if (messages.length > 40) return json({ error: "Too many messages in one request." }, 413, cors.headers);
@@ -226,6 +255,10 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   const obs = {
     ...cors.headers,
     "x-oiq-model": requested,
+    // Which key served the request. NEVER the key itself - just "own" or
+    // "shared", so a support question can be answered without asking anyone to
+    // paste a credential.
+    "x-oiq-key": userKey ? "own" : "shared",
     "x-oiq-reasoning": reasoningOn ? "on" : "off",
     "x-oiq-budget": String(budget),
     "x-oiq-quota-used": String(u.used) + "/" + String(perUser),
@@ -235,7 +268,9 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   try {
     const upstream = await fetch(NVIDIA_ENDPOINT, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + env.NVIDIA_API_KEY },
+      // The caller's own key when they brought one; otherwise the shared
+      // free-tier key, exactly as before.
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + (userKey || env.NVIDIA_API_KEY) },
       body: JSON.stringify(payload),
       // WAS 120000. THIS IS WHY YOU SAW RAW HTML INSTEAD OF AN ERROR MESSAGE.
       // Cloudflare kills a Worker subrequest at about 90 seconds, and the edge
