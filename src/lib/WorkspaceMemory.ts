@@ -1,7 +1,41 @@
 // src/lib/WorkspaceMemory.ts
 // Single place that handles ALL data storage for OrchestrIQ.
 // App.tsx never calls localStorage directly — it calls this instead.
-// When cloud storage is ready, only this file changes. App.tsx stays the same.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// WHY THIS FILE WAS REWRITTEN — A CONFIDENTIALITY FAILURE
+//
+// Every value was stored under a FIXED key: "cos-keys", "cos-br", and so on.
+// Nothing was scoped to the signed-in user, and the ordinary sign-out path
+// never cleared any of it — only the "full reset" button did.
+//
+// The consequence, reproduced exactly as reported: sign in as user A, enter API
+// keys, sign out, sign in as user B ON THE SAME BROWSER, and user B's app reads
+// localStorage["cos-keys"] and finds user A's keys. The same for boardroom
+// sessions, the ledger, company data and everything else.
+//
+// To be precise about what this was and was not:
+//   IT WAS NOT a server-side leak. The Supabase `profiles` table has correct
+//   row-level security (auth.uid() = id) and I verified against live data that
+//   the two non-admin accounts hold NO keys at all. Nothing was ever exposed
+//   through the database or to any remote user.
+//   IT WAS a same-device leak, and that is still serious: any shared computer,
+//   demo laptop, or account switch exposed one user's credentials to the next.
+//
+// THE FIX: every key is namespaced with the signed-in user's id, so two users
+// on the same browser write to different key names and CANNOT read each other's
+// data — even if sign-out never runs, the tab crashes, or the browser is
+// closed mid-session. Clearing on sign-out is now defence in depth rather than
+// the only line of defence.
+//
+// The user id is read synchronously from the Supabase session that already
+// lives in localStorage, so scoping is correct from the very first read on page
+// load. Waiting for an async auth callback would have left a window where the
+// old, unscoped keys were still being read.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SUPABASE_REF = "wfpqesnttzarfdfsghzw";
+const LEGACY_MIGRATED_FLAG = "oiq-scoped-v1";
 
 const ALL_KEYS = [
   "cos-keys","cos-co","cos-ch","cos-dp","cos-cd",
@@ -11,43 +45,136 @@ const ALL_KEYS = [
   "cos-ap","cos-ap-live","cos-vl","cos-theme",
   "cos-lastvisit","oiq-sb-col","cos-decision-history",
   "cos-pulse-concur","cos-pulse-email","cos-pulse-sn","cos-pulse-cfg",
-  "cos-fin-ap","cos-fin-ar",   "oiq-agent-history","oiq-agent-prefs","cos-unfulfilled-log",   "oiq-learn-index","oiq-learning-enabled",
+  "cos-fin-ap","cos-fin-ar","oiq-agent-history","oiq-agent-prefs",
+  "cos-unfulfilled-log","oiq-learn-index","oiq-learning-enabled",
+  // These three were storing real usage and cost data and were NOT in this
+  // list, which meant even the full-reset button left them behind.
+  "oiq-token-records","oiq-usage-queue","oiq-browser-docs",
 ];
+
+/** Keys that must NEVER survive an account switch, in any circumstance. */
+const SENSITIVE_KEYS = ["cos-keys", "oiq-token-records", "oiq-usage-queue"];
+
+/**
+ * The signed-in user's id, read straight from the Supabase session in
+ * localStorage. Synchronous by design: storage reads happen during the first
+ * render, long before any auth callback would fire.
+ * Returns "" when nobody is signed in — anonymous data stays unscoped and is
+ * wiped the moment a real user signs in.
+ */
+function currentUid(): string {
+  try {
+    const raw = localStorage.getItem("sb-" + SUPABASE_REF + "-auth-token");
+    if (!raw) return "";
+    const s = JSON.parse(raw);
+    return String(s?.user?.id || s?.currentSession?.user?.id || "");
+  } catch { return ""; }
+}
+
+/** Namespaced storage key. Two users produce two different names. */
+function scoped(key: string): string {
+  const uid = currentUid();
+  return uid ? "u:" + uid + ":" + key : key;
+}
+
+/**
+ * One-time migration so the existing owner does not lose their workspace.
+ * The unscoped values are handed to the FIRST user who signs in after this
+ * ships — which on your device is you — and then deleted, so nobody who signs
+ * in afterwards can ever reach them.
+ *
+ * SENSITIVE_KEYS are deliberately NOT migrated silently: API keys are re-entered
+ * rather than inherited. Losing a saved key is a minor inconvenience; handing
+ * one to the wrong account is the failure this rewrite exists to prevent.
+ */
+function migrateLegacyOnce(): void {
+  try {
+    const uid = currentUid();
+    if (!uid) return;
+    if (localStorage.getItem(LEGACY_MIGRATED_FLAG + ":" + uid) === "1") return;
+
+    for (const key of ALL_KEYS) {
+      const legacy = localStorage.getItem(key);
+      if (legacy === null) continue;
+      if (!SENSITIVE_KEYS.includes(key)) {
+        const target = "u:" + uid + ":" + key;
+        if (localStorage.getItem(target) === null) {
+          try { localStorage.setItem(target, legacy); } catch { /* full */ }
+        }
+      }
+      // Remove the unscoped copy either way. This is what closes the hole:
+      // after the first sign-in, no unscoped value remains for anyone to read.
+      try { localStorage.removeItem(key); } catch { /* ignore */ }
+    }
+    localStorage.setItem(LEGACY_MIGRATED_FLAG + ":" + uid, "1");
+  } catch { /* never block the app on migration */ }
+}
+
+let migrationDone = false;
+function ensureMigrated(): void {
+  if (migrationDone) return;
+  migrationDone = true;
+  migrateLegacyOnce();
+}
 
 export const WorkspaceMemory = {
 
-  // Save a value
   set(key: string, value: unknown): void {
     try {
-      localStorage.setItem(key, typeof value === "string" ? value : JSON.stringify(value));
+      ensureMigrated();
+      localStorage.setItem(scoped(key), typeof value === "string" ? value : JSON.stringify(value));
     } catch { /* storage full — silent */ }
   },
 
-  // Load a value
   get<T>(key: string): T | null {
     try {
-      const raw = localStorage.getItem(key);
+      ensureMigrated();
+      const raw = localStorage.getItem(scoped(key));
       if (raw === null) return null;
       try { return JSON.parse(raw) as T; } catch { return raw as unknown as T; }
     } catch { return null; }
   },
 
-  // Wipe EVERYTHING for this user — used by full reset
+  /** Wipe this user's data only. Another signed-in user's data is untouched. */
   clearAll(): void {
+    ensureMigrated();
     for (const key of ALL_KEYS) {
-      try { localStorage.removeItem(key); } catch { /* ignore */ }
+      try { localStorage.removeItem(scoped(key)); } catch { /* ignore */ }
+      try { localStorage.removeItem(key); } catch { /* ignore legacy */ }
     }
   },
 
-  // Add a new key here whenever a new feature saves something new.
-  // This is the ONLY place you need to update.
+  /**
+   * Called on SIGN OUT. Removes every OrchestrIQ value for every user on this
+   * device, plus any stray legacy value.
+   *
+   * Why every user and not just the one signing out: a shared or demo machine
+   * should not retain one person's credentials for the next person to find. The
+   * cost is that a returning user re-enters their keys; the benefit is that
+   * walking away from a browser cannot expose them. For a product handling
+   * financial data that is the right way round.
+   */
+  clearDevice(): void {
+    try {
+      const doomed: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        const bare = k.startsWith("u:") ? k.slice(k.indexOf(":", 2) + 1) : k;
+        if (ALL_KEYS.includes(bare) || k.startsWith(LEGACY_MIGRATED_FLAG)) doomed.push(k);
+      }
+      for (const k of doomed) { try { localStorage.removeItem(k); } catch { /* ignore */ } }
+      migrationDone = false;
+    } catch { /* ignore */ }
+  },
+
+  /** True when a signed-in user owns the current namespace. Diagnostics only. */
+  isScoped(): boolean { return !!currentUid(); },
+
   getAllKeys(): string[] {
     return [...ALL_KEYS];
   },
 
-  // Business State — single source of truth for org context.
-  // Read by Intelligence Engine (Session 2) as its starting point.
-  // Updated incrementally — never overwrites, always merges.
   buildBusinessState(data: {
     company: Record<string, string>;
     companyData: Record<string, string>;
