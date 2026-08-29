@@ -279,7 +279,7 @@ const PROVIDER_META = {
   gemini:   {name:"Gemini",   cost:"$",  speed:"fast",  quality:"great",blurb:"Fast, generous free tier, good research"},
   groq:     {name:"Groq",     cost:"$",  speed:"fast",  quality:"good", blurb:"Fastest responses; great for drafts"},
   fal:      {name:"fal.ai",   cost:"$$", speed:"medium",quality:"best", blurb:"Images & video (Flux, Kling, Veo)"},
-  nvidia:   {name:"NVIDIA (Free)", cost:"Free",speed:"medium",quality:"good", blurb:"No key needed \u2014 great starting point"},
+  nvidia:   {name:"NVIDIA", cost:"Free tier or your own key",speed:"medium",quality:"good", blurb:"Works with no key \u00b7 add your own for unlimited use"},
 } as Record<string,{name:string;cost:string;speed:string;quality:string;blurb:string}>;
 // Tasks where the user's Primary AI leads; specialists lead everywhere else.
 const PRIMARY_LED_TASKS=["general","creative","code","research"];
@@ -6954,7 +6954,14 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
   // A provider is usable only if it has a key AND is switched on. Everything
   // downstream (Primary AI, fallback chain, specialist routing) reads cfgP, so
   // switching one off behaves exactly as if its key were never entered.
-  const cfgP=["nvidia",...Object.keys(keys).filter(p=>isAiProviderKey(p)&&keys[p]?.trim()&&!offP[p])];
+  // "NVIDIA - 2 keys" with one key entered, and the provider card rendered
+  // twice. This line HARDCODES "nvidia" at position 0, because the free tier is
+  // always available, then appends every provider that has a key. Before
+  // Session 58 nobody COULD have an NVIDIA key, so the collision was
+  // impossible. Adding the key field created it.
+  // Beyond the wrong label it also duplicated a React key on the provider cards
+  // and made the failover chain try NVIDIA twice before moving on.
+  const cfgP=Array.from(new Set(["nvidia",...Object.keys(keys).filter(p=>isAiProviderKey(p)&&keys[p]?.trim()&&!offP[p])]));
   // AI providers PLUS any web-search service with a key: everything that receives
   // user text. Search services get only the query, and the disclosure says so.
   const activeProviderIds=["nvidia",...Object.keys(keys).filter(p=>keys[p]?.trim()&&!offP[p])]
@@ -8637,7 +8644,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                           setOffProviders(next); // keep the gate in sync immediately
                           try{showToast(MODELS[id]?.name+(next[id]?" switched OFF — it will not be used or billed anywhere":" switched ON"),next[id]?"warning":"success");}catch{}
                           if(next[id]&&defP===id){
-                            const fall=["nvidia",...Object.keys(keys).filter(p=>isAiProviderKey(p)&&keys[p]?.trim()&&!next[p])];
+                            const fall=Array.from(new Set(["nvidia",...Object.keys(keys).filter(p=>isAiProviderKey(p)&&keys[p]?.trim()&&!next[p])]));
                             setDefP(fall[1]||"nvidia");
                           }
                         }}
