@@ -175,7 +175,7 @@ const MODELS = {
   kimi:{name:"Kimi",company:"Moonshot AI",model:"moonshot-v1-8k",placeholder:"sk-...",color:"#8B5CF6",keyUrl:"https://platform.moonshot.cn/console/api-keys",note:"Fast · Affordable · Strong multilingual"},
   stability:{name:"Stability AI",company:"Stability AI",model:"stable-diffusion-xl-1024-v1-0",placeholder:"sk-...",color:"#EC4899",keyUrl:"https://platform.stability.ai/account/credits",note:"Image generation · ~₹3/image · Optional"},
   fal:{name:"fal.ai",company:"fal.ai",placeholder:"key-...",color:"#7C3AED",keyUrl:"https://fal.ai/dashboard/keys"},
-  nvidia:{name:"NVIDIA (Free)",company:"NVIDIA",model:NVIDIA_DEFAULT_MODEL,color:"#76B900",note:"No key needed \u2014 free tier via NVIDIA NIM"},
+  nvidia:{name:"NVIDIA",company:"NVIDIA",model:NVIDIA_DEFAULT_MODEL,placeholder:"nvapi-... (optional \u2014 free tier works without one)",color:"#76B900",keyUrl:"https://build.nvidia.com/",note:"Free tier needs no key \u00b7 add your own for unlimited use and document generation"},
 };
 // This list was hardcoded and had gone stale: it still offered nemotron-4-340b
 // and llama-3.1-nemotron-70b, neither of which NVIDIA serves any more, while the
@@ -1308,7 +1308,11 @@ function httpErrText(t:string,status:number):string{
   }
   return s.slice(0,200);
 }
-async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string){
+// userKey is the caller's OWN NVIDIA key when they have entered one in
+// Settings. It is passed straight through to the proxy for that single request
+// and is never stored anywhere but the browser, exactly like every other
+// provider key in this app.
+async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string,userKey?:string){
   // Reasoning models spend output tokens THINKING before they answer. The task
   // decides whether that is worth paying for; the registry decides how much
   // headroom the answer then needs on top. Deciding it here means no module has
@@ -1323,7 +1327,7 @@ async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string){
   let nvAuth="";
   try{const {data:{session}}=await supabase.auth.getSession();nvAuth=session?.access_token||"";}catch{}
   if(!nvAuth)throw new Error("NVIDIA (Free) requires you to be signed in. Sign in, or add your own provider key in Settings.");
-  const r=await fetch("/api/nvidia",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+nvAuth},body:JSON.stringify({sys,messages:msgs,model:nvModel,max_tokens:nvBudget,reasoning:nvReason,task:nvTask})});
+  const r=await fetch("/api/nvidia",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+nvAuth},body:JSON.stringify({sys,messages:msgs,model:nvModel,max_tokens:nvBudget,reasoning:nvReason,task:nvTask,user_key:(userKey&&userKey!=="nvidia")?userKey:""})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error;}catch{m=httpErrText(t,r.status);}if(r.status===429)throw new Error("NVIDIA: Free daily limit reached. Add your own key in Settings for unlimited use.");if(r.status===503)throw new Error("NVIDIA: Free tier not yet configured on this deployment.");throw new Error(m||("NVIDIA "+r.status));}
   const d=await r.json();
   const ntext=d.choices?.[0]?.message?.content||"";
@@ -1666,7 +1670,7 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,mode
     timerId=setTimeout(()=>rej(new Error("Request timed out after "+(timeoutMs/1000)+"s. The AI provider may be busy — try switching to Gemini (free tier).")),timeoutMs);
   });
   const callP=(async()=>{
-    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT,enableSearch):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT,modelOverride):provider==="kimi"?await callKimi(key,sys,msgs,maxT):provider==="fal"?await(async()=>{const prompt=rawMsgs?.find((m:any)=>m.role==="user")?.content||"generate image";const url=await callFalImage(key,prompt);return{text:`🖼️ Image URL: ${url}`,truncated:false};})():provider==="nvidia"?{text:await callNvidia(sys,msgs,maxT,modelOverride,USAGE_CTX.feature),truncated:false}:Promise.reject(new Error("Unknown provider: "+provider));
+    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT,enableSearch):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT,modelOverride):provider==="kimi"?await callKimi(key,sys,msgs,maxT):provider==="fal"?await(async()=>{const prompt=rawMsgs?.find((m:any)=>m.role==="user")?.content||"generate image";const url=await callFalImage(key,prompt);return{text:`🖼️ Image URL: ${url}`,truncated:false};})():provider==="nvidia"?{text:await callNvidia(sys,msgs,maxT,modelOverride,USAGE_CTX.feature,key),truncated:false}:Promise.reject(new Error("Unknown provider: "+provider));
     if(raw&&typeof raw==="object"&&"text" in raw)return raw as {text:string;truncated:boolean};
     return {text:raw as string,truncated:false};
   })();
@@ -8599,7 +8603,13 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 <div style={{background:"rgba(118,185,0,0.06)",border:"1px solid rgba(118,185,0,0.25)",borderRadius:6,padding:"8px 10px",marginBottom:12,fontSize:10,color:"#76B900"}}>
                   \u2728 NVIDIA (Free) works automatically \u2014 no key needed. Select it as your Primary AI below to try the platform instantly.
                 </div>
-                {Object.entries(MODELS).filter(([id])=>id!=="nvidia").map(([id,m])=>(
+                {/* WAS filtered out entirely. NVIDIA was the only provider with no
+                    key field, because the free tier runs on a shared key held in
+                    Cloudflare that only the deployment owner can set. That left every
+                    other user capped by the daily quota and unable to generate
+                    documents at all. The field is OPTIONAL: leave it empty and the
+                    free tier works exactly as before. */}
+                {Object.entries(MODELS).map(([id,m])=>(
                   <div key={id} style={{marginBottom:10}}>
                     <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}>
                       <div style={{width:6,height:6,borderRadius:"50%",background:keys[id]?.trim()?m.color:"#3A4060"}}/>
