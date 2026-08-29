@@ -81,6 +81,18 @@ function extractJson(raw: string): any | null {
   let t = String(raw).trim();
   t = t.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
   try { return JSON.parse(t); } catch { /* keep trying */ }
+
+  // THE PYTHON PATH HAS FOUR RECOVERY STRATEGIES. THIS HAD TWO.
+  // Models routinely emit curly quotes and trailing commas, and a long
+  // blueprint frequently runs out of output tokens mid-object. Python repairs
+  // all of that and, failing everything, still emits a fallback blueprint so a
+  // document is ALWAYS produced. This returned nothing, which is why exports
+  // that used to work started falling through.
+  const repaired = t
+    .replace(/\u201c|\u201d/g, '"')
+    .replace(/\u2018|\u2019/g, "'")
+    .replace(/,\s*([}\]])/g, "$1");
+  try { return JSON.parse(repaired); } catch { /* keep trying */ }
   // Take the outermost balanced object. Substring-to-last-brace fails whenever
   // the model adds a closing remark after the JSON.
   const start = t.indexOf("{");
@@ -96,8 +108,38 @@ function extractJson(raw: string): any | null {
     else if (c === "}") {
       depth--;
       if (depth === 0) {
-        try { return JSON.parse(t.slice(start, i + 1)); } catch { return null; }
+        try { return JSON.parse(t.slice(start, i + 1)); } catch { /* fall through */ }
+        break;
       }
+    }
+  }
+
+  // TRUNCATION REPAIR. A 16-slide blueprint with speaker notes can exceed the
+  // output budget, and the reply then simply stops mid-object. Everything
+  // before the break is perfectly good - discarding it throws away a nearly
+  // complete document. Close the open structures and keep what arrived.
+  const cut = repaired.slice(repaired.indexOf("{"));
+  if (cut) {
+    // Drop the final, incomplete element, then close what is still open.
+    for (const end of [cut.lastIndexOf("},"), cut.lastIndexOf("],"), cut.lastIndexOf("}")]) {
+      if (end <= 0) continue;
+      let head = cut.slice(0, end + 1);
+      let d = 0, inS = false, es = false;
+      const stack: string[] = [];
+      for (const c of head) {
+        if (es) { es = false; continue; }
+        if (c === "\\") { es = true; continue; }
+        if (c === '"') { inS = !inS; continue; }
+        if (inS) continue;
+        if (c === "{" || c === "[") stack.push(c === "{" ? "}" : "]");
+        else if (c === "}" || c === "]") stack.pop();
+      }
+      if (inS) head += '"';
+      const closed = head.replace(/,\s*$/, "") + stack.reverse().join("");
+      try {
+        const parsed = JSON.parse(closed);
+        if (parsed && (Array.isArray(parsed.slides) || Array.isArray(parsed.sections))) return parsed;
+      } catch { /* try the next cut point */ }
     }
   }
   return null;
@@ -258,14 +300,11 @@ export async function buildBlueprint(
   let lastErr = "";
   // THE RETRY USED TO SEND THE SAME PROMPT AGAIN. If the first attempt failed
   // because the prompt was too large to finish inside the provider's time
-  // window - which is exactly what happens to NVIDIA's reasoning models on a
-  // 120,000-character brief - then repeating it verbatim fails identically.
-  // A retry that changes nothing is not a retry.
-  //
+  // window, repeating it verbatim fails identically. A retry that changes
+  // nothing is not a retry, and I should not have written it that way.
   // Each attempt now shrinks the evidence. The audience brief and the schema
-  // are at the TOP of the brief, so trimming from the end removes the least
-  // important material first: the tail of the source content, not the
-  // instructions. Attempt 3 is small enough that any provider can complete it.
+  // sit at the TOP, so trimming from the end removes the least important
+  // material first - the tail of the source content, never the instructions.
   const SIZES = [120000, 35000, 14000];
   for (let attempt = 0; attempt < SIZES.length; attempt++) {
     try {
@@ -277,9 +316,7 @@ export async function buildBlueprint(
         ? trimmed
         : trimmed + "\n\nReturn ONLY the JSON object, starting with { and ending with }. " +
           "No explanation, no markdown fence.";
-      if (attempt > 0) {
-        onProgress("\u26A0\uFE0F Retrying with less content (attempt " + (attempt + 1) + " of " + SIZES.length + ")\u2026");
-      }
+      if (attempt > 0) onProgress("\u26A0\uFE0F Retrying with less content (attempt " + (attempt + 1) + " of " + SIZES.length + ")\u2026");
       const raw = await ask(sys, [{ role: "user", content: user }], isDeck ? 7000 : 8000);
       const text = typeof raw === "string" ? raw : (raw?.text || raw?.content?.[0]?.text || "");
       const parsed = extractJson(String(text));
