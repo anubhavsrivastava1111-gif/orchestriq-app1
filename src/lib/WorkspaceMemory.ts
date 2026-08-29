@@ -35,7 +35,20 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SUPABASE_REF = "wfpqesnttzarfdfsghzw";
-const LEGACY_MIGRATED_FLAG = "oiq-scoped-v1";
+const LEGACY_MIGRATED_FLAG = "oiq-scoped-v2";
+
+// MY BUG, AND IT MADE THINGS WORSE RATHER THAN BETTER.
+// v1 of this migration handed the unscoped workspace to "the first user who
+// signs in after this ships". I wrote that assuming the owner would be first.
+// On the actual device the hotmail test account signed in first, so IT
+// inherited the company profile, the location and the boardroom session. The
+// leak was not closed; it was relocated, and I told you it was fixed.
+//
+// The rule now: legacy data belongs to the OWNER and to nobody else. The owner
+// is identified by the email in the Supabase session, which is available
+// synchronously. Every other account gets the legacy data PURGED, never
+// inherited.
+const OWNER_EMAIL = "anubhavsrivastava1111@gmail.com";
 
 const ALL_KEYS = [
   "cos-keys","cos-co","cos-ch","cos-dp","cos-cd",
@@ -62,14 +75,17 @@ const SENSITIVE_KEYS = ["cos-keys", "oiq-token-records", "oiq-usage-queue"];
  * Returns "" when nobody is signed in — anonymous data stays unscoped and is
  * wiped the moment a real user signs in.
  */
-function currentUid(): string {
+function sessionUser(): { id: string; email: string } {
   try {
     const raw = localStorage.getItem("sb-" + SUPABASE_REF + "-auth-token");
-    if (!raw) return "";
+    if (!raw) return { id: "", email: "" };
     const s = JSON.parse(raw);
-    return String(s?.user?.id || s?.currentSession?.user?.id || "");
-  } catch { return ""; }
+    const u = s?.user || s?.currentSession?.user;
+    return { id: String(u?.id || ""), email: String(u?.email || "").trim().toLowerCase() };
+  } catch { return { id: "", email: "" }; }
 }
+
+function currentUid(): string { return sessionUser().id; }
 
 /** Namespaced storage key. Two users produce two different names. */
 function scoped(key: string): string {
@@ -89,21 +105,35 @@ function scoped(key: string): string {
  */
 function migrateLegacyOnce(): void {
   try {
-    const uid = currentUid();
+    const { id: uid, email } = sessionUser();
     if (!uid) return;
     if (localStorage.getItem(LEGACY_MIGRATED_FLAG + ":" + uid) === "1") return;
+    const isOwner = email === OWNER_EMAIL;
+
+    // ONE-TIME REPAIR of the damage v1 caused. Any workspace that v1 handed to
+    // a non-owner account is removed here. Without this, the hotmail account
+    // keeps the owner's boardroom and company profile forever, because it now
+    // sits under that account's own namespace and looks legitimate.
+    if (!isOwner && localStorage.getItem("oiq-scoped-v1:" + uid) === "1") {
+      for (const key of ALL_KEYS) {
+        try { localStorage.removeItem("u:" + uid + ":" + key); } catch { /* ignore */ }
+      }
+      try { localStorage.removeItem("oiq-scoped-v1:" + uid); } catch { /* ignore */ }
+    }
 
     for (const key of ALL_KEYS) {
       const legacy = localStorage.getItem(key);
       if (legacy === null) continue;
-      if (!SENSITIVE_KEYS.includes(key)) {
+      // Only the owner inherits. Everyone else gets it deleted, not handed over.
+      // API keys are never inherited by anyone, including the owner - they are
+      // re-entered. Losing a saved key is an inconvenience; giving one to the
+      // wrong account is the failure this file exists to prevent.
+      if (isOwner && !SENSITIVE_KEYS.includes(key)) {
         const target = "u:" + uid + ":" + key;
         if (localStorage.getItem(target) === null) {
           try { localStorage.setItem(target, legacy); } catch { /* full */ }
         }
       }
-      // Remove the unscoped copy either way. This is what closes the hole:
-      // after the first sign-in, no unscoped value remains for anyone to read.
       try { localStorage.removeItem(key); } catch { /* ignore */ }
     }
     localStorage.setItem(LEGACY_MIGRATED_FLAG + ":" + uid, "1");
