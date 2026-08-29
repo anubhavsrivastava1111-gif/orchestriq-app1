@@ -6464,7 +6464,10 @@ const processTask=useCallback(async(task:any)=>{
   };
   const fullReset=async()=>{
     try{clearCostContext();}catch{}
+    // clearAll() only removes the CURRENT user's namespace. A full reset that
+    // signs you out must leave nothing behind for the next person either.
     WorkspaceMemory.clearAll();
+    try{WorkspaceMemory.clearDevice();}catch{}
     try{await supabase.auth.signOut();}catch(e){console.warn("[OIQ] Sign out error:",e);}
     window.location.href="/";
   };
@@ -6502,6 +6505,18 @@ const processTask=useCallback(async(task:any)=>{
       try{exportAll();}catch(e){showToast("Save failed: "+(e as Error).message+" — signing out anyway","warning");}
       await new Promise(r=>setTimeout(r,600));
     }
+    // THIS LINE DID NOT EXIST, AND ITS ABSENCE IS THE BUG YOU FOUND.
+    // Ordinary sign-out left every API key, boardroom session, ledger entry and
+    // company record sitting in this browser's storage. The next person to sign
+    // in on the same machine read it as their own. Only the "full reset" button
+    // ever cleared anything.
+    // clearDevice() removes OrchestrIQ data for EVERY user on this device, not
+    // just the one leaving. A shared or demo machine must not hold one person's
+    // credentials for the next person to find. The cost is that a returning
+    // user re-enters their keys; for a product handling financial data that is
+    // the right way round.
+    try{WorkspaceMemory.clearDevice();}catch(e){console.warn("[OIQ] clearDevice:",e);}
+    try{clearCostContext();}catch{}
     try{await supabase.auth.signOut();}catch(e){console.warn("[OIQ] Sign out error:",e);}
     setShowSignOutConfirm(false);
     window.location.reload();
