@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { WorkspaceMemory } from "./lib/WorkspaceMemory";
 
 // ─── CENTRAL PRICING CONFIG ─────────────────────────────────────────────────
 // Single source of truth. Add new provider here only.
@@ -110,11 +111,16 @@ export function estimateTokens(text: string): number {
   return Math.ceil(((text ?? "").length) / 3.8);
 }
 
+// WAS a fixed localStorage key with no user scoping, read and written
+// directly. On a shared browser, the next person to sign in saw the previous
+// user's entire usage and cost history - which feature they used, which
+// provider, how much they spent. Routing it through WorkspaceMemory namespaces
+// it per user, exactly like every other stored value.
 const STORAGE_KEY = "oiq-token-records";
 const SESSION_ID = Date.now().toString(36);
 
 export function loadRecords(): TokenRecord[] {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); } catch { return []; }
+  try { return (WorkspaceMemory.get<any[]>(STORAGE_KEY)) || []; } catch { return []; }
 }
 
 export function saveRecord(rec: Omit<TokenRecord, "id" | "ts" | "session">) {
@@ -128,7 +134,7 @@ export function saveRecord(rec: Omit<TokenRecord, "id" | "ts" | "session">) {
     session: SESSION_ID,
   };
   const updated = [full, ...records].slice(0, 500);
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(updated)); } catch {}
+  try { WorkspaceMemory.set(STORAGE_KEY, updated); } catch {}
   window.dispatchEvent(new CustomEvent("oiq-token-update", { detail: full }));
   return full;
 }
@@ -244,7 +250,7 @@ export default function TokenAnalytics({ defP, keys, me }: { defP: string; keys:
 
   const reset = () => {
     if (!confirm("Reset all token records?")) return;
-    localStorage.removeItem(STORAGE_KEY);
+    WorkspaceMemory.set(STORAGE_KEY, []);
     setRecords([]);
   };
 
