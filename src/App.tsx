@@ -3344,12 +3344,6 @@ export default function App(){
   // ent.unlimited is true for you and for staff, so an owner can never be
   // locked out of their own product by a plan setting.
   const [ent,setEnt]=useState<any>({unlimited:true,features:{}});
-  // What this account's plan actually allows. Loaded once at sign-in from the
-  // database, which is also where it is enforced - this copy only decides what
-  // the menu shows.
-  // ent.unlimited is true for you and for staff, so an owner can never be
-  // locked out of their own product by a plan setting.
-  const [ent,setEnt]=useState<any>({unlimited:true,features:{}});
   const [showSignOutConfirm,setShowSignOutConfirm]=useState(false);
   const [wfView,setWfView]=useState("new");
   const [projects,setProjects]=useState([]);
@@ -3492,14 +3486,6 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
         // against the profiles table, so editing this value in a browser buys
         // nothing but an error message.
         try{setIsAdmin(prof?.role==="super_admin"||prof?.role==="admin");}catch{}
-        // If this call fails for any reason we keep the default of unlimited.
-        // Failing OPEN is deliberate: a database hiccup should never lock a
-        // paying customer out of the product they bought. Session limits are
-        // still enforced separately by the session gate, so nothing is free.
-        try{
-          const {data:_e}=await supabase.rpc("resolve_entitlements");
-          if(_e&&typeof _e==="object")setEnt(_e);
-        }catch(e){console.warn("[OIQ] entitlements unavailable, allowing all:",e);}
         // If this call fails for any reason we keep the default of unlimited.
         // Failing OPEN is deliberate: a database hiccup should never lock a
         // paying customer out of the product they bought. Session limits are
@@ -6996,15 +6982,6 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     return !!ent?.features?.[key]?.enabled;
   },[ent]);
  
-  // ONE place decides whether a module is available. Everything else asks this.
-  const canUse=useCallback((moduleId:string)=>{
-    if(ent?.unlimited)return true;                 // owner and staff
-    const map=ent?.module_map||{};
-    const key=map[moduleId];
-    if(!key)return true;                           // no rule defined = allowed
-    return !!ent?.features?.[key]?.enabled;
-  },[ent]);
- 
   const curRole=AR.find(r=>r.id===selRole);
   const curMsgs=selRole?(chats[selRole]||[]):[];
   // A provider is usable only if it has a key AND is switched on. Everything
@@ -8315,19 +8292,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         {!canUse(view)&&view!=="admin"&&view!=="tokens"&&(
           <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:40}}>
             <div style={{textAlign:"center",maxWidth:400}}>
-              <div style={{fontSize:34,marginBottom:10}}>\u2728</div>
-              <div style={{fontSize:14,fontWeight:800,color:"var(--oiq-ink)",marginBottom:6}}>Not included in your plan</div>
-              <div style={{fontSize:11,color:"#5A6480",lineHeight:1.6,marginBottom:14}}>
-                You are on the <b style={{color:"#14B8A6"}}>{ent?.plan_name||"Free"}</b> plan.
-                This module is available on a higher plan. Use Support to ask about upgrading.
-              </div>
-              <button onClick={()=>setView("nerve")} style={{...S.hBtn,padding:"8px 14px"}}>Back</button>
-            </div>
-          </div>)}
-        {!canUse(view)&&view!=="admin"&&view!=="tokens"&&(
-          <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:40}}>
-            <div style={{textAlign:"center",maxWidth:400}}>
-              <div style={{fontSize:34,marginBottom:10}}>\u2728</div>
+              <div style={{fontSize:34,marginBottom:10}}>✨</div>
               <div style={{fontSize:14,fontWeight:800,color:"var(--oiq-ink)",marginBottom:6}}>Not included in your plan</div>
               <div style={{fontSize:11,color:"#5A6480",lineHeight:1.6,marginBottom:14}}>
                 You are on the <b style={{color:"#14B8A6"}}>{ent?.plan_name||"Free"}</b> plan.
@@ -8712,7 +8677,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                   Gemini is free — no billing needed. Get key at <a href={MODELS.gemini.keyUrl} target="_blank" rel="noopener noreferrer" style={{color:"#4285F4"}}>aistudio.google.com</a>
                 </div>
                 <div style={{background:"rgba(118,185,0,0.06)",border:"1px solid rgba(118,185,0,0.25)",borderRadius:6,padding:"8px 10px",marginBottom:12,fontSize:10,color:"#76B900"}}>
-                  \u2728 NVIDIA (Free) works automatically \u2014 no key needed. Select it as your Primary AI below to try the platform instantly.
+                  ✨ NVIDIA works automatically on the free tier — no key needed. Add your own key below for unlimited use and document generation.
                 </div>
                 {/* WAS filtered out entirely. NVIDIA was the only provider with no
                     key field, because the free tier runs on a shared key held in
@@ -8787,7 +8752,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                           <div style={{fontSize:10,fontWeight:700,color:defP===p?(MODELS[p]?.color||"#14B8A6"):"#A0AAC0"}}>{MODELS[p]?.name||p}{defP===p?" ✓":""}</div>
                           {pm&&<div style={{fontSize:7.5,color:"#5A6480",marginTop:2}}>Cost {pm.cost} · {pm.speed} · {pm.quality}</div>}
                           {pm&&<div style={{fontSize:7.5,color:"#5A6480",marginTop:1,lineHeight:1.4}}>{pm.blurb}</div>}
-                          {p==="nvidia"&&<div style={{fontSize:7.5,color:"#76B900",marginTop:2,fontWeight:700}}>\u2728 No key needed</div>}
+                          {p==="nvidia"&&<div style={{fontSize:7.5,color:"#76B900",marginTop:2,fontWeight:700}}>✨ Free tier · key optional</div>}
                         </button>);})}
                     </div>
                     {/* WAS defP==="nvidia". The model list only appeared when NVIDIA
