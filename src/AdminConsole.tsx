@@ -104,7 +104,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
   const tabs = [
     ["users", "Users", "admin_manage_users"],
     ["plans", "Plans & Pricing", "admin_manage_plans"],
-    ["features", "Features", "admin_manage_plans"],
+    ["features", "Advanced", "admin_manage_plans"],
     ["support", "Support", "admin_manage_support"],
     ["access", "Roles & Access", "__owner"],
   ].filter(([, , cap]) => cap === "__owner" ? caps.is_owner : can(cap as string));
@@ -325,10 +325,92 @@ function PlansTab({ rpc, say }: any) {
   const byCat: Record<string, any[]> = {};
   features.forEach(f => { (byCat[f.category] ||= []).push(f); });
 
+  // Every module, every plan, in one grid. This is the table people actually
+  // want to look at when deciding what to sell: you can see the whole shape of
+  // your product tiers at once, instead of opening each plan in turn and
+  // holding the differences in your head.
+  // Clicking a cell changes it immediately.
+  const modules = features.filter(f => f.category === "modules")
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  const toggleCell = async (planId: string, f: any, next: boolean) => {
+    try {
+      await rpc("admin_set_plan_feature", { p_plan_id: planId, p_feature_key: f.key,
+        p_enabled: next, p_limit: null });
+      load();
+    } catch (e: any) { say(e.message, "bad"); }
+  };
+
   return (
     <>
       <div style={S.card}>
-        <div style={S.h}>Plans</div>
+        <div style={S.h}>What each plan includes</div>
+        <div style={S.sub}>
+          Click any tick or dash to change it. It saves straight away and takes effect
+          the next time that user signs in. No deployment, no code.
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", background: C.panel, color: C.ink }}>
+            <thead>
+              <tr>
+                <th style={{ ...S.th, minWidth: 170 }}>Module</th>
+                {plans.map(p => (
+                  <th key={p.id} style={{ ...S.th, textAlign: "center", minWidth: 92 }}>
+                    <div style={{ color: C.ink, fontSize: 10 }}>{p.name}</div>
+                    <div style={{ color: C.faint, fontWeight: 600, fontSize: 8.5 }}>
+                      {Number(p.price_monthly) === 0 ? "free" : "\u20B9" + p.price_monthly + "/mo"}
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {modules.map(f => (
+                <tr key={f.id}>
+                  <td style={{ ...S.td, fontWeight: 700 }}>{f.label}</td>
+                  {plans.map(p => {
+                    const row = pf[p.id + "|" + f.id] || {};
+                    const on = row.enabled ?? f.default_on;
+                    return (
+                      <td key={p.id} style={{ ...S.td, textAlign: "center", cursor: "pointer",
+                        background: on ? "rgba(34,197,94,0.10)" : "transparent" }}
+                        title={"Click to " + (on ? "remove from" : "add to") + " " + p.name}
+                        onClick={() => toggleCell(p.id, f, !on)}>
+                        <span style={{ fontSize: 13, fontWeight: 800,
+                          color: on ? C.green : C.faint }}>{on ? "\u2713" : "\u2013"}</span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              <tr>
+                <td style={{ ...S.td, fontWeight: 700, color: C.dim }}>Sessions per month</td>
+                {plans.map(p => (
+                  <td key={p.id} style={{ ...S.td, textAlign: "center", color: C.teal, fontWeight: 800 }}>
+                    {p.sessions_per_month ?? "\u2013"}
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td style={{ ...S.td, fontWeight: 700, color: C.dim }}>Executives per session</td>
+                {plans.map(p => (
+                  <td key={p.id} style={{ ...S.td, textAlign: "center", color: C.teal, fontWeight: 800 }}>
+                    {p.agents_allowed ?? "\u2013"}
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <Note>
+          A green tick means that plan gets that module. A grey dash means it does not
+          and the module will not appear in their menu at all.
+          <b> You and your staff always see every module</b>, whatever this table says,
+          so you can never lock yourself out.
+        </Note>
+      </div>
+
+      <div style={S.card}>
+        <div style={S.h}>Prices and limits</div>
         <div style={S.sub}>Change a price or a limit here and it takes effect immediately. No deployment.</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
           {plans.map(p => (
@@ -429,14 +511,24 @@ function FeaturesTab({ rpc, caps, say }: any) {
 
   return (
     <>
+      <Note tone="warn">
+        <b>You will rarely need this tab.</b> Everything you normally do — deciding which
+        plan gets which module — is on the <b>Plans &amp; Pricing</b> tab, in the grid at
+        the top.
+        <br /><br />
+        This tab is only for when a NEW capability is added to the product and it needs a
+        name before it can be sold. Creating a name here does nothing on its own: the
+        application code has to be changed to check for it. So do not create anything here
+        unless a developer has asked you to, and has told you the exact key to type.
+      </Note>
+
       {caps.is_owner && (
         <div style={S.card}>
-          <div style={S.h}>Define a new feature</div>
+          <div style={S.h}>Add a name for a new capability</div>
           <div style={S.sub}>
-            A feature is anything you might want to include in one plan and not another.
-            Create it here, then tick it on for the plans that should have it.
-            <b> The key is permanent</b> — it is what the application code will check, so choose
-            it carefully and use lower_snake_case.
+            Only do this if a developer asked you to, and gave you the exact key.
+            A name created here does nothing until the application is changed to use it.
+            <b> The key can never be changed afterwards.</b>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr 1fr 1fr auto", gap: 8, alignItems: "end" }}>
             <div><label style={S.lbl}>Key</label><input style={S.inp} value={nf.key} placeholder="module_forecasting" onChange={e => setNf({ ...nf, key: e.target.value })} /></div>
@@ -464,7 +556,11 @@ function FeaturesTab({ rpc, caps, say }: any) {
       )}
 
       <div style={S.card}>
-        <div style={S.h}>Feature catalogue ({features.length})</div>
+        <div style={S.h}>Everything the system can switch on or off ({features.length})</div>
+        <div style={S.sub}>
+          A reference list. Nothing here needs changing. Use the Plans &amp; Pricing tab to
+          decide who gets what.
+        </div>
         <table style={{ width: "100%", borderCollapse: "collapse", background: C.panel, color: C.ink }}>
           <thead><tr><th style={S.th}>Key</th><th style={S.th}>Label</th><th style={S.th}>Category</th><th style={S.th}>Type</th></tr></thead>
           <tbody>{features.map(f => (
