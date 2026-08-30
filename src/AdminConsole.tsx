@@ -32,7 +32,12 @@ const S: Record<string, React.CSSProperties> = {
   // which sets its own colours from a theme, and anything left to inherit came
   // out dark-on-dark or white-on-white - which is why the heading and the table
   // header rows were unreadable in your screenshots.
-  wrap:  { padding: 16, color: C.ink, background: C.bg, minHeight: "100%",
+  // WAS minHeight:"100%" with no scrolling, so anything past the bottom of the
+  // window was simply unreachable - you had to zoom the browser out to read it.
+  // Every other screen in this app sets flex:1 with its own overflowY; the
+  // console did not. Now it does.
+  wrap:  { flex: 1, height: "100%", maxHeight: "100vh", overflowY: "auto",
+           padding: 16, color: C.ink, background: C.bg,
            fontFamily: "Manrope,system-ui,sans-serif" },
   card:  { background: C.panel, border: "1px solid " + C.line, borderRadius: 8, padding: 14, marginBottom: 14, color: C.ink },
   h:     { fontSize: 13, fontWeight: 800, marginBottom: 3, color: C.ink },
@@ -103,6 +108,11 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
   const can = (k: string) => caps.is_owner || !!caps.caps?.[k];
   const tabs = [
     ["users", "Users", "admin_manage_users"],
+    // Two separate screens. Deciding WHICH MODULES a plan includes and deciding
+    // WHAT IT COSTS are different jobs done at different times, and putting the
+    // long module grid above the price fields meant the prices were pushed off
+    // the bottom of the screen.
+    ["modules", "Module Access", "admin_manage_plans"],
     ["plans", "Plans & Pricing", "admin_manage_plans"],
     ["features", "Advanced", "admin_manage_plans"],
     ["support", "Support", "admin_manage_support"],
@@ -130,7 +140,8 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
       {msg && <Note tone={msg.tone}>{msg.t}</Note>}
 
       {tab === "users"    && <UsersTab rpc={rpc} caps={caps} say={say} busy={busy} setBusy={setBusy} />}
-      {tab === "plans"    && <PlansTab rpc={rpc} say={say} />}
+      {tab === "modules"  && <PlansTab rpc={rpc} say={say} only="modules" />}
+      {tab === "plans"    && <PlansTab rpc={rpc} say={say} only="pricing" />}
       {tab === "features" && <FeaturesTab rpc={rpc} caps={caps} say={say} />}
       {tab === "support"  && <SupportTab rpc={rpc} say={say} />}
       {tab === "access"   && <AccessTab rpc={rpc} say={say} isOwner={caps.is_owner} />}
@@ -282,7 +293,7 @@ function UsersTab({ rpc, caps, say, busy, setBusy }: any) {
 }
 
 // ── PLANS ────────────────────────────────────────────────────────────────────
-function PlansTab({ rpc, say }: any) {
+function PlansTab({ rpc, say, only }: any) {
   const [plans, setPlans] = useState<any[]>([]);
   const [features, setFeatures] = useState<any[]>([]);
   const [pf, setPf] = useState<Record<string, any>>({});
@@ -340,8 +351,12 @@ function PlansTab({ rpc, say }: any) {
     } catch (e: any) { say(e.message, "bad"); }
   };
 
+  const showModules = only !== "pricing";
+  const showPricing  = only !== "modules";
+
   return (
     <>
+      {showModules && (
       <div style={S.card}>
         <div style={S.h}>What each plan includes</div>
         <div style={S.sub}>
@@ -408,7 +423,9 @@ function PlansTab({ rpc, say }: any) {
           so you can never lock yourself out.
         </Note>
       </div>
+      )}
 
+      {showPricing && (
       <div style={S.card}>
         <div style={S.h}>Prices and limits</div>
         <div style={S.sub}>Change a price or a limit here and it takes effect immediately. No deployment.</div>
@@ -422,10 +439,11 @@ function PlansTab({ rpc, say }: any) {
         </div>
         {plan && <PlanEditor plan={plan} rpc={rpc} say={say} onSaved={load} />}
       </div>
+      )}
 
-      {plan && (
+      {showPricing && plan && (
         <div style={S.card}>
-          <div style={S.h}>What “{plan.name}” includes</div>
+          <div style={S.h}>Everything in “{plan.name}”, in detail</div>
           <div style={S.sub}>
             Tick to include. Numbers take a value — leave a numeric field empty for unlimited.
             Dropdowns pick from the allowed options.
