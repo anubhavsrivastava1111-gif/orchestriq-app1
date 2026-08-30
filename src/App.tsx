@@ -5,6 +5,7 @@ import BoardroomView from "./BoardroomView";
 import FundingIntelligence from "./FundingIntelligence";
 import ServiceDesk from "./ServiceDesk";
 import TokenAnalytics, { saveRecord, estimateCost, saveUnitRecord } from "./TokenAnalytics";
+import AdminConsole from "./AdminConsole";
 import PulseGovernance from "./Pulse";
 import TokenBadge from "./components/TokenBadge";
 import AIAgents from "./AIAgents";
@@ -3332,6 +3333,10 @@ export default function App(){
   const [dnAmt,setDnAmt]=useState(100);
   const [dnCustom,setDnCustom]=useState("");
   const [showDonate,setShowDonate]=useState(false); 
+  // WAS declared and never set or read - dead state since it was written.
+  // It now holds whether this account has ANY administrative reach: the owner,
+  // or a staff member the owner has appointed. The console re-checks with the
+  // database itself, so this only decides whether the menu entry appears.
   const [isAdmin,setIsAdmin]=useState(false);
   const [showSignOutConfirm,setShowSignOutConfirm]=useState(false);
   const [wfView,setWfView]=useState("new");
@@ -3470,6 +3475,11 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
         const {data:prof}=await supabase.from("profiles").select("full_name,role,admin_api_keys,user_api_keys").eq("id",user.id).single();
         setMe({email:(prof as any)?.full_name||user.email||"",role:prof?.role||"user"});
         try{setUsageUser((prof as any)?.full_name||user.email||"",prof?.role||"user");}catch{}
+        // Show the console entry for the owner and for appointed staff. This is
+        // presentation only - every admin action is re-authorised server-side
+        // against the profiles table, so editing this value in a browser buys
+        // nothing but an error message.
+        try{setIsAdmin(prof?.role==="super_admin"||prof?.role==="admin");}catch{}
         // Load this user's saved keys. Row Level Security guarantees this row
         // is only ever returned to its owner.
         try{
@@ -7165,7 +7175,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           </button>
           {showModules&&(
             <div style={{position:"absolute",top:"calc(100% - 2px)",left:10,right:10,background:"var(--oiq-sbBg,var(--oiq-surface2,#0c1120))",backdropFilter:"none",border:"1px solid var(--sb-bdr)",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:7,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
+              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
                 <button key={v} onClick={()=>{setView(v);setShowModules(false);}}
                   style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 11px",background:view===v?"var(--oiq-accent)":"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"inherit",marginBottom:2,transition:"background 0.12s"}}>
                   <span style={{fontSize:15,width:22,textAlign:"center"}}>{ic}</span>
@@ -8256,6 +8266,15 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         )}
 
         {view==="funding"&&<FundingIntelligence co={co} compData={compData} ask={ask}/>}
+        {view==="admin"&&(isAdmin
+          ?<AdminConsole onClose={()=>setView("nerve")}/>
+          :<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:40}}>
+             <div style={{textAlign:"center",maxWidth:380}}>
+               <div style={{fontSize:34,marginBottom:10}}>\uD83D\uDD12</div>
+               <div style={{fontSize:14,fontWeight:800,color:"var(--oiq-ink)",marginBottom:6}}>Restricted</div>
+               <div style={{fontSize:11,color:"#5A6480",lineHeight:1.6}}>This area is for administrators. If you need something changed on your account, use Support to send a message.</div>
+             </div>
+           </div>)}
         {view==="tokens"&&(me.role==="super_admin"
           ?<TokenAnalytics defP={defP} keys={keys} me={me}/>
           :<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:40}}>
