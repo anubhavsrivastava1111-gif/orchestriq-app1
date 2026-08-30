@@ -7,6 +7,7 @@ import ServiceDesk from "./ServiceDesk";
 import TokenAnalytics, { saveRecord, estimateCost, saveUnitRecord } from "./TokenAnalytics";
 import AdminConsole from "./AdminConsole";
 import SupportWidget from "./SupportWidget";
+import MyAccount from "./MyAccount";
 import PulseGovernance from "./Pulse";
 import TokenBadge from "./components/TokenBadge";
 import AIAgents from "./AIAgents";
@@ -7200,13 +7201,24 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           </button>
           {showModules&&(
             <div style={{position:"absolute",top:"calc(100% - 2px)",left:10,right:10,background:"var(--oiq-sbBg,var(--oiq-surface2,#0c1120))",backdropFilter:"none",border:"1px solid var(--sb-bdr)",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:7,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>canUse(v as string)).filter(([v])=>canUse(v as string)).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
+              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["account","👤","My Account"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>{
+                // WAS: modules the plan did not include were REMOVED from the
+                // menu entirely, so a user had no idea they existed or that
+                // upgrading would unlock them. A customer who cannot see what
+                // they are missing has no reason to pay more.
+                // They are now shown, dimmed, with the plan that unlocks them.
+                const _ok=canUse(v as string);
+                const _need=(!_ok&&ent?.plan_upgrade_hint)||"a higher plan";
+                return (
                 <button key={v} onClick={()=>{setView(v);setShowModules(false);}}
-                  style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 11px",background:view===v?"var(--oiq-accent)":"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"inherit",marginBottom:2,transition:"background 0.12s"}}>
-                  <span style={{fontSize:15,width:22,textAlign:"center"}}>{ic}</span>
-                  <span style={{fontSize:11.5,fontWeight:600,color:view===v?"var(--oiq-accentText)":"var(--oiq-sbText)"}}>{lb}</span>
-                </button>
-              ))}
+                  title={_ok?"":"Not included in your plan"}
+                  style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 11px",background:view===v?"var(--oiq-accent)":"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"inherit",marginBottom:2,transition:"background 0.12s",opacity:_ok?1:0.45}}>
+                  <span style={{fontSize:15,width:22,textAlign:"center"}}>{_ok?ic:"\uD83D\uDD12"}</span>
+                  <span style={{flex:1,textAlign:"left"}}>
+                    <span style={{display:"block",fontSize:11.5,fontWeight:600,color:view===v?"var(--oiq-accentText)":"var(--oiq-sbText)"}}>{lb}</span>
+                    {!_ok&&<span style={{display:"block",fontSize:8,color:"#F59E0B",fontWeight:700,marginTop:1}}>Upgrade to unlock</span>}
+                  </span>
+                </button>);})}
             </div>
           )}
         </div>
@@ -8291,7 +8303,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         )}
 
         {view==="funding"&&<FundingIntelligence co={co} compData={compData} ask={ask}/>}
-        {!canUse(view)&&view!=="admin"&&view!=="tokens"&&(
+        {!canUse(view)&&view!=="admin"&&view!=="tokens"&&view!=="account"&&(
           <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:40}}>
             <div style={{textAlign:"center",maxWidth:400}}>
               <div style={{fontSize:34,marginBottom:10}}>✨</div>
@@ -8303,6 +8315,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               <button onClick={()=>setView("nerve")} style={{...S.hBtn,padding:"8px 14px"}}>Back</button>
             </div>
           </div>)}
+        {view==="account"&&<MyAccount onOpenHelp={()=>setShowHelp(true)}/>}
         {view==="admin"&&(isAdmin
           ?<AdminConsole onClose={()=>setView("nerve")}/>
           :<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:40}}>
