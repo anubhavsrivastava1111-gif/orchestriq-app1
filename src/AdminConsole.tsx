@@ -28,17 +28,27 @@ const C = {
 };
 
 const S: Record<string, React.CSSProperties> = {
-  wrap:  { padding: 16, color: C.ink, fontFamily: "Manrope,system-ui,sans-serif" },
-  card:  { background: C.panel, border: "1px solid " + C.line, borderRadius: 8, padding: 14, marginBottom: 14 },
-  h:     { fontSize: 13, fontWeight: 800, marginBottom: 3 },
+  // EVERY colour is stated explicitly. The console sits inside the main app,
+  // which sets its own colours from a theme, and anything left to inherit came
+  // out dark-on-dark or white-on-white - which is why the heading and the table
+  // header rows were unreadable in your screenshots.
+  wrap:  { padding: 16, color: C.ink, background: C.bg, minHeight: "100%",
+           fontFamily: "Manrope,system-ui,sans-serif" },
+  card:  { background: C.panel, border: "1px solid " + C.line, borderRadius: 8, padding: 14, marginBottom: 14, color: C.ink },
+  h:     { fontSize: 13, fontWeight: 800, marginBottom: 3, color: C.ink },
   sub:   { fontSize: 9.5, color: C.faint, marginBottom: 12, lineHeight: 1.55 },
   lbl:   { fontSize: 9, fontWeight: 700, color: C.dim, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 4 },
   inp:   { width: "100%", padding: "7px 9px", background: "#0A0E1A", border: "1px solid " + C.line, borderRadius: 5, color: C.ink, fontSize: 11, boxSizing: "border-box" },
   btn:   { padding: "7px 12px", borderRadius: 5, fontSize: 10.5, fontWeight: 700, cursor: "pointer", border: "1px solid " + C.line, background: "#0A0E1A", color: C.ink },
   prim:  { padding: "7px 12px", borderRadius: 5, fontSize: 10.5, fontWeight: 800, cursor: "pointer", border: "1px solid " + C.teal, background: C.teal, color: "#04070F" },
   danger:{ padding: "7px 12px", borderRadius: 5, fontSize: 10.5, fontWeight: 700, cursor: "pointer", border: "1px solid " + C.red, background: "transparent", color: C.red },
-  th:    { fontSize: 8.5, fontWeight: 800, color: C.faint, textTransform: "uppercase", letterSpacing: 0.6, textAlign: "left", padding: "6px 8px", borderBottom: "1px solid " + C.line },
-  td:    { fontSize: 10.5, padding: "7px 8px", borderBottom: "1px solid " + C.line, verticalAlign: "middle" },
+  // WAS: no background. The app's stylesheet gave table headers a white
+  // background, so grey-on-white made them almost invisible.
+  th:    { fontSize: 8.5, fontWeight: 800, color: C.dim, background: "#0A0E1A",
+           textTransform: "uppercase", letterSpacing: 0.6, textAlign: "left",
+           padding: "7px 8px", borderBottom: "1px solid " + C.line },
+  td:    { fontSize: 10.5, padding: "7px 8px", borderBottom: "1px solid " + C.line,
+           verticalAlign: "middle", color: C.ink, background: "transparent" },
   tab:   { padding: "8px 14px", fontSize: 11, fontWeight: 700, cursor: "pointer", border: "none", background: "transparent", color: C.faint, borderBottom: "2px solid transparent" },
   tabOn: { padding: "8px 14px", fontSize: 11, fontWeight: 800, cursor: "pointer", border: "none", background: "transparent", color: C.teal, borderBottom: "2px solid " + C.teal },
 };
@@ -103,9 +113,9 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
     <div style={S.wrap}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 800 }}>Admin Console</div>
-          <div style={{ fontSize: 9.5, color: C.faint }}>
-            {caps.is_owner ? "Owner — full control" : "Staff — limited to the capabilities granted to you"}
+          <div style={{ fontSize: 16, fontWeight: 800, color: C.ink }}>Admin Console</div>
+          <div style={{ fontSize: 10, color: caps.is_owner ? C.amber : C.teal, fontWeight: 700 }}>
+            {caps.is_owner ? "OWNER — full control" : "STAFF — limited to what the owner granted you"}
           </div>
         </div>
         {onClose && <button style={S.btn} onClick={onClose}>Close</button>}
@@ -123,7 +133,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
       {tab === "plans"    && <PlansTab rpc={rpc} say={say} />}
       {tab === "features" && <FeaturesTab rpc={rpc} caps={caps} say={say} />}
       {tab === "support"  && <SupportTab rpc={rpc} say={say} />}
-      {tab === "access"   && <AccessTab rpc={rpc} say={say} />}
+      {tab === "access"   && <AccessTab rpc={rpc} say={say} isOwner={caps.is_owner} />}
     </div>
   );
 }
@@ -212,7 +222,7 @@ function UsersTab({ rpc, caps, say, busy, setBusy }: any) {
       <div style={S.card}>
         <div style={S.h}>All users ({users.length})</div>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", background: C.panel, color: C.ink }}>
             <thead><tr>
               <th style={S.th}>Email</th><th style={S.th}>Role</th><th style={S.th}>Plan</th>
               <th style={S.th}>Sessions</th><th style={S.th}>Grants</th><th style={S.th}>Actions</th>
@@ -455,7 +465,7 @@ function FeaturesTab({ rpc, caps, say }: any) {
 
       <div style={S.card}>
         <div style={S.h}>Feature catalogue ({features.length})</div>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", background: C.panel, color: C.ink }}>
           <thead><tr><th style={S.th}>Key</th><th style={S.th}>Label</th><th style={S.th}>Category</th><th style={S.th}>Type</th></tr></thead>
           <tbody>{features.map(f => (
             <tr key={f.id}>
@@ -562,7 +572,7 @@ function SupportTab({ rpc, say }: any) {
 }
 
 // ── ROLES & ACCESS (owner only) ──────────────────────────────────────────────
-function AccessTab({ rpc, say }: any) {
+function AccessTab({ rpc, say, isOwner }: any) {
   const [users, setUsers] = useState<any[]>([]);
   const [adminFeatures, setAdminFeatures] = useState<any[]>([]);
   const [grants, setGrants] = useState<any[]>([]);
@@ -622,7 +632,7 @@ function AccessTab({ rpc, say }: any) {
           nothing, so one mis-click cannot create an administrator.
         </div>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", background: C.panel, color: C.ink }}>
             <thead><tr>
               <th style={S.th}>User</th><th style={S.th}>Role</th>
               {adminFeatures.map(f => <th key={f.id} style={{ ...S.th, textAlign: "center" }}>{f.label.replace("Staff: ", "")}</th>)}
@@ -640,7 +650,11 @@ function AccessTab({ rpc, say }: any) {
                       }}>
                       <option value="user">USER</option>
                       <option value="admin">STAFF</option>
-                      <option value="super_admin">OWNER</option>
+                      {/* The OWNER option is rendered ONLY for the owner. Staff can
+                          already never reach this tab, and the database refuses
+                          admin_set_user_role from anyone but the owner - this is a
+                          third layer, so the option does not exist even to look at. */}
+                      {isOwner && <option value="super_admin">OWNER</option>}
                     </select>
                   </td>
                   {adminFeatures.map(f => (
