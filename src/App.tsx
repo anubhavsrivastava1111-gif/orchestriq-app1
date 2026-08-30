@@ -6,6 +6,7 @@ import FundingIntelligence from "./FundingIntelligence";
 import ServiceDesk from "./ServiceDesk";
 import TokenAnalytics, { saveRecord, estimateCost, saveUnitRecord } from "./TokenAnalytics";
 import AdminConsole from "./AdminConsole";
+import SupportWidget from "./SupportWidget";
 import PulseGovernance from "./Pulse";
 import TokenBadge from "./components/TokenBadge";
 import AIAgents from "./AIAgents";
@@ -3344,6 +3345,7 @@ export default function App(){
   // ent.unlimited is true for you and for staff, so an owner can never be
   // locked out of their own product by a plan setting.
   const [ent,setEnt]=useState<any>({unlimited:true,features:{}});
+  const [showHelp,setShowHelp]=useState(false);
   const [showSignOutConfirm,setShowSignOutConfirm]=useState(false);
   const [wfView,setWfView]=useState("new");
   const [projects,setProjects]=useState([]);
@@ -9034,6 +9036,15 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
       )}
       {extractModal&&<ExtractReviewModal extracted={extractModal.items} sourceType={extractModal.sourceType} sourceLabel={extractModal.sourceLabel} onConfirm={confirmExtractedItems} onCancel={()=>setExtractModal(null)} AR={AR} S={S}/>}
       {showDonate&&<DonateModal cfg={dnCfg} presets={DONATION_PRESETS} onClose={()=>setShowDonate(false)} cur={cur} amt={dnAmt} setAmt={setDnAmt} custom={dnCustom} setCustom={setDnCustom} S={S}/>}
+      {/* Every signed-in user can reach this, on every plan. A customer who
+          cannot report a problem is a customer you lose without ever knowing
+          why - so this is deliberately not gated by any subscription. */}
+      <button onClick={()=>setShowHelp(true)} title="Help and support"
+        style={{position:"fixed",right:16,bottom:74,zIndex:8000,width:42,height:42,
+          borderRadius:"50%",border:"1px solid rgba(20,184,166,0.45)",
+          background:"#0F1420",color:"#14B8A6",fontSize:17,fontWeight:800,
+          cursor:"pointer",boxShadow:"0 4px 14px rgba(0,0,0,0.45)"}}>?</button>
+      <SupportWidget open={showHelp} onClose={()=>setShowHelp(false)}/>
       <ExportAudienceDialog/>
       <TokenBadge defP={defP} setDefP={p=>{setDefP(p);sv("cos-keys",{keys,defaultProvider:p,multiAI});}} keys={keys} onOpen={()=>{setView("tokens");}} />
       <Toaster toasts={toasts} onDismiss={id=>setToasts(prev=>prev.filter(t=>t.id!==id))}/>
