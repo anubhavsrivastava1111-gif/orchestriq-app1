@@ -320,15 +320,16 @@ function PlansTab({ rpc, say, only }: any) {
   const setFeat = async (f: any, patch: any) => {
     const cur = pf[sel + "|" + f.id] || {};
     try {
+      // WAS: a direct table write for the dropdown choice. That table allows
+      // no direct writing - every change goes through a protected command so
+      // there is only one way in. The write was refused silently, which is why
+      // clicking an executive flashed blue and then reverted.
       await rpc("admin_set_plan_feature", {
         p_plan_id: sel, p_feature_key: f.key,
         p_enabled: patch.enabled !== undefined ? patch.enabled : (cur.enabled ?? f.default_on),
         p_limit: patch.limit !== undefined ? patch.limit : (cur.limit_value ?? null),
+        p_choice: patch.choice !== undefined ? patch.choice : null,
       });
-      if (patch.choice !== undefined) {
-        await supabase.from("plan_features").update({ choice_value: patch.choice })
-          .eq("plan_id", sel).eq("feature_id", f.id);
-      }
       load();
     } catch (e: any) { say(e.message, "bad"); }
   };
