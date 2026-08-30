@@ -3338,6 +3338,12 @@ export default function App(){
   // or a staff member the owner has appointed. The console re-checks with the
   // database itself, so this only decides whether the menu entry appears.
   const [isAdmin,setIsAdmin]=useState(false);
+  // What this account's plan actually allows. Loaded once at sign-in from the
+  // database, which is also where it is enforced - this copy only decides what
+  // the menu shows.
+  // ent.unlimited is true for you and for staff, so an owner can never be
+  // locked out of their own product by a plan setting.
+  const [ent,setEnt]=useState<any>({unlimited:true,features:{}});
   const [showSignOutConfirm,setShowSignOutConfirm]=useState(false);
   const [wfView,setWfView]=useState("new");
   const [projects,setProjects]=useState([]);
@@ -3480,6 +3486,14 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
         // against the profiles table, so editing this value in a browser buys
         // nothing but an error message.
         try{setIsAdmin(prof?.role==="super_admin"||prof?.role==="admin");}catch{}
+        // If this call fails for any reason we keep the default of unlimited.
+        // Failing OPEN is deliberate: a database hiccup should never lock a
+        // paying customer out of the product they bought. Session limits are
+        // still enforced separately by the session gate, so nothing is free.
+        try{
+          const {data:_e}=await supabase.rpc("resolve_entitlements");
+          if(_e&&typeof _e==="object")setEnt(_e);
+        }catch(e){console.warn("[OIQ] entitlements unavailable, allowing all:",e);}
         // Load this user's saved keys. Row Level Security guarantees this row
         // is only ever returned to its owner.
         try{
@@ -6959,6 +6973,15 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
       </div>);
   };
  
+  // ONE place decides whether a module is available. Everything else asks this.
+  const canUse=useCallback((moduleId:string)=>{
+    if(ent?.unlimited)return true;                 // owner and staff
+    const map=ent?.module_map||{};
+    const key=map[moduleId];
+    if(!key)return true;                           // no rule defined = allowed
+    return !!ent?.features?.[key]?.enabled;
+  },[ent]);
+ 
   const curRole=AR.find(r=>r.id===selRole);
   const curMsgs=selRole?(chats[selRole]||[]):[];
   // A provider is usable only if it has a key AND is switched on. Everything
@@ -7175,7 +7198,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           </button>
           {showModules&&(
             <div style={{position:"absolute",top:"calc(100% - 2px)",left:10,right:10,background:"var(--oiq-sbBg,var(--oiq-surface2,#0c1120))",backdropFilter:"none",border:"1px solid var(--sb-bdr)",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:7,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
+              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>canUse(v as string)).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>(
                 <button key={v} onClick={()=>{setView(v);setShowModules(false);}}
                   style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 11px",background:view===v?"var(--oiq-accent)":"none",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"inherit",marginBottom:2,transition:"background 0.12s"}}>
                   <span style={{fontSize:15,width:22,textAlign:"center"}}>{ic}</span>
@@ -8266,6 +8289,18 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         )}
 
         {view==="funding"&&<FundingIntelligence co={co} compData={compData} ask={ask}/>}
+        {!canUse(view)&&view!=="admin"&&view!=="tokens"&&(
+          <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:40}}>
+            <div style={{textAlign:"center",maxWidth:400}}>
+              <div style={{fontSize:34,marginBottom:10}}>\u2728</div>
+              <div style={{fontSize:14,fontWeight:800,color:"var(--oiq-ink)",marginBottom:6}}>Not included in your plan</div>
+              <div style={{fontSize:11,color:"#5A6480",lineHeight:1.6,marginBottom:14}}>
+                You are on the <b style={{color:"#14B8A6"}}>{ent?.plan_name||"Free"}</b> plan.
+                This module is available on a higher plan. Use Support to ask about upgrading.
+              </div>
+              <button onClick={()=>setView("nerve")} style={{...S.hBtn,padding:"8px 14px"}}>Back</button>
+            </div>
+          </div>)}
         {view==="admin"&&(isAdmin
           ?<AdminConsole onClose={()=>setView("nerve")}/>
           :<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:40}}>
