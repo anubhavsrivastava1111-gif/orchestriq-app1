@@ -97,7 +97,11 @@ async function saveBYOKeyToSupabase(apiKey: string): Promise<void> {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase.from('profiles').update({ byo_api_key: apiKey || null }).eq('id', user.id);
+    // API keys are now ENCRYPTED at rest. The plaintext columns have been
+    // deleted from the database, so this write would fail. save_my_api_keys
+    // encrypts with a master key held in Supabase Vault - outside the database -
+    // and can only ever write the caller's OWN row.
+    await supabase.rpc('save_my_api_keys', { p_keys: { byo: apiKey || '' }, p_admin: false });
   } catch(e) {
     console.warn('[OIQ] Failed to save BYO key:', e);
   }
@@ -3270,7 +3274,7 @@ export default function App(){
         if(!user)return;
         const clean:any={};
         Object.entries(keys||{}).forEach(([k,v])=>{ if(typeof v==="string"&&v.trim())clean[k]=v.trim(); });
-        await supabase.from("profiles").update({user_api_keys:clean}).eq("id",user.id);
+        await supabase.rpc("save_my_api_keys",{p_keys:clean,p_admin:false});
       }catch{}
     },1500);
     return ()=>clearTimeout(t);
@@ -3481,7 +3485,11 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
       const {data:{user}}=await supabase.auth.getUser();
       if(user){
         try{loadCostContext(true);}catch(e){console.warn("[OIQ] cost context:",e);}
-        const {data:prof}=await supabase.from("profiles").select("full_name,role,admin_api_keys,user_api_keys").eq("id",user.id).single();
+        // WAS selecting admin_api_keys and user_api_keys. Those columns are gone -
+        // the keys are encrypted now and come back through get_my_api_keys(),
+        // which decrypts only for the person who owns them.
+        const {data:prof}=await supabase.from("profiles").select("full_name,role").eq("id",user.id).single();
+        const {data:_mk}=await supabase.rpc("get_my_api_keys");
         setMe({email:(prof as any)?.full_name||user.email||"",role:prof?.role||"user"});
         try{setUsageUser((prof as any)?.full_name||user.email||"",prof?.role||"user");}catch{}
         // Show the console entry for the owner and for appointed staff. This is
@@ -3500,7 +3508,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
         // Load this user's saved keys. Row Level Security guarantees this row
         // is only ever returned to its owner.
         try{
-          const uk=(prof as any)?.user_api_keys;
+          const uk=(_mk as any)?.user_api_keys;
           if(uk&&typeof uk==="object"&&Object.keys(uk).length){
             setKeys(prev=>{
               const merged:any={...prev};
@@ -3509,8 +3517,10 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
             });
           }
         }catch{}
-        if(prof?.role==="super_admin"&&prof?.admin_api_keys){
-          const ak=prof.admin_api_keys as any;
+        // get_my_api_keys returns admin keys ONLY to the owner. A staff member
+        // or a normal user receives an empty object, whatever this check says.
+        if(prof?.role==="super_admin"&&(_mk as any)?.admin_api_keys&&Object.keys((_mk as any).admin_api_keys).length){
+          const ak=(_mk as any).admin_api_keys;
           const loadedKeys=ak.keys||ak;
           // BUG FIX: this used to RETURN A NEW OBJECT WITH ONLY THESE 8 FIELDS,
           // silently deleting serper / tavily / brave / dataforseo (and nvidiaModel)
@@ -3642,9 +3652,8 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       if(user){
         const {data:prof}=await supabase.from("profiles").select("role").eq("id",user.id).single();
         if(prof?.role==="super_admin"){
-          await supabase.from("profiles").update({
-            admin_api_keys:{keys,defaultProvider:defP,multiAI}
-          }).eq("id",user.id);
+          await supabase.rpc("save_my_api_keys",{
+            p_keys:{keys,defaultProvider:defP,multiAI}, p_admin:true });
         }
       }
     }catch{}
