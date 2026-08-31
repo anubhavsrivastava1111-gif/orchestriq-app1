@@ -66,8 +66,18 @@ export const tableWrap: React.CSSProperties = {
 };
 
 export const table: React.CSSProperties = {
-  width: "100%", borderCollapse: "collapse",
-  // The rule that keeps a heading above its own column.
+  width: "100%",
+  // THIS LINE IS THE BUG YOU PHOTOGRAPHED, AND IT WAS MINE.
+  // I set borderCollapse:"collapse" AND made the header row sticky. Those two
+  // cannot be combined. When a browser collapses borders it merges cell edges
+  // into a single grid; a sticky cell has to be lifted out of that grid to
+  // float, and in Chrome it then loses its column and is painted at its own
+  // text width instead. The result is exactly what your screenshots show: the
+  // headings bunched over to the left, no longer above the data they label.
+  // "separate" with zero spacing looks identical and lets sticky work properly.
+  borderCollapse: "separate",
+  borderSpacing: 0,
+  // Keeps a heading above its own column as the data changes length.
   tableLayout: "fixed",
   background: C.panel, color: C.ink,
   fontVariantNumeric: "tabular-nums",
@@ -75,12 +85,15 @@ export const table: React.CSSProperties = {
 
 /** Header cell. `align` should match the cell beneath it, always. */
 export const th = (align: "left" | "right" | "center" = "left", width?: number | string): React.CSSProperties => ({
-  fontSize: 8.5, fontWeight: 800, color: C.dim, background: C.raised,
+  fontSize: 8.5, fontWeight: 800, color: C.dim,
+  // An opaque background is required: a sticky header floats OVER the rows, so
+  // a transparent one would show the data sliding underneath it.
+  background: C.raised,
   textTransform: "uppercase", letterSpacing: 0.6,
   textAlign: align, padding: "8px 10px",
   borderBottom: "1px solid " + C.line,
   width, whiteSpace: "nowrap",
-  position: "sticky", top: 0, zIndex: 1,
+  position: "sticky", top: 0, zIndex: 2,
 });
 
 /** Body cell. Pass "right" for anything numeric. */
