@@ -5336,6 +5336,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               body:JSON.stringify({
                 objective:del.description||del.name,
                 company_context:_coCtx,
+                access_token:(await supabase.auth.getSession()).data?.session?.access_token||"",
                 available_data:_allContent.slice(0,120000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
@@ -5431,6 +5432,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               body:JSON.stringify({
                 objective:del.description||del.name,
                 company_context:_coCtx,
+                access_token:(await supabase.auth.getSession()).data?.session?.access_token||"",
                 available_data:_allContent.slice(0,120000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
@@ -5558,6 +5560,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               body:JSON.stringify({
                 objective:del.description||del.name,
                 company_context:_coCtx,
+                access_token:(await supabase.auth.getSession()).data?.session?.access_token||"",
                 available_data:_allContent.slice(0,120000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
@@ -5745,6 +5748,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               body:JSON.stringify({
                 objective:del.description||del.name,
                 company_context:_coCtx,
+                access_token:(await supabase.auth.getSession()).data?.session?.access_token||"",
                 available_data:_allContent.slice(0,120000),
                 currency:proj.context?.company?.currency||co.currency||"INR",
                 currency_symbol:proj.context?.company?.currencySymbol||co.currencySymbol||"₹",
@@ -6697,7 +6701,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
             method:"POST",headers:{"Content-Type":"application/json"},
             // No claude_key. No openai_key. No deepseek_key. Nothing to leak.
             body:JSON.stringify({blueprint:_bpRes.blueprint,title:opts.title||"",
-              subtitle:opts.objective||"",currency_symbol:opts.currencySymbol||cur.sym||"\u20b9"}),
+              subtitle:opts.objective||"",currency_symbol:opts.currencySymbol||cur.sym||"\u20b9",
+              access_token:(await supabase.auth.getSession()).data?.session?.access_token||""}),
             signal:AbortSignal.timeout(120000)});
           if(rr.ok){
             const bb=await rr.arrayBuffer();
@@ -6744,6 +6749,10 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         // model then filled the gap with plausible invention. That is the
         // "missing key information" problem at its source. 120,000 characters is
         // comfortably inside the context window of every provider we route to.
+        // Proof of who is asking. Railway checks this with Supabase and refuses
+        // anyone who is not a signed-in user of your app. Until now that service
+        // would answer ANYONE who knew its web address.
+        access_token:(await supabase.auth.getSession()).data?.session?.access_token||"",
         available_data:normaliseForExport(opts.body||"",format).slice(0,120000),
         audience:opts.audience||"general",
         doc_purpose:opts.docPurpose||"",
