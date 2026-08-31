@@ -182,7 +182,7 @@ const MODELS = {
   kimi:{name:"Kimi",company:"Moonshot AI",model:"moonshot-v1-8k",placeholder:"sk-...",color:"#8B5CF6",keyUrl:"https://platform.moonshot.cn/console/api-keys",note:"Fast · Affordable · Strong multilingual"},
   stability:{name:"Stability AI",company:"Stability AI",model:"stable-diffusion-xl-1024-v1-0",placeholder:"sk-...",color:"#EC4899",keyUrl:"https://platform.stability.ai/account/credits",note:"Image generation · ~₹3/image · Optional"},
   fal:{name:"fal.ai",company:"fal.ai",placeholder:"key-...",color:"#7C3AED",keyUrl:"https://fal.ai/dashboard/keys"},
-  nvidia:{name:"NVIDIA",company:"NVIDIA",model:NVIDIA_DEFAULT_MODEL,placeholder:"nvapi-... (optional \u2014 free tier works without one)",color:"#76B900",keyUrl:"https://build.nvidia.com/",note:"Free tier needs no key \u00b7 add your own for unlimited use and document generation"},
+  nvidia:{name:"NVIDIA",company:"NVIDIA",model:NVIDIA_DEFAULT_MODEL,placeholder:"nvapi-... (optional — free tier works without one)",color:"#76B900",keyUrl:"https://build.nvidia.com/",note:"Free tier needs no key \u00b7 add your own for unlimited use and document generation"},
 };
 // This list was hardcoded and had gone stale: it still offered nemotron-4-340b
 // and llama-3.1-nemotron-70b, neither of which NVIDIA serves any more, while the
@@ -286,7 +286,7 @@ const PROVIDER_META = {
   gemini:   {name:"Gemini",   cost:"$",  speed:"fast",  quality:"great",blurb:"Fast, generous free tier, good research"},
   groq:     {name:"Groq",     cost:"$",  speed:"fast",  quality:"good", blurb:"Fastest responses; great for drafts"},
   fal:      {name:"fal.ai",   cost:"$$", speed:"medium",quality:"best", blurb:"Images & video (Flux, Kling, Veo)"},
-  nvidia:   {name:"NVIDIA", cost:"Free tier or your own key",speed:"medium",quality:"good", blurb:"Works with no key \u00b7 add your own for unlimited use"},
+  nvidia:   {name:"NVIDIA", cost:"Free tier or your own key",speed:"medium",quality:"good", blurb:"Works with no key · add your own for unlimited use"},
 } as Record<string,{name:string;cost:string;speed:string;quality:string;blurb:string}>;
 // Tasks where the user's Primary AI leads; specialists lead everywhere else.
 const PRIMARY_LED_TASKS=["general","creative","code","research"];
@@ -1782,11 +1782,30 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
   }
 
   if(!key){
-    const fallback=active==="groq"?"gemini":"groq";
-    const fallbackKey=effectiveKeys[fallback]?.trim();
-    if(!fallbackKey)throw new Error("No API keys available. Check Cloudflare environment variables.");
-    const r=await callAI(fallback,fallbackKey,sys,msgs,maxT,false);
-    return{primary:r.text,usedProvider:fallback};
+    // THIS IS THE BUG BEHIND "No API keys available".
+    // The old line fell back to groq, or to gemini if groq was active. Both of
+    // those need a key. So the moment you switched every keyed provider off and
+    // relied on NVIDIA, this looked for two providers you had deliberately
+    // turned off, found nothing, and reported that you had no keys at all -
+    // while NVIDIA, which needs no key, sat unused.
+    //
+    // NVIDIA is tried FIRST now, because it is the one provider that always
+    // works. It is only skipped if you have explicitly switched NVIDIA itself
+    // off, which is a decision worth respecting.
+    const order=["nvidia","claude","openai","deepseek","gemini","groq"];
+    for(const fb of order){
+      if(fb===active)continue;
+      const fbKey=fb==="nvidia"?(isProviderOff("nvidia")?"":providerKey(keys,"nvidia")):effectiveKeys[fb]?.trim();
+      if(!fbKey)continue;
+      try{
+        const r=await callAI(fb,fbKey,sys,msgs,maxT,false);
+        return{primary:r.text,usedProvider:fb};
+      }catch(e:any){
+        // A provider that is configured but failing should not stop the rest.
+        console.warn("[OIQ] fallback provider "+fb+" failed:",String(e?.message||e).slice(0,120));
+      }
+    }
+    throw new Error("No usable AI provider. NVIDIA works with no key at all \u2014 open Settings \u2192 API and make sure NVIDIA is switched ON.");
   }
 
   try{
@@ -8582,6 +8601,36 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 </span>
               </label>
             </div>
+            {/* You asked for a way for users to tell you which provider they
+                want next. This files it straight into your Support inbox. */}
+            <div style={{background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:6,padding:"9px 11px",marginBottom:14}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#F1F5F9",marginBottom:3}}>Want a provider that is not listed?</div>
+              <div style={{fontSize:9,color:"#5A6480",lineHeight:1.55,marginBottom:7}}>
+                Tell us which one. We review every request — if enough people need it, we add it.
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                <input id="oiq-provider-req" placeholder="e.g. Mistral, Perplexity, Cohere…"
+                  style={{...S.inp,flex:1,fontSize:10.5}}/>
+                <button style={{...S.hBtn,padding:"7px 12px",whiteSpace:"nowrap"}} onClick={async()=>{
+                  const el=document.getElementById("oiq-provider-req") as HTMLInputElement|null;
+                  const v=(el?.value||"").trim();
+                  if(v.length<2){showToast("Type the provider name first","warning");return;}
+                  try{
+                    const {data:s}=await supabase.auth.getSession();
+                    const uid=s?.session?.user?.id;
+                    if(!uid){showToast("Please sign in first","warning");return;}
+                    const {data:th,error}=await supabase.from("support_threads")
+                      .insert({user_id:uid,subject:"Provider request: "+v.slice(0,80),category:"feedback"})
+                      .select().single();
+                    if(error)throw error;
+                    await supabase.from("support_messages").insert({thread_id:th.id,author_id:uid,
+                      body:"Please add support for: "+v+". Sent from Settings, API keys."});
+                    if(el)el.value="";
+                    showToast("Request sent — thank you","success");
+                  }catch(e:any){showToast(e.message||"Could not send","error");}
+                }}>Request</button>
+              </div>
+            </div>
             <label style={S.lbl}>Audience — who is this for?</label>
             <div style={{fontSize:8.5,color:"#5A6480",marginBottom:6,lineHeight:1.5}}>This changes what the document contains, not just its tone. An investor pack leads with market size and unit economics; an operations review leads with steps, owners and dates. Same evidence, different document.</div>
             <select value={expAudience} onChange={e=>setExpAudience(e.target.value)} style={{...S.inp,marginBottom:4,cursor:"pointer"}}>
@@ -8709,8 +8758,37 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 <div style={{background:"rgba(16,185,129,0.05)",border:"1px solid rgba(16,185,129,0.2)",borderRadius:6,padding:"8px 10px",marginBottom:12,fontSize:10,color:"#10B981"}}>
                   Gemini is free — no billing needed. Get key at <a href={MODELS.gemini.keyUrl} target="_blank" rel="noopener noreferrer" style={{color:"#4285F4"}}>aistudio.google.com</a>
                 </div>
-                <div style={{background:"rgba(118,185,0,0.06)",border:"1px solid rgba(118,185,0,0.25)",borderRadius:6,padding:"8px 10px",marginBottom:12,fontSize:10,color:"#76B900"}}>
-                  ✨ NVIDIA works automatically on the free tier — no key needed. Add your own key below for unlimited use and document generation.
+                {/* A user who does not know what an API key is, or what the free
+                    tier costs them, will not use either. This says both plainly. */}
+                <div style={{background:"rgba(118,185,0,0.06)",border:"1px solid rgba(118,185,0,0.30)",borderRadius:7,padding:"11px 13px",marginBottom:14}}>
+                  <div style={{fontSize:11.5,fontWeight:800,color:"#76B900",marginBottom:5}}>
+                    Run this platform for free — no card, no bill
+                  </div>
+                  <div style={{fontSize:10,color:"#A0AAC0",lineHeight:1.6,marginBottom:9}}>
+                    NVIDIA gives away access to 8 large models. It works right now with no key at all,
+                    limited to 25 requests a day. Add your own free key and that limit disappears,
+                    and you can generate PDFs, decks and spreadsheets. You are not billed for either.
+                  </div>
+                  <details>
+                    <summary style={{fontSize:10,fontWeight:700,color:"#76B900",cursor:"pointer",marginBottom:6}}>
+                      How to get your free NVIDIA key — about 3 minutes
+                    </summary>
+                    <ol style={{fontSize:9.5,color:"#A0AAC0",lineHeight:1.75,margin:"7px 0 0 16px",padding:0}}>
+                      <li>Go to <a href="https://build.nvidia.com" target="_blank" rel="noopener noreferrer" style={{color:"#76B900"}}>build.nvidia.com</a> and sign up. An email address is all you need — no payment card.</li>
+                      <li>Open any model on that page, for example Nemotron.</li>
+                      <li>Click <b>Get API Key</b> on the right of the code panel.</li>
+                      <li>Copy the key. It starts with <code style={{color:"#76B900"}}>nvapi-</code>.</li>
+                      <li>Paste it into the NVIDIA box below. It saves by itself.</li>
+                    </ol>
+                    <div style={{fontSize:9,color:"#5A6480",lineHeight:1.65,marginTop:9,paddingTop:8,borderTop:"1px solid rgba(118,185,0,0.18)"}}>
+                      <b style={{color:"#F59E0B"}}>What free actually costs you.</b> NVIDIA offers this tier
+                      to improve its models, so prompts sent on it may be used for that. It is genuinely
+                      free in money, not in privacy. For routine analysis that is a fair trade. For
+                      anything commercially sensitive — unreleased figures, client names, a live deal —
+                      use a paid provider below instead. Claude, OpenAI and Gemini do not train on API
+                      traffic by default. Decide per piece of work, not once and forget.
+                    </div>
+                  </details>
                 </div>
                 {/* WAS filtered out entirely. NVIDIA was the only provider with no
                     key field, because the free tier runs on a shared key held in
@@ -8800,7 +8878,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                           NVIDIA model{defP!=="nvidia"?" (used for fallback and free-tier calls)":""}
                         </label>
                         <select value={keys.nvidiaModel||MODELS.nvidia.model} onChange={e=>{const nk={...keys,nvidiaModel:e.target.value};setKeys(nk);sv("cos-keys",{keys:nk,defaultProvider:defP,multiAI});}} style={{...S.inp,cursor:"pointer"}}>
-                          {NVIDIA_MODELS.map(m=><option key={m.id} value={m.id}>{m.label} \u2014 {m.note}</option>)}
+                          {NVIDIA_MODELS.map(m=><option key={m.id} value={m.id}>{m.label + " — " + m.note}</option>)}
                         </select>
                         {/* The dropdown label alone does not tell you what you are
                             running. NVIDIA models differ sharply: the 550B reasons
