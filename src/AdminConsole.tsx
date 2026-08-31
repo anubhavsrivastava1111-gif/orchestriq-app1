@@ -18,6 +18,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "./lib/supabase";
+// Shared table styling, so every screen lines up the same way.
+import { tableWrap, table as TBL, th as TH, td as TD, statRow, stat, statValue, statLabel, num as NUM } from "./lib/ui";
 
 type Caps = { role: string; is_owner: boolean; caps: Record<string, boolean> };
 
@@ -199,10 +201,10 @@ function UsersTab({ rpc, caps, say, busy, setBusy }: any) {
       {seats && (
         <div style={S.card}>
           <div style={S.h}>Seats</div>
-          <div style={{ display: "flex", gap: 22, alignItems: "baseline", marginBottom: 8 }}>
-            <div><div style={{ fontSize: 22, fontWeight: 800 }}>{seats.used}</div><div style={S.lbl}>used</div></div>
-            <div><div style={{ fontSize: 22, fontWeight: 800, color: C.teal }}>{seats.remaining}</div><div style={S.lbl}>remaining</div></div>
-            <div><div style={{ fontSize: 22, fontWeight: 800, color: C.faint }}>{seats.max_users}</div><div style={S.lbl}>cap</div></div>
+          <div style={statRow}>
+            <div style={stat}><div style={statValue()}>{NUM(seats.used)}</div><div style={statLabel}>used</div></div>
+            <div style={stat}><div style={statValue(C.teal)}>{NUM(seats.remaining)}</div><div style={statLabel}>remaining</div></div>
+            <div style={stat}><div style={statValue(C.faint)}>{NUM(seats.max_users)}</div><div style={statLabel}>cap</div></div>
           </div>
           <div style={S.sub}>
             The cap is enforced by the database, not by this screen, so it holds even if
@@ -232,20 +234,30 @@ function UsersTab({ rpc, caps, say, busy, setBusy }: any) {
 
       <div style={S.card}>
         <div style={S.h}>All users ({users.length})</div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", background: C.panel, color: C.ink }}>
+        {/* Fixed widths so a long email cannot push Role and Plan out of line,
+            and the two counts are right-aligned so they read as numbers. */}
+        <div style={tableWrap}>
+          <table style={{ ...TBL, minWidth: 900 }}>
+            <colgroup>
+              <col /><col style={{ width: 84 }} /><col style={{ width: 130 }} />
+              <col style={{ width: 96 }} /><col style={{ width: 78 }} /><col style={{ width: 230 }} />
+            </colgroup>
             <thead><tr>
-              <th style={S.th}>Email</th><th style={S.th}>Role</th><th style={S.th}>Plan</th>
-              <th style={S.th}>Sessions</th><th style={S.th}>Grants</th><th style={S.th}>Actions</th>
+              <th style={TH("left")}>Email</th>
+              <th style={TH("center")}>Role</th>
+              <th style={TH("left")}>Plan</th>
+              <th style={TH("right")}>Sessions</th>
+              <th style={TH("right")}>Grants</th>
+              <th style={TH("right")}>Actions</th>
             </tr></thead>
             <tbody>
               {users.map(u => (
                 <tr key={u.user_id}>
-                  <td style={S.td}>
-                    <div style={{ fontWeight: 700 }}>{u.email}</div>
-                    <div style={{ fontSize: 8.5, color: C.faint }}>{u.full_name}</div>
+                  <td style={TD("left")}>
+                    <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>{u.email}</div>
+                    <div style={{ fontSize: 8.5, color: C.faint, overflow: "hidden", textOverflow: "ellipsis" }}>{u.full_name}</div>
                   </td>
-                  <td style={S.td}>
+                  <td style={TD("center")}>
                     <span style={{ fontSize: 8.5, fontWeight: 800, padding: "2px 6px", borderRadius: 3,
                       background: u.role === "super_admin" ? "rgba(245,158,11,0.15)" : u.role === "admin" ? "rgba(20,184,166,0.15)" : "rgba(90,100,128,0.15)",
                       color: u.role === "super_admin" ? C.amber : u.role === "admin" ? C.teal : C.faint }}>
@@ -263,10 +275,13 @@ function UsersTab({ rpc, caps, say, busy, setBusy }: any) {
                       {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </td>
-                  <td style={S.td}>{u.sessions_used}{u.session_limit != null ? " / " + u.session_limit : ""}</td>
-                  <td style={S.td}>{u.extra_grants || 0}</td>
-                  <td style={S.td}>
-                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                  {/* WAS left-aligned. A column of numbers that does not line up
+                      on its digits is the most common reason a table looks
+                      unfinished. */}
+                  <td style={TD("right")}>{u.sessions_used}{u.session_limit != null ? " / " + u.session_limit : ""}</td>
+                  <td style={TD("right")}>{u.extra_grants || 0}</td>
+                  <td style={TD("right")}>
+                    <div style={{ display: "flex", gap: 5, flexWrap: "nowrap", justifyContent: "flex-end" }}>
                       <button style={{ ...S.btn, padding: "4px 8px", fontSize: 9.5 }}
                         onClick={async () => { try { await rpc("admin_reset_user_sessions", { p_user_id: u.user_id });
                           say("Sessions reset for " + u.email + "."); load(); } catch (e: any) { say(e.message, "bad"); } }}>
@@ -364,13 +379,19 @@ function PlansTab({ rpc, say, only }: any) {
           Click any tick or dash to change it. It saves straight away and takes effect
           the next time that user signs in. No deployment, no code.
         </div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", background: C.panel, color: C.ink }}>
+        {/* Every plan column is exactly the same width, so the ticks form clean
+            vertical lines instead of drifting with the plan name length. */}
+        <div style={tableWrap}>
+          <table style={{ ...TBL, minWidth: 240 + plans.length * 110 }}>
+            <colgroup>
+              <col style={{ width: 240 }} />
+              {plans.map(p => <col key={p.id} style={{ width: 110 }} />)}
+            </colgroup>
             <thead>
               <tr>
-                <th style={{ ...S.th, minWidth: 170 }}>Module</th>
+                <th style={TH("left")}>Module</th>
                 {plans.map(p => (
-                  <th key={p.id} style={{ ...S.th, textAlign: "center", minWidth: 92 }}>
+                  <th key={p.id} style={TH("center")}>
                     <div style={{ color: C.ink, fontSize: 10 }}>{p.name}</div>
                     <div style={{ color: C.faint, fontWeight: 600, fontSize: 8.5 }}>
                       {Number(p.price_monthly) === 0 ? "free" : "\u20B9" + p.price_monthly + "/mo"}
@@ -382,12 +403,12 @@ function PlansTab({ rpc, say, only }: any) {
             <tbody>
               {modules.map(f => (
                 <tr key={f.id}>
-                  <td style={{ ...S.td, fontWeight: 700 }}>{f.label}</td>
+                  <td style={{ ...TD("left"), fontWeight: 700 }}>{f.label}</td>
                   {plans.map(p => {
                     const row = pf[p.id + "|" + f.id] || {};
                     const on = row.enabled ?? f.default_on;
                     return (
-                      <td key={p.id} style={{ ...S.td, textAlign: "center", cursor: "pointer",
+                      <td key={p.id} style={{ ...TD("center"), cursor: "pointer",
                         background: on ? "rgba(34,197,94,0.10)" : "transparent" }}
                         title={"Click to " + (on ? "remove from" : "add to") + " " + p.name}
                         onClick={() => toggleCell(p.id, f, !on)}>
@@ -399,17 +420,17 @@ function PlansTab({ rpc, say, only }: any) {
                 </tr>
               ))}
               <tr>
-                <td style={{ ...S.td, fontWeight: 700, color: C.dim }}>Sessions per month</td>
+                <td style={{ ...TD("left"), fontWeight: 800, borderTop: "2px solid " + C.line }}>Sessions per month</td>
                 {plans.map(p => (
-                  <td key={p.id} style={{ ...S.td, textAlign: "center", color: C.teal, fontWeight: 800 }}>
+                  <td key={p.id} style={{ ...TD("center"), color: C.teal, fontWeight: 800, borderTop: "2px solid " + C.line }}>
                     {p.sessions_per_month ?? "\u2013"}
                   </td>
                 ))}
               </tr>
               <tr>
-                <td style={{ ...S.td, fontWeight: 700, color: C.dim }}>Executives per session</td>
+                <td style={{ ...TD("left"), fontWeight: 800 }}>Executives per session</td>
                 {plans.map(p => (
-                  <td key={p.id} style={{ ...S.td, textAlign: "center", color: C.teal, fontWeight: 800 }}>
+                  <td key={p.id} style={{ ...TD("center"), color: C.teal, fontWeight: 800 }}>
                     {p.agents_allowed ?? "\u2013"}
                   </td>
                 ))}
@@ -580,19 +601,25 @@ function FeaturesTab({ rpc, caps, say }: any) {
           A reference list. Nothing here needs changing. Use the Plans &amp; Pricing tab to
           decide who gets what.
         </div>
-        <table style={{ width: "100%", borderCollapse: "collapse", background: C.panel, color: C.ink }}>
-          <thead><tr><th style={S.th}>Key</th><th style={S.th}>Label</th><th style={S.th}>Category</th><th style={S.th}>Type</th></tr></thead>
+        <div style={tableWrap}>
+        <table style={{ ...TBL, minWidth: 640 }}>
+          <colgroup><col style={{ width: 230 }} /><col /><col style={{ width: 110 }} /><col style={{ width: 110 }} /></colgroup>
+          <thead><tr>
+            <th style={TH("left")}>Key</th><th style={TH("left")}>Label</th>
+            <th style={TH("left")}>Category</th><th style={TH("left")}>Type</th>
+          </tr></thead>
           <tbody>{features.map(f => (
             <tr key={f.id}>
-              <td style={{ ...S.td, fontFamily: "monospace", fontSize: 9.5, color: C.dim }}>{f.key}</td>
-              <td style={S.td}>{f.label}</td>
-              <td style={S.td}>
+              <td style={{ ...TD("left", { mono: true, dim: true }), fontSize: 9.5 }}>{f.key}</td>
+              <td style={TD("left")}>{f.label}</td>
+              <td style={TD("left")}>
                 <span style={{ fontSize: 8.5, color: f.category === "admin" ? C.amber : C.faint }}>{f.category}</span>
               </td>
-              <td style={S.td}><span style={{ fontSize: 9, color: C.faint }}>{f.kind}</span></td>
+              <td style={TD("left", { dim: true })}>{f.kind}</td>
             </tr>
           ))}</tbody>
         </table>
+        </div>
       </div>
     </>
   );
@@ -746,17 +773,21 @@ function AccessTab({ rpc, say, isOwner }: any) {
           takes effect for someone whose role is STAFF — a stray tick on a normal user grants
           nothing, so one mis-click cannot create an administrator.
         </div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", background: C.panel, color: C.ink }}>
+        <div style={tableWrap}>
+          <table style={{ ...TBL, minWidth: 320 + 130 + adminFeatures.length * 120 }}>
+            <colgroup>
+              <col style={{ width: 320 }} /><col style={{ width: 130 }} />
+              {adminFeatures.map(f => <col key={f.id} style={{ width: 120 }} />)}
+            </colgroup>
             <thead><tr>
-              <th style={S.th}>User</th><th style={S.th}>Role</th>
-              {adminFeatures.map(f => <th key={f.id} style={{ ...S.th, textAlign: "center" }}>{f.label.replace("Staff: ", "")}</th>)}
+              <th style={TH("left")}>User</th><th style={TH("left")}>Role</th>
+              {adminFeatures.map(f => <th key={f.id} style={{ ...TH("center"), whiteSpace: "normal", lineHeight: 1.35 }}>{f.label.replace("Staff: ", "")}</th>)}
             </tr></thead>
             <tbody>
               {users.map(u => (
                 <tr key={u.user_id}>
-                  <td style={S.td}>{u.email}</td>
-                  <td style={S.td}>
+                  <td style={TD("left")}>{u.email}</td>
+                  <td style={TD("left")}>
                     <select style={{ ...S.inp, padding: "4px 6px", fontSize: 10, width: 110 }} value={u.role}
                       onChange={async e => {
                         try { await rpc("admin_set_user_role", { p_user_id: u.user_id, p_role: e.target.value });
@@ -773,7 +804,7 @@ function AccessTab({ rpc, say, isOwner }: any) {
                     </select>
                   </td>
                   {adminFeatures.map(f => (
-                    <td key={f.id} style={{ ...S.td, textAlign: "center" }}>
+                    <td key={f.id} style={TD("center")}>
                       <input type="checkbox" disabled={u.role === "super_admin"}
                         checked={u.role === "super_admin" || hasGrant(u.user_id, f.id)}
                         style={{ cursor: u.role === "super_admin" ? "not-allowed" : "pointer" }}
