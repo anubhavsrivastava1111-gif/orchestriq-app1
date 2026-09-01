@@ -184,12 +184,28 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   // It is accepted only if it matches NVIDIA's real key shape, so a stray
   // string cannot silently replace the shared key with something meaningless.
   const rawUserKey = String((body && body.user_key) || "").trim();
-  const userKey = /^nvapi-[A-Za-z0-9_\-]{20,}$/.test(rawUserKey) ? rawUserKey : "";
+  // MY BUG. I required the key to match [A-Za-z0-9_-] exactly. NVIDIA keys do
+  // not always use only those characters, so a perfectly good key was thrown
+  // away here - silently, with no message - and the request then fell through
+  // to the "not configured" error below, which blamed Cloudflare for something
+  // that was entirely my doing.
+  //
+  // A key is now accepted on the only thing that actually identifies one: the
+  // nvapi- prefix and a sensible length. And if a key IS supplied but does not
+  // look like one, that is said out loud rather than being swallowed.
+  const looksLikeKey = rawUserKey.startsWith("nvapi-") && rawUserKey.length >= 20;
+  const userKey = looksLikeKey ? rawUserKey : "";
+  const keySuppliedButRejected = rawUserKey.length > 0 && !looksLikeKey;
 
   // The shared key is required ONLY for free-tier callers. Someone using their
   // own key does not need this deployment to have one at all.
+  if (keySuppliedButRejected) {
+    return json({ error: "The NVIDIA key in your Settings does not look right. It should start with nvapi- and be at least 20 characters. Copy it again from build.nvidia.com, with no spaces before or after." },
+      400, { ...cors.headers, "x-oiq-key": "rejected" });
+  }
   if (!env.NVIDIA_API_KEY && !userKey) {
-    return json({ error: "NVIDIA is not configured on this deployment: the NVIDIA_API_KEY secret is missing in Cloudflare Pages (Settings -> Environment variables -> Production), or the project has not been redeployed since it was added. You can instead add your own NVIDIA API key in Settings." }, 503, cors.headers);
+    return json({ error: "NVIDIA free tier is unavailable on this deployment, and no personal key was supplied. Add your own free key in Settings \u2192 API \u2014 it takes about three minutes at build.nvidia.com and removes this problem permanently. (Owner: the NVIDIA_API_KEY secret is not reaching the Pages Function at runtime.)" },
+      503, { ...cors.headers, "x-oiq-key": "none" });
   }
 
   // 4 ── QUOTAS
@@ -258,6 +274,9 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
     // Which key served the request. NEVER the key itself - just "own" or
     // "shared", so a support question can be answered without asking anyone to
     // paste a credential.
+    // "own"    = your personal key was used
+    // "shared" = the platform free-tier key was used
+    // Check this header in DevTools -> Network to see instantly which path ran.
     "x-oiq-key": userKey ? "own" : "shared",
     "x-oiq-reasoning": reasoningOn ? "on" : "off",
     "x-oiq-budget": String(budget),
