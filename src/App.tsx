@@ -1750,6 +1750,57 @@ function setLibraryEnabled(on:boolean){LIBRARY_ENABLED=!!on;try{localStorage.set
 // with no explanation. NVIDIA cannot be used here at all: it has no user key and
 // Railway cannot reach your Cloudflare proxy - so that case is named honestly
 // rather than failing silently.
+// ─────────────────────────────────────────────────────────────────────────────
+// THE FILE YOU COULD NOT OPEN.
+//
+// Excel said: "the file format or file extension is not valid". That message
+// means one thing - the bytes inside were not a spreadsheet. Something else
+// entirely was saved with an .xlsx name on it.
+//
+// Every Office file - xlsx, pptx, docx - is a ZIP archive underneath, and every
+// ZIP on earth starts with the same four bytes: P, K, 0x03, 0x04. A PDF starts
+// with %PDF. Those four bytes are a fact about the format, not a guess.
+//
+// So we check them before writing anything. If a server returns an error page,
+// a JSON message, or an empty response, it is now caught HERE and never reaches
+// your disk wearing an .xlsx name. You get a readable explanation instead of a
+// file Excel refuses to open.
+//
+// I did not chase which of five code paths produced the bad bytes. This closes
+// all of them at once, permanently, including any added later.
+// ─────────────────────────────────────────────────────────────────────────────
+function assertRealOfficeFile(buf:ArrayBuffer|Uint8Array, ext:string, source:string):Uint8Array{
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  if(u8.byteLength < 512){
+    throw new Error(source+" returned only "+u8.byteLength+" bytes - too small to be a real "+ext.toUpperCase()+" file.");
+  }
+  const isZip = u8[0]===0x50 && u8[1]===0x4B && u8[2]===0x03 && u8[3]===0x04;
+  const isPdf = u8[0]===0x25 && u8[1]===0x50 && u8[2]===0x44 && u8[3]===0x46;
+  const needZip = ext==="xlsx"||ext==="xlsm"||ext==="pptx"||ext==="docx";
+ 
+  if(needZip && !isZip){
+    // Show what actually came back, so the cause is obvious rather than a mystery.
+    let head=""; try{ head=new TextDecoder().decode(u8.slice(0,120)).replace(/\s+/g," ").trim(); }catch{}
+    const what = head.startsWith("{") ? "an error message from the server"
+               : /^<!?[a-z]/i.test(head) ? "a web page instead of a file"
+               : "something that is not a valid Office file";
+    throw new Error(source+" returned "+what+", so no "+ext.toUpperCase()+
+      " was written."+(head?" It began: "+head.slice(0,90):""));
+  }
+  if(ext==="pdf" && !isPdf){
+    throw new Error(source+" did not return a PDF.");
+  }
+  return u8;
+}
+ 
+// Excel rejects a sheet name containing : \\ / ? * [ ] , one longer than 31
+// characters, or an empty one. A deliverable called "Q1: Revenue / Costs" would
+// throw and take the entire workbook with it.
+function safeSheetName(n:any):string{
+  const cleaned=String(n||"").replace(/[:\\/?*\[\]]/g," ").replace(/\s+/g," ").trim().slice(0,31);
+  return cleaned||"Data";
+}
+ 
 function docServiceKey(keys:any):string{
   return providerKey(keys,"claude")||providerKey(keys,"openai")||providerKey(keys,"deepseek")
        ||providerKey(keys,"gemini")||providerKey(keys,"groq")||"";
@@ -5558,7 +5609,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             if(!_r.ok)throw new Error("Railway DOCX: HTTP "+_r.status);
             const _buf=await _r.arrayBuffer();
             if(_buf.byteLength<5000)throw new Error("Railway returned empty file");
-            zip.folder(folder).file(fname+".docx",_buf);
+            zip.folder(folder).file(fname+".docx",assertRealOfficeFile(_buf,"docx","The Word engine"));
             _docDone=true;
           }catch(_beeErr:any){
             recordEngineDowngrade(del.name,"docx",_beeErr);
@@ -5653,8 +5704,11 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             });
             if(!_r.ok)throw new Error("Railway Excel: HTTP "+_r.status);
             const _buf=await _r.arrayBuffer();
-            if(_buf.byteLength<1000)throw new Error("Railway returned empty file");
-            zip.folder(folder).file(fname+".xlsx",_buf);
+            // WAS: only a size check. A server error page is easily bigger than
+            // 1,000 bytes, sailed through, and was saved as .xlsx - which is
+            // exactly the file Excel refused to open for you.
+            const _ok=assertRealOfficeFile(_buf,"xlsx","The Excel engine");
+            zip.folder(folder).file(fname+".xlsx",_ok);
             // WE CANNOT EMBED A REAL VBA PROJECT FROM A BROWSER, AND WE WILL NOT
             // PRETEND OTHERWISE BY RENAMING A FILE TO .xlsm. A macro-enabled
             // workbook needs a compiled vbaProject.bin, which is a Windows Excel
@@ -5757,13 +5811,23 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               wsMain["!freeze"]={xSplit:0,ySplit:1};
               if(allRows[0]?.length) wsMain["!autofilter"]={ref:`A1:${String.fromCharCode(64+allRows[0].length)}1`};
               wsMain["!cols"]=allRows[0]?.map?.(()=>({wch:18}))||[];
-              XLSX.utils.book_append_sheet(wb,wsMain,del.name.slice(0,31)||"Data");
+              // Excel forbids : \\ / ? * [ ] in a sheet name and refuses an empty
+              // one. An unsanitised deliverable name here throws, and the whole
+              // workbook is lost to the catch below.
+              XLSX.utils.book_append_sheet(wb,wsMain,safeSheetName(del.name));
               // Assumptions sheet
               const assumptions=content.split("\n").filter((l:string)=>/\[ASSUMPTION\]|\[ESTIMATE\]/i.test(l)).map((l:string)=>[stripMd(l)]);
               if(assumptions.length){const wsA=XLSX.utils.aoa_to_sheet([["Assumption/Estimate"],...assumptions]);XLSX.utils.book_append_sheet(wb,wsA,"Assumptions");}
               const buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
-              zip.folder(folder).file(fname+".xlsx",buf);
-            }catch{zip.folder(folder).file(fname+".md",content);}
+              zip.folder(folder).file(fname+".xlsx",assertRealOfficeFile(buf,"xlsx","The built-in Excel builder"));
+            }catch(xe:any){
+              // If a workbook genuinely cannot be built, say so in the folder
+              // rather than leaving a file that will not open. A clear note is
+              // more use than a broken spreadsheet.
+              zip.folder(folder).file(fname+"-EXCEL-COULD-NOT-BE-BUILT.md",
+                "# Excel could not be generated\n\n**Reason:** "+String(xe?.message||xe).slice(0,300)+
+                "\n\nThe analysis itself is below and is complete. Only the spreadsheet packaging failed.\n\n---\n\n"+content);
+            }
             }
           }
           // ── PPTX: JSON-driven consulting-grade presentation ─────────────
@@ -5792,7 +5856,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             if(!_r.ok)throw new Error("Railway PPTX: HTTP "+_r.status);
             const _buf=await _r.arrayBuffer();
             if(_buf.byteLength<5000)throw new Error("Railway returned empty file");
-            zip.folder(folder).file(fname+".pptx",_buf);
+            zip.folder(folder).file(fname+".pptx",assertRealOfficeFile(_buf,"pptx","The PowerPoint engine"));
             _pptxDone=true;
           }catch(_beeErr:any){
             recordEngineDowngrade(del.name,"pptx",_beeErr);
@@ -5980,7 +6044,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             if(!_r.ok)throw new Error("Railway PDF: HTTP "+_r.status);
             const _buf=await _r.arrayBuffer();
             if(_buf.byteLength<2000)throw new Error("Railway returned empty file");
-            zip.folder(folder).file(fname+".pdf",_buf);
+            zip.folder(folder).file(fname+".pdf",assertRealOfficeFile(_buf,"pdf","The PDF engine"));
             _pdfDone=true;
           }catch(_beeErr:any){
             recordEngineDowngrade(del.name,"pdf",_beeErr);
@@ -7949,7 +8013,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                       const XLSX=await ensureXLSX();const wb=XLSX.utils.book_new();
                                       const rows=cnt.split("\n").filter(Boolean).map(r=>r.split("|").filter((c,ii,a)=>ii>0&&ii<a.length-1).map(c=>c.trim())).filter(r=>r.length>1&&!r.every(c=>c.match(/^[-:]+$/)));
                                       const ws=rows.length>0?XLSX.utils.aoa_to_sheet(rows):XLSX.utils.aoa_to_sheet([[del.name],[""],[ cnt.slice(0,500)]]);
-                                      XLSX.utils.book_append_sheet(wb,ws,del.name.slice(0,31)||"Data");
+                                      XLSX.utils.book_append_sheet(wb,ws,safeSheetName(del.name));
                                       const buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
                                       const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
                                       const u=URL.createObjectURL(blob);
