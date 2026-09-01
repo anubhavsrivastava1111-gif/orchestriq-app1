@@ -1380,13 +1380,39 @@ async function callGroq(key,sys,msgs,maxT){
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}if(r.status===401)throw new Error("Groq: Invalid API key.");if(r.status===429)throw new Error("Groq: Rate limit hit. Wait a moment.");throw new Error("Groq "+r.status+": "+(m||r.statusText));}
   const d=await r.json();return d.choices?.[0]?.message?.content||"";
 }
-  async function callClaude(key,sys,msgs,maxT,enableSearch,modelOverride=""){
+  // YOUR "signal timed out". THIS WAS A FIXED 90 SECONDS.
+//
+// Claude was the ONLY provider with a timeout at all - OpenAI, Gemini,
+// DeepSeek, Groq and Kimi have none. That is why this failed for you the
+// moment you switched to Claude alone, and why it never happened before.
+//
+// The Project Architect asks for 9,000 tokens. Writing 9,000 tokens of
+// structured JSON takes well over 90 seconds. The request was cut off
+// mid-answer, every single time, and no amount of retrying could change that -
+// each retry asked for the same 9,000 tokens and hit the same wall.
+//
+// A timeout has to scale with how much you asked for. Roughly 22 milliseconds
+// per token is a safe real-world rate, with a 60-second floor for short
+// answers and a 5-minute ceiling so nothing can hang forever.
+//
+//     1,500 tokens  ->  60s
+//     4,000 tokens  ->  88s
+//     9,000 tokens  -> 198s   <- the plan that kept failing
+//    16,000 tokens  -> 300s
+function claudeTimeoutMs(maxT:any,enableSearch?:boolean):number{
+  const want=Math.max(Number(maxT)||1500,500);
+  const base=Math.max(60000,Math.min(300000,want*22));
+  // A web search adds a round trip of its own before Claude starts writing.
+  return enableSearch?Math.min(360000,base+120000):base;
+}
+ 
+async function callClaude(key,sys,msgs,maxT,enableSearch,modelOverride=""){
   const body:any={model:(modelOverride||MODELS.claude.model),max_tokens:maxT,system:sys,messages:msgs};
   if(enableSearch)body.tools=[{type:"web_search_20250305",name:"web_search",max_uses:5}];
   // Search-enabled calls run server-side searches and can take minutes. Every
   // other long call in this file carries a timeout; this one did not, so a
   // stalled connection surfaced as an unexplained "Failed to fetch".
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body),signal:AbortSignal.timeout(enableSearch?180000:90000)});
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body),signal:AbortSignal.timeout(claudeTimeoutMs(maxT,enableSearch))});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}throw new Error("Claude "+r.status+": "+(m||r.statusText));}
   const d=await r.json();
   // Response content blocks can include: text, server_tool_use (search query), web_search_tool_result (search results).
@@ -4832,7 +4858,14 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       setProjectPlan(plan);
       sv("cos-project-plan",plan);
     }catch(err:any){
-      showToast("Project planning failed: "+err.message,"error");
+      // A timed-out request is still BILLED. Anthropic generated the tokens;
+      // we simply stopped listening. Repeating it silently spends real money
+      // for nothing, so the message has to say so rather than inviting a
+      // fourth identical attempt.
+      const _timedOut=/timed out|aborted|signal/i.test(String(err?.message||""));
+      showToast(_timedOut
+        ? "Planning timed out. Your Claude account is still charged for a timed-out request, so please do not retry the same objective repeatedly \u2014 shorten it instead, or switch Primary AI to NVIDIA which has no time limit."
+        : "Project planning failed: "+err.message,"error");
     }finally{
       setProjectPlanning(false);
     }
