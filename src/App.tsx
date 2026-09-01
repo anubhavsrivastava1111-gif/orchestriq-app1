@@ -1326,7 +1326,16 @@ async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string,userK
   // to know anything about reasoning modes.
   const nvModel=modelOverride||MODELS.nvidia.model;
   const nvTask=task||USAGE_CTX.feature||"general";
-  const nvReason=nvidiaShouldReason(nvModel,nvTask);
+  // YOUR 504. A reasoning model on a 120B network can think for well over a
+  // minute, and the network layer in front of it gives up at about 75 seconds.
+  // For a boardroom paper that deliberation is worth waiting for. For a chat
+  // message it is not - you want an answer, not a wait followed by an error.
+  //
+  // So interactive chat runs WITHOUT deep reasoning. Boardroom, workflows and
+  // documents keep it. This is the difference between NVIDIA feeling instant
+  // and NVIDIA feeling broken.
+  const _interactive=/chat|message|quick|ask|assistant|general/i.test(String(nvTask));
+  const nvReason=_interactive?false:nvidiaShouldReason(nvModel,nvTask);
   const nvBudget=nvidiaTokenBudget(nvModel,maxT,nvReason);
   // The proxy now REQUIRES a verified Supabase session. Without this header the
   // request is rejected with 401 - which is the point: an anonymous script can
@@ -1352,7 +1361,22 @@ async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string,userK
   return ntext;
 }
 async function callGroq(key,sys,msgs,maxT){
-  const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.groq.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
+  // YOUR EXACT ERROR: "Limit 8000, Requested 9728".
+  // Groq's free tier caps TOKENS PER MINUTE at 8,000 - and that budget covers
+  // the prompt AND the answer together. We were sending the prompt plus a
+  // separately chosen max_tokens with no regard for the total, so the two
+  // added up past the limit and Groq refused the whole request.
+  // Roughly 4 characters make one token. We measure the prompt, then ask for
+  // only what is left under a 7,200 ceiling, keeping 800 in hand for Groq's
+  // own counting being slightly different from ours.
+  const _promptChars=String(sys||"").length+msgs.reduce((n,m)=>n+String(m?.content||"").length,0);
+  const _promptTokens=Math.ceil(_promptChars/4);
+  const _room=7200-_promptTokens;
+  if(_room<300){
+    throw new Error("Groq: this request is too long for the free tier, which allows about 8,000 tokens a minute in total. Shorten the prompt, or use a different provider for this one.");
+  }
+  const _groqMax=Math.max(300,Math.min(Number(maxT)||1500,_room));
+  const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.groq.model,max_tokens:_groqMax,messages:[{role:"system",content:sys},...msgs]})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}if(r.status===401)throw new Error("Groq: Invalid API key.");if(r.status===429)throw new Error("Groq: Rate limit hit. Wait a moment.");throw new Error("Groq "+r.status+": "+(m||r.statusText));}
   const d=await r.json();return d.choices?.[0]?.message?.content||"";
 }
@@ -1433,7 +1457,27 @@ async function callDeepSeek(key,sys,msgs,maxT,modelOverride=""){
     // Throwing here makes the failover loop retry instead of accepting silence.
     const reasoned=(ch?.message?.reasoning_content||"").trim();
     const fin=ch?.finish_reason||"";
-    if(reasoned&&fin==="length")throw new Error("DeepSeek ran out of output budget while reasoning and produced no answer. Raise the response budget or shorten the prompt.");
+    if(reasoned&&fin==="length"){
+      // WHY THIS KEPT HAPPENING AND WHY RAISING THE BUDGET COULD NOT FIX IT.
+      // DeepSeek's own hard ceiling is 8,192 output tokens. We were already
+      // asking for that. So the previous advice - "raise the response budget" -
+      // was impossible to follow: there was no higher number to use.
+      //
+      // The amount of thinking a reasoning model does scales with how much you
+      // give it to read. The only lever left is the INPUT. Cutting the prompt
+      // roughly in half cuts the thinking roughly in half, which leaves room
+      // for an actual answer.
+      //
+      // One retry only. If a halved prompt still cannot finish, the failover
+      // moves to another provider rather than burning your credit twice more.
+      if(!(msgs as any)?.__dsRetry){
+        const _half=(t:string)=>{const s=String(t||"");return s.length>1200?s.slice(0,Math.floor(s.length*0.5))+"\n\n[Shortened so the model has room to answer.]":s;};
+        const _msgs=msgs.map((m:any)=>({...m,content:_half(m.content)}));
+        (_msgs as any).__dsRetry=true;
+        return await callDeepSeek(key,_half(sys),_msgs,maxT,modelOverride);
+      }
+      throw new Error("DeepSeek could not finish this request - it is a reasoning model and this prompt is too long for its 8,192 token answer limit. Use Claude or NVIDIA for long documents, or ask a shorter question.");
+    }
     if(reasoned)return reasoned;
     throw new Error("DeepSeek returned an empty answer (finish_reason: "+(fin||"unknown")+").");
   }
@@ -1740,7 +1784,22 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
   // for images). Only falls back to a written description if every visual
   // provider is missing a key or genuinely fails.
   if(resolvedTask==="image_gen"||resolvedTask==="diagram"||resolvedTask==="video_gen"){
-    const mediaPrompt=msgs?.find((m:any)=>m.role==="user")?.content||sys||"generate image";
+    // YOUR EXAMPLE: "give me the Eiffel Tower picture" produced something else.
+    // We were passing your sentence to the image model word for word. An image
+    // model is not being asked a question - it draws whatever words it is given.
+    // "give me the ... picture" is an instruction, not a description, so those
+    // words end up influencing the picture. Stripping the request wrapper leaves
+    // the subject: "Eiffel Tower".
+    const _rawMedia=msgs?.find((m:any)=>m.role==="user")?.content||sys||"generate image";
+    const mediaPrompt=(()=>{
+      let p=String(_rawMedia).trim();
+      p=p.replace(/^\s*(please\s+)?(can you\s+|could you\s+|i want\s+|i need\s+)?(give me|generate|create|make|draw|produce|show me|get me|design)\s+(me\s+)?(an?\s+|the\s+)?/i,"");
+      p=p.replace(/^\s*(image|picture|photo|photograph|illustration|diagram|visual)\s+(of|for|showing)\s+/i,"");
+      p=p.replace(/\s+(image|picture|photo|photograph)\s*[.!?]?\s*$/i,"");
+      p=p.replace(/\s*[.!?]+\s*$/,"").trim();
+      // If stripping left almost nothing, the original was already a description.
+      return p.length>=3?p:String(_rawMedia).trim();
+    })();
     const isVideo=resolvedTask==="video_gen";
     const mediaRoute=isVideo?["fal"]:routeOrder.filter(p=>["fal","openai","stability"].includes(p));
     let lastMediaErr:any=null;
