@@ -709,13 +709,24 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
     // Your chosen extraction model leads; the rest remain as failover.
     const pref=stageRoute(keys,"research_extract");
     if(pref)routes.push({provider:pref.provider,key:pref.key});
-    ["deepseek","kimi","groq","openai","gemini","claude"].forEach(p=>{
+    // NVIDIA WAS MISSING FROM THIS LIST. That single omission is why you saw
+    // "Research Desk OFFLINE - no Claude or Gemini key" while running NVIDIA
+    // with a perfectly good Serper key configured.
+    //
+    // The logic above is already right: when an external search service does
+    // the searching, ANY model can read the results. NVIDIA reads them as well
+    // as any other. It was simply never named here, so the list came out empty
+    // and the code concluded there was no way to do research at all.
+    ["nvidia","deepseek","kimi","groq","openai","gemini","claude"].forEach(p=>{
       if(ek[p]&&!routes.some(r=>r.provider===p))routes.push({provider:p,key:ek[p]});
     });
   }
   const route=routes[0];
   if(!route){
-    try{showToast&&showToast("Research Desk OFFLINE — no Claude or Gemini key. Executives will debate UNVERIFIED figures. Add a key in Settings.","warning");}catch{}
+    // WAS: "no Claude or Gemini key" - which was wrong and sent you hunting
+    // for the wrong fix. A Serper key plus ANY model is enough, and is the
+    // cheaper of the two routes by roughly ten times.
+    try{showToast&&showToast("Research Desk cannot reach the web. Cheapest fix: Settings \u2192 Web Search Service \u2192 add a Serper key (2,500 free searches). Any AI provider you already have, NVIDIA included, can then do the reading.","warning");}catch{}
     return {
       brief:"⚠ **RESEARCH DESK OFFLINE — NO SEARCH-CAPABLE PROVIDER**\n\nNo way to reach the live web is currently configured, so no live figure could be retrieved for this question.\n\n**Every number produced below is model-generated and UNVERIFIED.** Do not use any figure in this session for a real decision, valuation, budget, or external document until independently confirmed.\n\nFix — either option works:\n1. CHEAPEST: Settings → Web Search Service → add a Serper key (~$1 per 1,000 searches, 2,500 free). Any AI provider you already have can then do the reasoning.\n2. Settings → API Keys → switch on Claude or Gemini and let the model search for itself (~$10–14 per 1,000 searches).",
       grounded:false,provider:"none"
