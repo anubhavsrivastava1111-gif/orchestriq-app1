@@ -81,7 +81,11 @@ export const PROVIDERS: ProviderSpec[] = [
   },
   {
     id: "openai", label: "OpenAI", company: "OpenAI",
-    can: ["text", "vision", "image", "documents"],
+    // OpenAI has a native web_search tool on the Responses API, so it belongs
+    // in the websearch column. Our code does not yet USE it - that is a
+    // separate wiring job - but the registry must describe what a provider can
+    // do, not what we have got round to.
+    can: ["text", "vision", "image", "websearch", "documents"],
     keyPrefix: "sk-", keyPlaceholder: "sk-…",
     getKeyUrl: "https://platform.openai.com/api-keys",
     cost: "Paid, per token. Images about ₹8 each.",
@@ -122,6 +126,33 @@ export const PROVIDERS: ProviderSpec[] = [
     getKeyUrl: "https://platform.moonshot.cn/console/api-keys",
     cost: "Low cost per token",
     privacyNote: "Moonshot AI is based in China. Same consideration as DeepSeek.",
+    freeTier: false, active: true,
+  },
+  // ── ADDED ON REQUEST: providers that reach the live web themselves ────────
+  // You asked to be ready for more than the original six. These two are the
+  // ones that genuinely change what the product can do, rather than being
+  // another way to do what we already have.
+  {
+    id: "perplexity", label: "Perplexity", company: "Perplexity AI",
+    // Sonar is a model with the web built in - it answers and cites, in one
+    // call. For research that is materially cheaper and simpler than paying a
+    // reasoning model to read search results we fetched separately.
+    can: ["text", "websearch"],
+    keyPrefix: "pplx-", keyPlaceholder: "pplx-…",
+    getKeyUrl: "https://www.perplexity.ai/settings/api",
+    cost: "Sonar from about $1 per 1,000 requests; the raw Search API about $5 per 1,000",
+    privacyNote: "Queries are processed by Perplexity. Answers arrive already cited, which makes verification easy.",
+    freeTier: false, active: true,
+  },
+  {
+    id: "exa", label: "Exa", company: "Exa",
+    // Search only - it returns results, it does not reason. Its own index
+    // rather than a Google scrape, so it does not break when Google changes.
+    can: ["websearch"],
+    keyPrefix: "", keyPlaceholder: "Exa API key",
+    getKeyUrl: "https://dashboard.exa.ai/api-keys",
+    cost: "Pay as you go, comparable to Serper",
+    privacyNote: "Independent index, not derived from Google. A good second search source if Serper fails.",
     freeTier: false, active: true,
   },
   {
