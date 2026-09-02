@@ -14,6 +14,7 @@ import AIAgents from "./AIAgents";
 import AgenticWorkflows from "./AgenticWorkflows";
 import { getExecutivesCached } from "./lib/executives";
 import { supabase } from "./lib/supabase";
+import PROV, { availableFor as provAvailableFor, cannotDoMessage as provCannotDo, type Capability } from "./lib/Providers";
 import { WorkspaceMemory } from "./lib/WorkspaceMemory";
 import ReadAloudButton from "./components/ReadAloudButton";
 import DesignCentre from "./components/DesignCentre";
@@ -1977,7 +1978,10 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
   const paidConfigured=["claude","openai"].filter(p=>effectiveKeys[p]?.trim());
   let active=taskRoutedProvider||getActiveProvider(defP,effectiveKeys,EFF_GROQ,EFF_GEMINI);
   if(!taskRoutedProvider){
-    if(providerEnabled(keys,"claude")&&!keys.claude?.trim()&&!keys.openai?.trim()){
+    // WAS: if Claude is enabled but has no key, and OpenAI has no key, force
+    // "claude" as the active provider - with no key at all. That is how a user
+    // running only NVIDIA ended up being told they had no keys.
+    if(providerEnabled(keys,"claude")&&!providerKey(keys,"claude")&&!providerKey(keys,"openai")&&!providerKey(keys,"nvidia")){
       active="claude";
     }else if(paidConfigured.length&&!paidConfigured.includes(defP)&&!effectiveKeys[active]?.trim()){
       active=paidConfigured[0];
@@ -3960,12 +3964,12 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     callMulti(keys,defP,sys,msgs,maxT,enableSearch,taskType),
   [keys,defP]);
   const askImage=useCallback(async(prompt:string,size="landscape_4_3",model="fal-ai/flux-pro"):Promise<string>=>{
-    const falKey=(keys.fal||EFF_FAL)?.trim();
+    const falKey=providerKey(keys,"fal");
     if(!falKey)throw new Error("Add your fal.ai API key in Settings → fal.ai to generate images.");
     return callFalImage(falKey,prompt,model);
   },[keys]);
   const askVideo=useCallback(async(prompt:string,durationSec=5,model="fal-ai/kling-video/v1.6/standard/text-to-video"):Promise<string>=>{
-    const falKey=(keys.fal||EFF_FAL)?.trim();
+    const falKey=providerKey(keys,"fal");
     if(!falKey)throw new Error("Add your fal.ai API key in Settings → fal.ai to generate videos.");
     return callFalVideo(falKey,prompt,durationSec,model);
   },[keys]);
@@ -4727,8 +4731,8 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       fundingSummary,
       requiredFormats:["docx","xlsx","pdf","md","pptx","linkedin_post","facebook_post","instagram_post","whatsapp_message","email"],
       mediaGeneration:{
-        imageEnabled:!!(keys.openai?.trim()||keys.fal?.trim()),
-        videoEnabled:!!(keys.fal?.trim()),
+        imageEnabled:provAvailableFor("image",(id)=>providerKey(keys,id)).length>0,
+        videoEnabled:provAvailableFor("video",(id)=>providerKey(keys,id)).length>0,
         promptsOnly:false,
       },
     };
@@ -5787,8 +5791,23 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
                 }
               },
               stripMd,
-              { image:async(p:string)=>{const _oa=((keys as any).openai||"").trim();if(_oa){try{const u=await callDallE(p,_oa);if(u)return u;}catch{}}return callFalImage((keys as any).fal||EFF_FAL,p);},
-                video:(p:string)=>callFalVideo((keys as any).fal||EFF_FAL,p) },
+              { image:async(p:string)=>{
+                  // WAS: read keys.openai directly, then keys.fal directly. Both
+                  // ignored the on/off switch, so a provider you had switched OFF
+                  // was still used - and a provider you HAD configured was
+                  // invisible if it was not one of those two.
+                  // The registry answers "who can make an image" in one place.
+                  const cands=provAvailableFor("image",(id)=>providerKey(keys,id));
+                  for(const c of cands){
+                    try{
+                      if(c.id==="openai"){const u=await callDallE(p,c.key); if(u)return u;}
+                      else if(c.id==="stability"){const u=await callStabilityAI(p,c.key); if(u)return u;}
+                      else if(c.id==="fal"){const u=await callFalImage(c.key,p); if(u)return u;}
+                    }catch(e){console.warn("[OIQ] image provider "+c.id+" failed:",String((e as any)?.message||e).slice(0,110));}
+                  }
+                  throw new Error(provCannotDo(defP||"nvidia","image",[]));
+                },
+                video:(p:string)=>callFalVideo(providerKey(keys,"fal"),p) },
             );
             const _xlsxDel: DeliverableSpec = {
               type: "excel",
@@ -6144,7 +6163,9 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
           // REAL media generation — deliver the actual PNG/MP4, never a prompt file.
           // Script/brief is included alongside as reference. A prompt file is written
           // ONLY on genuine failure, and it states the exact error and fix.
-          const falK=((keys as any).fal||EFF_FAL||"").trim();
+          // WAS a direct read that ignored the on/off switch entirely.
+          // providerKey is the one function that respects it.
+          const falK=providerKey(keys,"fal");
           try{
             setProjectExecPhase((fmt==="video"?"\ud83c\udfac Generating video: ":"\ud83c\udfa8 Generating image: ")+del.name+"...");
             const mp:any=buildMediaPrompt(del,proj.context||{});
@@ -6155,7 +6176,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
             }else{
               // DALL\u00b7E is the PRIMARY image provider (fal.ai billing on hold);
               // fal.ai remains the automatic fallback when no OpenAI key exists.
-              const _oa=((keys as any).openai||"").trim();
+              const _oa=providerKey(keys,"openai");
               if(_oa){
                 try{
                   setProjectExecPhase("\ud83c\udfa8 Generating image via DALL\u00b7E: "+del.name+"...");
@@ -6226,7 +6247,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
         const folder=del._modName.replace(/[^a-zA-Z0-9]/g,"-");
         const fname=del.name.replace(/[^a-zA-Z0-9]/g,"-");
         mediaPromptLines.push("## "+del.name);
-        const falKey=(keys.fal||EFF_FAL)?.trim();
+        const falKey=providerKey(keys,"fal");
         if(prompts.type==="video"||del.outputFormat==="video"){
           // ── VIDEO: Generate via fal.ai (Kling), fall back to prompts ───────
           if(falKey){
@@ -6281,10 +6302,10 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               mediaPromptLines.push("","*⚠️ fal.ai image failed ("+e.message.slice(0,60)+"), trying next provider...*","");
             }
           }
-          if(!imgGenerated&&mediaMode.image==="dalle"&&keys.openai?.trim()){
+          if(!imgGenerated&&mediaMode.image==="dalle"&&providerKey(keys,"openai")){
             try{
               setProjectExecPhase("🖼 Generating image via DALL-E: "+del.name);
-              const imgUrl=await callDallE(prompts.dalle,keys.openai);
+              const imgUrl=await callDallE(prompts.dalle,providerKey(keys,"openai"));
               if(imgUrl){
                 const ir=await fetch(imgUrl);const ib=await ir.blob();const ibuf=await ib.arrayBuffer();
                 zip.folder(folder).file(fname+".png",ibuf);
@@ -6293,10 +6314,10 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
               }
             }catch(e:any){mediaPromptLines.push("","*DALL-E failed: "+e.message.slice(0,60)+"*","");}
           }
-          if(!imgGenerated&&mediaMode.image==="stability"&&keys.stability?.trim()){
+          if(!imgGenerated&&mediaMode.image==="stability"&&providerKey(keys,"stability")){
             try{
               setProjectExecPhase("🖼 Generating image via Stability: "+del.name);
-              const imgUrl=await callStabilityAI(prompts.stability,keys.stability);
+              const imgUrl=await callStabilityAI(prompts.stability,providerKey(keys,"stability"));
               if(imgUrl){
                 const ir=await fetch(imgUrl);const ib=await ir.blob();const ibuf=await ib.arrayBuffer();
                 zip.folder(folder).file(fname+".png",ibuf);
