@@ -91,9 +91,17 @@ export function isRateLimit(errorMessage: string): boolean {
 
 export async function waitWithCountdown(
   seconds: number,
-  onTick: (remaining: number) => void
+  onTick: (remaining: number) => void,
+  // WHY YOUR CANCEL BUTTON DID NOTHING FOR A MINUTE.
+  // When every provider hit its limit the app waited 65 seconds before trying
+  // again. This loop had no way to be told "stop" - it counted down to zero
+  // whatever the user did. Pressing Cancel during that minute appeared to do
+  // nothing at all, because nothing was listening.
+  // shouldStop is checked every second. Cancel now takes effect immediately.
+  shouldStop?: () => boolean,
 ): Promise<void> {
   for (let i = seconds; i > 0; i--) {
+    if (shouldStop && shouldStop()) return;
     onTick(i);
     await new Promise(r => setTimeout(r, 1000));
   }
