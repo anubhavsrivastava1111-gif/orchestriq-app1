@@ -1331,7 +1331,7 @@ function httpErrText(t:string,status:number):string{
 // Settings. It is passed straight through to the proxy for that single request
 // and is never stored anywhere but the browser, exactly like every other
 // provider key in this app.
-async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string,userKey?:string){
+async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string,userKey?:string,nvRetried?:boolean){
   // Reasoning models spend output tokens THINKING before they answer. The task
   // decides whether that is worth paying for; the registry decides how much
   // headroom the answer then needs on top. Deciding it here means no module has
@@ -1356,7 +1356,26 @@ async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string,userK
   try{const {data:{session}}=await supabase.auth.getSession();nvAuth=session?.access_token||"";}catch{}
   if(!nvAuth)throw new Error("NVIDIA (Free) requires you to be signed in. Sign in, or add your own provider key in Settings.");
   const r=await fetch("/api/nvidia",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+nvAuth},body:JSON.stringify({sys,messages:msgs,model:nvModel,max_tokens:nvBudget,reasoning:nvReason,task:nvTask,user_key:(userKey&&userKey!=="nvidia")?userKey:""})});
-  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error;}catch{m=httpErrText(t,r.status);}if(r.status===429)throw new Error("NVIDIA: Free daily limit reached. Add your own key in Settings for unlimited use.");if(r.status===503)throw new Error("NVIDIA: Free tier not yet configured on this deployment.");throw new Error(m||("NVIDIA "+r.status));}
+  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error;}catch{m=httpErrText(t,r.status);}if(r.status===429)throw new Error("NVIDIA: Free daily limit reached. Add your own key in Settings for unlimited use.");if(r.status===503)throw new Error("NVIDIA: Free tier not yet configured on this deployment.");
+    // YOUR "NVIDIA 404: " WITH NOTHING AFTER THE COLON.
+    // 404 from NVIDIA means one thing: the MODEL NAME does not exist on their
+    // service. Not a limit, not a key problem, not our proxy. NVIDIA retires
+    // and renames models, and when they do, a name that worked beautifully
+    // last month returns 404 today - for every module at once, which is
+    // exactly what you saw.
+    // The old message did not say which model, so it was impossible to tell.
+    // Now it does, and it retries once with a model we know is current.
+    if(r.status===404){
+      if(!nvRetried){
+        const alt="meta/llama-3.3-70b-instruct";
+        if(nvModel!==alt){
+          console.warn("[OIQ] NVIDIA model "+nvModel+" returned 404 - retrying with "+alt);
+          return await callNvidia(sys,msgs,maxT,alt,task,userKey,true);
+        }
+      }
+      throw new Error("NVIDIA does not recognise the model \""+nvModel+"\". NVIDIA has most likely retired it. Settings \u2192 API \u2192 NVIDIA model, and choose another from the list.");
+    }
+    throw new Error(m||("NVIDIA "+r.status));}
   const d=await r.json();
   const ntext=d.choices?.[0]?.message?.content||"";
   if(!ntext.trim())throw new Error("NVIDIA returned an empty answer (finish_reason: "+(d.choices?.[0]?.finish_reason||"unknown")+").");
@@ -4407,8 +4426,9 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           // All providers exhausted this cycle — wait 65s then reset and retry
           if(cyclesDone<3){
             await waitWithCountdown(65,(s)=>{
-              setBrPh(ag.ic+" "+ag.t+" — all providers at limit. Resuming in "+s+"s…");
-            });
+              setBrPh(ag.ic+" "+ag.t+" — all providers at limit. Resuming in "+s+"s… (Cancel to stop)");
+            },()=>cancelRef.current.br);
+            if(cancelRef.current.br)break;
             // ProviderManager auto-resets after 60s; 65s guarantees reset
           }
         }
@@ -5245,7 +5265,13 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
         // All providers tried — wait before retry
         if(attempt===0){
           setProjectExecPhase("All providers at limit — waiting 65s before retry for: "+delLabel);
-          await waitWithCountdown(65,(s)=>setProjectExecPhase("Retry in "+s+"s — "+delLabel));
+          // Same fix, same reason. Every long wait in the product must be
+          // interruptible or Cancel is decoration. projectExecCancelRef is the
+          // flag the existing Stop button already sets - this wait simply never
+          // looked at it.
+          await waitWithCountdown(65,(s)=>setProjectExecPhase("Retry in "+s+"s \u2014 "+delLabel+" (Stop to cancel)"),
+            ()=>projectExecCancelRef.current);
+          if(projectExecCancelRef.current)break;
         }
       }
       throw lastErr||new Error("All providers exhausted for: "+delLabel);
