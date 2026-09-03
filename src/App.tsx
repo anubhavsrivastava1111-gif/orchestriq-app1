@@ -649,7 +649,13 @@ function buildAngleQueries(question:string,angleId:string,co:any):string[]{
   const cleaned=stripSelfReference(question,co);
   const qWords=cleaned.replace(/[^a-z0-9\s.%-]/g," ").split(/\s+/)
     .filter(w=>w.length>2&&!QUERY_STOPWORDS.has(w)&&!/^\d+$/.test(w));
-  const qCore=Array.from(new Set(qWords)).slice(0,4).join(" ").trim();
+  // WAS: only 4 words survived from the question, and the INDUSTRY was then
+  // put in front of them. So the search was mostly about the company's sector
+  // and only slightly about what was actually asked. That is why the results
+  // came back competent and beside the point.
+  // Eight words now survive, and they LEAD the query. Industry and place stay,
+  // but as context behind the question rather than in front of it.
+  const qCore=Array.from(new Set(qWords)).slice(0,8).join(" ").trim();
   // 2. The INDUSTRY always leads, because it is the one term guaranteed to describe
   //    a real market. Words surviving from the question only add specificity.
   //    Verified query output:
@@ -673,6 +679,58 @@ function buildAngleQueries(question:string,angleId:string,co:any):string[]{
 // mandatory disconfirming-evidence pass), runs a real search per angle, then
 // runs a final synthesis pass that reconciles conflicts, ranks what matters,
 // and hands the executives framed tensions to debate rather than raw facts.
+// WHY THE RESEARCH FELT UNRELATED TO THE QUESTION.
+//
+// The seven angles below were applied to EVERY question, without exception.
+// They are good angles - for a market-entry or investment question. They are
+// the wrong seven for anything else.
+//
+// Ask "how do I handle an unreasonable manager" and the desk still went looking
+// for market size, competitor pricing and unit economics. Ask about export
+// documentation and it searched for churn and CAC. The research was competent
+// and irrelevant, which is exactly what you described.
+//
+// The angles now follow the question. A market question gets market angles. A
+// career question gets career angles. A trade question gets trade angles.
+const ANGLE_SETS:Record<string,Array<{id:string;label:string}>>={
+  career:[
+    {id:"norms",label:"Workplace norms, hierarchy and how promotion actually gets decided in this country and sector"},
+    {id:"benchmark",label:"Salary bands, titles and typical progression timelines for this role and level"},
+    {id:"rights",label:"Employment law, notice periods, and what protection the employee actually has here"},
+    {id:"tactics",label:"Evidence on what works when managing upwards, negotiating, or handling a difficult manager"},
+    {id:"wellbeing",label:"Burnout, workload and work-life expectations in this specific culture and industry"},
+    {id:"contrarian",label:"Where the common career advice fails, and what people regret doing"},
+  ],
+  trade:[
+    {id:"classification",label:"HS classification, applicable duty rates and the tariff schedule for this product and destination"},
+    {id:"regulation",label:"Import and export licensing, certification, labelling and prohibited or restricted status"},
+    {id:"agreements",label:"Trade agreements, preferential origin rules and current tariff or sanction changes"},
+    {id:"demand",label:"Import volumes, leading supplier countries and demand trend for this product in the target market"},
+    {id:"logistics",label:"Freight routes, transit times, packaging standards and landed cost components"},
+    {id:"risk",label:"Payment risk, buyer default patterns, customs delays and documentation failures in this corridor"},
+  ],
+  market:[
+    {id:"market",label:"Market size, growth rate, and demand trends"},
+    {id:"competitors",label:"Direct and indirect competitors, their pricing and positioning"},
+    {id:"pricing",label:"Industry pricing benchmarks and unit economics (gross margin, CAC, payback, churn)"},
+    {id:"regulatory",label:"Regulatory, compliance, licensing, and legal exposure"},
+    {id:"news",label:"Events in the last 6-12 months that change the picture"},
+    {id:"customer",label:"Customer adoption trends, buyer behaviour, and objections"},
+    {id:"contrarian",label:"Disconfirming evidence: failures, shutdowns, declining metrics, and the strongest case AGAINST this working"},
+  ],
+};
+ 
+/** Reads the question and picks the angle set that fits it. */
+function pickAngleSet(question:string,execIds?:string[]):Array<{id:string;label:string}>{
+  const q=String(question||"").toLowerCase();
+  const ex=(execIds||[]).join(" ");
+  if(/\btrade\b|import|export|customs|hs code|tariff|duty|incoterm|shipping|freight|consignment|exporter|importer/.test(q)||/trade/.test(ex))
+    return ANGLE_SETS.trade;
+  if(/\bmanager\b|promotion|appraisal|salary|resign|notice period|burnout|work.?life|colleague|boss|career|my job|my team lead|toxic/.test(q)||/coach/.test(ex))
+    return ANGLE_SETS.career;
+  return ANGLE_SETS.market;
+}
+ 
 const RESEARCH_ANGLES=[
   {id:"market",label:"Market size, growth rate, and demand trends"},
   {id:"competitors",label:"Direct and indirect competitors, their pricing and positioning"},
@@ -747,7 +805,9 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   const sections=[];
   let anyFail=false;
   let anyTruncated=false;
-  for(const angle of RESEARCH_ANGLES){
+  // Use the angle set that matches this question, not the fixed business seven.
+  const ACTIVE_ANGLES=pickAngleSet(question);
+  for(const angle of ACTIVE_ANGLES){
     try{
       let anglePrompt=researchDeskPrompt(co,compData,question)+
         "\n\nFOCUS THIS PASS ENTIRELY ON: "+angle.label+
@@ -1068,6 +1128,12 @@ const DEPTS=[
   ]},
   {id:"strategy",l:"Strategy & Corp Dev",c:"#6366F1",roles:[
     {id:"cso",t:"Chief Strategy Officer",f:"Chief Strategy Officer",ic:"♟️",d:"Corporate Strategy · M&A · Innovation",qa:["3-year strategic plan","M&A target screening","Innovation portfolio review","Strategic partnership evaluation"]},
+    // ── TWO NEW EXECUTIVES ────────────────────────────────────────────────
+    // Added as DATA, alongside the existing roles. No existing behaviour
+    // changes: every module already reads this list, so both appear
+    // everywhere at once - Boardroom, Executive Chat, Workflow, Autopilot.
+    {id:"coach",t:"Career Coach",f:"Executive Career and Life Coach",ic:"\uD83E\uDDED",d:"Career Growth \u00b7 Difficult Managers \u00b7 Work-Life",qa:["How do I handle an unreasonable manager?","Build my 12-month promotion plan","I am burning out \u2014 what do I change first?","Negotiate my salary and title"]},
+    {id:"trade",t:"Trade Officer",f:"Chief International Trade Officer",ic:"\uD83C\uDF0F",d:"Import \u00b7 Export \u00b7 Customs \u00b7 Trade Compliance",qa:["How do I start exporting from India?","Find the HS code and duty for my product","Which market should I enter first?","Get my documentation and Incoterms right"]}
     {id:"strat_mgr",t:"Strategy Manager",f:"Senior Strategy Manager",ic:"📐",d:"Strategic Projects · Analysis",qa:["Market sizing analysis","Five Forces analysis","Business model canvas","Strategic options evaluation"]},
     {id:"biz_ana",t:"Business Analyst",f:"Senior Business Analyst",ic:"💡",d:"Process Analysis · Requirements",qa:["Business requirements document","As-is vs to-be process map","Stakeholder analysis","Cost-benefit analysis"]},
     {id:"strat_ana",t:"Strategy Analyst",f:"Strategy and Research Analyst",ic:"🔭",d:"Market Research · Competitor Intel",qa:["Industry landscape report","Competitor deep-dive","Market entry feasibility","PESTLE analysis"]},
@@ -1091,10 +1157,46 @@ const DEPTS=[
 ];
 
 const AR=DEPTS.flatMap(d=>d.roles.map(r=>({...r,dc:d.c,dl:d.l})));
-const CS=AR.filter(r=>["chairman","ceo","cfo","cto","coo","cmo","chro","clo","cso"].includes(r.id));
+// Both new executives are added here so they appear in the Boardroom picker
+// alongside the rest. They are ordinary participants: they debate, they are
+// challenged, and they challenge others.
+const CS=AR.filter(r=>["chairman","ceo","cfo","cto","coo","cmo","chro","clo","cso","coach","trade"].includes(r.id));
 
 const EP={
   chairman:{b:"MBA Strategy Harvard · LLB Cambridge · 45 years.",m:"You are the Executive Chairman. Set board agenda, ensure fiduciary duty, protect shareholders, hold CEO accountable."},
+ 
+  // ── CAREER COACH ──────────────────────────────────────────────────────────
+  // Not a motivational speaker. A coach who has sat on both sides of the
+  // promotion table and will say the uncomfortable thing when it is true.
+  coach:{
+    b:"MSc Organisational Psychology LSE \u00b7 ICF Master Certified Coach \u00b7 22 years: HR Director at two FTSE 100 firms, then executive coach to 400+ leaders across India, the Gulf, the UK and South-East Asia.",
+    m:"You are an Executive Career and Life Coach. You coach the individual, not the company \u2014 your loyalty is to the person asking.\n\n"+
+      "ALWAYS ESTABLISH CONTEXT FIRST. Where they work matters enormously. Notice period, at-will employment, how directly a junior may disagree with a senior, whether salary is openly discussed, how promotion actually gets decided \u2014 all of these differ completely between Bengaluru, Dubai, London and Singapore. If you do not know their location, sector and level, ASK before advising. Advice given to the wrong context is worse than none.\n\n"+
+      "HOW YOU WORK:\n"+
+      "1. Separate the SITUATION from the STORY. What actually happened, and what are they telling themselves about it? Most stuck feelings live in the gap.\n"+
+      "2. Name the power dynamic honestly. Who controls what they want, what do they control, and what leverage genuinely exists.\n"+
+      "3. Give SPECIFIC WORDS. Not 'set a boundary' \u2014 the actual sentence to say, and what to do when it is ignored.\n"+
+      "4. Distinguish what they can change, influence, or only survive. Effort spent on the third is what causes burnout.\n"+
+      "5. Timeline every plan. 'Within two weeks', 'by the next review'. A plan with no date is a wish.\n\n"+
+      "ON DIFFICULT MANAGERS: diagnose before prescribing. An overloaded manager, an insecure one, and a genuinely hostile one need three different responses. Say which you think it is and why.\n\n"+
+      "ON PROMOTION: promotion follows visible business impact plus a sponsor who will argue for them in a room they are not in. Coach both. Working harder without either is the most common wasted year.\n\n"+
+      "ON WORK-LIFE BALANCE AND MONEY: be practical about their actual constraints \u2014 rent, dependants, visa status, a single income. Never suggest walking away from a job without checking whether they can afford to.\n\n"+
+      "WHEN TO STOP COACHING: if you hear signs of harassment, discrimination, unsafe conditions, or serious distress, say plainly that this is beyond coaching and point to HR, a lawyer, a doctor or a helpline. Do not coach someone through something they should be reporting or getting help for. That is the one place where being useful means stepping back."
+  },
+ 
+  // ── CHIEF INTERNATIONAL TRADE OFFICER ─────────────────────────────────────
+  trade:{
+    b:"MSc International Trade Law \u00b7 Licensed Customs Broker \u00b7 28 years: Head of Global Logistics at a Fortune 500 manufacturer, DGFT and FIEO advisory panels, 60+ country market entries.",
+    m:"You are a Chief International Trade Officer covering the whole chain \u2014 product selection, buyer discovery, pricing, documentation, customs, logistics, payment and dispute.\n\n"+
+      "CLASSIFICATION AND DUTY ARE WHERE PEOPLE LOSE MONEY. An HS code is 6 digits internationally; countries add 2 to 4 more of their own. Give the 6-digit heading and say the national extension must be confirmed with that country's tariff schedule. NEVER state a duty rate as fact without a source and a date \u2014 rates change with every budget and every trade agreement. Say where to verify: India's ICEGATE, the EU's TARIC, the US HTS, or the destination customs authority.\n\n"+
+      "INCOTERMS 2020 DECIDE WHO PAYS AND WHO CARRIES THE RISK. Always state which term you are assuming. EXW gives the exporter least control and most disputes; FOB and CIF suit sea freight; DDP means the seller clears import customs, which is often impossible without a local entity. Getting this wrong is the single most common costly error a first-time exporter makes.\n\n"+
+      "DOCUMENTATION \u2014 name the actual documents: commercial invoice, packing list, bill of lading or air waybill, certificate of origin (and whether preferential origin applies under a trade agreement), inspection certificate, insurance certificate, and any product-specific licence. A missing certificate of origin can cost the buyer the entire duty preference.\n\n"+
+      "PAYMENT RISK RANKS: advance payment, confirmed letter of credit, unconfirmed LC, documents against payment, documents against acceptance, open account. State the risk plainly for a first transaction with an unknown buyer. Most first-time exporters lose money here, not on logistics.\n\n"+
+      "MARKET SELECTION should be evidence-led: existing import volume for that HS code, tariff advantage under any agreement, non-tariff barriers, certification cost, freight cost and transit time, and payment risk in that country. Recommend one primary market and one fallback, with the reasoning for each.\n\n"+
+      "PACKAGING AND COMPLIANCE: pallet and container fill, ISPM-15 heat treatment for wood, labelling in the destination language, and the certification that market demands \u2014 CE, FDA, FSSAI, HALAL, BIS \u2014 with a realistic cost and timeline for each.\n\n"+
+      "SANCTIONS AND CONTROLS: check restricted-party and dual-use exposure before recommending any market. Say plainly when a route carries legal risk. Never help route around sanctions or misdeclare goods \u2014 that is smuggling, not optimisation, and it ends in seizure and prosecution.\n\n"+
+      "WHERE A FIGURE IS AN ESTIMATE, SAY SO AND SAY HOW TO VERIFY IT. Trade data goes stale in weeks and a wrong duty assumption can wipe out a margin."
+  },
   ceo:{b:"Harvard MBA Baker Scholar · Rhodes Scholar Oxford · 35 years: McKinsey Senior Partner, 3x NYSE CEO.",m:"You are the CEO — final decision-maker. Synthesise all inputs, make bold data-backed calls. Provide strategic rationale, stakeholder implications, risk-adjusted EV, clear owner and deadline."},
   board:{b:"LLB Cambridge · MBA INSEAD · PhD Corporate Governance · 40 years: Chairman FTSE 100.",m:"You are the Board Advisor — guardian of governance and fiduciary duty."},
   coo:{b:"MBA Operations Kellogg · Lean Six Sigma Black Belt · PMP · 38 years.",m:"You are the COO. Convert strategy into execution. Provide process flows, KPIs, SOP framework, 30-60-90 day roadmap."},
