@@ -2356,6 +2356,38 @@ const BOARD_RESEARCH_REMIT: Record<string,string> = {
   risk_mgr:"Quantified risk benchmarks, insurance costs, and published loss events in this industry.",
 };
  
+// ─────────────────────────────────────────────────────────────────────────────
+// ASKING FOR CLARITY.
+//
+// A real adviser does not answer a vague brief with a confident essay. They say
+// "I need three things before I can answer this properly" - and then answer
+// with what they have, flagged as provisional.
+//
+// Our executives had no way to do that. Given a thin question they guessed,
+// labelled the guess an Assumption, and carried on. The advice looked
+// authoritative and rested on invented context.
+//
+// This gives every executive a standard way to ask. Rules that matter:
+//   - Questions must be ones only the USER can answer. Anything findable by
+//     research is not a clarifying question, it is laziness.
+//   - Maximum three, and only genuinely load-bearing ones - the kind where a
+//     different answer changes the recommendation.
+//   - They still ANSWER. A question is never a substitute for the work.
+//   - They do not repeat a question already asked or already answered. You
+//     said no more than once or twice, and that is the right limit: being
+//     interrogated is worse than being guessed at.
+const CLARITY_PROTOCOL =
+  "\n\nASKING FOR WHAT YOU ARE MISSING\n" +
+  "Before you answer, decide what you genuinely do not know that would change your recommendation.\n" +
+  "- If something material is missing, open with a short block headed WHAT I NEED FROM YOU, listing at most THREE questions.\n" +
+  "- Ask ONLY things the user alone can answer: their numbers, their constraints, their intent, their timeline, their appetite for risk. Anything you could research is NOT a clarifying question.\n" +
+  "- Each question must be load-bearing: if a different answer would not change your advice, do not ask it.\n" +
+  "- Say in one line WHY each answer changes your recommendation. A question without a reason feels like a form to fill in.\n" +
+  "- THEN ANSWER ANYWAY, using your stated assumptions. Never withhold your analysis pending an answer. Mark the parts that would change as [Provisional - depends on Q1].\n" +
+  "- Do NOT ask a question that has already been asked in this session, or that the user has already answered. Read what is above you first.\n" +
+  "- If the brief is already sufficient, ask nothing and say nothing about it. Silence is the correct output when you have what you need.\n" +
+  "- Draw your questions from YOUR domain. A CFO asks about capital and covenants; a Trade Officer asks about destination market and Incoterms; a Coach asks about level, location and constraints. Do not ask outside your remit - another executive will cover it.\n";
+ 
 function buildBoardIdentity(role,fallback?){
   const p=getExecutiveIntel(role.id)||{};
   const bio=(p.b||fallback?.b||"").trim();
@@ -4448,7 +4480,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         const ag=agents[i];const p=EP[ag.id]||{};
         const prev=res.map(r=>"\n--- "+r.ag.t+" ---\n"+r.text).join("\n");
         setBrPh(ag.ic+" "+ag.t+" is analyzing…");announceBoardroomPhase(ag.t+" is analyzing");
-        const sys="You are "+ag.f+" at \""+co.name+"\".\n"+buildBoardIdentity(ag,p)+"\n"+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS AVAILABLE: "+frameworks.map(f=>f.name+" ("+f.reason+")").join("; ")+"\nFRAMEWORK REQUIREMENT: you MUST explicitly apply at least one named framework and SHOW ITS OUTPUT — the populated table, the calculation, the scored matrix, the register. Naming a framework without producing its output does not count. Choose the framework that answers a specific question you actually need answered; if none of the above fits, name and apply a more appropriate one and say why you chose it. Never insert a framework to look thorough.\n"+brDocBrief+fxRuleBlock()+brScaffold+brWorkspaceBlock+brRegisterBlock+"\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — ONLY permitted when you give BOTH a named source AND a URL on the same line. No URL means it is NOT a verified fact, however confident you are.\n"+"[Recalled — Unverified] — you believe it from prior knowledge but cannot produce a source URL. Use this instead of [Verified Fact] whenever the URL is missing.\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label. Tagging a recalled figure as a Verified Fact is the most serious error you can make in this boardroom.":"Previous contributions:\n"+prev+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Conduct your own independent analysis of the question from your "+ag.dl+" perspective, and discharge your standing mandate in full. If your mandate requires a financial model, build it. If it requires a process or capacity map, produce it. If it requires a risk or regulatory register, write it. Another executive having touched a topic does NOT relieve you of your own analysis of it.\n"+"Step 2: You MAY re-derive, recompute, or rebuild any figure a prior speaker presented. If your figure differs from theirs, show both side by side and explain the reason for the gap.\n"+"Step 3: Where an input you need is missing, name the missing variable and state how it changes your conclusion. Do not assume through a gap silently.\n"+"Step 4: Only after presenting your own analysis, state where it contradicts a prior speaker and why yours is better founded.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\nLENGTH AND SCOPE — HARD LIMITS, not suggestions:\n"+"You have approximately "+boardWordBudget(ag)+" words. You will be cut off at that point mid-sentence, so plan the whole response to fit and reach your conclusion inside it.\n"+"Produce AT MOST 8 sections. No appendices, annexures or addenda.\n"+"Stay strictly inside your own functional mandate — never write another executive\u2019s deliverable. A CFO does not write a marketing roadmap; a CTO does not write a hiring plan.\n"+"Depth means the reasoning behind your numbers, NOT more sections. One well-derived figure beats ten listed ones.\n"+"Never state or estimate your own word count.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
+        const sys="You are "+ag.f+" at \""+co.name+"\".\n"+buildBoardIdentity(ag,p)+CLARITY_PROTOCOL+"\n"+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS AVAILABLE: "+frameworks.map(f=>f.name+" ("+f.reason+")").join("; ")+"\nFRAMEWORK REQUIREMENT: you MUST explicitly apply at least one named framework and SHOW ITS OUTPUT — the populated table, the calculation, the scored matrix, the register. Naming a framework without producing its output does not count. Choose the framework that answers a specific question you actually need answered; if none of the above fits, name and apply a more appropriate one and say why you chose it. Never insert a framework to look thorough.\n"+brDocBrief+fxRuleBlock()+brScaffold+brWorkspaceBlock+brRegisterBlock+"\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — ONLY permitted when you give BOTH a named source AND a URL on the same line. No URL means it is NOT a verified fact, however confident you are.\n"+"[Recalled — Unverified] — you believe it from prior knowledge but cannot produce a source URL. Use this instead of [Verified Fact] whenever the URL is missing.\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label. Tagging a recalled figure as a Verified Fact is the most serious error you can make in this boardroom.":"Previous contributions:\n"+prev+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Conduct your own independent analysis of the question from your "+ag.dl+" perspective, and discharge your standing mandate in full. If your mandate requires a financial model, build it. If it requires a process or capacity map, produce it. If it requires a risk or regulatory register, write it. Another executive having touched a topic does NOT relieve you of your own analysis of it.\n"+"Step 2: You MAY re-derive, recompute, or rebuild any figure a prior speaker presented. If your figure differs from theirs, show both side by side and explain the reason for the gap.\n"+"Step 3: Where an input you need is missing, name the missing variable and state how it changes your conclusion. Do not assume through a gap silently.\n"+"Step 4: Only after presenting your own analysis, state where it contradicts a prior speaker and why yours is better founded.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\nLENGTH AND SCOPE — HARD LIMITS, not suggestions:\n"+"You have approximately "+boardWordBudget(ag)+" words. You will be cut off at that point mid-sentence, so plan the whole response to fit and reach your conclusion inside it.\n"+"Produce AT MOST 8 sections. No appendices, annexures or addenda.\n"+"Stay strictly inside your own functional mandate — never write another executive\u2019s deliverable. A CFO does not write a marketing roadmap; a CTO does not write a hiring plan.\n"+"Depth means the reasoning behind your numbers, NOT more sections. One well-derived figure beats ten listed ones.\n"+"Never state or estimate your own word count.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
         let agText="";
         let agTruncated=false;
         let gotResponse=false;
@@ -4663,7 +4695,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         setBrPh(ag.ic+" "+ag.t+" is responding…");
 
         const sys="You are "+ag.f+" at \""+co.name+"\".\n"
-          +buildBoardIdentity(ag,p)+"\n"
+          +buildBoardIdentity(ag,p)+CLARITY_PROTOCOL+"\n"
           +buildCtx(co,compData)
           +"\n\nDECISION THREAD CONTEXT (all previous stages — do not repeat, only reference):\n"+priorStagesContext
           +"\n\n"+"=".repeat(60)+"\n\n"
@@ -6583,7 +6615,7 @@ if(!role){
 
     const sys=
   "You are "+role.f+" at \""+co.name+"\".\n"+
-  buildBoardIdentity(role,p)+"\n"+
+  buildBoardIdentity(role,p)+CLARITY_PROTOCOL+"\n"+
   buildCtx(co,compData)+"\n"+
   preflightContext+"\n"+
   "WORKFLOW CHAIN: \""+ch.label+"\" Level "+(i+1)+"/"+activeChain.length+"\n"+
@@ -6773,7 +6805,7 @@ const processTask=useCallback(async(task:any)=>{
     // System prompt — identical in both modes except prevWork variable
     const sys=
       "You are "+role.f+" at \""+co.name+"\".\n"+
-      buildBoardIdentity(role,p)+"\n"+
+      buildBoardIdentity(role,p)+CLARITY_PROTOCOL+"\n"+
       "OPERATING STYLE: Think critically, not agreeably — challenge weak assumptions including your own from prior drafts. When current real-world data would strengthen your answer (rates, regulations, market data, competitor moves, benchmarks), search for it and use it — don't rely on memory for anything time-sensitive. Be decisive and specific; avoid generic frameworks restated without numbers.\n"+
       buildCtx(co,compData)+"\n"+
       "AUTONOMOUS CHAIN Level "+(i+1)+"/"+ch.chain.length+" - "+ch.label+"\n"+
