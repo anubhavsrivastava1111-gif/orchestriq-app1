@@ -159,23 +159,102 @@ export async function ceoFormBoard(
 // prompt engineering, it composes with it.
 export async function executiveSpeak(
   ask: AskFn, provider: string, model: string,
-  roleId: string, personaBlock: string, objective: string, transcript: string, decisionState: any
+  roleId: string, personaBlock: string, objective: string, transcript: string, decisionState: any,
+  // Fix #1: when the round exists BECAUSE the user directly addressed this
+  // executive, that is not optional context — it is the reason they were
+  // called at all, and the previous version left it to inference from the
+  // transcript alone, which is how a direct @CFO question got dropped.
+  directedByUser?: string
 ): Promise<string> {
   const sys = personaBlock +
     "\n\nYOU ARE IN A LIVE BOARDROOM, NOT WRITING A REPORT.\n" +
     "Read the transcript below. Respond to what was ACTUALLY just said \u2014 challenge a specific claim, " +
     "answer a question or @mention aimed at you, add evidence, or move the discussion forward.\n" +
+    (directedByUser
+      ? ("THE USER ADDRESSED YOU DIRECTLY, JUST NOW, WITH THIS QUESTION \u2014 answer it, specifically and " +
+         "first, before anything else you want to add: \"" + directedByUser + "\"\n" +
+         "The user is the person this discussion exists for. Do not deflect the question back to another " +
+         "executive and do not fold it into a general comment \u2014 answer it.\n")
+      : "") +
+    "TAG COLLEAGUES BY NAME WHEN IT IS GENUINELY WARRANTED. If you disagree with something a specific " +
+    "colleague said, are building on their point, or need something only they can answer, address them " +
+    "directly: \"@CFO your payback assumption does not include...\". This is not decoration \u2014 a live " +
+    "boardroom is executives talking TO each other, not each delivering a statement to the room. Do this " +
+    "whenever it genuinely applies; do not force it when it does not.\n" +
     "Where you state something as fact rather than your own judgement, say EVIDENCE: or ASSUMPTION: at the " +
     "start of that sentence so it can be shown as such \u2014 do not let an inference read as an established fact.\n" +
     "NEVER open with agreement filler ('great point', 'I agree with my colleague'). If you agree, say " +
     "WHY with a reason that adds something; otherwise say nothing about it and make your own point.\n" +
     "Use @Name to address a specific colleague or @User to ask the person a direct question.\n" +
+    "STRUCTURED DATA: if you have a genuine table of figures (a comparison, a cost breakdown, a set of " +
+    "options), format it as a proper markdown table with | pipes |. If a simple numeric comparison would " +
+    "read better as a chart, add one fenced block after your prose, exactly in this form:\n" +
+    "```chart\n{\"title\":\"...\",\"labels\":[\"A\",\"B\"],\"values\":[10,20]}\n```\n" +
+    "Only do either when it genuinely helps \u2014 most of what you say is spoken dialogue, not a report, and " +
+    "should stay plain sentences.\n" +
     "Keep it to the length of something a real executive would say in a meeting \u2014 usually a paragraph, " +
     "not an essay. This is dialogue, not a deliverable.";
   const user = "OBJECTIVE: " + objective +
     "\n\nDECISION STATE:\n" + JSON.stringify(decisionState).slice(0,1500) +
     "\n\nTRANSCRIPT SO FAR:\n" + transcript.slice(-6000);
-  return (await ask(sys, [{ role:"user", content:user }], 700, false, "boardroom_"+roleId, provider, model)).trim();
+  return (await ask(sys, [{ role:"user", content:user }], 800, false, "boardroom_"+roleId, provider, model)).trim();
+}
+
+// ── EXPORT: BUILD A DOCUMENT FROM THE ACTUAL DISCUSSION ─────────────────────
+// Reused by every export format (spec item 5, item 7: "reuse existing
+// infrastructure"). The Railway document service already knows how to turn
+// well-structured Markdown into a polished PDF/PPTX/DOCX (the same
+// content_blueprint path used elsewhere in the app), so the job here is only
+// to produce that Markdown FROM the session's real state \u2014 never inventing
+// content the board did not actually produce.
+export function buildTranscriptMarkdown(
+  session: any, messages: any[], decisionState: any, roleLabelOf: (id:string)=>string
+): string {
+  const L: string[] = [];
+  L.push("# " + (session.objective || "Boardroom Decision"));
+  L.push("");
+  const fd = decisionState?.final_decision;
+  if (fd?.decision) {
+    L.push("## Executive Summary");
+    L.push("");
+    L.push("**Decision:** " + fd.decision);
+    L.push("");
+    if (fd.why) L.push(fd.why);
+    L.push("");
+    if (fd.confidence) L.push("**Confidence:** " + fd.confidence);
+    if (fd.vote) L.push("**Board vote:** " + (fd.vote.for||0) + " for, " + (fd.vote.against||0) +
+      " against, " + (fd.vote.abstain||0) + " abstaining");
+    if (fd.dissent) L.push("**Dissent:** " + fd.dissent);
+    L.push("");
+  }
+  for (const k of ["assumptions","risks","objections","unresolved_questions","facts"]) {
+    const arr = decisionState?.[k];
+    if (Array.isArray(arr) && arr.length) {
+      L.push("## " + k.replace(/_/g," ").replace(/\b\w/g, (c:string)=>c.toUpperCase()));
+      L.push("");
+      arr.forEach((x:string) => L.push("- " + x));
+      L.push("");
+    }
+  }
+  if (Array.isArray(fd?.conditions) && fd.conditions.length) {
+    L.push("## Conditions"); L.push("");
+    fd.conditions.forEach((c:string) => L.push("- " + c));
+    L.push("");
+  }
+  if (Array.isArray(fd?.alternatives_considered) && fd.alternatives_considered.length) {
+    L.push("## Alternatives Considered"); L.push("");
+    fd.alternatives_considered.forEach((c:string) => L.push("- " + c));
+    L.push("");
+  }
+  L.push("## Discussion");
+  L.push("");
+  for (const m of messages) {
+    if (m.author_type === "system") continue;
+    const who = m.author_type === "user" ? "User" : roleLabelOf(m.author_role || "");
+    L.push("**" + who + ":** " + (m.content || "").replace(/```chart[\s\S]*?```/g, "").trim());
+    L.push("");
+  }
+  return L.join("\n");
 }
 
 // ── DECISION STATE EXTRACTION (spec section 9) ──────────────────────────────
@@ -292,4 +371,5 @@ export function transcriptOf(messages: any[]): string {
 
 export default { MANDATE, routeNext, ceoFormBoard, executiveSpeak, extractStateUpdate,
                  proposeDecision, createSession, addParticipant, postMessage, setStatus,
-                 setPendingQuestion, setPaused, extractMentions, mergeDecisionState, transcriptOf };
+                 setPendingQuestion, setPaused, extractMentions, mergeDecisionState, transcriptOf,
+                 buildTranscriptMarkdown };
