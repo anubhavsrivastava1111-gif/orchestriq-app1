@@ -39,11 +39,146 @@ interface Props {
   routerProviderModel: () => { provider:string; model:string };
   runResearch: (query:string) => Promise<{ text:string; sources:Array<{url:string;title?:string}> }>;
   showToast?: (m:string, k?:string) => void;
+  // ITEM 5 — EXPORTS. Both optional and safely defaulted, so nothing in
+  // App.tsx has to change for exports to work: without a key, the Railway
+  // service falls back to its own content-preserving builder (the same
+  // fallback path already shipped for the existing Boardroom's documents),
+  // which still produces a genuine, correctly formatted file — just without
+  // an AI polish pass. Passing docApiKey/companyContext from App.tsx (one
+  // optional line each) upgrades quality; it is not required for exports
+  // to function.
+  docApiKey?: () => string;
+  companyContext?: string;
 }
 
 type Msg = { id:string; author_type:string; author_role?:string; content:string; kind?:string; created_at:string };
 
-export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderModel, runResearch, showToast }: Props) {
+// ── ITEM 4 & 6: STRUCTURED CONTENT INSIDE A CHAT MESSAGE ────────────────────
+// "Normal discussion = chat. Data/analysis = high-quality structured
+// presentation." The rule this enforces: plain sentences stay plain
+// sentences, exactly as before. Only a genuine markdown table or a fenced
+// ```chart block gets special treatment — nothing is forced into a report
+// look that was not already structured by the executive.
+function splitStructured(raw: string): Array<
+  { type:"text"; content:string } | { type:"table"; rows:string[][] } | { type:"chart"; title:string; labels:string[]; values:number[] }
+> {
+  const text = raw.replace(/^(EVIDENCE|ASSUMPTION):\s*/i, "");
+  const parts: any[] = [];
+  const lines = text.split("\n");
+  let buf: string[] = [];
+  const flushText = () => {
+    const t = buf.join("\n").trim();
+    if (t) parts.push({ type:"text", content:t });
+    buf = [];
+  };
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // Fenced chart block: ```chart ... ```
+    if (/^```chart\s*$/i.test(line.trim())) {
+      flushText();
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i])) { body.push(lines[i]); i++; }
+      i++; // consume closing fence
+      try {
+        const j = JSON.parse(body.join("\n"));
+        if (Array.isArray(j.labels) && Array.isArray(j.values) && j.labels.length === j.values.length) {
+          parts.push({ type:"chart", title: String(j.title||""), labels: j.labels.map(String), values: j.values.map(Number) });
+          continue;
+        }
+      } catch { /* malformed — fall through and drop silently rather than show broken JSON */ }
+      continue;
+    }
+    // Markdown table: a header row, a |---|---| divider, then data rows.
+    if (/^\|.*\|\s*$/.test(line) && i+1 < lines.length && /^\|?[\s:|-]+\|?\s*$/.test(lines[i+1]) && lines[i+1].includes("-")) {
+      flushText();
+      const rows: string[][] = [];
+      const toCells = (l:string) => l.trim().replace(/^\|/,"").replace(/\|$/,"").split("|").map(c=>c.trim());
+      rows.push(toCells(line));
+      i += 2; // header + divider
+      while (i < lines.length && /^\|.*\|\s*$/.test(lines[i])) { rows.push(toCells(lines[i])); i++; }
+      parts.push({ type:"table", rows });
+      continue;
+    }
+    buf.push(line);
+    i++;
+  }
+  flushText();
+  return parts;
+}
+
+/** A professional table — same visual language as the rest of the app (dark
+ *  panel, teal accents), not a plain HTML table dropped into a chat bubble. */
+function StructuredTable({ rows }: { rows: string[][] }) {
+  const [head, ...body] = rows;
+  return (
+    <div style={{ overflowX:"auto", margin:"8px 0", border:"1px solid "+C.line, borderRadius:8 }}>
+      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+        <thead>
+          <tr style={{ background:C.raised }}>
+            {head.map((h,i)=>(
+              <th key={i} style={{ textAlign:"left", padding:"7px 10px", fontWeight:800, fontSize:9.5,
+                color:C.dim, textTransform:"uppercase", letterSpacing:0.4, borderBottom:"1px solid "+C.line }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.map((r,ri)=>(
+            <tr key={ri} style={{ background: ri%2 ? "rgba(255,255,255,0.015)" : "transparent" }}>
+              {r.map((c,ci)=>(
+                <td key={ci} style={{ padding:"7px 10px", borderBottom:"1px solid "+C.line, color:C.ink,
+                  fontVariantNumeric:"tabular-nums" }}>{c}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** A small inline bar chart, drawn as SVG — no charting library dependency,
+ *  consistent with keeping the Live Boardroom's footprint minimal. */
+function StructuredChart({ title, labels, values }: { title:string; labels:string[]; values:number[] }) {
+  const w = 320, h = 140, pad = 24;
+  const max = Math.max(1, ...values);
+  const bw = (w - pad*2) / values.length;
+  return (
+    <div style={{ margin:"8px 0", padding:"10px 12px", border:"1px solid "+C.line, borderRadius:8, background:C.raised }}>
+      {title && <div style={{ fontSize:10, fontWeight:800, color:C.dim, marginBottom:6 }}>{title}</div>}
+      <svg width="100%" viewBox={"0 0 "+w+" "+h} style={{ display:"block" }}>
+        {values.map((v,i) => {
+          const bh = ((h - pad*2) * v) / max;
+          const x = pad + i*bw + bw*0.15;
+          const y = h - pad - bh;
+          return (
+            <g key={i}>
+              <rect x={x} y={y} width={bw*0.7} height={bh} fill={C.teal} rx={2} />
+              <text x={x+bw*0.35} y={h-pad+12} fontSize="8" fill={C.faint} textAnchor="middle">{labels[i]}</text>
+              <text x={x+bw*0.35} y={y-4} fontSize="8" fill={C.ink} textAnchor="middle">{v}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function MessageBody({ content, plain }: { content:string; plain?:boolean }) {
+  const parts = splitStructured(content);
+  return (
+    <>
+      {parts.map((p,i) => {
+        if (p.type === "table") return <StructuredTable key={i} rows={p.rows} />;
+        if (p.type === "chart") return <StructuredChart key={i} title={p.title} labels={p.labels} values={p.values} />;
+        return <div key={i} style={{ whiteSpace:"pre-wrap", marginBottom: i<parts.length-1?8:0 }}>{p.content}</div>;
+      })}
+    </>
+  );
+}
+
+export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderModel, runResearch, showToast, docApiKey, companyContext }: Props) {
   const [sessions, setSessions]   = useState<any[]>([]);
   const [session, setSession]     = useState<any>(null);
   const [participants, setParts]  = useState<any[]>([]);
@@ -54,6 +189,7 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
   const [activity, setActivity]   = useState<string[]>([]); // "CFO is reviewing…" style lines
   const [addRole, setAddRole]     = useState("");
   const runningRef = useRef(false);
+  const queuedRef = useRef(false); // fix #1: remembers a request that arrived mid-round
   const endRef = useRef<HTMLDivElement>(null);
 
   // ── load session list ───────────────────────────────────────────────────
@@ -174,17 +310,19 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
   // This function calls itself until the router says nothing is pending —
   // that is what makes the room feel alive rather than turn-based.
   const runRound = useCallback(async (sessionId:string, roleIds:string[]) => {
-    if (runningRef.current) return;
+    // FIX #1 ROOT CAUSE: previously, if the loop was already running when the
+    // user sent a message, this function returned immediately and NOTHING
+    // ever re-triggered it — a direct @CFO question sent while an earlier
+    // round was still finishing simply vanished. queuedRef records that a
+    // fresh run was requested; the loop re-invokes itself once on exit if so.
+    if (runningRef.current) { queuedRef.current = true; return; }
     runningRef.current = true;
+    queuedRef.current = false;
     try {
       let guard = 0;
       let sameDisagreementCount = 0;
       let lastSpeakerPair = "";
       while (guard++ < 8) { // hard ceiling — a runaway loop must never be possible
-        // P0-7: manual pause is checked at the TOP of every iteration. This is
-        // what makes Pause actually stop generation rather than merely hiding
-        // a button — the loop will not start another executive call once this
-        // is true, even mid-round.
         const { data: sRowCheck } = await supabase.from("boardroom_sessions").select("paused,status").eq("id", sessionId).single();
         if (sRowCheck?.paused) { setActivity([]); break; }
         if (sRowCheck?.status && ["decision_proposed","accepted","closed","waiting_for_user"].includes(sRowCheck.status)) break;
@@ -194,61 +332,79 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
         const transcript = transcriptOf((mRows as any) || []);
         const decisionState = sRow?.decision_state || {};
 
-        setActivity(a=>[...a, "Boardroom is thinking\u2026"]);
-        const route = await BE.routeNext(ask, rp, rm, objective || session?.objective || "", roleIds, transcript, decisionState);
-        setActivity([]);
+        // FIX #1: HIGHEST PRIORITY FOR A DIRECT USER QUESTION.
+        // Do not leave "the user must be answered" to the router's judgement —
+        // that is exactly what silently failed. If the most recent message is
+        // from the user and explicitly mentions an active executive, that
+        // executive speaks THIS iteration, deterministically, no router call.
+        const lastRow: any = (mRows as any[])[(mRows as any[]).length - 1];
+        const lastIsUser = lastRow?.author_type === "user";
+        const userMentions: string[] = lastIsUser
+          ? (Array.isArray(lastRow.mentions) && lastRow.mentions.length
+              ? lastRow.mentions.filter((r:string)=>roleIds.includes(r))
+              : BE.extractMentions(lastRow.content||"", roleIds).mentions)
+          : [];
 
-        if (route.question_to_user) {
-          // P0-3/P0-9: post the question as a live message AND record it as
-          // the session's explicit pending_question. The status flip to
-          // waiting_for_user is what the loop checks above to actually stop —
-          // the message alone would only be a visual cue, not an enforced pause.
-          const posted = await BE.postMessage(sessionId, "system", null,
-            "The board needs your input: " + route.reason, { kind:"question_to_user" });
-          await BE.setPendingQuestion(sessionId, { messageId: posted?.id, askedBy: (route.speakers[0]||"ceo"), text: route.reason });
-          break; // P0-3: stop \u2014 live, never deferred to "after the conversation"
-        }
-        if (route.research_needed.length) {
-          setActivity(a=>[...a, "Researching: " + route.research_needed[0]]);
-          const r = await runResearch(route.research_needed[0]);
-          await BE.postMessage(sessionId, "system", null,
-            "Additional research \u2014 " + route.research_needed[0] + ": " + r.text.slice(0,600), { kind:"evidence" });
+        let speakersThisRound: string[];
+        let forcedByUser = false;
+        let route: any = null;
+
+        if (lastIsUser && userMentions.length) {
+          speakersThisRound = userMentions.slice(0,2);
+          forcedByUser = true;
+        } else {
+          setActivity(a=>[...a, "Boardroom is thinking\u2026"]);
+          route = await BE.routeNext(ask, rp, rm, objective || session?.objective || "", roleIds, transcript, decisionState);
           setActivity([]);
-          continue;
-        }
-        if (route.ready_for_decision) {
-          await proposeDecisionNow(sessionId, roleIds);
-          break;
-        }
-        if (!route.speakers.length) break; // genuine silence — correct and common
 
-        // P1-18: crude but effective loop guard. If the same two participants
-        // keep exchanging turns with the router never finding new ground,
-        // force the CEO to name the impasse rather than let it repeat forever.
-        const pairKey = route.speakers.slice().sort().join(",");
-        if (pairKey && pairKey === lastSpeakerPair) sameDisagreementCount++; else sameDisagreementCount = 0;
-        lastSpeakerPair = pairKey;
-        const forcedBreak = sameDisagreementCount >= 3;
+          if (route.question_to_user) {
+            const posted = await BE.postMessage(sessionId, "system", null,
+              "The board needs your input: " + route.reason, { kind:"question_to_user" });
+            await BE.setPendingQuestion(sessionId, { messageId: posted?.id, askedBy: (route.speakers[0]||"ceo"), text: route.reason });
+            break; // P0-3: stop — live, never deferred to "after the conversation"
+          }
+          if (route.research_needed.length) {
+            setActivity(a=>[...a, "Researching: " + route.research_needed[0]]);
+            const r = await runResearch(route.research_needed[0]);
+            await BE.postMessage(sessionId, "system", null,
+              "Additional research \u2014 " + route.research_needed[0] + ": " + r.text.slice(0,600), { kind:"evidence" });
+            setActivity([]);
+            continue;
+          }
+          if (route.ready_for_decision) {
+            await proposeDecisionNow(sessionId, roleIds);
+            break;
+          }
+          if (!route.speakers.length) break; // genuine silence — correct and common
+          speakersThisRound = route.speakers;
+        }
 
-        for (const roleId of (forcedBreak ? ["ceo"] : route.speakers)) {
+        // P1-18: crude but effective loop guard — skipped for a user-forced
+        // turn, since that is never the disagreement loop the guard exists for.
+        if (!forcedByUser) {
+          const pairKey = speakersThisRound.slice().sort().join(",");
+          if (pairKey && pairKey === lastSpeakerPair) sameDisagreementCount++; else sameDisagreementCount = 0;
+          lastSpeakerPair = pairKey;
+        }
+        const forcedBreak = !forcedByUser && sameDisagreementCount >= 3;
+
+        for (const roleId of (forcedBreak ? ["ceo"] : speakersThisRound)) {
           const role = AR.find((r:any)=>r.id===roleId);
           if (!role) continue;
-          // P1-12: a meaningful activity line, not a generic "typing…".
           const domainLine = BE.MANDATE[roleId] ? BE.MANDATE[roleId].split(".")[0] : "reviewing";
-          setActivity(a=>[...a, role.t + " is " + (forcedBreak ? "resolving a repeated disagreement" : domainLine.toLowerCase()) + "\u2026"]);
+          setActivity(a=>[...a, role.t + " is " +
+            (forcedBreak ? "resolving a repeated disagreement" : forcedByUser ? "answering your question" : domainLine.toLowerCase()) + "\u2026"]);
           try {
             const persona = buildIdentity(role);
             const speakTranscript = forcedBreak
               ? transcript + "\n\nSYSTEM NOTE: the same disagreement has repeated 3 times with no new evidence. Name the impasse plainly and either force a choice, request one specific piece of evidence, or ask the user."
               : transcript;
             const text = await BE.executiveSpeak(ask, rp, rm, roleId, persona,
-              objective || session?.objective || "", speakTranscript, decisionState);
-            // P0-2: thread the reply — if this executive's text mentions a
-            // colleague, attach reply_to the colleague's most recent message,
-            // so the conversational relationship is real data, not inferred.
+              objective || session?.objective || "", speakTranscript, decisionState,
+              forcedByUser ? lastRow.content : undefined);
             const { mentions } = BE.extractMentions(text, roleIds);
-            let replyTo: string | undefined;
-            if (mentions.length) {
+            let replyTo: string | undefined = forcedByUser ? lastRow.id : undefined;
+            if (!replyTo && mentions.length) {
               const target = (mRows as any[]).slice().reverse().find(x => x.author_role === mentions[0]);
               replyTo = target?.id;
             }
@@ -265,8 +421,12 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
         }
         if (forcedBreak) { sameDisagreementCount = 0; lastSpeakerPair = ""; }
       }
-    } finally { runningRef.current = false; setActivity([]); }
+    } finally {
+      runningRef.current = false; setActivity([]);
+      if (queuedRef.current) { queuedRef.current = false; runRound(sessionId, roleIds); }
+    }
   }, [ask, rp, rm, AR, buildIdentity, objective, session, runResearch]);
+
 
   const proposeDecisionNow = async (sessionId:string, roleIds:string[]) => {
     const { data: mRows } = await supabase.from("boardroom_messages").select("*").eq("session_id", sessionId).order("created_at");
@@ -372,6 +532,96 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
     setShowMentions(false);
   };
 
+  // ── ITEM 5: EXPORT — reuses the EXACT Railway endpoint pattern already
+  // used elsewhere in the app for document generation (same URL, same body
+  // shape, same binary-validation helper name), rather than building a
+  // second document pipeline. ──────────────────────────────────────────────
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState("");
+
+  const railwayExport = async (fmt: "pdf"|"pptx"|"docx") => {
+    if (!session?.id) return;
+    setExporting(fmt); setExportOpen(false);
+    try {
+      const md = BE.buildTranscriptMarkdown(session, msgs, decisionState, (id:string)=>roleLabel(AR,id));
+      const { data: s } = await supabase.auth.getSession();
+      const url = "https://orchestriq-gen-service-production.up.railway.app/generate/" + fmt;
+      const r = await fetch(url, {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          objective: session.objective,
+          company_context: companyContext || "",
+          access_token: s?.session?.access_token || "",
+          available_data: md.slice(0,120000),
+          currency_symbol: "\u20b9",
+          api_key: docApiKey ? docApiKey() : "",
+        }),
+        signal: AbortSignal.timeout(120000),
+      });
+      if (!r.ok) throw new Error("Export service: HTTP " + r.status);
+      const buf = await r.arrayBuffer();
+      if (buf.byteLength < 1000) throw new Error("Export service returned an empty file.");
+      const u8 = new Uint8Array(buf);
+      const isZip = u8[0]===0x50 && u8[1]===0x4B;
+      const isPdf = u8[0]===0x25 && u8[1]===0x50;
+      if ((fmt==="pdf" && !isPdf) || (fmt!=="pdf" && !isZip)) {
+        throw new Error("The export service did not return a valid " + fmt.toUpperCase() + " file.");
+      }
+      const blob = new Blob([buf], { type:
+        fmt==="pdf" ? "application/pdf" :
+        fmt==="pptx" ? "application/vnd.openxmlformats-officedocument.presentationml.presentation" :
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = (session.objective||"Boardroom").replace(/[^a-zA-Z0-9]+/g,"-").slice(0,60) + "." + fmt;
+      a.click();
+      showToast?.("Downloaded " + fmt.toUpperCase() + ".", "success");
+    } catch (e:any) {
+      showToast?.(String(e?.message||e).slice(0,200), "error");
+    } finally { setExporting(""); }
+  };
+
+  // XLSX is built entirely in the browser from the tables the board actually
+  // produced — the same SheetJS-via-CDN technique the rest of the app uses
+  // (window.XLSX loaded on demand), so no server round trip and no new
+  // dependency is added to the project.
+  const exportExcel = async () => {
+    if (!session?.id) return;
+    setExporting("xlsx"); setExportOpen(false);
+    try {
+      if (!(window as any).XLSX) {
+        await new Promise<void>((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+          s.onload = () => resolve(); s.onerror = () => reject(new Error("Could not load the Excel library."));
+          document.head.appendChild(s);
+        });
+      }
+      const XLSX = (window as any).XLSX;
+      const wb = XLSX.utils.book_new();
+      let any = false;
+      msgs.forEach((m,i) => {
+        splitStructured(m.content||"").forEach((p:any,j:number) => {
+          if (p.type === "table") {
+            const ws = XLSX.utils.aoa_to_sheet(p.rows);
+            XLSX.utils.book_append_sheet(wb, ws, ("T" + (i+1) + "-" + (j+1)).slice(0,31));
+            any = true;
+          }
+        });
+      });
+      if (!any) { showToast?.("No tables were found in this discussion to export.", "warning"); setExporting(""); return; }
+      const buf = XLSX.write(wb, { type:"array", bookType:"xlsx", bookSST:true });
+      const blob = new Blob([buf], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = (session.objective||"Boardroom").replace(/[^a-zA-Z0-9]+/g,"-").slice(0,60) + "-tables.xlsx";
+      a.click();
+      showToast?.("Downloaded Excel.", "success");
+    } catch (e:any) {
+      showToast?.(String(e?.message||e).slice(0,200), "error");
+    } finally { setExporting(""); }
+  };
+
   const decisionState = session?.decision_state || {};
   const finalDecision = decisionState.final_decision;
   const pendingQMsgId = session?.pending_question?.messageId;
@@ -460,11 +710,37 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
                 : "\u25CF LIVE \u2014 discussion in progress"}
             </div>
           </div>
-          <button style={{ ...btn, background: session.paused ? C.teal : C.raised,
-            color: session.paused ? "#04070F" : C.ink, fontWeight:800, flexShrink:0 }}
-            onClick={togglePause}>
-            {session.paused ? "\u25B6 Resume" : "\u23F8 Pause"}
-          </button>
+          <div style={{ position:"relative", flexShrink:0, display:"flex", gap:8 }}>
+            <button style={btn} onClick={()=>setExportOpen(v=>!v)} disabled={!!exporting}>
+              {exporting ? "Exporting\u2026" : "\u2B07 Export"}
+            </button>
+            {exportOpen && (
+              <div style={{ position:"absolute", top:"100%", right:0, marginTop:6, background:C.panel,
+                border:"1px solid "+C.line, borderRadius:8, padding:6, minWidth:190, zIndex:60,
+                boxShadow:"0 10px 30px rgba(0,0,0,0.5)" }}>
+                {[["pdf","PDF \u2014 full record"],["pptx","PowerPoint \u2014 decision deck"],
+                  ["docx","Word \u2014 decision document"]].map(([fmt,label]) => (
+                  <div key={fmt} onClick={()=>railwayExport(fmt as any)}
+                    style={{ padding:"7px 9px", borderRadius:5, cursor:"pointer", fontSize:11 }}
+                    onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background="rgba(20,184,166,0.10)";}}
+                    onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";}}>
+                    {label}
+                  </div>
+                ))}
+                <div onClick={exportExcel}
+                  style={{ padding:"7px 9px", borderRadius:5, cursor:"pointer", fontSize:11 }}
+                  onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background="rgba(20,184,166,0.10)";}}
+                  onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";}}>
+                  Excel \u2014 tables from this discussion
+                </div>
+              </div>
+            )}
+            <button style={{ ...btn, background: session.paused ? C.teal : C.raised,
+              color: session.paused ? "#04070F" : C.ink, fontWeight:800 }}
+              onClick={togglePause}>
+              {session.paused ? "\u25B6 Resume" : "\u23F8 Pause"}
+            </button>
+          </div>
         </div>
 
         <div ref={scrollBoxRef} onScroll={checkBottom} style={{ flex:1, overflowY:"auto", padding:16, position:"relative" }}>
@@ -481,8 +757,22 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
             const replyMsg = m.reply_to ? msgs.find(x=>x.id===m.reply_to) : null;
             const evTag = m.evidence_status === "verified" ? "EVIDENCE"
                         : m.evidence_status === "assumption" ? "ASSUMPTION" : null;
+            // ITEM 3: make CEO<->CFO, CTO<->CFO etc. obvious at a glance —
+            // a coloured left border keyed to the SPEAKER, and when this
+            // message is explicitly addressed to one colleague, an arrow
+            // naming both ends in their own colours right above the text.
+            const primaryMention = mentions[0];
+            const conversationArrow = (!isUser && primaryMention && !addressesUser) ? (
+              <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:9, fontWeight:700, marginBottom:4 }}>
+                <span style={{ color }}>{roleLabel(AR, m.author_role||"")}</span>
+                <span style={{ color:C.faint }}>&#8594;</span>
+                <span style={{ color: ROLE_COLOR[primaryMention]||C.dim }}>{roleLabel(AR, primaryMention)}</span>
+              </div>
+            ) : null;
             return (
-              <div key={m.id} id={"msg-"+m.id} style={{ marginBottom:14, maxWidth:680 }}>
+              <div key={m.id} id={"msg-"+m.id} style={{ marginBottom:14, maxWidth:680,
+                borderLeft: !isUser && !isSystem ? "2.5px solid "+color : "none",
+                paddingLeft: !isUser && !isSystem ? 10 : 0 }}>
                 {isSystem ? (
                   <div style={{ fontSize:10, color: m.kind==="question_to_user"?C.amber:C.faint,
                     background: m.kind==="question_to_user" ? "rgba(245,158,11,0.08)" : "transparent",
@@ -492,9 +782,6 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
                   </div>
                 ) : (
                   <div style={{
-                    // P0-10: a direct question to the user gets a border and tint that
-                    // is unmistakable against ordinary discussion \u2014 "substantially
-                    // easier to notice than a normal board message", per spec.
                     ...(addressesUser && !isUser ? {
                       border:"1.5px solid rgba(245,158,11,0.5)", background:"rgba(245,158,11,0.06)",
                       borderRadius:10, padding:"10px 12px",
@@ -505,9 +792,11 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
                         \u26A1 QUESTION FOR YOU
                       </div>
                     )}
+                    {conversationArrow}
                     {replyMsg && (
-                      <div style={{ fontSize:9, color:C.faint, marginBottom:4, paddingLeft:8, borderLeft:"2px solid "+C.line }}>
-                        Replying to {roleLabel(AR, replyMsg.author_role||"")}: \u201c{(replyMsg.content||"").slice(0,60)}{(replyMsg.content||"").length>60?"\u2026":""}\u201d
+                      <div style={{ fontSize:9, color: ROLE_COLOR[replyMsg.author_role]||C.faint, marginBottom:4,
+                        paddingLeft:8, borderLeft:"2px solid "+(ROLE_COLOR[replyMsg.author_role]||C.line) }}>
+                        &#8618; Replying to <b>{roleLabel(AR, replyMsg.author_role||"")}</b>: \u201c{(replyMsg.content||"").slice(0,60)}{(replyMsg.content||"").length>60?"\u2026":""}\u201d
                       </div>
                     )}
                     <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3, flexWrap:"wrap" }}>
@@ -516,8 +805,8 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
                         {isUser ? "YOU" : roleLabel(AR, m.author_role||"").toUpperCase()}
                       </span>
                       {mentions.map(rid => (
-                        <span key={rid} style={{ fontSize:8.5, fontWeight:700, color:ROLE_COLOR[rid]||C.dim,
-                          background:(ROLE_COLOR[rid]||C.dim)+"1A", borderRadius:4, padding:"1px 6px" }}>
+                        <span key={rid} style={{ fontSize:8.5, fontWeight:800, color:"#04070F",
+                          background:ROLE_COLOR[rid]||C.dim, borderRadius:4, padding:"1.5px 7px" }}>
                           @{roleLabel(AR, rid)}
                         </span>
                       ))}
@@ -528,12 +817,12 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
                       )}
                       <span style={{ fontSize:8, color:C.faint }}>{new Date(m.created_at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</span>
                     </div>
-                    <div style={{ fontSize:12, lineHeight:1.7, whiteSpace:"pre-wrap",
+                    <div style={{ fontSize:12, lineHeight:1.7,
                       background: isUser ? "transparent" : (addressesUser ? "transparent" : C.panel),
                       border: (isUser || addressesUser) ? "none" : "1px solid "+C.line,
                       borderRadius: (isUser || addressesUser) ? 0 : 8,
                       padding: (isUser || addressesUser) ? 0 : "10px 12px" }}>
-                      {m.content.replace(/^(EVIDENCE|ASSUMPTION):\s*/i,"")}
+                      <MessageBody content={m.content} />
                     </div>
                   </div>
                 )}
