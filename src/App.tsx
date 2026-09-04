@@ -9,6 +9,7 @@ import AdminConsole from "./AdminConsole";
 import SupportWidget from "./SupportWidget";
 import MyAccount from "./MyAccount";
 import Workspace from "./Workspace";
+import LiveBoardroom from "./LiveBoardroom";
 import { modelsFor as wsModelsFor } from "./lib/AIModels";
 import PulseGovernance from "./Pulse";
 import TokenBadge from "./components/TokenBadge";
@@ -4200,6 +4201,27 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       .filter(id=>providerKey(keys,id)&&wsModelsFor(id).length)
       .map(id=>({id,label:(MODELS as any)[id]?.name||id})),
   [keys]);
+ 
+  // ── LIVE BOARDROOM WIRING ──────────────────────────────────────────────
+  // Reuses everything that already exists rather than duplicating it:
+  //   askDirect        the same provider call the Workspace uses
+  //   AR                the full 84-role roster, unchanged
+  //   buildBoardIdentity + ANALYST_STANDARD + CLARITY_PROTOCOL   the exact
+  //       persona, standard of reasoning and clarifying-question rules every
+  //       existing executive already uses — the Live Boardroom does not
+  //       get a second, different personality.
+  //   runResearchDesk   the same research pipeline the existing Boardroom uses
+  const lbRunResearch=useCallback(async(q:string)=>{
+    const r:any=await runResearchDesk((s:any,m:any,t:any)=>ask(s,m,t,true),co,compData,q,showToast,keys);
+    const brief=typeof r==="string"?r:(r?.brief||"");
+    const sources=(brief.match(/https?:\/\/[^\s)]+/g)||[]).slice(0,8).map((u:string)=>({url:u}));
+    return {text:brief,sources};
+  },[co,compData,keys,ask,showToast]);
+  const lbRoute=useCallback(()=>({provider:defP,model:MODELS[defP]?.model||""}),[defP]);
+  const lbBuildIdentity=useCallback((role:any)=>{
+    const p=getExecutiveIntel(role.id)||{};
+    return "You are "+role.f+" at \""+co.name+"\".\n"+buildBoardIdentity(role,p)+CLARITY_PROTOCOL;
+  },[co]);
   const askFull=useCallback(async(sys:any,msgs:any,maxT?:any,enableSearch?:any,taskType?:any)=>
     callMulti(keys,defP,sys,msgs,maxT,enableSearch,taskType),
   [keys,defP]);
@@ -7820,7 +7842,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           </button>
           {showModules&&(
             <div style={{position:"absolute",top:"calc(100% - 2px)",left:10,right:10,background:"var(--oiq-sbBg,var(--oiq-surface2,#0c1120))",backdropFilter:"none",border:"1px solid var(--sb-bdr)",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:7,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["workspace","✳️","AI Workspace"],["account","👤","My Account"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>{
+              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["workspace","✳️","AI Workspace"],["liveboard","🗣️","Live Boardroom"],["account","👤","My Account"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>{
                 // WAS: modules the plan did not include were REMOVED from the
                 // menu entirely, so a user had no idea they existed or that
                 // upgrading would unlock them. A customer who cannot see what
@@ -8922,7 +8944,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         )}
 
         {view==="funding"&&<FundingIntelligence co={co} compData={compData} ask={ask}/>}
-        {!canUse(view)&&view!=="admin"&&view!=="tokens"&&view!=="account"&&view!=="workspace"&&(
+        {!canUse(view)&&view!=="admin"&&view!=="tokens"&&view!=="account"&&view!=="workspace"&&view!=="liveboard"&&(
           <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:40}}>
             <div style={{textAlign:"center",maxWidth:400}}>
               <div style={{fontSize:34,marginBottom:10}}>✨</div>
@@ -8936,6 +8958,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           </div>)}
         {view==="workspace"&&<Workspace ask={askDirect} availableProviders={wsProviders}
           canUse={canUse} showToast={showToast}/>}
+        {view==="liveboard"&&<LiveBoardroom ask={askDirect} AR={AR} buildIdentity={lbBuildIdentity}
+          routerProviderModel={lbRoute} runResearch={lbRunResearch} showToast={showToast}/>}
         {view==="account"&&<MyAccount onOpenHelp={()=>setShowHelp(true)}/>}
         {view==="admin"&&(isAdmin
           ?<AdminConsole onClose={()=>setView("nerve")}/>
