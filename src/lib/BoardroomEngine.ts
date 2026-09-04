@@ -29,6 +29,30 @@ export type AskFn = (sys:string, msgs:any[], maxT:number, search?:boolean, task?
 // of reasoning, debate rules — is layered on separately from App.tsx's own
 // buildBoardIdentity/ANALYST_STANDARD/CLARITY_PROTOCOL, which this engine
 // reuses rather than reinventing (spec section 49: reuse what exists).
+// ── P0-1/2: STRUCTURED MENTIONS ─────────────────────────────────────────────
+// "The mention system therefore cannot be frontend-only." This is the backend
+// half: every message is scanned for @role and @User references against the
+// ACTUAL roster in this session, so a mention is a fact the router can act on
+// (priority) rather than text a human has to notice.
+const ROLE_ALIASES: Record<string,string> = {
+  ceo:"ceo", cfo:"cfo", cmo:"cmo", cto:"cto", coo:"coo", chro:"chro", clo:"clo",
+  cso:"cso", trade:"trade", coach:"coach", chairman:"chairman",
+};
+
+export function extractMentions(text: string, activeRoleIds: string[]): { mentions: string[]; toUser: boolean } {
+  const found = new Set<string>();
+  let toUser = false;
+  const re = /@(\w+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const tok = m[1].toLowerCase();
+    if (tok === "user") { toUser = true; continue; }
+    const role = ROLE_ALIASES[tok];
+    if (role && activeRoleIds.includes(role)) found.add(role);
+  }
+  return { mentions: Array.from(found), toUser };
+}
+
 export const MANDATE: Record<string,string> = {
   ceo:   "Strategic direction, decision framing, board coordination, final prioritisation. You convene the board and decide who is needed.",
   cfo:   "Financial viability, capital allocation, ROI, cash impact, downside risk. You demand quantification before agreement.",
@@ -57,6 +81,9 @@ export async function routeNext(
   ask: AskFn, provider: string, model: string,
   objective: string, activeRoles: string[], recentMessages: string, decisionState: any
 ): Promise<RouterResult> {
+  const lastMsg = recentMessages.split("\n\n").filter(Boolean).pop() || "";
+  const { mentions: directMentions, toUser: directToUser } = extractMentions(lastMsg, activeRoles);
+
   const sys =
     "You are the boardroom ROUTER. You do not participate in the discussion. You decide, after the " +
     "most recent message, which of the active executives (if any) genuinely have something to add.\n\n" +
@@ -70,6 +97,13 @@ export async function routeNext(
     "- If a claim needs checking or a genuine information gap exists, list it in research_needed.\n" +
     "- Set ready_for_decision true only when material objections have been addressed and no critical " +
     "assumption remains unvalidated \u2014 not merely because everyone has spoken once.\n\n" +
+    (directMentions.length ? ("The last message explicitly addressed: " + directMentions.join(", ") +
+      ". Give them priority to respond, but you may still add another executive with a materially " +
+      "relevant contribution \u2014 a mention creates priority, not an exclusive turn.\n") : "") +
+    (directToUser ? "The last message explicitly addressed @User. Set question_to_user true.\n" : "") +
+    "REPEATED DISAGREEMENT: if the same two positions have gone back and forth 3+ times with no new " +
+    "evidence, do not let it continue. Either set research_needed, set question_to_user for the " +
+    "deciding fact, or select the CEO to name the impasse and force a choice.\n" +
     "Active executives: " + activeRoles.join(", ") + "\n" +
     "Respond with ONLY this JSON, nothing else:\n" +
     '{"speakers":[],"question_to_user":false,"research_needed":[],"ready_for_decision":false,"reason":""}';
@@ -131,6 +165,8 @@ export async function executiveSpeak(
     "\n\nYOU ARE IN A LIVE BOARDROOM, NOT WRITING A REPORT.\n" +
     "Read the transcript below. Respond to what was ACTUALLY just said \u2014 challenge a specific claim, " +
     "answer a question or @mention aimed at you, add evidence, or move the discussion forward.\n" +
+    "Where you state something as fact rather than your own judgement, say EVIDENCE: or ASSUMPTION: at the " +
+    "start of that sentence so it can be shown as such \u2014 do not let an inference read as an established fact.\n" +
     "NEVER open with agreement filler ('great point', 'I agree with my colleague'). If you agree, say " +
     "WHY with a reason that adds something; otherwise say nothing about it and make your own point.\n" +
     "Use @Name to address a specific colleague or @User to ask the person a direct question.\n" +
@@ -205,16 +241,40 @@ export async function addParticipant(sessionId: string, roleId: string, label: s
 }
 
 export async function postMessage(sessionId: string, authorType: "user"|"agent"|"system",
-  authorRole: string|null, content: string, opts: { kind?:string; provider?:string; model?:string; refs?:string[] } = {}) {
-  const { error } = await supabase.from("boardroom_messages").insert({
+  authorRole: string|null, content: string,
+  opts: { kind?:string; provider?:string; model?:string; refs?:string[]; activeRoles?:string[]; replyTo?:string } = {}) {
+  // P0-2: mentions and evidence status are extracted and stored as DATA, not
+  // left implicit in the prose. This is what lets the router and the UI act
+  // on them instead of re-parsing text every time.
+  const { mentions } = extractMentions(content, opts.activeRoles || []);
+  let evidence_status: string | null = null;
+  if (/^EVIDENCE:/i.test(content.trim())) evidence_status = "verified";
+  else if (/^ASSUMPTION:/i.test(content.trim())) evidence_status = "assumption";
+
+  const { data, error } = await supabase.from("boardroom_messages").insert({
     session_id: sessionId, author_type: authorType, author_role: authorRole, content,
     kind: opts.kind || "text", provider: opts.provider, model: opts.model, refs: opts.refs || [],
-  });
+    mentions, reply_to: opts.replyTo || null, evidence_status,
+  }).select().single();
   if (error) throw error;
+  return data;
 }
 
 export async function setStatus(sessionId: string, status: string) {
   await supabase.from("boardroom_sessions").update({ status }).eq("id", sessionId);
+}
+
+// P0-3/P0-9: a machine-readable "the board is waiting, and for what" record,
+// separate from status text. This is what survives a refresh (spec: persistence)
+// and what a rejoining user sees immediately without re-reading the transcript.
+export async function setPendingQuestion(sessionId: string, q: { messageId:string; askedBy:string; text:string } | null) {
+  await supabase.from("boardroom_sessions").update({
+    pending_question: q, status: q ? "waiting_for_user" : "live_discussion",
+  }).eq("id", sessionId);
+}
+
+export async function setPaused(sessionId: string, paused: boolean) {
+  await supabase.from("boardroom_sessions").update({ paused }).eq("id", sessionId);
 }
 
 export async function mergeDecisionState(sessionId: string, patch: any) {
@@ -232,4 +292,4 @@ export function transcriptOf(messages: any[]): string {
 
 export default { MANDATE, routeNext, ceoFormBoard, executiveSpeak, extractStateUpdate,
                  proposeDecision, createSession, addParticipant, postMessage, setStatus,
-                 mergeDecisionState, transcriptOf };
+                 setPendingQuestion, setPaused, extractMentions, mergeDecisionState, transcriptOf };
