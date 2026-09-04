@@ -251,7 +251,13 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
 
   const loadConvs = useCallback(async () => {
     const { data } = await supabase.from("workspace_conversations")
-      .select("*").eq("archived", false).order("updated_at", { ascending:false }).limit(60);
+      // THE BUG: this table has no "archived" column. It never existed on the
+      // real workspace_conversations table - only in the schema I wrongly
+      // assumed when writing this file. With Row Level Security newly fixed
+      // to actually allow your own rows, this filter would have started
+      // throwing a real error instead of the silent one it was masked by
+      // before. Removed, since there is no archive concept on this table.
+      .select("*").order("updated_at", { ascending:false }).limit(60);
     setConvs(data || []);
   }, []);
   useEffect(() => { loadConvs(); }, [loadConvs]);
@@ -315,9 +321,12 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
 
       const url = await generateImage(prompt);
       const { data: saved } = await supabase.from("workspace_messages")
-        .insert({ conversation_id:cid, user_id:uid, role:"assistant", content:"", asset_url:url, asset_kind:"image" })
+        // THE EXACT BUG YOU HIT: workspace_messages has no asset_url or
+        // asset_kind column - it has one column, "assets", holding jsonb.
+        // This is what produced "Could not find the asset_url column".
+        .insert({ conversation_id:cid, user_id:uid, role:"assistant", content:"", assets:{ url, kind:"image" } })
         .select().single();
-      setMsgs(m => [...m, saved || { role:"assistant", content:"", asset_url:url, asset_kind:"image", id:"tmp2-"+Date.now() }]);
+      setMsgs(m => [...m, saved || { role:"assistant", content:"", assets:{ url, kind:"image" }, id:"tmp2-"+Date.now() }]);
       loadConvs();
     } catch (e:any) {
       const m = String(e?.message || e).slice(0,240);
@@ -493,7 +502,7 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
           {msgs.map((m,i) => (
             <div key={m.id||i} style={{ marginBottom:14, maxWidth:820 }}>
               <div style={{ fontSize:8.5, fontWeight:800, color: m.role==="user"?C.faint:C.teal, marginBottom:4, letterSpacing:0.5 }}>
-                {m.role==="user" ? "YOU" : (m.asset_kind==="image" ? "IMAGE" : (findModel(m.provider,m.model)?.label || m.model || "ASSISTANT")).toUpperCase()}
+                {m.role==="user" ? "YOU" : (m.assets?.kind==="image" ? "IMAGE" : (findModel(m.provider,m.model)?.label || m.model || "ASSISTANT")).toUpperCase()}
               </div>
               {m.error ? (
                 <div style={{ fontSize:11.5, color:"#EF4444", background:"rgba(239,68,68,0.07)",
@@ -503,11 +512,11 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
                     Your message was saved. Try another model from the picker above.
                   </div>
                 </div>
-              ) : m.asset_kind === "image" && m.asset_url ? (
+              ) : m.assets?.kind === "image" && m.assets?.url ? (
                 // SHIPMENT 2 — a generated image, shown inline with a real download link.
                 <div>
-                  <img src={m.asset_url} alt="Generated" style={{ maxWidth:420, borderRadius:8, border:"1px solid "+C.line, display:"block" }} />
-                  <a href={m.asset_url} download target="_blank" rel="noreferrer"
+                  <img src={m.assets?.url} alt="Generated" style={{ maxWidth:420, borderRadius:8, border:"1px solid "+C.line, display:"block" }} />
+                  <a href={m.assets?.url} download target="_blank" rel="noreferrer"
                     style={{ fontSize:9.5, color:C.teal, marginTop:5, display:"inline-block" }}>Download image</a>
                 </div>
               ) : (
