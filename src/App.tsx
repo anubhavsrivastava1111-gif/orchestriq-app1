@@ -8,6 +8,8 @@ import TokenAnalytics, { saveRecord, estimateCost, saveUnitRecord } from "./Toke
 import AdminConsole from "./AdminConsole";
 import SupportWidget from "./SupportWidget";
 import MyAccount from "./MyAccount";
+import Workspace from "./Workspace";
+import { modelsFor as wsModelsFor } from "./lib/AIModels";
 import PulseGovernance from "./Pulse";
 import TokenBadge from "./components/TokenBadge";
 import AIAgents from "./AIAgents";
@@ -4177,6 +4179,27 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
   const ask=useCallback(async(sys:any,msgs:any,maxT?:any,enableSearch?:any,taskType?:any)=>
     (await callMulti(keys,defP,sys,msgs,maxT,enableSearch,taskType)).primary,
   [keys,defP]);
+ 
+  // The Universal Workspace lets the USER pick provider and model, so it needs
+  // a way to override the app's normal routing. Everything else is unchanged:
+  // the same callAI, the same keys, the same failure handling. This adds a
+  // choice; it does not add a second AI layer.
+  const askDirect=useCallback(async(sys:any,msgs:any,maxT?:any,_s?:any,_t?:any,provider?:string,model?:string)=>{
+    if(!provider)return (await callMulti(keys,defP,sys,msgs,maxT,false,"workspace")).primary;
+    const k=providerKey(keys,provider);
+    if(!k)throw new Error("No key configured for "+provider+". Add one in Settings \u2192 API.");
+    setUsageFeature("Universal Workspace","\u2733");
+    const r=await callAI(provider,k,sys,msgs,maxT||4000,false,model);
+    return typeof r==="string"?r:(r?.text||"");
+  },[keys,defP]);
+ 
+  // Only providers the user actually has a usable key for. A model they cannot
+  // reach must never appear in the picker.
+  const wsProviders=useMemo(()=>
+    ["claude","openai","gemini","nvidia","deepseek","groq","kimi"]
+      .filter(id=>providerKey(keys,id)&&wsModelsFor(id).length)
+      .map(id=>({id,label:(MODELS as any)[id]?.name||id})),
+  [keys]);
   const askFull=useCallback(async(sys:any,msgs:any,maxT?:any,enableSearch?:any,taskType?:any)=>
     callMulti(keys,defP,sys,msgs,maxT,enableSearch,taskType),
   [keys,defP]);
@@ -7797,7 +7820,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           </button>
           {showModules&&(
             <div style={{position:"absolute",top:"calc(100% - 2px)",left:10,right:10,background:"var(--oiq-sbBg,var(--oiq-surface2,#0c1120))",backdropFilter:"none",border:"1px solid var(--sb-bdr)",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:7,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["account","👤","My Account"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>{
+              {[["home","🎛️","Command Center"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["workspace","✳️","AI Workspace"],["account","👤","My Account"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>{
                 // WAS: modules the plan did not include were REMOVED from the
                 // menu entirely, so a user had no idea they existed or that
                 // upgrading would unlock them. A customer who cannot see what
@@ -8899,7 +8922,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         )}
 
         {view==="funding"&&<FundingIntelligence co={co} compData={compData} ask={ask}/>}
-        {!canUse(view)&&view!=="admin"&&view!=="tokens"&&view!=="account"&&(
+        {!canUse(view)&&view!=="admin"&&view!=="tokens"&&view!=="account"&&view!=="workspace"&&(
           <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:40}}>
             <div style={{textAlign:"center",maxWidth:400}}>
               <div style={{fontSize:34,marginBottom:10}}>✨</div>
@@ -8911,6 +8934,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               <button onClick={()=>setView("nerve")} style={{...S.hBtn,padding:"8px 14px"}}>Back</button>
             </div>
           </div>)}
+        {view==="workspace"&&<Workspace ask={askDirect} availableProviders={wsProviders}
+          canUse={canUse} showToast={showToast}/>}
         {view==="account"&&<MyAccount onOpenHelp={()=>setShowHelp(true)}/>}
         {view==="admin"&&(isAdmin
           ?<AdminConsole onClose={()=>setView("nerve")}/>
