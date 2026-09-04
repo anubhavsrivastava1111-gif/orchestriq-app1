@@ -4202,6 +4202,21 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
       .map(id=>({id,label:(MODELS as any)[id]?.name||id})),
   [keys]);
  
+  const wsImageProviders=useMemo(()=>
+    provAvailableFor("image",(id)=>providerKey(keys,id)).map(c=>({id:c.id,label:c.spec.label})),
+  [keys]);
+  const wsGenerateImage=useCallback(async(prompt:string):Promise<string>=>{
+    const cands=provAvailableFor("image",(id)=>providerKey(keys,id));
+    for(const c of cands){
+      try{
+        if(c.id==="openai"){const u=await callDallE(prompt,c.key); if(u)return u;}
+        else if(c.id==="stability"){const u=await callStabilityAI(prompt,c.key); if(u)return u;}
+        else if(c.id==="fal"){const u=await callFalImage(c.key,prompt); if(u)return u;}
+      }catch(e){console.warn("[OIQ] workspace image provider "+c.id+" failed:",String((e as any)?.message||e).slice(0,110));}
+    }
+    throw new Error(provCannotDo(defP||"nvidia","image",[]));
+  },[keys,defP]);
+ 
   // ── LIVE BOARDROOM WIRING ──────────────────────────────────────────────
   // Reuses everything that already exists rather than duplicating it:
   //   askDirect        the same provider call the Workspace uses
@@ -8957,7 +8972,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
             </div>
           </div>)}
         {view==="workspace"&&<Workspace ask={askDirect} availableProviders={wsProviders}
-          canUse={canUse} showToast={showToast}/>}
+          canUse={canUse} showToast={showToast}
+          generateImage={wsGenerateImage} imageProviders={wsImageProviders}/>}
         {view==="liveboard"&&<LiveBoardroom ask={askDirect} AR={AR} buildIdentity={lbBuildIdentity}
           routerProviderModel={lbRoute} runResearch={lbRunResearch} showToast={showToast}/>}
         {view==="account"&&<MyAccount onOpenHelp={()=>setShowHelp(true)}/>}
