@@ -8,7 +8,7 @@ import TokenAnalytics, { saveRecord, estimateCost, saveUnitRecord } from "./Toke
 import AdminConsole from "./AdminConsole";
 import SupportWidget from "./SupportWidget";
 import MyAccount from "./MyAccount";
-import Workspace from "./Workspace";
+import Workspace from "./lib/Workspace";
 import { modelsFor as wsModelsFor } from "./lib/AIModels";
 import PulseGovernance from "./Pulse";
 import TokenBadge from "./components/TokenBadge";
