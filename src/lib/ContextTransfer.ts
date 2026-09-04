@@ -71,18 +71,25 @@ export async function sendToModule(p: TransferPayload):
     if (!(p.content || "").trim() && !p.assetUrl)
       return { ok: false, message: "There is nothing selected to send." };
 
+    // THIS INSERT WAS THE EXACT ERROR YOU HIT: "Could not find the asset_url
+    // column of module_inbox". module_inbox pre-dates this feature - it was
+    // built with a different, real schema (source_title not title,
+    // source_conversation not source_conversation_id, assets as one jsonb
+    // field not asset_url, actioned_at not accepted_at) that I did not check
+    // before writing this file. Corrected to match what is actually there.
     const { error } = await supabase.from("module_inbox").insert({
       user_id: uid,
       destination: p.destination,
-      title: (p.title || "From Universal Workspace").slice(0, 160),
+      source_title: (p.title || "From Universal Workspace").slice(0, 160),
       content: (p.content || "").slice(0, 60000),
-      // PROVENANCE. Without these four fields a transfer is anonymous text and
+      // PROVENANCE. Without these fields a transfer is anonymous text and
       // nobody can later answer "which model produced this number?"
       source: "workspace",
       source_provider: p.provider || null,
       source_model: p.model || null,
-      source_conversation_id: p.conversationId || null,
-      asset_url: p.assetUrl || null,
+      source_conversation: p.conversationId || null,
+      is_ai_generated: true,
+      assets: p.assetUrl ? { url: p.assetUrl } : null,
       status: "pending",
     });
     if (error) return { ok: false, message: error.message };
