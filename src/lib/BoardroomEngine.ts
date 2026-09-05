@@ -363,6 +363,39 @@ export async function mergeDecisionState(sessionId: string, patch: any) {
   return merged;
 }
 
+// ── QUESTION STATE TRACKING (spec: "PENDING/ANSWERED/SKIPPED/DECLINED/RESOLVED") ─
+// WHAT WAS MISSING: a question that got answered or skipped was simply erased -
+// pending_question was set back to null with nothing kept. That meant nobody
+// could later see WHAT was asked, WHO answered it, or that a question had been
+// deliberately skipped rather than never having existed. This is what the spec
+// means by tracking "unresolved state" as a real thing, not a transient UI flag.
+//
+// mergeDecisionState above does a SHALLOW merge, so an array field has to be
+// read, modified, and written back whole - it cannot be appended to directly.
+export type QuestionStatus = "PENDING" | "ANSWERED" | "SKIPPED" | "DECLINED" | "RESOLVED";
+export interface QuestionLogEntry {
+  id: string; text: string; askedBy: string; status: QuestionStatus;
+  answer?: string; askedAt: string; resolvedAt?: string;
+}
+
+export async function logQuestionAsked(sessionId: string, entry: { messageId:string; askedBy:string; text:string }) {
+  const { data } = await supabase.from("boardroom_sessions").select("decision_state").eq("id", sessionId).single();
+  const state = data?.decision_state || {};
+  const log: QuestionLogEntry[] = Array.isArray(state.question_log) ? state.question_log : [];
+  log.push({ id: entry.messageId, text: entry.text, askedBy: entry.askedBy, status: "PENDING", askedAt: new Date().toISOString() });
+  await mergeDecisionState(sessionId, { question_log: log });
+}
+
+export async function logQuestionResolved(sessionId: string, messageId: string, status: "ANSWERED"|"SKIPPED", answer?: string) {
+  const { data } = await supabase.from("boardroom_sessions").select("decision_state").eq("id", sessionId).single();
+  const state = data?.decision_state || {};
+  const log: QuestionLogEntry[] = Array.isArray(state.question_log) ? state.question_log : [];
+  const updated = log.map(q => q.id === messageId
+    ? { ...q, status, answer: answer, resolvedAt: new Date().toISOString() }
+    : q);
+  await mergeDecisionState(sessionId, { question_log: updated });
+}
+
 export function transcriptOf(messages: any[]): string {
   return messages.map(m =>
     (m.author_type === "user" ? "USER" : m.author_type === "system" ? "SYSTEM" : (m.author_role||"").toUpperCase())
@@ -372,4 +405,4 @@ export function transcriptOf(messages: any[]): string {
 export default { MANDATE, routeNext, ceoFormBoard, executiveSpeak, extractStateUpdate,
                  proposeDecision, createSession, addParticipant, postMessage, setStatus,
                  setPendingQuestion, setPaused, extractMentions, mergeDecisionState, transcriptOf,
-                 buildTranscriptMarkdown };
+                 buildTranscriptMarkdown, logQuestionAsked, logQuestionResolved };
