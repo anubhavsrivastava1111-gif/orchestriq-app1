@@ -359,12 +359,43 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
           setActivity([]);
 
           if (route.question_to_user) {
-            const posted = await BE.postMessage(sessionId, "system", null,
-              "The board needs your input: " + route.reason, { kind:"question_to_user" });
-            await BE.setPendingQuestion(sessionId, { messageId: posted?.id, askedBy: (route.speakers[0]||"ceo"), text: route.reason });
-            // A question that gets answered or skipped later was previously just
-            // erased - this is the durable record of it ever having been asked.
-            if (posted?.id) await BE.logQuestionAsked(sessionId, { messageId: posted.id, askedBy: (route.speakers[0]||"ceo"), text: route.reason });
+            // THE EXACT CONFUSION IN YOUR SCREENSHOT: this used to post a
+            // disembodied SYSTEM announcement, then attribute it to an
+            // executive purely as bookkeeping. That executive never actually
+            // said it - their transcript had nothing in it - so asking them
+            // directly correctly got "I haven't posed any questions". The
+            // system was honest; the label on it was fiction.
+            //
+            // The chosen executive now genuinely SPEAKS the question, in
+            // their own persona, ending with @User. It is a real turn in
+            // their real voice, so asking them "did you ask me that" later
+            // gets a truthful yes - and it is caught by the exact same
+            // deterministic @User check every other message goes through
+            // (below), rather than needing its own separate mechanism.
+            const askerRole = roleIds.includes(route.speakers[0]) ? route.speakers[0] : (roleIds[0] || "ceo");
+            const askerDef = AR.find((r:any)=>r.id===askerRole);
+            if (askerDef) {
+              try {
+                const persona = buildIdentity(askerDef);
+                const qText = await BE.speakQuestionToUser(ask, rp, rm, askerRole, persona,
+                  objective || session?.objective || "", transcript, decisionState, route.reason);
+                const { mentions: qMentions } = BE.extractMentions(qText, roleIds);
+                const posted = await BE.postMessage(sessionId, "agent", askerRole, qText,
+                  { provider: rp, model: rm, activeRoles: roleIds });
+                if (posted?.id) {
+                  await BE.setPendingQuestion(sessionId, { messageId: posted.id, askedBy: askerRole, text: route.reason });
+                  await BE.logQuestionAsked(sessionId, { messageId: posted.id, askedBy: askerRole, text: route.reason });
+                }
+              } catch {
+                // If the executive's own voice fails for any reason, fall back
+                // to the plain system announcement rather than losing the
+                // question entirely.
+                const posted = await BE.postMessage(sessionId, "system", null,
+                  "The board needs your input: " + route.reason, { kind:"question_to_user" });
+                await BE.setPendingQuestion(sessionId, { messageId: posted?.id, askedBy: askerRole, text: route.reason });
+                if (posted?.id) await BE.logQuestionAsked(sessionId, { messageId: posted.id, askedBy: askerRole, text: route.reason });
+              }
+            }
             break; // P0-3: stop — live, never deferred to "after the conversation"
           }
           if (route.research_needed.length) {
@@ -559,8 +590,14 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
     if (m) { setShowMentions(true); setMentionQuery(m[1]); } else { setShowMentions(false); }
   };
   const pickMention = (roleId: string) => {
-    const label = AR.find((r:any)=>r.id===roleId)?.t || roleId;
-    setInput(v => v.replace(/@\w*$/, "@" + label.split(" ")[0] + " "));
+    // THE EXACT BUG YOU HIT. This used to insert the first WORD of the
+    // executive's title - and every single title starts with "Chief", so
+    // clicking any one of them from this very dropdown produced the same
+    // unresolvable "@Chief" whichever person you actually picked. Inserting
+    // the role's real id instead is guaranteed to match, because it is the
+    // exact same value the backend mention parser keys on - there is no
+    // second, disagreeing name to go out of sync with.
+    setInput(v => v.replace(/@\w*$/, "@" + roleId + " "));
     setShowMentions(false);
   };
 
