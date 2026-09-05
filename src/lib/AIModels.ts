@@ -47,13 +47,36 @@ export const MODELS_BY_PROVIDER: Record<string, ModelSpec[]> = {
     { id: "gemini-1.5-pro", label: "Gemini 1.5 Pro", note: "Handles very large documents in one go.",
       caps: ["text","vision","websearch","long"], ctx: "very long", tier: "strong" },
   ],
+  // THE EXACT BUG YOU HIT.
+  // These three model ids were never real options on this platform's NVIDIA
+  // proxy. I wrote this list from general knowledge of what NVIDIA hosts,
+  // without checking the actual allowlist your own Cloudflare proxy
+  // (functions/api/nvidia.ts) enforces - so the picker offered choices the
+  // backend was always going to refuse with "model not supported on this
+  // deployment", regardless of your key.
+  // This list is now copied EXACTLY from that proxy's real MODELS map, so the
+  // picker can never again offer something the backend will reject.
+  // meta/llama-3.3-70b-instruct is deliberately NOT listed: NVIDIA itself
+  // retired it on 2026-08-26 (the 410 error in your screenshot is NVIDIA
+  // saying so, not a bug on our side) - it has also been removed from the
+  // proxy's allowlist in the same update as this file.
   nvidia: [
-    { id: "meta/llama-3.3-70b-instruct", label: "Llama 3.3 70B", note: "Stable and dependable. The safest NVIDIA choice.",
+    { id: "nvidia/nemotron-3-super-120b-a12b", label: "Nemotron 3 Super", note: "The recommended default. Strong reasoning, thinks before answering.",
       caps: ["text"], ctx: "long", tier: "balanced" },
-    { id: "deepseek-ai/deepseek-r1", label: "DeepSeek R1", note: "Thinks before answering. Slower — good for hard problems.",
+    { id: "nvidia/nemotron-3-ultra-550b-a55b", label: "Nemotron 3 Ultra", note: "The largest, most capable model here. Slower.",
       caps: ["text"], ctx: "long", tier: "strong" },
-    { id: "qwen/qwen2.5-72b-instruct", label: "Qwen 2.5 72B", note: "Strong at code and multilingual work.",
-      caps: ["text","code"], ctx: "long", tier: "balanced" },
+    { id: "nvidia/nemotron-3-nano-30b-a3b", label: "Nemotron 3 Nano", note: "Small and quick. Good for short, simple questions.",
+      caps: ["text"], ctx: "short", tier: "fast" },
+    { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B", note: "Fast, does not spend time reasoning. Good default for quick chat.",
+      caps: ["text"], ctx: "long", tier: "fast" },
+    { id: "deepseek-ai/deepseek-v4-pro", label: "DeepSeek V4 Pro", note: "Thinks before answering. Good for hard analytical problems.",
+      caps: ["text"], ctx: "long", tier: "strong" },
+    { id: "qwen/qwen3.5-397b-a17b", label: "Qwen 3.5", note: "Strong at code and multilingual work.",
+      caps: ["text","code"], ctx: "long", tier: "strong" },
+    { id: "moonshotai/kimi-k2.6", label: "Kimi K2.6", note: "Long-context specialist.",
+      caps: ["text","long"], ctx: "very long", tier: "balanced" },
+    { id: "zhipuai/glm-5.2", label: "GLM 5.2", note: "General-purpose reasoning model.",
+      caps: ["text"], ctx: "long", tier: "balanced" },
   ],
   deepseek: [
     { id: "deepseek-chat", label: "DeepSeek Chat", note: "Very low cost. Solid general reasoning.",
