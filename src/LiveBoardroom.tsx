@@ -322,6 +322,7 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
       let guard = 0;
       let sameDisagreementCount = 0;
       let lastSpeakerPair = "";
+      roundLoop:
       while (guard++ < 8) { // hard ceiling — a runaway loop must never be possible
         const { data: sRowCheck } = await supabase.from("boardroom_sessions").select("paused,status").eq("id", sessionId).single();
         if (sRowCheck?.paused) { setActivity([]); break; }
@@ -405,16 +406,38 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
             const text = await BE.executiveSpeak(ask, rp, rm, roleId, persona,
               objective || session?.objective || "", speakTranscript, decisionState,
               forcedByUser ? lastRow.content : undefined);
-            const { mentions } = BE.extractMentions(text, roleIds);
+            const { mentions, toUser } = BE.extractMentions(text, roleIds);
             let replyTo: string | undefined = forcedByUser ? lastRow.id : undefined;
             if (!replyTo && mentions.length) {
               const target = (mRows as any[]).slice().reverse().find(x => x.author_role === mentions[0]);
               replyTo = target?.id;
             }
-            await BE.postMessage(sessionId, "agent", roleId, text,
+            const posted = await BE.postMessage(sessionId, "agent", roleId, text,
               { provider: rp, model: rm, activeRoles: roleIds, replyTo });
             const updated = await BE.extractStateUpdate(ask, rp, rm, text, decisionState);
             await BE.mergeDecisionState(sessionId, updated);
+
+            // THE EXACT BUG YOU HIT: an executive asking YOU something relied
+            // entirely on the model remembering to literally type "@User".
+            // Nothing enforced it, and nothing checked afterward whether it
+            // had happened - so when the model phrased a real question to you
+            // in plain prose without that tag, the conversation simply moved
+            // on. No pause, no visual mark, nothing. This is the mirror of the
+            // fix already in place for the opposite direction (a user
+            // addressing an executive is forced deterministically, not left
+            // to the router's judgement) - that same discipline was missing
+            // here, and it is exactly why "he asked me a question but there
+            // was no tagging" happened.
+            //
+            // Now checked on EVERY executive message, not inferred by the
+            // router on some later turn: if this message contains "@User",
+            // the round stops HERE, this turn, and the question is recorded
+            // the same way the system's own questions are.
+            if (toUser && posted?.id) {
+              await BE.setPendingQuestion(sessionId, { messageId: posted.id, askedBy: roleId, text: text.slice(0,300) });
+              await BE.logQuestionAsked(sessionId, { messageId: posted.id, askedBy: roleId, text: text.slice(0,300) });
+              break roundLoop;
+            }
           } catch (e:any) {
             await BE.postMessage(sessionId, "system", null,
               role.t + " temporarily unavailable (" + String(e?.message||e).slice(0,100) + "). Continuing without them this round.",
