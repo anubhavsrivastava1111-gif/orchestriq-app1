@@ -241,16 +241,32 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   if (approxChars > 400_000) return json({ error: "Request too large." }, 413, cors.headers);
 
   const requested = String(model || "").trim() || DEFAULT_MODEL;
+  // THE FIX: this allowlist exists to control cost and reliability on the
+  // SHARED free-tier key we pay for and manage. It has no business rejecting
+  // a request that is running on the CALLER'S OWN key - that is their quota,
+  // their choice of model, and NVIDIA's own API is the only authority that
+  // should ever say yes or no to it. Requiring us to hand-maintain a mirror
+  // of NVIDIA's entire catalog is exactly what produced retired-model and
+  // wrong-model-name errors twice already: a hand-kept list always drifts
+  // from the real one. NVIDIA adding or retiring a model now requires
+  // ZERO changes on our side for anyone using their own key.
   const spec = MODELS[requested];
-  if (!spec) {
+  if (!spec && !userKey) {
     return json({
-      error: "NVIDIA model not supported on this deployment: \"" + requested + "\". Nothing was sent and nothing was billed.",
+      error: "NVIDIA model not supported on the free shared tier: \"" + requested + "\". Add your own free NVIDIA key in Settings to use any model NVIDIA offers, with no restriction from us.",
       availableModels: Object.keys(MODELS),
     }, 400, cors.headers);
   }
+  // A model outside our curated table has no known reasoning/overhead profile.
+  // Safe generic defaults: assume it might reason if asked to, no fixed
+  // overhead beyond what the caller requests, capped by the same time-safe
+  // ceiling as everything else. If NVIDIA does not recognise the id at all,
+  // NVIDIA's own 404 - already handled below with a clear message - is what
+  // tells the user, not a guess made on our side beforehand.
+  const effSpec = spec || { max: 9000, reason: true, overhead: 0 };
 
-  const wantThink = reasoning === undefined ? spec.reason : (reasoning === true || reasoning === "on");
-  const reasoningOn = wantThink && spec.reason;
+  const wantThink = reasoning === undefined ? effSpec.reason : (reasoning === true || reasoning === "on");
+  const reasoningOn = wantThink && effSpec.reason;
   const wanted = Math.max(Number(max_tokens) || 1500, 512);
   // A 16,000-token reasoning generation on a 550B model does not finish inside
   // the ~90 seconds Cloudflare allows. Asking for more than can be delivered in
@@ -258,15 +274,15 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   // these models can actually complete on this platform; raising it does not
   // produce longer answers, it produces HTML error pages.
   const TIME_SAFE_CEILING = 9000;
-  const budget = Math.min(wanted + (reasoningOn ? spec.overhead : 0),
-                          spec.max, HARD_CEILING, TIME_SAFE_CEILING);
+  const budget = Math.min(wanted + (reasoningOn ? effSpec.overhead : 0),
+                          effSpec.max, HARD_CEILING, TIME_SAFE_CEILING);
 
   const payload: any = {
     model: requested, max_tokens: budget,
     temperature: reasoningOn ? 0.6 : 0.4,
     messages: [{ role: "system", content: sys || "" }, ...messages],
   };
-  if (spec.reason) payload.chat_template_kwargs = { thinking: reasoningOn };
+  if (effSpec.reason) payload.chat_template_kwargs = { thinking: reasoningOn };
 
   const obs = {
     ...cors.headers,
