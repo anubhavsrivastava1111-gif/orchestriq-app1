@@ -4196,6 +4196,21 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
  
   // Only providers the user actually has a usable key for. A model they cannot
   // reach must never appear in the picker.
+  const [nvLiveModels,setNvLiveModels]=useState<Array<{id:string;label:string;note:string}>|null>(null);
+  useEffect(()=>{
+    const k=(keys.nvidia&&keys.nvidia!=="nvidia"&&keys.nvidia.startsWith("nvapi-"))?keys.nvidia:"";
+    if(!k){setNvLiveModels(null);return;}
+    let cancelled=false;
+    import("./lib/AIModels").then(({fetchNvidiaLiveCatalog})=>
+      fetchNvidiaLiveCatalog(k).then(models=>{
+        if(!cancelled&&models.length){
+          setNvLiveModels(models.map((m:any)=>({id:m.id,label:m.label,note:(m.ctx==="long"?"long context":"")+(m.tier==="strong"?" \u00b7 strong":"")})));
+        }
+      })
+    );
+    return ()=>{cancelled=true;};
+  },[keys.nvidia]);
+ 
   const wsProviders=useMemo(()=>
     ["claude","openai","gemini","nvidia","deepseek","groq","kimi"]
       .filter(id=>providerKey(keys,id)&&wsModelsFor(id).length)
@@ -8973,7 +8988,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           </div>)}
         {view==="workspace"&&<Workspace ask={askDirect} availableProviders={wsProviders}
           canUse={canUse} showToast={showToast}
-          generateImage={wsGenerateImage} imageProviders={wsImageProviders}/>}
+          generateImage={wsGenerateImage} imageProviders={wsImageProviders}
+          nvidiaUserKey={(keys.nvidia&&keys.nvidia!=="nvidia"&&keys.nvidia.startsWith("nvapi-"))?keys.nvidia:""}/>}
         {view==="liveboard"&&<LiveBoardroom ask={askDirect} AR={AR} buildIdentity={lbBuildIdentity}
           routerProviderModel={lbRoute} runResearch={lbRunResearch} showToast={showToast}/>}
         {view==="account"&&<MyAccount onOpenHelp={()=>setShowHelp(true)}/>}
@@ -9502,8 +9518,13 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                           NVIDIA model{defP!=="nvidia"?" (used for fallback and free-tier calls)":""}
                         </label>
                         <select value={keys.nvidiaModel||MODELS.nvidia.model} onChange={e=>{const nk={...keys,nvidiaModel:e.target.value};setKeys(nk);sv("cos-keys",{keys:nk,defaultProvider:defP,multiAI});}} style={{...S.inp,cursor:"pointer"}}>
-                          {NVIDIA_MODELS.map(m=><option key={m.id} value={m.id}>{m.label + " — " + m.note}</option>)}
+                          {(nvLiveModels||NVIDIA_MODELS).map((m:any)=><option key={m.id} value={m.id}>{m.label + " — " + m.note}</option>)}
                         </select>
+                        {nvLiveModels && (
+                          <div style={{fontSize:8,color:"#22C55E",marginTop:3}}>
+                            \u25CF Live from NVIDIA \u00b7 {nvLiveModels.length} models currently available
+                          </div>
+                        )}
                         {/* The dropdown label alone does not tell you what you are
                             running. NVIDIA models differ sharply: the 550B reasons
                             deeply but is slow enough to hit the 75-second proxy
@@ -9514,9 +9535,12 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                           return sel?<div style={{fontSize:8,color:"#5A6480",marginTop:3,lineHeight:1.45}}>
                             {sel.note}{/reasoning/.test(sel.note)?" \u00b7 slower on long prompts":" \u00b7 fast"}
                           </div>:null;})()}
-                        <div style={{fontSize:8,color:"#5A6480",marginTop:3,lineHeight:1.45}}>
-                          {NVIDIA_MODELS.length} models available, free, no key required.
-                        </div>
+                        {!nvLiveModels && (
+                          <div style={{fontSize:8,color:"#5A6480",marginTop:3,lineHeight:1.45}}>
+                            {NVIDIA_MODELS.length} models available, free, no key required.
+                            {" "}Add your own free NVIDIA key for the complete live catalogue.
+                          </div>
+                        )}
                       </div>
                     )}
                     <label style={{...S.lbl,marginBottom:4}}>Automatic Specialist Routing</label>
