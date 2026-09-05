@@ -185,7 +185,13 @@ export async function executiveSpeak(
     "start of that sentence so it can be shown as such \u2014 do not let an inference read as an established fact.\n" +
     "NEVER open with agreement filler ('great point', 'I agree with my colleague'). If you agree, say " +
     "WHY with a reason that adds something; otherwise say nothing about it and make your own point.\n" +
-    "Use @Name to address a specific colleague or @User to ask the person a direct question.\n" +
+    "IF YOU NEED ANYTHING FROM THE HUMAN USER \u2014 their budget, their risk tolerance, a fact only " +
+    "they know, or a decision only they can make \u2014 YOU MUST WRITE THE LITERAL TEXT \"@User\" " +
+    "immediately before the question, exactly like that, with a capital U. This is not optional " +
+    "phrasing: the platform detects this exact text to pause the discussion and wait for their answer. " +
+    "A question to the user written any other way will be missed entirely and never receive an answer. " +
+    "Example: \"@User what is the maximum you are willing to invest in the first year?\"\n" +
+    "Use @Name the same way to address a specific colleague.\n" +
     "STRUCTURED DATA: if you have a genuine table of figures (a comparison, a cost breakdown, a set of " +
     "options), format it as a proper markdown table with | pipes |. If a simple numeric comparison would " +
     "read better as a chart, add one fenced block after your prose, exactly in this form:\n" +
