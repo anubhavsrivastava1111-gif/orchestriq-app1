@@ -324,9 +324,14 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
         // THE EXACT BUG YOU HIT: workspace_messages has no asset_url or
         // asset_kind column - it has one column, "assets", holding jsonb.
         // This is what produced "Could not find the asset_url column".
-        .insert({ conversation_id:cid, user_id:uid, role:"assistant", content:"", assets:{ url, kind:"image" } })
+        // "assets" is a NOT NULL array column (default '[]') on the real table -
+        // the same shape module_inbox uses. Storing a single object instead of
+        // a one-item array would not violate NOT NULL, but it would not match
+        // the column's own design, so this stores it correctly from the start
+        // rather than waiting to find out the hard way later.
+        .insert({ conversation_id:cid, user_id:uid, role:"assistant", content:"", assets:[{ url, kind:"image" }] })
         .select().single();
-      setMsgs(m => [...m, saved || { role:"assistant", content:"", assets:{ url, kind:"image" }, id:"tmp2-"+Date.now() }]);
+      setMsgs(m => [...m, saved || { role:"assistant", content:"", assets:[{ url, kind:"image" }], id:"tmp2-"+Date.now() }]);
       loadConvs();
     } catch (e:any) {
       const m = String(e?.message || e).slice(0,240);
@@ -502,7 +507,7 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
           {msgs.map((m,i) => (
             <div key={m.id||i} style={{ marginBottom:14, maxWidth:820 }}>
               <div style={{ fontSize:8.5, fontWeight:800, color: m.role==="user"?C.faint:C.teal, marginBottom:4, letterSpacing:0.5 }}>
-                {m.role==="user" ? "YOU" : (m.assets?.kind==="image" ? "IMAGE" : (findModel(m.provider,m.model)?.label || m.model || "ASSISTANT")).toUpperCase()}
+                {m.role==="user" ? "YOU" : (m.assets?.[0]?.kind==="image" ? "IMAGE" : (findModel(m.provider,m.model)?.label || m.model || "ASSISTANT")).toUpperCase()}
               </div>
               {m.error ? (
                 <div style={{ fontSize:11.5, color:"#EF4444", background:"rgba(239,68,68,0.07)",
@@ -512,11 +517,11 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
                     Your message was saved. Try another model from the picker above.
                   </div>
                 </div>
-              ) : m.assets?.kind === "image" && m.assets?.url ? (
+              ) : m.assets?.[0]?.kind === "image" && m.assets?.[0]?.url ? (
                 // SHIPMENT 2 — a generated image, shown inline with a real download link.
                 <div>
-                  <img src={m.assets?.url} alt="Generated" style={{ maxWidth:420, borderRadius:8, border:"1px solid "+C.line, display:"block" }} />
-                  <a href={m.assets?.url} download target="_blank" rel="noreferrer"
+                  <img src={m.assets?.[0]?.url} alt="Generated" style={{ maxWidth:420, borderRadius:8, border:"1px solid "+C.line, display:"block" }} />
+                  <a href={m.assets?.[0]?.url} download target="_blank" rel="noreferrer"
                     style={{ fontSize:9.5, color:C.teal, marginTop:5, display:"inline-block" }}>Download image</a>
                 </div>
               ) : (
