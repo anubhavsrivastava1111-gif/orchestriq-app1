@@ -34,9 +34,32 @@ export type AskFn = (sys:string, msgs:any[], maxT:number, search?:boolean, task?
 // half: every message is scanned for @role and @User references against the
 // ACTUAL roster in this session, so a mention is a fact the router can act on
 // (priority) rather than text a human has to notice.
+// THE EXACT BUG THAT SENT YOUR QUESTION TO THE WRONG EXECUTIVE.
+// This table only recognised short internal codes (ceo, cfo, cso...). It had
+// never heard the word "chief" - and every single C-suite title starts with
+// that word, so the mention picker's own suggestion ("@Chief") could never
+// resolve to anyone, for any executive, ever. Two things fix this together:
+// this table now also accepts the ONE WORD THAT ACTUALLY DISTINGUISHES each
+// role (Strategy, Finance, Marketing...), so someone typing naturally has a
+// real chance of being understood - and separately, the picker itself has
+// been fixed to insert the unambiguous code directly rather than a guessed
+// word from the title.
 const ROLE_ALIASES: Record<string,string> = {
-  ceo:"ceo", cfo:"cfo", cmo:"cmo", cto:"cto", coo:"coo", chro:"chro", clo:"clo",
-  cso:"cso", trade:"trade", coach:"coach", chairman:"chairman",
+  // "chief" and "executive" are deliberately NOT mapped here - every single
+  // C-suite title contains one of those words, so treating either as a
+  // reliable pointer to any one specific role would silently guess wrong with
+  // total confidence, which is worse than the honest ambiguity it replaces.
+  ceo:"ceo",
+  cfo:"cfo", finance:"cfo", financial:"cfo",
+  cmo:"cmo", marketing:"cmo",
+  cto:"cto", technology:"cto", tech:"cto",
+  coo:"coo", operations:"coo", operating:"coo",
+  chro:"chro", hr:"chro", people:"chro", human:"chro",
+  clo:"clo", legal:"clo", compliance:"clo",
+  cso:"cso", strategy:"cso", strategist:"cso",
+  trade:"trade", export:"trade", international:"trade",
+  coach:"coach", career:"coach",
+  chairman:"chairman", chair:"chairman",
 };
 
 export function extractMentions(text: string, activeRoleIds: string[]): { mentions: string[]; toUser: boolean } {
@@ -157,6 +180,38 @@ export async function ceoFormBoard(
 // personaBlock is passed in from App.tsx's existing buildBoardIdentity +
 // ANALYST_STANDARD + CLARITY_PROTOCOL — this engine does not duplicate that
 // prompt engineering, it composes with it.
+// ── MAKE THE PENDING QUESTION A REAL, ATTRIBUTED STATEMENT ─────────────────
+// THE EXACT CONFUSION IN YOUR SCREENSHOT: the yellow "board needs your input"
+// banner was a SYSTEM announcement, never actually said by any executive in
+// their own voice. It was attributed to one (askedBy) as bookkeeping only.
+// So when you asked that executive directly "did you ask me a question?",
+// they answered honestly from their own transcript, which contained no such
+// question - and correctly said no. The system was telling the truth about
+// itself; the attribution was fiction.
+//
+// This makes the router-selected executive ACTUALLY ask it, in their own
+// persona, ending with the literal @User tag - so it is a genuine turn in
+// their own voice that they will truthfully confirm later, and it is caught
+// by the same deterministic @User check every other executive message goes
+// through, rather than needing its own separate, disconnected mechanism.
+export async function speakQuestionToUser(
+  ask: AskFn, provider: string, model: string,
+  roleId: string, personaBlock: string, objective: string, transcript: string, decisionState: any,
+  reason: string
+): Promise<string> {
+  const sys = personaBlock +
+    "\n\nYOU HAVE DETERMINED YOU NEED SOMETHING FROM THE USER TO PROCEED: " + reason + "\n" +
+    "Ask them directly, in your own voice, in one or two sentences. Your message MUST contain the " +
+    "literal text \"@User\" immediately before the question, exactly like that. Do not restate the " +
+    "whole discussion - just ask what you need, as you genuinely would in a live meeting.";
+  const user = "OBJECTIVE: " + objective + "\n\nTRANSCRIPT SO FAR:\n" + transcript.slice(-4000);
+  const out = (await ask(sys, [{ role:"user", content:user }], 300, false, "boardroom_"+roleId, provider, model)).trim();
+  // A model can still forget, despite the instruction - this is the backstop
+  // that guarantees the tag is present regardless, so the deterministic
+  // pause mechanism never depends on the model's compliance alone.
+  return /@user\b/i.test(out) ? out : ("@User " + out);
+}
+
 export async function executiveSpeak(
   ask: AskFn, provider: string, model: string,
   roleId: string, personaBlock: string, objective: string, transcript: string, decisionState: any,
@@ -411,4 +466,4 @@ export function transcriptOf(messages: any[]): string {
 export default { MANDATE, routeNext, ceoFormBoard, executiveSpeak, extractStateUpdate,
                  proposeDecision, createSession, addParticipant, postMessage, setStatus,
                  setPendingQuestion, setPaused, extractMentions, mergeDecisionState, transcriptOf,
-                 buildTranscriptMarkdown, logQuestionAsked, logQuestionResolved };
+                 buildTranscriptMarkdown, logQuestionAsked, logQuestionResolved, speakQuestionToUser };
