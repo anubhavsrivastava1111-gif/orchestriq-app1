@@ -2874,30 +2874,82 @@ function ResearchBriefCard({brief,accent,label}:{brief:string;accent?:string;lab
   );
 }
  
+// v2 — VISUAL REDESIGN. Same free, native SpeechRecognition mechanism as
+// before (nothing about HOW this transcribes changed, and every existing
+// caller across the app - Time Machine, Workflow, Project Engine, Data Hub,
+// Ledger, Dispatch - gets the new look automatically, with no wiring changes
+// anywhere else). What changed is the LISTENING state: a real, audio-reactive
+// waveform (Web Audio API AnalyserNode against the same microphone stream
+// this component already opens) replacing a single static emoji, styled with
+// this platform's own theme accent so it matches whichever of the 8 themes
+// is active rather than a fixed hard-coded colour.
 function MicButton({lang,onResult,disabled}){
   const [st,setSt]=useState("idle");const [err,setErr]=useState("");const recRef=useRef(null);
+  const [bars,setBars]=useState(Array(18).fill(0.08));
+  const streamRef=useRef(null);const audioCtxRef=useRef(null);const analyserRef=useRef(null);const rafRef=useRef(null);
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition||null;
-  const stop=()=>{try{recRef.current?.stop();}catch{}setSt("idle");};
+
+  const stopWaveform=()=>{
+    if(rafRef.current){cancelAnimationFrame(rafRef.current);rafRef.current=null;}
+    try{audioCtxRef.current?.close();}catch{}
+    audioCtxRef.current=null;analyserRef.current=null;
+    streamRef.current?.getTracks().forEach(t=>t.stop());streamRef.current=null;
+  };
+  const startWaveform=(stream)=>{
+    try{
+      const ctx=new (window.AudioContext||window.webkitAudioContext)();
+      const source=ctx.createMediaStreamSource(stream);
+      const analyser=ctx.createAnalyser();analyser.fftSize=64;analyser.smoothingTimeConstant=0.6;
+      source.connect(analyser);audioCtxRef.current=ctx;analyserRef.current=analyser;
+      const buf=new Uint8Array(analyser.frequencyBinCount);
+      const tick=()=>{
+        analyser.getByteFrequencyData(buf);
+        const step=Math.max(1,Math.floor(buf.length/18));
+        const next=[];for(let i=0;i<18;i++)next.push(Math.max(0.08,Math.min(1,(buf[i*step]/255)*1.5)));
+        setBars(next);rafRef.current=requestAnimationFrame(tick);
+      };
+      tick();
+    }catch{/* waveform is cosmetic — never block transcription if this fails */}
+  };
+
+  const stop=()=>{try{recRef.current?.stop();}catch{}stopWaveform();setSt("idle");};
   const start=()=>{
     if(!SR){setErr("Voice not supported. Use Chrome or Edge.");setSt("error");return;}
     if(disabled)return;
     if(st==="listening"){stop();return;}
     setSt("requesting");setErr("");
-    navigator.mediaDevices?.getUserMedia({audio:true}).then(()=>{
+    navigator.mediaDevices?.getUserMedia({audio:true}).then((stream)=>{
+      streamRef.current=stream;startWaveform(stream);
       const rec=new SR();rec.lang=lang||"en-IN";rec.continuous=true;rec.interimResults=true;recRef.current=rec;
       let final="";
       rec.onstart=()=>setSt("listening");
       rec.onresult=(e)=>{final="";for(let i=0;i<e.results.length;i++){if(e.results[i].isFinal)final+=e.results[i][0].transcript;}};
-      rec.onerror=(e)=>{if(e.error==="not-allowed")setErr("Mic access denied.");else setErr("Voice error: "+e.error+".");setSt("error");};
-      rec.onend=()=>{if(final.trim())onResult(final.trim());setSt("idle");};
-      try{rec.start();}catch{setErr("Could not start voice input.");setSt("error");}
+      rec.onerror=(e)=>{stopWaveform();if(e.error==="not-allowed")setErr("Mic access denied.");else setErr("Voice error: "+e.error+".");setSt("error");};
+      rec.onend=()=>{stopWaveform();if(final.trim())onResult(final.trim());setSt("idle");};
+      try{rec.start();}catch{stopWaveform();setErr("Could not start voice input.");setSt("error");}
     }).catch(()=>{setErr("Mic access denied. Allow mic in browser settings.");setSt("error");});
   };
+
+  if(st==="listening"){
+    return(
+      <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.03)",
+        border:"1px solid var(--oiq-accent,#14B8A6)66",borderRadius:999,padding:"3px 10px 3px 6px",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:1.5,height:20}}>
+          {bars.map((h,i)=>(<div key={i} style={{width:2.5,minWidth:2.5,height:Math.max(3,h*18),
+            background:"var(--oiq-accent,#14B8A6)",borderRadius:2,opacity:0.6+h*0.4,transition:"height 70ms ease"}}/>))}
+        </div>
+        <button onClick={stop} title="Stop listening" disabled={disabled}
+          style={{background:"none",border:"none",cursor:"pointer",fontSize:13,padding:0,color:"var(--oiq-accent,#14B8A6)",lineHeight:1}}>
+          {"\u25A0"}
+        </button>
+      </div>
+    );
+  }
   return(
     <div style={{position:"relative",flexShrink:0}}>
-      <button onClick={st==="listening"?stop:start} disabled={disabled||st==="requesting"} title={!SR?"Voice not supported":st==="listening"?"Listening — click to stop":"Click to speak"}
-        style={{background:st==="listening"?"rgba(239,68,68,0.18)":"none",border:"1px solid "+(st==="listening"?"#EF4444":"#1a2030"),borderRadius:5,padding:"5px 8px",cursor:disabled?"not-allowed":"pointer",fontSize:15,lineHeight:1,opacity:disabled?0.35:1,transition:"all 0.2s"}}>
-        {st==="listening"?"🔴":st==="requesting"?"⏳":st==="error"?"⚠️":"🎤"}
+      <button onClick={start} disabled={disabled||st==="requesting"} title={!SR?"Voice not supported":"Click to speak"}
+        style={{background:"none",border:"1px solid #1a2030",borderRadius:5,padding:"5px 8px",cursor:disabled?"not-allowed":"pointer",fontSize:15,lineHeight:1,opacity:disabled?0.35:1,transition:"all 0.2s"}}>
+        {st==="requesting"?"⏳":st==="error"?"⚠️":"🎤"}
       </button>
       {st==="error"&&err&&<div style={{position:"absolute",bottom:"calc(100% + 6px)",right:0,background:"#1a0a0a",border:"1px solid #EF444466",borderRadius:6,padding:"7px 10px",fontSize:10,color:"#EF9999",width:220,lineHeight:1.5,zIndex:99}}>
         {err}<button onClick={()=>setSt("idle")} style={{display:"block",marginTop:5,background:"none",border:"none",color:"#EF6666",fontSize:9,cursor:"pointer",fontFamily:"Manrope,sans-serif",textDecoration:"underline"}}>Dismiss</button>
