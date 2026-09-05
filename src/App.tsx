@@ -8995,7 +8995,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         {view==="workspace"&&<Workspace ask={askDirect} availableProviders={wsProviders}
           canUse={canUse} showToast={showToast}
           generateImage={wsGenerateImage} imageProviders={wsImageProviders}
-          nvidiaUserKey={(keys.nvidia&&keys.nvidia!=="nvidia"&&keys.nvidia.startsWith("nvapi-"))?keys.nvidia:""}/>}
+          nvidiaUserKey={(keys.nvidia&&keys.nvidia!=="nvidia"&&keys.nvidia.startsWith("nvapi-"))?keys.nvidia:""}
+          getProviderKey={(id:string)=>providerKey(keys,id)||undefined}/>}
         {/* PHASE 2 — DECISION -> TASK TRACKER.
             Reuses the SAME extraction pipeline every other module already
             uses (extractActionItems -> the AI turns text into structured
@@ -9005,7 +9006,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
             infrastructure that already exists. */}
         {view==="liveboard"&&<LiveBoardroom ask={askDirect} AR={AR} buildIdentity={lbBuildIdentity}
           routerProviderModel={lbRoute} runResearch={lbRunResearch} showToast={showToast}
-          onDecisionAccepted={(content:string,label:string)=>extractActionItems("liveboard",label,content)}/>}
+          onDecisionAccepted={(content:string,label:string)=>extractActionItems("liveboard",label,content)}
+          getProviderKey={(id:string)=>providerKey(keys,id)||undefined}/>}
         {view==="account"&&<MyAccount onOpenHelp={()=>setShowHelp(true)}/>}
         {view==="admin"&&(isAdmin
           ?<AdminConsole onClose={()=>setView("nerve")}/>
