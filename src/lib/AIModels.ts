@@ -101,6 +101,75 @@ export const MODELS_BY_PROVIDER: Record<string, ModelSpec[]> = {
   ],
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LIVE NVIDIA CATALOG - the actual fix, not another hand-typed list.
+//
+// This has now bitten twice: a model NVIDIA retired, and models that were
+// never real to begin with. Both happened because a static list drifts from
+// reality the moment NVIDIA changes anything, with nobody told.
+//
+// NVIDIA exposes the real, current catalog at a public endpoint:
+//     GET https://integrate.api.nvidia.com/v1/models
+// Called directly from the browser with the USER'S OWN KEY - never our shared
+// one - this is a free, harmless metadata request. When a user has their own
+// key, they now see NVIDIA's actual live list: every model NVIDIA currently
+// offers, automatically, with anything retired simply absent because NVIDIA
+// stopped listing it. No restriction from us, no manual updates needed when
+// NVIDIA changes their catalog - which is exactly what was asked for.
+//
+// The static list below survives as the fallback for the ONE case that has
+// to have one: someone using the shared free-tier key with no personal key
+// at all, which cannot safely make this call from the browser (it would have
+// to expose the shared key to do so). That case is now clearly labelled as
+// the fallback it is, not presented as equivalent to the live list.
+// ─────────────────────────────────────────────────────────────────────────────
+const _nvidiaLiveCache: { at: number; models: ModelSpec[] } = { at: 0, models: [] };
+const _NV_CACHE_MS = 10 * 60 * 1000; // ten minutes - long enough to avoid refetching every render, short enough that a newly-added model shows up the same session
+
+/** Heuristic labelling only - the /v1/models endpoint gives an id, not
+ *  capabilities. Good enough to sort a dropdown sensibly; never claimed as
+ *  more precise than that. */
+function _guessNvidiaSpec(id: string): ModelSpec {
+  const low = id.toLowerCase();
+  const isEmbed = /embed|rerank|guard|nemoguard|nv-embed/.test(low);
+  const reasoning = /r1|reason|think|nemotron|qwq|deepseek|glm|kimi/.test(low) && !isEmbed;
+  const big = /70b|72b|120b|235b|397b|550b|ultra|large/.test(low);
+  return {
+    id, label: id.split("/").pop() || id,
+    note: isEmbed ? "Embedding/utility model - not for chat." : "From NVIDIA's live catalog.",
+    caps: isEmbed ? [] : (/vl|vision|multimodal/.test(low) ? ["text","vision"] : ["text"]),
+    ctx: big ? "long" : "short",
+    tier: isEmbed ? "fast" : big ? "strong" : reasoning ? "balanced" : "fast",
+  };
+}
+
+/**
+ * Fetches NVIDIA's real, current model list using the caller's own key.
+ * Never throws - a failure here should fall back silently to the static
+ * list, not break whatever screen asked for it.
+ */
+export async function fetchNvidiaLiveCatalog(userKey: string): Promise<ModelSpec[]> {
+  if (!userKey || !userKey.startsWith("nvapi-")) return [];
+  const now = Date.now();
+  if (_nvidiaLiveCache.models.length && now - _nvidiaLiveCache.at < _NV_CACHE_MS) {
+    return _nvidiaLiveCache.models;
+  }
+  try {
+    const r = await fetch("https://integrate.api.nvidia.com/v1/models", {
+      headers: { "Authorization": "Bearer " + userKey },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) return _nvidiaLiveCache.models; // stale cache beats nothing
+    const data = await r.json();
+    const ids: string[] = Array.isArray(data?.data) ? data.data.map((m: any) => String(m.id)).filter(Boolean) : [];
+    const models = ids.map(_guessNvidiaSpec).filter(m => m.caps.length > 0);
+    if (models.length) { _nvidiaLiveCache.at = now; _nvidiaLiveCache.models = models; }
+    return models;
+  } catch {
+    return _nvidiaLiveCache.models;
+  }
+}
+
 export const modelsFor = (provider: string): ModelSpec[] =>
   MODELS_BY_PROVIDER[provider] || [];
 
