@@ -1,58 +1,106 @@
 // src/VoiceButton.tsx
 // ─────────────────────────────────────────────────────────────────────────────
-// A single, self-contained microphone control. Drop it next to any composer;
-// it never touches that screen's own state directly — it only calls
-// onTranscript(text) when it has one, exactly like a piece of typed text
-// arriving. This is what lets the SAME component sit in the Workspace and the
-// Live Boardroom without either screen knowing anything about how voice
-// works internally.
+// v2 — VISUAL REDESIGN TO MATCH THE REFERENCE SCREENSHOT.
 //
-// STATES, EXPLICITLY, PER THE SPEC: idle -> requesting permission -> recording
-// -> transcribing -> done (or error). Every one of them is a distinct visual
-// state, not inferred from a boolean.
+// Recording is now one continuous pill, sized to sit inline with a composer:
+// [X cancel] [live, audio-reactive waveform bars, filling the space] [stop].
+// The waveform is REAL, not decorative — it reads the actual microphone level
+// via the Web Audio API's AnalyserNode, the same technique already proven
+// elsewhere in this codebase's own voice component, applied here to this
+// component's own MediaRecorder stream.
 //
-// WHAT THIS DOES NOT DO: it does not auto-send the transcribed text. It calls
-// onTranscript(text), and the composer that receives it behaves exactly as if
-// the person had typed it — editable, not yet sent, per the explicit
-// instruction not to auto-send unless a screen already does that for typed
-// text (none of this platform's composers do).
+// COLOR: accepts a `color` prop rather than a fixed hex, so it can be tinted
+// with this platform's own theme accent (var(--oiq-accent)) wherever a
+// composer already participates in the multi-theme system, or with the
+// Workspace/Live Boardroom's own established teal where those two
+// deliberately self-contained screens are concerned. Nothing here hard-codes
+// one specific color.
+//
+// BEHAVIOUR IS UNCHANGED FROM v1: transcribed text lands in the composer,
+// editable, never auto-sent. Only the recording state's appearance changed.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { transcribeAudio } from "./lib/Voice";
 
 type VoiceState = "idle" | "permission" | "recording" | "transcribing" | "error";
+const BARS = 24;
 
 interface Props {
   onTranscript: (text: string) => void;
   getKeyFor: (providerId: string) => string | undefined;
   showToast?: (m: string, k?: string) => void;
   size?: number;
+  /** Theme accent color. Defaults to this component's own teal for screens
+   *  that use a fixed palette; pass "var(--oiq-accent)" for any composer
+   *  that already participates in the platform's multi-theme system. */
+  color?: string;
 }
 
-export default function VoiceButton({ onTranscript, getKeyFor, showToast, size = 40 }: Props) {
+export default function VoiceButton({ onTranscript, getKeyFor, showToast, size = 40, color = "#14B8A6" }: Props) {
   const [state, setState] = useState<VoiceState>("idle");
   const [seconds, setSeconds] = useState(0);
+  const [levels, setLevels] = useState<number[]>(Array(BARS).fill(0.06));
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  const stopWaveformLoop = () => {
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    audioCtxRef.current?.close().catch(() => {});
+    audioCtxRef.current = null;
+    analyserRef.current = null;
+  };
 
   const cleanupStream = () => {
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    stopWaveformLoop();
+  };
+
+  useEffect(() => () => { cleanupStream(); }, []);
+
+  // REAL, AUDIO-REACTIVE WAVEFORM — reads actual microphone amplitude per
+  // frequency band, the same AnalyserNode technique already proven in this
+  // codebase's own voice component, applied to this recording's own stream.
+  const startWaveformLoop = (stream: MediaStream) => {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 128;
+      analyser.smoothingTimeConstant = 0.65;
+      source.connect(analyser);
+      audioCtxRef.current = ctx;
+      analyserRef.current = analyser;
+      const buf = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        analyser.getByteFrequencyData(buf);
+        const step = Math.floor(buf.length / BARS) || 1;
+        const next: number[] = [];
+        for (let i = 0; i < BARS; i++) {
+          const v = buf[i * step] / 255;
+          next.push(Math.max(0.06, Math.min(1, v * 1.4)));
+        }
+        setLevels(next);
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch { /* waveform is cosmetic — never block recording if this fails */ }
   };
 
   const start = useCallback(async () => {
     if (state === "recording") return;
     setState("permission");
     try {
-      // PERMISSION HANDLING: the browser's own prompt does the actual asking;
-      // this state exists so the button shows something other than "idle"
-      // while that prompt is up, rather than looking unresponsive.
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+      startWaveformLoop(stream);
       const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
       const recorder = new MediaRecorder(stream, { mimeType: mime });
       chunksRef.current = [];
@@ -79,9 +127,6 @@ export default function VoiceButton({ onTranscript, getKeyFor, showToast, size =
     } catch (e: any) {
       cleanupStream();
       setState("error");
-      // GRACEFUL FAILURE: name the actual reason rather than a generic
-      // failure — permission denied and no-microphone-found need different
-      // guidance from the person reading this.
       const msg = e?.name === "NotAllowedError"
         ? "Microphone access was denied. Allow microphone access in your browser's site settings to use voice input."
         : e?.name === "NotFoundError"
@@ -99,10 +144,8 @@ export default function VoiceButton({ onTranscript, getKeyFor, showToast, size =
   }, []);
 
   const cancel = useCallback(() => {
-    // STOP/CANCEL, DISTINCT: stop transcribes what was said so far; cancel
-    // discards it entirely. Both are explicitly required by the spec.
     if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.onstop = null; // suppress the normal transcribe-on-stop path
+      mediaRecorderRef.current.onstop = null; // suppress transcribe-on-stop
       if (mediaRecorderRef.current.state === "recording") mediaRecorderRef.current.stop();
     }
     cleanupStream();
@@ -113,38 +156,48 @@ export default function VoiceButton({ onTranscript, getKeyFor, showToast, size =
 
   if (state === "recording") {
     return (
-      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-        <div style={{ width:8, height:8, borderRadius:99, background:"#EF4444",
-          animation:"oiqVoicePulse 1.1s ease-in-out infinite" }} />
-        <span style={{ fontSize:10.5, color:"#EF4444", fontWeight:700, fontVariantNumeric:"tabular-nums" }}>{fmt(seconds)}</span>
+      <div style={{
+        display:"flex", alignItems:"center", gap:10, flex:1, minWidth:0,
+        background:"rgba(255,255,255,0.03)", border:"1px solid "+color+"55",
+        borderRadius:999, padding:"6px 8px 6px 6px", height:size,
+      }}>
+        <button onClick={cancel} title="Cancel — discard this recording"
+          style={{ width:size-10, height:size-10, borderRadius:"50%", border:"none", background:"transparent",
+            color:"#8A93A8", cursor:"pointer", fontSize:15, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          {"\u2715"}
+        </button>
+        {/* THE REAL WAVEFORM — audio-reactive, matching the reference image's
+            central bar cluster rather than a spinner or a static dot. */}
+        <div style={{ display:"flex", alignItems:"center", gap:2, flex:1, height:size-14, minWidth:0, overflow:"hidden" }}>
+          {levels.map((h,i) => (
+            <div key={i} style={{ width:3, minWidth:3, height:Math.max(3,h*(size-18)),
+              background:color, borderRadius:2, opacity:0.55+h*0.45, transition:"height 70ms ease", flexShrink:0 }} />
+          ))}
+        </div>
+        <span style={{ fontSize:10, color:"#8A93A8", fontVariantNumeric:"tabular-nums", flexShrink:0 }}>{fmt(seconds)}</span>
         <button onClick={stop} title="Stop and transcribe"
-          style={{ width:size, height:size, borderRadius:"50%", border:"1px solid #EF4444", background:"rgba(239,68,68,0.12)",
-            color:"#EF4444", cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>
-          \u25A0
+          style={{ width:size-8, height:size-8, borderRadius:"50%", border:"none", background:"#EF4444",
+            color:"#fff", cursor:"pointer", fontSize:11, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          {"\u25A0"}
         </button>
-        <button onClick={cancel} title="Cancel"
-          style={{ background:"none", border:"none", color:"#5A6480", cursor:"pointer", fontSize:11, padding:"0 4px" }}>
-          Cancel
-        </button>
-        <style>{"@keyframes oiqVoicePulse{0%,100%{opacity:1}50%{opacity:0.3}}"}</style>
       </div>
     );
   }
 
   if (state === "permission" || state === "transcribing") {
     return (
-      <div style={{ width:size, height:size, borderRadius:"50%", border:"1px solid #1A2030", background:"#0A0E1A",
-        color:"#A0AAC0", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12 }}
+      <div style={{ width:size, height:size, borderRadius:"50%", border:"1px solid rgba(255,255,255,0.12)", background:"rgba(255,255,255,0.03)",
+        color:"#8A93A8", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, flexShrink:0 }}
         title={state === "permission" ? "Requesting microphone access\u2026" : "Transcribing\u2026"}>
-        \u2026
+        {"\u2026"}
       </div>
     );
   }
 
   return (
     <button onClick={start} title="Voice input"
-      style={{ width:size, height:size, borderRadius:"50%", border:"1px solid #1A2030", background:"#0A0E1A",
-        color: state === "error" ? "#EF4444" : "#A0AAC0", cursor:"pointer", fontSize:15,
+      style={{ width:size, height:size, borderRadius:"50%", border:"1px solid rgba(255,255,255,0.12)", background:"rgba(255,255,255,0.03)",
+        color: state === "error" ? "#EF4444" : "#8A93A8", cursor:"pointer", fontSize:15, flexShrink:0,
         display:"flex", alignItems:"center", justifyContent:"center" }}>
       {"\uD83C\uDF99\uFE0F"}
     </button>
