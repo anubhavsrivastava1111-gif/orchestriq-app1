@@ -8974,7 +8974,13 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         )}
 
         {view==="funding"&&<FundingIntelligence co={co} compData={compData} ask={ask}/>}
-        {!canUse(view)&&view!=="admin"&&view!=="tokens"&&view!=="account"&&view!=="workspace"&&view!=="liveboard"&&(
+        {/* THE EXACT BUG THE OWNER FOUND: "workspace" and "liveboard" were
+            hard-excluded from this check, so plan_features rows for them were
+            silently ignored - a Free-plan restriction already configured in
+            the Admin Console (module_workspace = false) has never actually
+            been enforced, and Live AI Boardroom had no gate at all. Removed:
+            both now go through canUse() exactly like every other module. */}
+        {!canUse(view)&&view!=="admin"&&view!=="tokens"&&view!=="account"&&(
           <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:40}}>
             <div style={{textAlign:"center",maxWidth:400}}>
               <div style={{fontSize:34,marginBottom:10}}>✨</div>
@@ -8990,8 +8996,16 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           canUse={canUse} showToast={showToast}
           generateImage={wsGenerateImage} imageProviders={wsImageProviders}
           nvidiaUserKey={(keys.nvidia&&keys.nvidia!=="nvidia"&&keys.nvidia.startsWith("nvapi-"))?keys.nvidia:""}/>}
+        {/* PHASE 2 — DECISION -> TASK TRACKER.
+            Reuses the SAME extraction pipeline every other module already
+            uses (extractActionItems -> the AI turns text into structured
+            items -> the owner reviews and confirms via ExtractReviewModal
+            before anything is added). No new task system, exactly as
+            instructed - the Live Boardroom is simply a new SOURCE feeding
+            infrastructure that already exists. */}
         {view==="liveboard"&&<LiveBoardroom ask={askDirect} AR={AR} buildIdentity={lbBuildIdentity}
-          routerProviderModel={lbRoute} runResearch={lbRunResearch} showToast={showToast}/>}
+          routerProviderModel={lbRoute} runResearch={lbRunResearch} showToast={showToast}
+          onDecisionAccepted={(content:string,label:string)=>extractActionItems("liveboard",label,content)}/>}
         {view==="account"&&<MyAccount onOpenHelp={()=>setShowHelp(true)}/>}
         {view==="admin"&&(isAdmin
           ?<AdminConsole onClose={()=>setView("nerve")}/>
