@@ -89,7 +89,14 @@ export async function sendToModule(p: TransferPayload):
       source_model: p.model || null,
       source_conversation: p.conversationId || null,
       is_ai_generated: true,
-      assets: p.assetUrl ? { url: p.assetUrl } : null,
+      // THE NEW ERROR: "assets" is NOT NULL on the real table, defaulting to
+      // an empty ARRAY - it holds a LIST of assets, not one object. My last
+      // fix sent a single object, or null when there was none, and null is
+      // exactly what the column forbids. It is never sent now; when there is
+      // no asset, the key is simply left out and the column's own default of
+      // an empty array applies. When there IS one, it goes in as a one-item
+      // array, matching the shape the column expects.
+      ...(p.assetUrl ? { assets: [{ url: p.assetUrl }] } : {}),
       status: "pending",
     });
     if (error) return { ok: false, message: error.message };
