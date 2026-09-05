@@ -49,6 +49,12 @@ interface Props {
   // to function.
   docApiKey?: () => string;
   companyContext?: string;
+  // PHASE 2 — DECISION -> TASK TRACKER. Optional and safely defaulted: without
+  // it, Accept Decision behaves exactly as before. When present, App.tsx
+  // wires it straight into the SAME extraction pipeline every other module
+  // already uses - this component does not know or care how tasks are
+  // stored, it only hands over the decision text.
+  onDecisionAccepted?: (content: string, sourceLabel: string) => void;
 }
 
 type Msg = { id:string; author_type:string; author_role?:string; content:string; kind?:string; created_at:string };
@@ -178,7 +184,7 @@ function MessageBody({ content, plain }: { content:string; plain?:boolean }) {
   );
 }
 
-export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderModel, runResearch, showToast, docApiKey, companyContext }: Props) {
+export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderModel, runResearch, showToast, docApiKey, companyContext, onDecisionAccepted }: Props) {
   const [sessions, setSessions]   = useState<any[]>([]);
   const [session, setSession]     = useState<any>(null);
   const [participants, setParts]  = useState<any[]>([]);
@@ -569,6 +575,21 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
   const acceptDecision = async () => {
     await BE.setStatus(session.id, "accepted");
     showToast?.("Decision accepted.", "success");
+    // PHASE 2: hand the ACCEPTED decision - not the raw chat log - to the
+    // existing task-extraction pipeline. Built from the same structured
+    // record the decision panel and exports already use, so this is exactly
+    // what the user actually agreed to, not an approximation of it.
+    if (onDecisionAccepted && finalDecision?.decision) {
+      const parts = [
+        "DECISION: " + finalDecision.decision,
+        finalDecision.why ? "WHY: " + finalDecision.why : "",
+        Array.isArray(finalDecision.conditions) && finalDecision.conditions.length
+          ? "CONDITIONS:\n" + finalDecision.conditions.map((c:string)=>"- "+c).join("\n") : "",
+        Array.isArray(finalDecision.risks) && finalDecision.risks.length
+          ? "RISKS:\n" + finalDecision.risks.map((r:string)=>"- "+r).join("\n") : "",
+      ].filter(Boolean).join("\n\n");
+      onDecisionAccepted(parts, "Live Boardroom \u2014 " + (session.objective || "").slice(0,80));
+    }
   };
   const rejectDecision = async () => {
     await BE.setStatus(session.id, "reopened");
