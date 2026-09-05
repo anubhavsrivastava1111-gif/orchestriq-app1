@@ -361,6 +361,9 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
             const posted = await BE.postMessage(sessionId, "system", null,
               "The board needs your input: " + route.reason, { kind:"question_to_user" });
             await BE.setPendingQuestion(sessionId, { messageId: posted?.id, askedBy: (route.speakers[0]||"ceo"), text: route.reason });
+            // A question that gets answered or skipped later was previously just
+            // erased - this is the durable record of it ever having been asked.
+            if (posted?.id) await BE.logQuestionAsked(sessionId, { messageId: posted.id, askedBy: (route.speakers[0]||"ceo"), text: route.reason });
             break; // P0-3: stop — live, never deferred to "after the conversation"
           }
           if (route.research_needed.length) {
@@ -451,6 +454,9 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
     await BE.postMessage(session.id, "user", null, text, { kind: wasWaiting ? "user_answer" : "text", activeRoles: activeRoleIds });
     if (wasWaiting) {
       await BE.mergeDecisionState(session.id, { user_constraints: [text] });
+      if (session.pending_question?.messageId) {
+        await BE.logQuestionResolved(session.id, session.pending_question.messageId, "ANSWERED", text);
+      }
       await BE.setPendingQuestion(session.id, null); // clears status back to live_discussion
     }
     // P0-8: a new user message is authoritative new context. Because executives
@@ -471,6 +477,9 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
       "(Skipped \u2014 continuing without an answer to: \u201c" + session.pending_question.text + "\u201d)",
       { kind:"text" });
     await BE.mergeDecisionState(session.id, { unresolved_questions: [session.pending_question.text + " (user chose not to answer)"] });
+    if (session.pending_question.messageId) {
+      await BE.logQuestionResolved(session.id, session.pending_question.messageId, "SKIPPED");
+    }
     await BE.setPendingQuestion(session.id, null);
     if (!session.paused) runRound(session.id, activeRoleIds);
   };
@@ -918,6 +927,25 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
             style={{ fontSize:10, color:C.amber, cursor:"pointer", marginBottom:12, padding:"6px 8px",
               background:"rgba(245,158,11,0.08)", borderRadius:6, fontWeight:700 }}>
             \u2753 1 question waiting for you \u2014 jump to it
+          </div>
+        )}
+
+        {/* Otherwise-erased history: every question the board has asked you,
+            and whether you answered or skipped it. Nothing here disappears
+            when the "current" waiting question is cleared. */}
+        {Array.isArray(decisionState.question_log) && decisionState.question_log.length > 0 && (
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:9, fontWeight:800, color:C.dim, textTransform:"uppercase", marginBottom:4 }}>Questions asked of you</div>
+            {decisionState.question_log.slice().reverse().slice(0,6).map((q:any,i:number)=>(
+              <div key={q.id||i} style={{ fontSize:9.5, marginBottom:5, paddingLeft:7,
+                borderLeft:"2px solid "+(q.status==="ANSWERED"?"#22C55E":q.status==="SKIPPED"?C.amber:C.faint) }}>
+                <span style={{ fontWeight:700, color:q.status==="ANSWERED"?"#22C55E":q.status==="SKIPPED"?C.amber:C.faint }}>
+                  {q.status}
+                </span>
+                <span style={{ color:C.faint }}> — {q.text.slice(0,70)}{q.text.length>70?"…":""}</span>
+                {q.answer && <div style={{ color:C.ink, marginTop:2 }}>{'"'}{q.answer.slice(0,60)}{q.answer.length>60?"…":""}{'"'}</div>}
+              </div>
+            ))}
           </div>
         )}
 
