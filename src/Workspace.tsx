@@ -29,6 +29,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./lib/supabase";
 import { modelsFor, defaultModel, switchNotice, historyLimit, findModel } from "./lib/AIModels";
 import { DESTINATIONS, sendToModule } from "./lib/ContextTransfer";
+import VoiceButton from "./VoiceButton";
 
 const C = { bg:"#070B14", panel:"#0F1420", raised:"#0A0E1A", line:"#1A2030",
             ink:"#F1F5F9", dim:"#A0AAC0", faint:"#5A6480", teal:"#14B8A6", amber:"#F59E0B", red:"#EF4444" };
@@ -213,8 +214,12 @@ interface Props {
   // actually exist right now. Never the shared platform key, and never sent
   // anywhere except straight to NVIDIA's own metadata endpoint.
   nvidiaUserKey?: string;
+  // VOICE INPUT — reuses whichever OpenAI key the user already has stored
+  // for chat/images. No new secret, no new server call: this is the exact
+  // same BYOK path every other OpenAI request in this app already takes.
+  getProviderKey?: (providerId: string) => string | undefined;
 }
-export default function Workspace({ ask, availableProviders, canUse, showToast, generateImage, imageProviders, nvidiaUserKey }: Props) {
+export default function Workspace({ ask, availableProviders, canUse, showToast, generateImage, imageProviders, nvidiaUserKey, getProviderKey }: Props) {
   const [nvidiaLive, setNvidiaLive] = useState<any[] | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -634,6 +639,14 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
                 </button>
               </>
             )}
+            {/* VOICE INPUT. Transcribed text lands in the composer exactly like
+                typed text - editable, not sent - never auto-submitted. */}
+            <VoiceButton
+              onTranscript={(text)=>setInput(v=>v?.trim()?v.trim()+" "+text:text)}
+              getKeyFor={getProviderKey || (()=>undefined)}
+              showToast={showToast}
+              size={40}
+            />
             <textarea style={{ ...inp, minHeight:52, maxHeight:180, resize:"vertical" }}
               placeholder={mode==="image" ? "Describe the image you want\u2026" : "Ask anything…  (Enter to send, Shift+Enter for a new line)"}
               value={input} onChange={e=>setInput(e.target.value)}
