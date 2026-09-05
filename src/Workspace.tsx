@@ -208,8 +208,27 @@ interface Props {
   // mode toggle simply does not appear; nothing else in the Workspace changes.
   generateImage?: (prompt:string) => Promise<string>;
   imageProviders?: Array<{ id:string; label:string }>;
+  // NVIDIA LIVE CATALOG — the user's own real nvapi- key, if they have one.
+  // Passed through only so this screen can ask NVIDIA directly what models
+  // actually exist right now. Never the shared platform key, and never sent
+  // anywhere except straight to NVIDIA's own metadata endpoint.
+  nvidiaUserKey?: string;
 }
-export default function Workspace({ ask, availableProviders, canUse, showToast, generateImage, imageProviders }: Props) {
+export default function Workspace({ ask, availableProviders, canUse, showToast, generateImage, imageProviders, nvidiaUserKey }: Props) {
+  const [nvidiaLive, setNvidiaLive] = useState<any[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (nvidiaUserKey) {
+      import("./lib/AIModels").then(({ fetchNvidiaLiveCatalog }) =>
+        fetchNvidiaLiveCatalog(nvidiaUserKey).then(models => {
+          if (!cancelled && models.length) setNvidiaLive(models);
+        })
+      );
+    } else {
+      setNvidiaLive(null);
+    }
+    return () => { cancelled = true; };
+  }, [nvidiaUserKey]);
   const [convs, setConvs]       = useState<any[]>([]);
   const [convId, setConvId]     = useState<string>("");
   const [msgs, setMsgs]         = useState<any[]>([]);
@@ -471,9 +490,22 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
           </select>
           <select style={{ ...inp, width:"auto", fontSize:11, cursor:"pointer", minWidth:200 }} value={model}
             onChange={e=>changeModel(provider, e.target.value)}>
-            {modelsFor(provider).map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            {/* When NVIDIA's own live catalog loaded successfully, it REPLACES
+                the static list entirely - it is the real, current truth, not
+                an addition to a guess. The static list is the fallback used
+                only until the live one arrives, or if it never can (no
+                personal key). */}
+            {(provider==="nvidia" && nvidiaLive?.length ? nvidiaLive : modelsFor(provider))
+              .map((m:any) => <option key={m.id} value={m.id}>{m.label}</option>)}
           </select>
-          {findModel(provider,model) && (
+          {provider==="nvidia" && (
+            <span style={{ fontSize:9, color: nvidiaLive?.length ? "#22C55E" : C.faint }}>
+              {nvidiaLive?.length
+                ? "● Live from NVIDIA · " + nvidiaLive.length + " models"
+                : nvidiaUserKey ? "Loading NVIDIA's live catalog…" : "Add your own NVIDIA key for the full live catalog"}
+            </span>
+          )}
+          {provider!=="nvidia" && findModel(provider,model) && (
             <span style={{ fontSize:9.5, color:C.faint }}>{findModel(provider,model)!.note}</span>
           )}
         </div>
