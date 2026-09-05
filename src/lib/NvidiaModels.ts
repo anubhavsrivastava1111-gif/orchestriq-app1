@@ -127,17 +127,24 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     verified: "2026-08",
   },
   {
+    // THE EXACT MODEL YOU HIT THE RETIREMENT ERROR ON. This entry claimed
+    // "verified: 2026-08" and enabled:true right up until NVIDIA's own API
+    // told you, in a live response, that they retired it on 2026-08-26. A
+    // "verified" date on a hand-typed list is only ever as good as the last
+    // time someone actually checked - it does not update itself, and nothing
+    // here noticed when NVIDIA changed anything. That is the structural
+    // problem this whole file has, addressed properly below.
     modelId: "meta/llama-3.3-70b-instruct",
-    displayName: "Llama 3.3 70B — legacy fallback",
+    displayName: "Llama 3.3 70B — RETIRED by NVIDIA, do not use",
     vendor: "Meta",
     contextWindow: 128_000,
     maxOutputTokens: 8000,
     reasoningSupported: false, reasoningDefault: false, reasoningOverhead: 0,
     toolCallingSupported: true, structuredOutputSupported: false, multimodalSupported: false,
-    freeEndpoint: true, enabled: true,
-    bestFor: "Kept only so existing saved settings keep working.",
-    caution: "Two generations behind the Nemotron 3 family. Do not choose it for new work.",
-    verified: "2026-08",
+    freeEndpoint: true, enabled: false,
+    bestFor: "Nothing - NVIDIA retired this model on 2026-08-26.",
+    caution: "Disabled. Selecting it will fail with an end-of-life error from NVIDIA.",
+    verified: "2026-09",
   },
 ];
 
@@ -161,7 +168,14 @@ export function nvidiaModelIds(): string[] {
  */
 export function nvidiaTokenBudget(modelId: string, wantedOutputTokens: number, reasoningOn: boolean): number {
   const m = getNvidiaModel(modelId);
-  if (!m) return Math.min(Math.max(wantedOutputTokens || 1500, 512), 4000);
+  // WAS a flat, conservative 4000-token cap for anything not in this table -
+  // which is exactly what a model chosen from NVIDIA's LIVE catalog will be,
+  // now that this platform can offer any model NVIDIA currently has rather
+  // than only the ones hand-typed here. A model we have no curated data for
+  // still deserves a real budget, not an arbitrary small one; 9000 matches
+  // the same safe generic default used by the Cloudflare proxy for the same
+  // situation, so the two sides of this system agree.
+  if (!m) return Math.min(Math.max(wantedOutputTokens || 1500, 512) + (reasoningOn ? 2000 : 0), 9000);
   const overhead = reasoningOn && m.reasoningSupported ? m.reasoningOverhead : 0;
   const needed = Math.max(wantedOutputTokens || 1500, 512) + overhead;
   return Math.min(needed, m.maxOutputTokens);
@@ -178,7 +192,13 @@ const THINKING_TASKS = new Set([
 ]);
 export function nvidiaShouldReason(modelId: string, task: string): boolean {
   const m = getNvidiaModel(modelId);
-  if (!m || !m.reasoningSupported) return false;
+  // A model outside this table (from the live catalog) has an unknown
+  // reasoning capability. Assume it MIGHT reason for a task that genuinely
+  // needs it, and not otherwise - the safer default than assuming none of
+  // NVIDIA's newer models can think, which would quietly downgrade quality
+  // for every model this table has not been told about yet.
+  if (!m) return THINKING_TASKS.has(String(task || "").toLowerCase());
+  if (!m.reasoningSupported) return false;
   if (THINKING_TASKS.has(String(task || "").toLowerCase())) return true;
   return m.reasoningDefault && !String(task || "").toLowerCase().startsWith("format");
 }
