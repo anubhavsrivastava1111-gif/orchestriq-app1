@@ -3,7 +3,7 @@ import { useState } from "react";
 export interface ActionItem{
   id:number;
   text:string;
-  source:"boardroom"|"autopilot"|"timemachine"|"workflow"|"manual";
+  source:"boardroom"|"autopilot"|"timemachine"|"workflow"|"manual"|"liveboard";
   sourceLabel:string;
   ownerRoleId:string|null;
   status:"not_started"|"in_progress"|"done";
@@ -31,7 +31,7 @@ interface ActionTrackerProps{
 }
 
 const PRIORITY_COLORS:Record<string,string>={high:"#EF4444",medium:"#F59E0B",low:"#10B981"};
-const SOURCE_LABELS:Record<string,string>={boardroom:"🏛️ Boardroom",autopilot:"🤖 Autopilot",timemachine:"⏳ Time Machine",workflow:"⚡ Workflow",manual:"✍️ Manual"};
+const SOURCE_LABELS:Record<string,string>={boardroom:"🏛️ Boardroom",autopilot:"🤖 Autopilot",timemachine:"⏳ Time Machine",workflow:"⚡ Workflow",manual:"✍️ Manual",liveboard:"🗣️ Live Boardroom"};
 const COLUMNS:{id:ActionItem["status"];label:string;color:string}[]=[
   {id:"not_started",label:"Not Started",color:"var(--oiq-muted)"},
   {id:"in_progress",label:"In Progress",color:"#3B82F6"},
