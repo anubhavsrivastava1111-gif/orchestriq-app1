@@ -34,7 +34,8 @@ export type Capability =
   | "video"       // creates video
   | "websearch"   // fetches live web results ITSELF
   | "documents"   // can drive PDF / PPT / Excel generation
-  | "code";       // writes and runs code
+  | "code"        // writes and runs code
+  | "speech";     // transcribes spoken audio to text
 
 export interface ProviderSpec {
   id: string;
@@ -85,7 +86,7 @@ export const PROVIDERS: ProviderSpec[] = [
     // in the websearch column. Our code does not yet USE it - that is a
     // separate wiring job - but the registry must describe what a provider can
     // do, not what we have got round to.
-    can: ["text", "vision", "image", "websearch", "documents"],
+    can: ["text", "vision", "image", "websearch", "documents", "speech"],
     keyPrefix: "sk-", keyPlaceholder: "sk-…",
     getKeyUrl: "https://platform.openai.com/api-keys",
     cost: "Paid, per token. Images about ₹8 each.",
