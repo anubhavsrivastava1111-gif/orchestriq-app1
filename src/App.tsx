@@ -1489,7 +1489,7 @@ async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string,userK
     // Now it does, and it retries once with a model we know is current.
     if(r.status===404){
       if(!nvRetried){
-        const alt="meta/llama-3.3-70b-instruct";
+        const alt="openai/gpt-oss-120b";
         if(nvModel!==alt){
           console.warn("[OIQ] NVIDIA model "+nvModel+" returned 404 - retrying with "+alt);
           return await callNvidia(sys,msgs,maxT,alt,task,userKey,true);
@@ -7367,7 +7367,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
       "Could not build the document in your browser"+(_bpWhy?": "+_bpWhy:"")+
       ". There is no Claude, OpenAI or DeepSeek key configured for the server fallback either. "+
       (/timed out|did not finish|did not respond|75 seconds/i.test(_bpWhy)
-        ? "Your NVIDIA model was too slow for this amount of content. In Settings \u2192 API, switch the NVIDIA model to meta/llama-3.3-70b-instruct (fast, no reasoning) and try again."
+        ? "Your NVIDIA model was too slow for this amount of content. In Settings \u2192 API, switch the NVIDIA model to GPT-OSS 120B (fast, no reasoning) and try again."
         : "Try again, or add a provider key in Settings."));
     // Excellent tier prefers Claude first (highest quality); Standard/Professional prefer DeepSeek first (cheaper).
     const providerOrder = RESPONSE_QUALITY==="excellent" ? "claude,openai,deepseek" : "deepseek,claude,openai";
