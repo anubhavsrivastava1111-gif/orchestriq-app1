@@ -2898,6 +2898,15 @@ function MicButton({lang,onResult,disabled}){
   const startWaveform=(stream)=>{
     try{
       const ctx=new (window.AudioContext||window.webkitAudioContext)();
+      // REAL, KNOWN CAUSE OF "NO ANIMATION": several browsers create a new
+      // AudioContext in a SUSPENDED state whenever it is not constructed
+      // synchronously inside the original click handler. Because this runs
+      // inside a getUserMedia().then() continuation - an async callback, not
+      // the click itself - that is exactly this situation. A suspended
+      // context delivers silence to the analyser: the code was correct, the
+      // audio graph simply was never running. Explicitly resuming it is the
+      // documented fix for this exact case.
+      if(ctx.state==="suspended"){ctx.resume().catch(()=>{});}
       const source=ctx.createMediaStreamSource(stream);
       const analyser=ctx.createAnalyser();analyser.fftSize=64;analyser.smoothingTimeConstant=0.6;
       source.connect(analyser);audioCtxRef.current=ctx;analyserRef.current=analyser;
