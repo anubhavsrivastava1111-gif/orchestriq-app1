@@ -16,6 +16,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "./lib/supabase";
 import BE, { MANDATE, transcriptOf } from "./lib/BoardroomEngine";
+import VoiceButton from "./VoiceButton";
 
 const C = { bg:"#070B14", panel:"#0F1420", raised:"#0A0E1A", line:"#1A2030",
             ink:"#F1F5F9", dim:"#A0AAC0", faint:"#5A6480", teal:"#14B8A6", amber:"#F59E0B", red:"#EF4444" };
@@ -55,6 +56,11 @@ interface Props {
   // already uses - this component does not know or care how tasks are
   // stored, it only hands over the decision text.
   onDecisionAccepted?: (content: string, sourceLabel: string) => void;
+  // VOICE INPUT. THE CONFIRMED CAUSE OF THE MISSING MIC: this prop, the
+  // import above, and the component below were never actually present in
+  // the file that was live on the server — checked directly, not assumed.
+  // Whatever got deployed before was not this file.
+  getProviderKey?: (providerId: string) => string | undefined;
 }
 
 type Msg = { id:string; author_type:string; author_role?:string; content:string; kind?:string; created_at:string };
@@ -184,7 +190,7 @@ function MessageBody({ content, plain }: { content:string; plain?:boolean }) {
   );
 }
 
-export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderModel, runResearch, showToast, docApiKey, companyContext, onDecisionAccepted }: Props) {
+export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderModel, runResearch, showToast, docApiKey, companyContext, onDecisionAccepted, getProviderKey }: Props) {
   const [sessions, setSessions]   = useState<any[]>([]);
   const [session, setSession]     = useState<any>(null);
   const [participants, setParts]  = useState<any[]>([]);
@@ -999,6 +1005,12 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
             placeholder={session.status==="waiting_for_user" ? "Type your answer\u2026 (or use Skip above)" : "Speak to the board\u2026  Type @ to mention someone"}
             value={input} onChange={e=>onComposerChange(e.target.value)}
             onKeyDown={e=>{ if(e.key==="Enter" && !e.shiftKey && !showMentions){ e.preventDefault(); send(); } }} />
+          <VoiceButton
+            onTranscript={(text)=>setInput(v=>v?.trim()?v.trim()+" "+text:text)}
+            getKeyFor={getProviderKey || (()=>undefined)}
+            showToast={showToast}
+            size={40}
+          />
           <button style={{ ...prim, height:40 }} onClick={send} disabled={!input.trim()}>Send</button>
         </div>
       </div>
