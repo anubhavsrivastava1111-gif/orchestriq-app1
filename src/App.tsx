@@ -2883,10 +2883,18 @@ function ResearchBriefCard({brief,accent,label}:{brief:string;accent?:string;lab
 // this component already opens) replacing a single static emoji, styled with
 // this platform's own theme accent so it matches whichever of the 8 themes
 // is active rather than a fixed hard-coded colour.
-function MicButton({lang,onResult,disabled}){
+// v3 — OPENAI-FALLBACK PARITY WITH VoiceButton.tsx.
+// THE CONFIRMED BUG: this function had ZERO knowledge of OpenAI at all — it
+// always used the free native engine regardless of whether the caller had an
+// OpenAI key. Every screen using MicButton (Time Machine, Workflow, Project
+// Engine, Data Hub, Ledger, Dispatch, and — via a prop pass-through, not a
+// separate implementation — the "AI Boardroom" screen itself) inherited that
+// gap. This is the single point of fix for all of them at once.
+function MicButton({lang,onResult,disabled,openaiKey}){
   const [st,setSt]=useState("idle");const [err,setErr]=useState("");const recRef=useRef(null);
   const [bars,setBars]=useState(Array(18).fill(0.08));
   const streamRef=useRef(null);const audioCtxRef=useRef(null);const analyserRef=useRef(null);const rafRef=useRef(null);
+  const mediaRecRef=useRef(null);const chunksRef=useRef([]);
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition||null;
 
   const stopWaveform=()=>{
@@ -2898,14 +2906,6 @@ function MicButton({lang,onResult,disabled}){
   const startWaveform=(stream)=>{
     try{
       const ctx=new (window.AudioContext||window.webkitAudioContext)();
-      // REAL, KNOWN CAUSE OF "NO ANIMATION": several browsers create a new
-      // AudioContext in a SUSPENDED state whenever it is not constructed
-      // synchronously inside the original click handler. Because this runs
-      // inside a getUserMedia().then() continuation - an async callback, not
-      // the click itself - that is exactly this situation. A suspended
-      // context delivers silence to the analyser: the code was correct, the
-      // audio graph simply was never running. Explicitly resuming it is the
-      // documented fix for this exact case.
       if(ctx.state==="suspended"){ctx.resume().catch(()=>{});}
       const source=ctx.createMediaStreamSource(stream);
       const analyser=ctx.createAnalyser();analyser.fftSize=64;analyser.smoothingTimeConstant=0.6;
@@ -2921,21 +2921,55 @@ function MicButton({lang,onResult,disabled}){
     }catch{/* waveform is cosmetic — never block transcription if this fails */}
   };
 
-  const stop=()=>{try{recRef.current?.stop();}catch{}stopWaveform();setSt("idle");};
+  // ── OPENAI PATH: record, upload, get back punctuated, cleaned-up text ──────
+  const startOpenAIPath=(stream)=>{
+    const mime=MediaRecorder.isTypeSupported("audio/webm;codecs=opus")?"audio/webm;codecs=opus":"audio/webm";
+    const rec=new MediaRecorder(stream,{mimeType:mime});chunksRef.current=[];mediaRecRef.current=rec;
+    rec.ondataavailable=(e)=>{if(e.data.size>0)chunksRef.current.push(e.data);};
+    rec.onstop=async()=>{
+      stopWaveform();
+      const blob=new Blob(chunksRef.current,{type:mime});
+      setSt("transcribing");
+      try{
+        const {transcribeAudio}=await import("./lib/Voice");
+        const result=await transcribeAudio(blob,(id)=>id==="openai"?openaiKey:undefined);
+        if(result.text)onResult(result.text);
+        setSt("idle");
+      }catch(e){
+        setErr(String(e?.message||e).slice(0,180));setSt("error");
+      }
+    };
+    rec.start();setSt("listening");
+  };
+
+  // ── FREE, NATIVE PATH — unchanged from before ───────────────────────────────
+  const startNativePath=(stream)=>{
+    if(!SR){stopWaveform();setErr("Voice not supported. Use Chrome or Edge, or add an OpenAI key in Settings.");setSt("error");return;}
+    const rec=new SR();rec.lang=lang||"en-IN";rec.continuous=true;rec.interimResults=true;recRef.current=rec;
+    let final="";
+    rec.onstart=()=>setSt("listening");
+    rec.onresult=(e)=>{final="";for(let i=0;i<e.results.length;i++){if(e.results[i].isFinal)final+=e.results[i][0].transcript;}};
+    rec.onerror=(e)=>{stopWaveform();if(e.error==="not-allowed")setErr("Mic access denied.");else setErr("Voice error: "+e.error+".");setSt("error");};
+    rec.onend=()=>{stopWaveform();if(final.trim())onResult(final.trim());setSt("idle");};
+    try{rec.start();}catch{stopWaveform();setErr("Could not start voice input.");setSt("error");}
+  };
+
+  const stop=()=>{
+    if(openaiKey){try{mediaRecRef.current?.stop();}catch{}}
+    else{try{recRef.current?.stop();}catch{}stopWaveform();}
+    if(!openaiKey)setSt("idle");
+  };
   const start=()=>{
-    if(!SR){setErr("Voice not supported. Use Chrome or Edge.");setSt("error");return;}
     if(disabled)return;
     if(st==="listening"){stop();return;}
     setSt("requesting");setErr("");
     navigator.mediaDevices?.getUserMedia({audio:true}).then((stream)=>{
       streamRef.current=stream;startWaveform(stream);
-      const rec=new SR();rec.lang=lang||"en-IN";rec.continuous=true;rec.interimResults=true;recRef.current=rec;
-      let final="";
-      rec.onstart=()=>setSt("listening");
-      rec.onresult=(e)=>{final="";for(let i=0;i<e.results.length;i++){if(e.results[i].isFinal)final+=e.results[i][0].transcript;}};
-      rec.onerror=(e)=>{stopWaveform();if(e.error==="not-allowed")setErr("Mic access denied.");else setErr("Voice error: "+e.error+".");setSt("error");};
-      rec.onend=()=>{stopWaveform();if(final.trim())onResult(final.trim());setSt("idle");};
-      try{rec.start();}catch{stopWaveform();setErr("Could not start voice input.");setSt("error");}
+      // THE FALLBACK DECISION: OpenAI when a key is available, the free
+      // native engine otherwise. Nobody picks a mode — this decides silently
+      // and automatically, exactly matching VoiceButton's own behaviour, so
+      // every voice surface on the platform behaves the same way.
+      if(openaiKey)startOpenAIPath(stream);else startNativePath(stream);
     }).catch(()=>{setErr("Mic access denied. Allow mic in browser settings.");setSt("error");});
   };
 
@@ -2954,9 +2988,17 @@ function MicButton({lang,onResult,disabled}){
       </div>
     );
   }
+  if(st==="transcribing"){
+    return(
+      <div style={{display:"flex",alignItems:"center",gap:5,padding:"5px 9px",border:"1px solid var(--oiq-accent,#14B8A6)55",
+        borderRadius:5,fontSize:10,color:"var(--oiq-accent,#14B8A6)",flexShrink:0}}>
+        {"\u2026"} transcribing
+      </div>
+    );
+  }
   return(
     <div style={{position:"relative",flexShrink:0}}>
-      <button onClick={start} disabled={disabled||st==="requesting"} title={!SR?"Voice not supported":"Click to speak"}
+      <button onClick={start} disabled={disabled||st==="requesting"} title={openaiKey?"Voice input — enhanced with OpenAI, punctuated automatically":!SR?"Voice not supported":"Click to speak — free, no API key needed"}
         style={{background:"none",border:"1px solid #1a2030",borderRadius:5,padding:"5px 8px",cursor:disabled?"not-allowed":"pointer",fontSize:15,lineHeight:1,opacity:disabled?0.35:1,transition:"all 0.2s"}}>
         {st==="requesting"?"⏳":st==="error"?"⚠️":"🎤"}
       </button>
@@ -4272,6 +4314,16 @@ if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     return ()=>{cancelled=true;};
   },[keys.nvidia]);
  
+  // Wraps the module-level MicButton with this user's actual OpenAI key,
+  // resolved via the same providerKey() every other provider call already
+  // uses (respecting the per-user on/off toggle correctly, rather than a
+  // second, separate lookup that could drift from it). Passed to every
+  // screen that receives MicButton as a prop (BoardroomView, Ledger,
+  // Dispatch) so none of those files need to know this exists.
+  const MicButtonWithKey=useCallback((props:any)=>
+    <MicButton {...props} openaiKey={providerKey(keys,"openai")||undefined}/>,
+  [keys]);
+
   const wsProviders=useMemo(()=>
     ["claude","openai","gemini","nvidia","deepseek","groq","kimi"]
       .filter(id=>providerKey(keys,id)&&wsModelsFor(id).length)
@@ -8051,7 +8103,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     showToast={showToast} sv={sv} setBrCur={setBrCur}
     CS={CS} co={co} cur={cur}
     isDark={theme==="dark"||theme==="blue"||theme==="gray"}
-    MicButton={MicButton} vLang={vLang}
+    MicButton={MicButtonWithKey} vLang={vLang}
   />
 )}
 
@@ -8081,7 +8133,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                   <div style={{display:"flex",gap:5,marginBottom:12}}>
                     <textarea style={{...S.inp,flex:1,minHeight:55}} value={tmDec} onChange={e=>setTmDec(e.target.value)} placeholder={"Describe the decision… e.g. Hire 5 engineers and launch in "+(co.location||"Delhi")+" Q3 with "+cur.sym+"50L budget"} disabled={tmRun}/>
                     <div style={{display:"flex",flexDirection:"column",gap:4,alignSelf:"flex-end"}}>
-                      <div style={{display:"flex",gap:3}}><LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/><MicButton lang={vLang} onResult={t=>setTmDec(prev=>(prev?prev+" ":"")+t)} disabled={tmRun}/></div>
+                      <div style={{display:"flex",gap:3}}><LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/><MicButton lang={vLang} onResult={t=>setTmDec(prev=>(prev?prev+" ":"")+t)} disabled={tmRun} openaiKey={providerKey(keys,"openai")||undefined}/></div>
                       <div style={{display:"flex",gap:3}}>
                         {tmRun&&<button onClick={()=>{cancelRef.current.tm=true;}} style={S.cancelBtn}>Cancel</button>}
                         <button onClick={runTM} disabled={tmRun||!tmDec.trim()} style={{...S.pBtn,width:"auto",padding:"7px 12px",marginTop:0,fontSize:11,background:"#8B5CF6",opacity:tmRun||!tmDec.trim()?0.3:1}}>{tmRun?"Simulating…":"Simulate"}</button>
@@ -8228,7 +8280,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                   <label style={S.lbl}>Step 3: Describe the Task</label>
                   <div style={{display:"flex",gap:4,alignItems:"flex-start",marginBottom:12}}>
                     <textarea style={{...S.inp,flex:1,minHeight:80,resize:"vertical"}} value={wfTask} onChange={e=>setWfTask(e.target.value)} placeholder="e.g. Prepare Q1 FY2026 P&L statement, highlight variances greater than 10% from budget, and recommend 3 cost reduction measures for board review" disabled={wfRunning}/>
-                    <div style={{display:"flex",flexDirection:"column",gap:4}}><LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/><MicButton lang={vLang} onResult={t=>setWfTask(prev=>(prev?prev+" ":"")+t)} disabled={wfRunning}/></div>
+                    <div style={{display:"flex",flexDirection:"column",gap:4}}><LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/><MicButton lang={vLang} onResult={t=>setWfTask(prev=>(prev?prev+" ":"")+t)} disabled={wfRunning} openaiKey={providerKey(keys,"openai")||undefined}/></div>
                   </div>
                   {!wfPreflightActive&&(<div style={{display:"flex",gap:4}}>
                     <button onClick={runPreflight} disabled={wfRunning||wfPreflightLoading||!wfTask.trim()||!wfCat} style={{...S.pBtn,background:"linear-gradient(135deg,#14B8A6,#3B82F6)",opacity:wfRunning||wfPreflightLoading||!wfTask.trim()?0.3:1,marginTop:0,flex:1}}>{wfPreflightLoading?"Preparing questions…":wfRunning?"Chain Running…":"Start Workflow Chain"}</button>
@@ -8248,7 +8300,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                           <div style={{fontSize:11,color:"#F1F5F9",marginBottom:6,lineHeight:1.5}}>{q.q}</div>
                           <div style={{display:"flex",gap:4,alignItems:"flex-end"}}>
                             <textarea style={{...S.inp,flex:1,minHeight:36,resize:"vertical",fontSize:11}} value={wfPreflight.answers[i]||""} onChange={e=>{const na=[...wfPreflight.answers];na[i]=e.target.value;setWfPreflight({...wfPreflight,answers:na});}} placeholder={q.placeholder||"Your answer…"}/>
-                            <MicButton lang={vLang} onResult={t=>{const na=[...wfPreflight.answers];na[i]=(na[i]?na[i]+" ":"")+t;setWfPreflight({...wfPreflight,answers:na});}} disabled={false}/>
+                            <MicButton lang={vLang} onResult={t=>{const na=[...wfPreflight.answers];na[i]=(na[i]?na[i]+" ":"")+t;setWfPreflight({...wfPreflight,answers:na});}} disabled={false} openaiKey={providerKey(keys,"openai")||undefined}/>
                           </div>
                         </div>
                       ))}
@@ -8589,7 +8641,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                       <label style={S.lbl}>Business Objective</label>
                       <div style={{display:"flex",gap:4,alignItems:"flex-start",marginBottom:10}}>
                         <textarea style={{...S.inp,flex:1,minHeight:80,resize:"vertical"}} value={projectObjective} onChange={e=>setProjectObjective(e.target.value)} placeholder="e.g. Launch Orchestriq to market. Or: Build a complete compliance audit programme for our EMEA operations."/>
-                        <div style={{display:"flex",flexDirection:"column",gap:4}}><LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/><MicButton lang={vLang} onResult={t=>setProjectObjective(prev=>(prev?prev+" ":"")+t)}/></div>
+                        <div style={{display:"flex",flexDirection:"column",gap:4}}><LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/><MicButton lang={vLang} onResult={t=>setProjectObjective(prev=>(prev?prev+" ":"")+t)} openaiKey={providerKey(keys,"openai")||undefined}/></div>
                       </div>
                       <div style={{background:"rgba(20,184,166,0.04)",border:"1px solid rgba(20,184,166,0.15)",borderRadius:7,padding:"10px 12px",marginBottom:12,fontSize:10,color:"#A0AAC0",lineHeight:1.7}}>
                         <strong style={{color:"#14B8A6"}}>What happens next:</strong> The Project Architect analyses your objective and builds an Execution Plan listing every module and deliverable. You review and approve the plan before any AI execution begins.
@@ -8869,7 +8921,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                   <label style={S.lbl}>Task Description</label>
                   <div style={{display:"flex",gap:4,alignItems:"flex-start",marginBottom:10}}>
                     <textarea style={{...S.inp,flex:1,minHeight:80,resize:"vertical"}} value={p3Task} onChange={e=>setP3Task(e.target.value)} placeholder="Describe the task in detail…"/>
-                    <div style={{display:"flex",flexDirection:"column",gap:4}}><LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/><MicButton lang={vLang} onResult={t=>setP3Task(prev=>(prev?prev+" ":"")+t)}/></div>
+                    <div style={{display:"flex",flexDirection:"column",gap:4}}><LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/><MicButton lang={vLang} onResult={t=>setP3Task(prev=>(prev?prev+" ":"")+t)} openaiKey={providerKey(keys,"openai")||undefined}/></div>
                   </div>
                   <div style={{display:"flex",gap:6}}>
                     <button onClick={()=>{if(!p3Task.trim())return;enqueue(p3Task,p3Cat,p3Pri,p3Auto);setP3Task("");setP3View("dashboard");}} disabled={!p3Task.trim()} style={{...S.pBtn,marginTop:0,flex:1,opacity:p3Task.trim()?1:0.3}}>Add to Queue</button>
@@ -8961,7 +9013,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 
         {/* GENERAL LEDGER */}
 {view==="ledger"&&(
-  <Ledger cur={cur} entries={ledgerEntries} setEntries={setLedgerEntries} customAccounts={customAccounts} setCustomAccounts={setCustomAccounts} sv={sv} S={S} showToast={showToast} ask={ask} MicButton={MicButton} vLang={vLang}/>
+  <Ledger cur={cur} entries={ledgerEntries} setEntries={setLedgerEntries} customAccounts={customAccounts} setCustomAccounts={setCustomAccounts} sv={sv} S={S} showToast={showToast} ask={ask} MicButton={MicButtonWithKey} vLang={vLang}/>
 )}
 
 {view==="finance"&&(
@@ -8973,7 +9025,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 )}
 
         {/* PULSE AGENTIC */}
-{view==="dispatch"&&<div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}><div style={{display:"flex",gap:6,padding:"8px 14px",borderBottom:"1px solid #14192a",background:"#0c1120",flexShrink:0}}>{[["dispatch","📡","Dispatch"],["servicenow","🎫","ServiceNow"],["concur","🧾","Concur Audit"],["email","📧","Email"]].map(([id,ic,lb])=><button key={id} onClick={()=>setPulseTab(id)} style={{padding:"6px 14px",borderRadius:6,border:"1px solid "+(pulseTab===id?"#14B8A6":"#1a2030"),background:pulseTab===id?"rgba(20,184,166,0.08)":"transparent",color:pulseTab===id?"#14B8A6":"#5A6480",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{ic} {lb}</button>)}</div><div style={{flex:1,overflow:"auto"}}>{pulseTab==="dispatch"&&<Dispatch templates={dispatchTemplates} setTemplates={setDispatchTemplates} sv={sv} S={S} showToast={showToast} ask={ask} askVision={askVision} MicButton={MicButton} vLang={vLang}/>}{pulseTab!=="dispatch"&&<PulseGovernance callAI={(prompt)=>ask("You are a governance analyst.",[{role:"user",content:prompt}],4000)} askVision={askVision} companyName={co.name} defaultModule={pulseTab}/>}</div></div>}
+{view==="dispatch"&&<div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}><div style={{display:"flex",gap:6,padding:"8px 14px",borderBottom:"1px solid #14192a",background:"#0c1120",flexShrink:0}}>{[["dispatch","📡","Dispatch"],["servicenow","🎫","ServiceNow"],["concur","🧾","Concur Audit"],["email","📧","Email"]].map(([id,ic,lb])=><button key={id} onClick={()=>setPulseTab(id)} style={{padding:"6px 14px",borderRadius:6,border:"1px solid "+(pulseTab===id?"#14B8A6":"#1a2030"),background:pulseTab===id?"rgba(20,184,166,0.08)":"transparent",color:pulseTab===id?"#14B8A6":"#5A6480",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{ic} {lb}</button>)}</div><div style={{flex:1,overflow:"auto"}}>{pulseTab==="dispatch"&&<Dispatch templates={dispatchTemplates} setTemplates={setDispatchTemplates} sv={sv} S={S} showToast={showToast} ask={ask} askVision={askVision} MicButton={MicButtonWithKey} vLang={vLang}/>}{pulseTab!=="dispatch"&&<PulseGovernance callAI={(prompt)=>ask("You are a governance analyst.",[{role:"user",content:prompt}],4000)} askVision={askVision} companyName={co.name} defaultModule={pulseTab}/>}</div></div>}
 
         {/* ACTION TRACKER */}
 {view==="actions"&&(
@@ -8996,7 +9048,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               <input style={{...S.inp,width:190}} placeholder="Label (e.g. Monthly Revenue)" value={dataF.k} onChange={e=>setDataF({...dataF,k:e.target.value})} onKeyDown={e=>e.key==="Enter"&&addD()}/>
               <input style={{...S.inp,flex:1,minWidth:120}} placeholder={"Value (e.g. "+cur.sym+"5,00,000)"} value={dataF.v} onChange={e=>setDataF({...dataF,v:e.target.value})} onKeyDown={e=>e.key==="Enter"&&addD()}/>
               <LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/>
-              <MicButton lang={vLang} onResult={t=>setDataF(p=>({...p,v:(p.v?p.v+" ":"")+t}))}/>
+              <MicButton lang={vLang} onResult={t=>setDataF(p=>({...p,v:(p.v?p.v+" ":"")+t}))} openaiKey={providerKey(keys,"openai")||undefined}/>
               <button onClick={addD} style={{...S.pBtn,padding:"6px 14px",marginTop:0,fontSize:11,width:"auto"}}>+ Add</button>
             </div>
 {(
