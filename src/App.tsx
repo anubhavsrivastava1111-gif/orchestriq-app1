@@ -2964,7 +2964,7 @@ function MicButton({lang,onResult,disabled,openaiKey}){
     if(st==="listening"){stop();return;}
     setSt("requesting");setErr("");
     navigator.mediaDevices?.getUserMedia({audio:true}).then((stream)=>{
-      streamRef.current=stream;startWaveform(stream);
+      streamRef.current=stream; // waveform animation removed - the toggle button no longer has a visual that needs it
       // THE FALLBACK DECISION: OpenAI when a key is available, the free
       // native engine otherwise. Nobody picks a mode — this decides silently
       // and automatically, exactly matching VoiceButton's own behaviour, so
@@ -2973,34 +2973,22 @@ function MicButton({lang,onResult,disabled,openaiKey}){
     }).catch(()=>{setErr("Mic access denied. Allow mic in browser settings.");setSt("error");});
   };
 
-  if(st==="listening"){
-    return(
-      <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.03)",
-        border:"1px solid var(--oiq-accent,#14B8A6)66",borderRadius:999,padding:"3px 10px 3px 6px",flexShrink:0}}>
-        <div style={{display:"flex",alignItems:"center",gap:1.5,height:20}}>
-          {bars.map((h,i)=>(<div key={i} style={{width:2.5,minWidth:2.5,height:Math.max(3,h*18),
-            background:"var(--oiq-accent,#14B8A6)",borderRadius:2,opacity:0.6+h*0.4,transition:"height 70ms ease"}}/>))}
-        </div>
-        <button onClick={stop} title="Stop listening" disabled={disabled}
-          style={{background:"none",border:"none",cursor:"pointer",fontSize:13,padding:0,color:"var(--oiq-accent,#14B8A6)",lineHeight:1}}>
-          {"\u25A0"}
-        </button>
-      </div>
-    );
-  }
-  if(st==="transcribing"){
-    return(
-      <div style={{display:"flex",alignItems:"center",gap:5,padding:"5px 9px",border:"1px solid var(--oiq-accent,#14B8A6)55",
-        borderRadius:5,fontSize:10,color:"var(--oiq-accent,#14B8A6)",flexShrink:0}}>
-        {"\u2026"} transcribing
-      </div>
-    );
-  }
+  // ONE FIXED-SIZE BUTTON, THE SAME LAYOUT COMPLAINT FIXED HERE TOO. The old
+  // "listening" state expanded into a separate pill with its own stop
+  // button, next to whatever else sat beside it - here that meant the
+  // Language picker and the composer around it shifted every time someone
+  // spoke. Now the SAME button that started listening also stops it: no
+  // second control, no layout change, ever.
+  const isListening = st==="listening";
+  const isBusy = st==="requesting"||st==="transcribing";
   return(
     <div style={{position:"relative",flexShrink:0}}>
-      <button onClick={start} disabled={disabled||st==="requesting"} title={openaiKey?"Voice input — enhanced with OpenAI, punctuated automatically":!SR?"Voice not supported":"Click to speak — free, no API key needed"}
-        style={{background:"none",border:"1px solid #1a2030",borderRadius:5,padding:"5px 8px",cursor:disabled?"not-allowed":"pointer",fontSize:15,lineHeight:1,opacity:disabled?0.35:1,transition:"all 0.2s"}}>
-        {st==="requesting"?"⏳":st==="error"?"⚠️":"🎤"}
+      <button onClick={isListening?stop:start} disabled={disabled||isBusy}
+        title={isListening?"Click to stop and use this text":openaiKey?"Voice input — enhanced with OpenAI, punctuated automatically":!SR?"Voice not supported":"Click to speak — free, no API key needed"}
+        style={{background:isListening?"#EF4444":"none",border:"1px solid "+(isListening?"#EF4444":"#1a2030"),borderRadius:5,
+          padding:"5px 8px",cursor:disabled?"not-allowed":isBusy?"wait":"pointer",fontSize:15,lineHeight:1,
+          color:isListening?"#fff":"inherit",opacity:disabled?0.35:1,transition:"all 0.2s"}}>
+        {isBusy?"…":isListening?"\u25A0":st==="error"?"⚠️":"🎤"}
       </button>
       {st==="error"&&err&&<div style={{position:"absolute",bottom:"calc(100% + 6px)",right:0,background:"#1a0a0a",border:"1px solid #EF444466",borderRadius:6,padding:"7px 10px",fontSize:10,color:"#EF9999",width:220,lineHeight:1.5,zIndex:99}}>
         {err}<button onClick={()=>setSt("idle")} style={{display:"block",marginTop:5,background:"none",border:"none",color:"#EF6666",fontSize:9,cursor:"pointer",fontFamily:"Manrope,sans-serif",textDecoration:"underline"}}>Dismiss</button>
