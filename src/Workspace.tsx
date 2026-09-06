@@ -653,7 +653,13 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
                 </button>
               </>
             )}
-            {/* VOICE INPUT. Transcribed text lands in the composer exactly like
+            <textarea style={{ ...inp, minHeight:52, maxHeight:180, resize:"vertical" }}
+              placeholder={mode==="image" ? "Describe the image you want\u2026" : "Ask anything…  (Enter to send, Shift+Enter for a new line)"}
+              value={input} onChange={e=>setInput(e.target.value)}
+              onKeyDown={e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); mode==="image" ? sendImage() : send(); } }} />
+            {/* VOICE INPUT — moved to sit on the right of the text box, the
+                same position as every other composer on the platform, not
+                to its left. Transcribed text lands in the box exactly like
                 typed text - editable, not sent - never auto-submitted. */}
             <VoiceButton
               onTranscript={(text)=>setInput(v=>v?.trim()?v.trim()+" "+text:text)}
@@ -661,10 +667,6 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
               showToast={showToast}
               size={40}
             />
-            <textarea style={{ ...inp, minHeight:52, maxHeight:180, resize:"vertical" }}
-              placeholder={mode==="image" ? "Describe the image you want\u2026" : "Ask anything…  (Enter to send, Shift+Enter for a new line)"}
-              value={input} onChange={e=>setInput(e.target.value)}
-              onKeyDown={e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); mode==="image" ? sendImage() : send(); } }} />
             <button style={{ ...prim, height:40 }} disabled={busy||!input.trim()} onClick={mode==="image" ? sendImage : send}>
               {busy ? "…" : mode==="image" ? "Generate" : "Send"}
             </button>
