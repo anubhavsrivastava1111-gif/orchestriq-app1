@@ -790,6 +790,17 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
         <div style={{ padding:"10px 16px", borderBottom:"1px solid "+C.line, background:C.panel,
           display:"flex", justifyContent:"space-between", alignItems:"center", gap:10 }}>
           <div style={{ minWidth:0, flex:1 }}>
+            {/* THE EXACT SAME BUG AS THE WORKSPACE: "Live AI Boardroom" only
+                ever existed on the start screen, before a session begins.
+                Once live, there was no persistent label saying which module
+                this even was - only your own objective text, which someone
+                landing mid-session with no memory of typing it would not
+                recognise as a page identifier at all. */}
+            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+              <span style={{ fontSize:9, fontWeight:800, color:C.teal, letterSpacing:0.3, flexShrink:0 }}>
+                {"\uD83D\uDDE3\uFE0F LIVE BOARDROOM"}
+              </span>
+            </div>
             <div style={{ fontSize:12.5, fontWeight:800, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{session.objective}</div>
             <div style={{ fontSize:9.5, fontWeight:700, marginTop:1,
               color: session.status==="waiting_for_user" ? C.amber : session.paused ? C.faint : C.teal }}>
