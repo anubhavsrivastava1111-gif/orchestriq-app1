@@ -71,6 +71,10 @@ export default function VoiceButton({ onTranscript, getKeyFor, showToast, size =
   const startWaveformLoop = (stream: MediaStream) => {
     try {
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      // Same known cause as MicButton: created inside an async continuation
+      // (getUserMedia().then()), not synchronously in the click handler, so
+      // some browsers start it suspended and deliver silence to the analyser.
+      if (ctx.state === "suspended") { ctx.resume().catch(() => {}); }
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 128;
