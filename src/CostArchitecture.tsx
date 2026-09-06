@@ -86,7 +86,27 @@ const ALLOCATION_BASES = [
   { v: "equal",            label: "Split equally" },
 ];
 
-type TabKey = "start" | "setup" | "inputs" | "products" | "channels" | "diagnostics";
+type TabKey = "start" | "setup" | "inputs" | "products" | "channels" | "diagnostics" | "history";
+
+// ── MODULE 1 — COST PROJECT LIFECYCLE ────────────────────────────────────────
+// THE CONFIRMED GAP: every table below (resources, offerings, channels...) was
+// scoped to a single ongoing workspace per user - never a discrete, nameable,
+// completable "Cost Project" with a lifecycle and a History, which is the
+// very first thing the product spec asks for. This wraps the existing live
+// workspace in a project concept: complete a project and its ENTIRE current
+// state is frozen as a full-fidelity snapshot, then the live workspace clears
+// for the next one. Nothing about the existing tables changed to build this -
+// the snapshot is additive, so nothing already working can break.
+interface CaProject {
+  id: string; user_id: string; name: string; description: string | null;
+  status: "draft" | "discovery" | "modeling" | "review" | "complete";
+  created_at: string; updated_at: string; completed_at: string | null;
+}
+interface CaProjectSnapshot {
+  id: string; project_id: string; created_at: string;
+  business_context: any; resources: any[]; offerings: any[]; bom_lines: any[];
+  cost_pools: any[]; channels: any[]; offering_channels: any[]; diagnosis: any;
+}
 
 /* ------------------------------------------------------------------ styling */
 
@@ -337,6 +357,13 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
   const [openOffering, setOpenOffering] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Set<string>>(new Set());
 
+  // MODULE 1 — projects and their frozen history.
+  const [projects, setProjects] = useState<CaProject[]>([]);
+  const [activeProject, setActiveProject] = useState<CaProject | null>(null);
+  const [snapshots, setSnapshots] = useState<CaProjectSnapshot[]>([]);
+  const [viewingSnapshot, setViewingSnapshot] = useState<CaProjectSnapshot | null>(null);
+  const [completing, setCompleting] = useState(false);
+
   const toast = useCallback((m: string, k?: string) => { if (showToast) showToast(m, k); }, [showToast]);
 
   /* ---------------------------------------------------------------- loading */
@@ -351,7 +378,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
         setUserId(uidNow);
         if (!uidNow) { setErr("Sign in to use Cost Architecture."); setLoading(false); return; }
 
-        const [bc, rs, of, bl, cp, ch, oc, bm, vo] = await Promise.all([
+        const [bc, rs, of, bl, cp, ch, oc, bm, vo, pr] = await Promise.all([
           supabase.from("ca_business_context").select("*").eq("user_id", uidNow).maybeSingle(),
           supabase.from("ca_resources").select("*").eq("user_id", uidNow).order("created_at", { ascending: true }),
           supabase.from("ca_offerings").select("*").eq("user_id", uidNow).order("created_at", { ascending: true }),
@@ -361,8 +388,24 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
           supabase.from("ca_offering_channels").select("*").eq("user_id", uidNow),
           supabase.from("ca_benchmarks").select("*"),
           supabase.from("ca_validation_overrides").select("finding_id").eq("user_id", uidNow),
+          supabase.from("ca_projects").select("*").eq("user_id", uidNow).order("updated_at", { ascending: false }),
         ]);
         if (cancelled) return;
+
+        // MODULE 1: the active project is whichever one is not yet complete.
+        // If someone genuinely has none yet (shouldn't happen after the
+        // migration that gave every existing user a default one), create it
+        // here rather than leaving the workspace project-less.
+        const allProjects = (pr.data as CaProject[]) ?? [];
+        let active = allProjects.find(p => p.status !== "complete") ?? null;
+        if (!active) {
+          const { data: created } = await supabase.from("ca_projects")
+            .insert({ user_id: uidNow, name: "My Cost Model", status: "draft" }).select().single();
+          active = created as CaProject;
+          allProjects.unshift(active);
+        }
+        setProjects(allProjects);
+        setActiveProject(active);
 
         setCtx((bc.data as CaBusinessContext) ?? null);
         setResources((rs.data as CaResource[]) ?? []);
@@ -591,6 +634,79 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
   const dx: PortfolioDiagnosis = useMemo(() => diagnose(ws), [ws]);
   useEffect(() => { if (onDiagnosis) onDiagnosis(dx); }, [dx, onDiagnosis]);
 
+  // MODULE 1 — COMPLETE: freeze everything currently in the live workspace as
+  // a full-fidelity snapshot (spec Section 3: "preserve all components,
+  // assumptions, calculations, source information"), then clear the live
+  // tables so the next project starts genuinely clean. The snapshot holds the
+  // actual rows as they were, not a re-derived summary - so nothing about
+  // what made this project's numbers what they were can be lost or drift.
+  const completeProject = useCallback(async () => {
+    if (!userId || !activeProject) return;
+    if (!offerings.length) { toast("Add at least one thing you sell before completing this project.", "warning"); return; }
+    setCompleting(true);
+    try {
+      const { error: snapErr } = await supabase.from("ca_project_snapshots").insert({
+        project_id: activeProject.id, user_id: userId,
+        business_context: ctx || {}, resources, offerings, bom_lines: bomLines,
+        cost_pools: costPools, channels, offering_channels: offeringChannels,
+        diagnosis: dx,
+      });
+      if (snapErr) throw snapErr;
+
+      const { error: projErr } = await supabase.from("ca_projects")
+        .update({ status: "complete", completed_at: new Date().toISOString() })
+        .eq("id", activeProject.id);
+      if (projErr) throw projErr;
+
+      // Clear the live workspace for the next project. Deleting by user_id
+      // is safe here specifically BECAUSE everything that mattered about
+      // this project was just written into the snapshot above, unchanged.
+      await Promise.all([
+        supabase.from("ca_resources").delete().eq("user_id", userId),
+        supabase.from("ca_offerings").delete().eq("user_id", userId),
+        supabase.from("ca_bom_lines").delete().eq("user_id", userId),
+        supabase.from("ca_cost_pools").delete().eq("user_id", userId),
+        supabase.from("ca_channels").delete().eq("user_id", userId),
+        supabase.from("ca_offering_channels").delete().eq("user_id", userId),
+      ]);
+
+      const { data: created } = await supabase.from("ca_projects")
+        .insert({ user_id: userId, name: "New Cost Model", status: "draft" }).select().single();
+
+      setResources([]); setOfferings([]); setBomLines([]); setCostPools([]);
+      setChannels([]); setOfferingChannels([]); setOverrides(new Set());
+      setProjects(p => [created as CaProject, { ...activeProject, status: "complete" as const }, ...p.filter(x=>x.id!==activeProject.id)]);
+      setActiveProject(created as CaProject);
+      setTab("start");
+      toast(`"${activeProject.name}" completed and saved to History. Starting a new project.`, "success");
+    } catch (e: any) {
+      toast("Could not complete the project: " + (e?.message || "unknown error"), "error");
+    } finally { setCompleting(false); }
+  }, [userId, activeProject, offerings, resources, bomLines, costPools, channels, offeringChannels, ctx, dx, toast]);
+
+  const loadSnapshots = useCallback(async () => {
+    if (!userId) return;
+    const { data } = await supabase.from("ca_project_snapshots").select("*")
+      .eq("user_id", userId).order("created_at", { ascending: false });
+    setSnapshots((data as CaProjectSnapshot[]) ?? []);
+  }, [userId]);
+
+  // Aggregated once, from data the engine already computes per-offering per-
+  // channel (ChannelEconomics.leakagePerUnit) - not a new calculation, a
+  // portfolio-level rollup of an existing one, so it can never disagree with
+  // what the Channels tab itself shows for any single offering.
+  const marketingLeakage = useMemo(() => {
+    let totalLeak = 0, totalRev = 0;
+    dx.offerings.forEach((o) => {
+      o.channelEconomics.forEach((ce) => {
+        const vol = o.monthlyVolume * (ce.volumeSharePct / 100);
+        totalLeak += ce.leakagePerUnit * vol;
+        totalRev += ce.grossPrice * vol;
+      });
+    });
+    return { totalLeak, totalRev, pct: totalRev > 0 ? (totalLeak / totalRev) * 100 : 0 };
+  }, [dx]);
+
   const findings = useMemo(() => validate(ws, overrides), [ws, overrides]);
   const vSummary = useMemo(() => summarise(findings), [findings]);
 
@@ -673,9 +789,9 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
     <div style={S.wrap}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h1 style={S.h1}>Cost Architecture &amp; Unit Economics</h1>
+          <h1 style={S.h1}>Cost Architect</h1>
           <div style={S.sub}>
-            {companyName ? companyName + " \u00B7 " : ""}What each thing you sell actually costs, and where the money leaks.
+            {companyName ? companyName + " \u00B7 " : ""}Universal Cost, Management Accounting &amp; Economic Intelligence Engine.
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -686,12 +802,42 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
         </div>
       </div>
 
+      {/* MODULE 1 — the project lifecycle, made visible. Section 3 of the spec:
+          a Cost Project is a discrete, nameable thing with a status, not an
+          invisible ongoing workspace. */}
+      {activeProject && (
+        <div style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 12px", marginTop:10,
+          background: V("panel2","#12161f"), border:"1px solid "+V("border","#232838"), borderRadius:8, flexWrap:"wrap" }}>
+          <span style={{ fontSize:9, fontWeight:800, letterSpacing:0.4, color: V("muted","#8b98a5"), textTransform:"uppercase" }}>Project</span>
+          <input value={activeProject.name}
+            onChange={e=>setActiveProject(p=>p?{...p,name:e.target.value}:p)}
+            onBlur={e=>{ void supabase.from("ca_projects").update({name:e.target.value,updated_at:new Date().toISOString()}).eq("id",activeProject.id); }}
+            style={{ fontSize:12, fontWeight:700, background:"transparent", border:"none", color: V("text","#e8ecf1"), outline:"none", minWidth:140 }} />
+          <span style={{ fontSize:9.5, color: V("muted","#8b98a5"), textTransform:"capitalize" }}>{activeProject.status}</span>
+          <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
+            <button onClick={()=>{ setTab("history"); void loadSnapshots(); }}
+              style={{ ...S.btnGhost, fontSize:10.5, padding:"5px 10px" }}>
+              History{projects.filter(p=>p.status==="complete").length>0?` (${projects.filter(p=>p.status==="complete").length})`:""}
+            </button>
+            <button onClick={completeProject} disabled={completing || !offerings.length}
+              title={!offerings.length?"Add at least one thing you sell first":"Freeze this project into History and start a new one"}
+              style={{ ...S.btnGhost, fontSize:10.5, padding:"5px 10px", opacity:(completing||!offerings.length)?0.5:1 }}>
+              {completing?"Completing\u2026":"Complete project"}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={S.tabs}>
         {TABS.map((t) => (
           <button key={t.k} onClick={() => setTab(t.k)} style={{ ...S.tab, ...(tab === t.k ? S.tabOn : {}) }}>
             {t.label}{t.count != null && t.count > 0 ? ` (${t.count})` : ""}{tabBadge(t.k)}
           </button>
         ))}
+        <button onClick={() => { setTab("history"); void loadSnapshots(); }}
+          style={{ ...S.tab, ...(tab === "history" ? S.tabOn : {}) }}>
+          History{projects.filter(p=>p.status==="complete").length>0?` (${projects.filter(p=>p.status==="complete").length})`:""}
+        </button>
       </div>
 
       {err && userId && (
@@ -703,6 +849,50 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
 
       <DataQualityBar summary={vSummary} findings={findings} overrideCount={overrides.size} goTo={setTab}
         onUndoAll={() => { overrides.forEach((id) => { void undoException(id); }); }} />
+
+      {/* THE EXACT COMPLAINT: "what is fixed cost, what is variable cost,
+          where does the marketing cost sit" - none of that was ever clearly
+          called out, even though the engine was already calculating all of
+          it. This surfaces figures that already exist in dx (diagnose()) -
+          no new calculation logic, purely making what was already computed
+          impossible to miss. Shown once real data exists, not on the
+          empty-state screen where it would just be zeros. */}
+      {offerings.length > 0 && (
+        <div style={{ ...S.card, marginBottom: 12 }}>
+          <div style={{ fontSize:10, fontWeight:800, letterSpacing:0.4, color: V("muted","#8b98a5"), textTransform:"uppercase", marginBottom:10 }}>
+            Cost breakdown at a glance
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:14 }}>
+            <div>
+              <div style={{ fontSize:9, color: V("muted","#8b98a5"), textTransform:"uppercase" }}>Fixed cost / month</div>
+              <div style={{ fontSize:17, fontWeight:800 }}>{M(dx.monthlyFixedCost)}</div>
+              <div style={{ fontSize:9, color: V("muted","#8b98a5") }}>Rent, salaries, overhead \u2014 does not change with volume</div>
+            </div>
+            <div>
+              <div style={{ fontSize:9, color: V("muted","#8b98a5"), textTransform:"uppercase" }}>Variable cost / month</div>
+              <div style={{ fontSize:17, fontWeight:800 }}>{M(dx.monthlyVariableCost)}</div>
+              <div style={{ fontSize:9, color: V("muted","#8b98a5") }}>Materials, direct labour \u2014 scales with what you sell</div>
+            </div>
+            <div>
+              <div style={{ fontSize:9, color: V("muted","#8b98a5"), textTransform:"uppercase" }}>Marketing &amp; channel leakage</div>
+              <div style={{ fontSize:17, fontWeight:800, color: marketingLeakage.pct > 15 ? BAD.fg : undefined }}>
+                {M(marketingLeakage.totalLeak)}{marketingLeakage.totalRev > 0 ? ` (${marketingLeakage.pct.toFixed(1)}% of revenue)` : ""}
+              </div>
+              <div style={{ fontSize:9, color: V("muted","#8b98a5") }}>Commission, discounts, ad spend, gateway fees \u2014 per your channels</div>
+            </div>
+            <div>
+              <div style={{ fontSize:9, color: V("muted","#8b98a5"), textTransform:"uppercase" }}>Contribution margin</div>
+              <div style={{ fontSize:17, fontWeight:800 }}>{dx.contributionMarginPct.toFixed(1)}%</div>
+              <div style={{ fontSize:9, color: V("muted","#8b98a5") }}>What's left of each rupee of sales after variable costs</div>
+            </div>
+            <div>
+              <div style={{ fontSize:9, color: V("muted","#8b98a5"), textTransform:"uppercase" }}>Break-even revenue / month</div>
+              <div style={{ fontSize:17, fontWeight:800 }}>{M(dx.breakevenRevenue)}</div>
+              <div style={{ fontSize:9, color: V("muted","#8b98a5") }}>What you must sell just to cover fixed cost</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {tab === "start" && (
         <StartTab callAI={callAI} ctx={ctx} applyBlueprint={applyBlueprint}
@@ -733,6 +923,55 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
       )}
 
       {tab === "diagnostics" && <DiagnosticsTab dx={dx} M={M} goTo={setTab} />}
+
+      {/* MODULE 1 — HISTORY. Spec Section 57: "view, duplicate as new project,
+          compare with current, use as historical reference." This ships the
+          "view" capability now, real and working; duplicate/compare are the
+          natural next increment on top of this same table, not pretended to
+          exist here. */}
+      {tab === "history" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {!snapshots.length && (
+            <div style={S.card}>
+              <div style={{ fontSize:12, color: V("muted","#8b98a5") }}>
+                No completed projects yet. When you press "Complete project", everything currently in your
+                workspace is frozen here exactly as it was — components, assumptions, calculations and all.
+              </div>
+            </div>
+          )}
+          {snapshots.map(s => {
+            const p = projects.find(pr => pr.id === s.project_id);
+            return (
+              <div key={s.id} style={S.card}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:700 }}>{p?.name || "Completed project"}</div>
+                    <div style={{ fontSize:10, color: V("muted","#8b98a5") }}>
+                      Completed {new Date(s.created_at).toLocaleDateString()} \u00B7 {s.offerings.length} thing{s.offerings.length===1?"":"s"} sold \u00B7 {s.resources.length} input{s.resources.length===1?"":"s"}
+                    </div>
+                  </div>
+                  <button style={S.btnGhost} onClick={()=>setViewingSnapshot(viewingSnapshot?.id===s.id?null:s)}>
+                    {viewingSnapshot?.id===s.id ? "Close" : "View"}
+                  </button>
+                </div>
+                {viewingSnapshot?.id===s.id && s.diagnosis && (
+                  <div style={{ marginTop:10, paddingTop:10, borderTop:"1px solid "+V("border","#232838"),
+                    display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:10 }}>
+                    <div><div style={{fontSize:9,color:V("muted","#8b98a5"),textTransform:"uppercase"}}>Monthly Revenue</div>
+                      <div style={{fontSize:14,fontWeight:700}}>{M(s.diagnosis.monthlyRevenue)}</div></div>
+                    <div><div style={{fontSize:9,color:V("muted","#8b98a5"),textTransform:"uppercase"}}>Fixed Cost</div>
+                      <div style={{fontSize:14,fontWeight:700}}>{M(s.diagnosis.monthlyFixedCost)}</div></div>
+                    <div><div style={{fontSize:9,color:V("muted","#8b98a5"),textTransform:"uppercase"}}>Variable Cost</div>
+                      <div style={{fontSize:14,fontWeight:700}}>{M(s.diagnosis.monthlyVariableCost)}</div></div>
+                    <div><div style={{fontSize:9,color:V("muted","#8b98a5"),textTransform:"uppercase"}}>Contribution Margin</div>
+                      <div style={{fontSize:14,fontWeight:700}}>{s.diagnosis.contributionMarginPct?.toFixed(1)}%</div></div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
