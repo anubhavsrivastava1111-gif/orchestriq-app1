@@ -487,7 +487,21 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
       {/* ── conversation ──────────────────────────────────────────────────── */}
       <div style={{ flex:1, display:"flex", flexDirection:"column", minWidth:0 }}>
 
-        <div style={{ padding:"10px 14px", borderBottom:"1px solid "+C.line, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", background:C.panel }}>
+        {/* THE EXACT BUG: "Universal AI Workspace" only ever existed in the
+            empty-state welcome screen. The instant a conversation had any
+            messages, it vanished and never came back - there was no
+            persistent indication anywhere that this was the Workspace at
+            all. Fixed with a real, always-visible header. */}
+        <div style={{ padding:"9px 14px 0", display:"flex", alignItems:"center", gap:7, background:C.panel }}>
+          <span style={{ fontSize:14 }}>{"\u2733\uFE0F"}</span>
+          <span style={{ fontSize:11.5, fontWeight:800, color:C.ink, letterSpacing:0.2 }}>AI Workspace</span>
+          {convId && (
+            <span style={{ fontSize:10, color:C.faint, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:260 }}>
+              {"\u2014 "}{convs.find(c=>c.id===convId)?.title || "New conversation"}
+            </span>
+          )}
+        </div>
+        <div style={{ padding:"7px 14px 10px", borderBottom:"1px solid "+C.line, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", background:C.panel }}>
           <select style={{ ...inp, width:"auto", fontSize:11, cursor:"pointer" }} value={provider}
             onChange={e=>changeModel(e.target.value, defaultModel(e.target.value))}>
             {!availableProviders.length && <option value="">No API key configured</option>}
