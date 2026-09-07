@@ -16,6 +16,7 @@ import {
   type CaBusinessContext, type ResourceClass, type OfferingType,
   type PortfolioDiagnosis, type Opportunity,
 } from "./lib/CostEngine";
+import { computeCapacity, computeRates, costActivity } from "./lib/WorkforceEngine";
 import {
   validate, summarise,
   type Finding, type Severity,
@@ -1078,6 +1079,97 @@ const SetupTab: React.FC<{
  * TAB :: INPUTS
  * ========================================================================== */
 
+/* ============================================================================
+ * MODULE 5 — WORKFORCE & FTE PANEL.
+ * Shown inside a LABOUR resource's detail row. Builds capacity from named,
+ * auditable assumptions (spec Section 12), shows the distinct rate tiers
+ * (Section 13), and includes a live Activity Cost calculator matching the
+ * spec's own worked test case exactly: N participants x minutes each = hours,
+ * costed at this resource's rate (Section 79).
+ * ========================================================================== */
+const WorkforcePanel: React.FC<{
+  resource: CaResource; patchRes: (id: string, p: Partial<CaResource>) => void; cur: string;
+}> = ({ resource: r, patchRes, cur }) => {
+  const capacity = useMemo(() => computeCapacity(r), [r]);
+  const rates = useMemo(() => computeRates(r, capacity), [r, capacity]);
+  const [actVolume, setActVolume] = useState<number | null>(100);
+  const [actMinutes, setActMinutes] = useState<number | null>(6);
+  const [actTier, setActTier] = useState<"effective" | "billable" | "salary">("effective");
+  const activity = useMemo(() => costActivity(actVolume || 0, actMinutes || 0, r, rates, actTier), [actVolume, actMinutes, r, rates, actTier]);
+
+  const field = (label: string, key: keyof CaResource, suffix?: string, placeholder?: string) => (
+    <div><label style={S.lbl}>{label}</label>
+      <NumCell value={r[key] as any} onChange={(v) => patchRes(r.id, { [key]: v } as any)} suffix={suffix} />
+    </div>
+  );
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed " + V("border", "#232838") }}>
+      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.4, color: V("muted", "#8b98a5"), textTransform: "uppercase", marginBottom: 9 }}>
+        Capacity &amp; rates — Module 5
+      </div>
+      <div style={S.grid2}>
+        {field("Scheduled hours / day", "sched_hours_per_day", "h")}
+        {field("Working days / year", "working_days_per_year", "d")}
+        {field("Paid holidays / year", "paid_holidays_per_year", "d")}
+        {field("Annual leave / year", "annual_leave_days", "d")}
+        {field("Sick leave / year", "sick_leave_days", "d")}
+        {field("Training days / year", "training_days_per_year", "d")}
+        {field("Meetings + admin loss", "meetings_admin_pct", "%")}
+        {field("Utilization (demand)", "utilization_pct", "%")}
+        {field("Billability", "billability_pct", "%")}
+        {field("Employer add-on (PF, insurance...)", "fully_loaded_addon_pct", "%")}
+        {field("Client billing rate (optional)", "client_billing_rate", "/hr")}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginTop: 12,
+        padding: 10, background: V("bg", "#070c18"), borderRadius: 6 }}>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Gross hours / year</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>{capacity.grossHoursPerYear.toFixed(0)}</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Productive hours</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>{capacity.productiveHours.toFixed(0)}</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Billable hours</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>{capacity.billableHours.toFixed(0)}</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Effective hourly cost</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>{fmtMoney(rates.effectiveHourlyCost, cur)}</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Billable cost rate</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>{fmtMoney(rates.billableCostRate, cur)}</div></div>
+        {rates.clientBillingRate != null && (
+          <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Margin on labour</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: rates.clientBillingRate > rates.billableCostRate ? OK.fg : BAD.fg }}>
+              {rates.billableCostRate > 0 ? (((rates.clientBillingRate / rates.billableCostRate) - 1) * 100).toFixed(0) : "0"}%
+            </div></div>
+        )}
+      </div>
+
+      <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5"), marginTop: 8, lineHeight: 1.6 }}>
+        {capacity.grossHoursPerYear.toFixed(0)} scheduled hours \u2192 lost to {capacity.lossBreakdown.map(l => `${l.label.toLowerCase()} (${l.hours.toFixed(0)}h)`).join(", ")}
+        {" \u2192 "}{capacity.productiveHours.toFixed(0)} productive hours remain.
+      </div>
+
+      <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px dashed " + V("border", "#232838") }}>
+        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.4, color: V("muted", "#8b98a5"), textTransform: "uppercase", marginBottom: 8 }}>
+          Cost an activity with this role
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div><label style={S.lbl}>Volume (participants, units...)</label>
+            <NumCell value={actVolume} onChange={setActVolume} /></div>
+          <div><label style={S.lbl}>Minutes per unit</label>
+            <NumCell value={actMinutes} onChange={setActMinutes} /></div>
+          <div><label style={S.lbl}>Rate tier</label>
+            <SelectCell value={actTier} onChange={(v) => setActTier(v as any)}
+              options={[{ v: "effective", label: "Effective (internal)" }, { v: "billable", label: "Billable" }, { v: "salary", label: "Salary only" }]} />
+          </div>
+        </div>
+        <div style={{ marginTop: 8, fontSize: 11.5 }}>
+          {(actVolume || 0).toLocaleString()} \u00d7 {actMinutes || 0} min = <strong>{activity.totalHours.toFixed(2)} hours</strong> of {r.name || "this role"}
+          {" "}\u00d7 {fmtMoney(activity.hourlyCostUsed, cur)}/hr = <strong style={{ fontSize: 14 }}>{fmtMoney(activity.totalCost, cur)}</strong>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const InputsTab: React.FC<{
   resources: CaResource[]; patchRes: (id: string, p: Partial<CaResource>) => void;
   addResource: () => void; delRes: (id: string) => void; cur: string;
@@ -1199,6 +1291,14 @@ const InputsTab: React.FC<{
                         Landed cost {fmtMoney(naive, cur)} per {r.base_uom || "unit"} before waste.
                         After {num(r.effective_yield_pct, 100)}% usable, true cost is <strong style={{ color: V("ink", "#e6edf3") }}>{fmtMoney(eff, cur)}</strong>.
                       </div>
+                      {/* MODULE 5 — shown ONLY for labour, because this build-up
+                          means nothing for a kilogram of butter. Section 12's
+                          exact waterfall: Scheduled -> Net Available ->
+                          Productive -> Billable, each step named, none of it
+                          collapsed into one guessed percentage. */}
+                      {r.resource_class === "LABOUR" && (
+                        <WorkforcePanel resource={r} patchRes={patchRes} cur={cur} />
+                      )}
                     </td></tr>
                   )}
                 </React.Fragment>
