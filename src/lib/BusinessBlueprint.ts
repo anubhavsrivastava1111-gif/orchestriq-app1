@@ -767,11 +767,29 @@ export async function researchBlueprint(
     { label: "Compact request",          stage: "compact",         search: false, prompt: compactPrompt(clean, geo, cur) },
   ];
 
+  // THE CONFIRMED ROOT CAUSE OF "RESEARCH NEVER FINISHES": no timeout existed
+  // anywhere on the actual AI call. If the provider stalled - especially with
+  // web search enabled on the first, "deep" rung - this awaited forever, with
+  // nothing in the code able to move on to the next fallback rung or the
+  // no-AI template. The visible progress messages would cycle through their
+  // list and then freeze on the last one indefinitely, because the thing
+  // they were describing genuinely never returned. This wraps every rung in
+  // a hard ceiling: if a provider has not answered within 45 seconds, that
+  // attempt is abandoned and the NEXT rung (a cheaper, non-web-search
+  // request, and ultimately a no-AI structural template that "cannot fail")
+  // is tried instead - so the flow always reaches a real result.
+  const RUNG_TIMEOUT_MS = 45000;
+  const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> =>
+    Promise.race([
+      p,
+      new Promise<T>((_, reject) => setTimeout(() => reject(new Error(label + " did not respond within " + (ms/1000) + "s")), ms)),
+    ]);
+
   let lastRaw = 0;
   for (const rung of rungs) {
     let raw = "";
     try {
-      raw = await callAI(rung.prompt, rung.search);
+      raw = await withTimeout(callAI(rung.prompt, rung.search), RUNG_TIMEOUT_MS, rung.label);
     } catch (e: any) {
       const msg = e?.message || "unknown error";
       attempts.push(`${rung.label}: THREW - ${msg}`);
