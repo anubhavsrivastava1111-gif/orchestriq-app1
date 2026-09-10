@@ -2005,6 +2005,23 @@ const StartTab: React.FC<{
         geography: ctx?.geography || "India", currency: cur, depth: "deep",
       });
       setRes(r);
+      // THE ACTUAL BUG, FOUND AND FIXED: this used to only build a preview -
+      // a SEPARATE "Apply draft" button further down the page was required
+      // to actually save anything, and its own text ("Nothing is saved until
+      // you press this") was easy to miss once a fully-formed-looking draft
+      // was already on screen. Verified directly against the database: a
+      // business context row existed, but zero resources and zero offerings -
+      // proof the second step was never completing, not a guess. This now
+      // saves automatically the instant research succeeds, matching what was
+      // actually asked for from the start: one step, not two. Anything
+      // wrongly discovered can still be deleted afterwards from the What You
+      // Buy / What You Sell tabs, exactly as it already could be - nothing
+      // about correcting a mistake gets harder, only "did it actually save"
+      // stops depending on a click that was too easy to miss.
+      if (r.ok && r.blueprint) {
+        const ok = await applyBlueprint(r.blueprint, { resources: new Set(), offerings: new Set(), channels: new Set(), costPools: new Set() });
+        if (ok) setApplied(true);
+      }
     } catch (e: any) {
       setRes({ ok: false, blueprint: null, rawLength: 0, stage: "failed", attempts: [], error: e?.message || "Research failed. Please try again." });
     } finally {
@@ -2185,7 +2202,7 @@ const StartTab: React.FC<{
                       const off = skipR.has(r.name);
                       return (
                         <tr key={r.name} style={{ opacity: off ? 0.35 : 1 }}>
-                          <td style={S.td}><input type="checkbox" checked={!off} onChange={() => toggle(skipR, r.name, setSkipR)} /></td>
+                          <td style={S.td} title="This has already been saved. Remove it from the What You Buy tab if it does not apply."><input type="checkbox" checked disabled style={{opacity:0.5,cursor:"not-allowed"}} /></td>
                           <td style={S.td}>
                             <div style={{ fontWeight: 600 }}>{r.name}</div>
                             {r.price_basis && <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5") }}>{r.price_basis}</div>}
@@ -2217,7 +2234,7 @@ const StartTab: React.FC<{
                 return (
                   <div key={o.name} style={{ opacity: off ? 0.35 : 1, padding: "10px 0", borderBottom: `1px solid ${V("faint", "#16202c")}` }}>
                     <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
-                      <input type="checkbox" checked={!off} onChange={() => toggle(skipO, o.name, setSkipO)} />
+                      <input type="checkbox" checked disabled style={{opacity:0.5,cursor:"not-allowed"}} title="This has already been saved. Remove it from What You Sell if it does not apply." />
                       <strong style={{ fontSize: 12.5 }}>{o.name}</strong>
                       <span style={{ fontSize: 10.5, color: V("muted", "#8b98a5") }}>per {o.output_uom}</span>
                       <Chip tone={VERIFY_STYLE[o.verify].tone}>
@@ -2353,28 +2370,15 @@ const StartTab: React.FC<{
             </div>
           )}
 
-          {/* ---- apply ---- */}
+          {/* ---- saved automatically - no separate click required anymore ---- */}
           <div style={{ ...S.card, borderColor: V("accent", "#4ADE80") }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ flex: "1 1 300px" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
-                  {applied ? "Draft applied" : "Add this draft to your model"}
-                </div>
-                <div style={S.note}>
-                  {applied
-                    ? "Now go to What you sell and correct anything marked \u201CYou must enter\u201D. Diagnostics update as you type."
-                    : "Nothing is saved until you press this. Uncheck anything above that does not apply. You can edit every figure afterwards."}
-                </div>
-              </div>
-              <button
-                style={{ ...S.btn, opacity: applied ? 0.5 : 1 }}
-                disabled={applied}
-                onClick={async () => {
-                  const ok = await applyBlueprint(bp, { resources: skipR, offerings: skipO, channels: skipC, costPools: skipP });
-                  if (ok) setApplied(true);
-                }}>
-                {applied ? "Applied" : "Apply draft"}
-              </button>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: applied ? OK.fg : undefined }}>
+              {applied ? "\u2713 Added to your model" : "Saving\u2026"}
+            </div>
+            <div style={S.note}>
+              {applied
+                ? "This has already been saved - there is nothing further to press. Go to What you sell and correct anything marked \u201CYou must enter\u201D. If anything above does not apply to your business, delete it from that tab; everything here can be edited or removed afterwards."
+                : "Saving what was found\u2026"}
             </div>
           </div>
         </>
