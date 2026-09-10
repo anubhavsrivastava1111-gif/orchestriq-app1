@@ -433,6 +433,15 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
   const queue = useRef<Map<string, { table: string; row: any }>>(new Map());
   const timer = useRef<any>(null);
 
+  // THE SECOND CONFIRMED CAUSE OF LOST WORK: every edit is queued here and
+  // saved 900ms later, so typing feels instant. But the cleanup below used to
+  // CANCEL that pending timer on unmount without ever running it - so an
+  // edit made right before switching away, closing the tab, or navigating to
+  // a different module could be discarded with no warning at all. hasUnsaved
+  // now makes that risk VISIBLE rather than invisible, and flush() is called
+  // for real whenever the component is about to go away, not just cleared.
+  const [hasUnsaved, setHasUnsaved] = useState(false);
+
   const flush = useCallback(async () => {
     if (!queue.current.size) return;
     const batch = Array.from(queue.current.values());
@@ -447,12 +456,18 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
       }
       for (const [table, rows] of Array.from(byTable.entries())) {
         const clean = rows.map((r) => { const { effective_cost_per_base_unit, created_at, updated_at, ...rest } = r; return rest; });
-        const { error } = await supabase.from(table).upsert(clean, { onConflict: "id" });
+        // Same fix as applyBlueprint: business context is uniquely keyed by
+        // user_id, not id - every write path has to agree on that, not just
+        // the one the original bug report happened to be reproducing.
+        const conflictCol = table === "ca_business_context" ? "user_id" : "id";
+        const { error } = await supabase.from(table).upsert(clean, { onConflict: conflictCol });
         if (error) throw error;
       }
+      setHasUnsaved(false);
     } catch (e: any) {
       toast("Could not save: " + (e?.message || "unknown error"), "error");
       setErr(e?.message || "Save failed");
+      setHasUnsaved(true); // the save genuinely failed - say so, don't pretend it's fine
     } finally {
       setSaving(false);
     }
@@ -460,11 +475,28 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
 
   const persist = useCallback((table: string, row: any) => {
     queue.current.set(table + ":" + row.id, { table, row });
+    setHasUnsaved(true);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => { void flush(); }, 900);
   }, [flush]);
 
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  // Flush for REAL on unmount - the fix for the exact bug reported. Switching
+  // to a different OrchestrIQ module unmounts this component; the old code
+  // only cleared the pending timer, discarding whatever was queued. Now the
+  // save actually runs before the component disappears.
+  useEffect(() => () => {
+    if (timer.current) { clearTimeout(timer.current); void flush(); }
+  }, [flush]);
+
+  // A safety net for the browser tab closing or reloading outright, which a
+  // React unmount effect cannot reliably catch on its own.
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (queue.current.size) { void flush(); e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [flush]);
 
   const removeRow = useCallback(async (table: string, id: string) => {
     try {
@@ -593,15 +625,22 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
       const rows = blueprintToRows(bp, userId, uid, skip);
 
       const nextCtx = { ...(ctx || { id: uid(), user_id: userId }), ...rows.context } as CaBusinessContext;
-      const w = async (table: string, data: any[]) => {
+      const w = async (table: string, data: any[], conflictCol: string = "id") => {
         if (!data.length) return;
         const clean = data.map((r) => { const { effective_cost_per_base_unit, created_at, updated_at, ...rest } = r; return rest; });
-        const { error } = await supabase.from(table).upsert(clean, { onConflict: "id" });
+        const { error } = await supabase.from(table).upsert(clean, { onConflict: conflictCol });
         if (error) throw error;
       };
 
+      // THE EXACT DATA-LOSS BUG: ca_business_context has its real uniqueness
+      // constraint on user_id, not id - one user, one context row. Upserting
+      // with onConflict:"id" meant that if the local id ever drifted even
+      // slightly from what the database actually held, Postgres rejected the
+      // write as a user_id constraint violation, and everything downstream
+      // that depended on this row succeeding could be left in an
+      // inconsistent state. Fixed to match the table's real constraint.
       // order matters: parents before the rows that reference them
-      await w("ca_business_context", [nextCtx]);
+      await w("ca_business_context", [nextCtx], "user_id");
       await w("ca_resources", rows.resources);
       await w("ca_offerings", rows.offerings);
       await w("ca_channels", rows.channels);
@@ -797,7 +836,19 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {saving && <span style={{ fontSize: 10, color: V("muted", "#8b98a5") }}>Saving...</span>}
+          {/* THE VISIBLE PROMISE: information is never wiped silently. Either
+              this says "Saved" and it genuinely is, or it says "Unsaved
+              changes" and tells you exactly that - never nothing. */}
+          {saving && <span style={{ fontSize: 10, color: V("muted", "#8b98a5") }}>Saving\u2026</span>}
+          {!saving && hasUnsaved && (
+            <span style={{ fontSize: 10, color: WARN.fg, display: "flex", alignItems: "center", gap: 6 }}>
+              \u25CF Unsaved changes
+              <button onClick={() => void flush()} style={{ ...S.btnGhost, fontSize: 9.5, padding: "3px 8px" }}>Save now</button>
+            </span>
+          )}
+          {!saving && !hasUnsaved && (
+            <span style={{ fontSize: 10, color: OK.fg }}>\u2713 Saved</span>
+          )}
           <Chip tone={dx.confidenceScore >= 70 ? OK : dx.confidenceScore >= 40 ? WARN : BAD}>
             {dx.confidenceScore}% confidence
           </Chip>
