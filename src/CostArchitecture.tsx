@@ -18,6 +18,7 @@ import {
 } from "./lib/CostEngine";
 import { computeCapacity, computeRates, costActivity } from "./lib/WorkforceEngine";
 import { offeringBreakEven, priceForTargetMargin, priceChangeImpact } from "./lib/PricingEngine";
+import { activityBreakdown, allocationBreakdown } from "./lib/CostTransparencyEngine";
 import {
   validate, summarise,
   type Finding, type Severity,
@@ -964,7 +965,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
 
       {tab === "products" && (
         <ProductsTab offerings={offerings} resources={resources} bomLines={bomLines} channels={channels}
-          offeringChannels={offeringChannels} dx={dx} openOffering={openOffering} setOpenOffering={setOpenOffering}
+          offeringChannels={offeringChannels} dx={dx} costPools={costPools} openOffering={openOffering} setOpenOffering={setOpenOffering}
           patchOff={patchOff} patchBom={patchBom} patchOC={patchOC} addOffering={addOffering}
           addBomLine={addBomLine} linkChannel={linkChannel} delOff={delOff} delBom={delBom} delOC={delOC} M={M}
           flagFor={flagFor} onAccept={acceptException} />
@@ -1370,7 +1371,7 @@ const InputsTab: React.FC<{
 
 const ProductsTab: React.FC<{
   offerings: CaOffering[]; resources: CaResource[]; bomLines: CaBomLine[]; channels: CaChannel[];
-  offeringChannels: CaOfferingChannel[]; dx: PortfolioDiagnosis;
+  offeringChannels: CaOfferingChannel[]; dx: PortfolioDiagnosis; costPools: CaCostPool[];
   openOffering: string | null; setOpenOffering: (v: string | null) => void;
   patchOff: (id: string, p: Partial<CaOffering>) => void;
   patchBom: (id: string, p: Partial<CaBomLine>) => void;
@@ -1595,6 +1596,12 @@ const ProductsTab: React.FC<{
                 {econ && (
                   <PricingBreakEvenPanel econ={econ} offering={o} patchOff={p.patchOff} M={p.M} cur={p.cur} />
                 )}
+
+                {/* MODULE 7 — where cost actually concentrates in your process. */}
+                <ActivityCostPanel offering={o} resources={p.resources} bomLines={p.bomLines} offerings={p.offerings} M={p.M} />
+
+                {/* MODULE 8 — which cost pool contributed how much overhead, per offering. */}
+                <AllocationPanel offering={o} dx={p.dx} costPools={p.costPools} M={p.M} />
               </div>
             )}
           </div>
@@ -1670,6 +1677,106 @@ const PricingBreakEvenPanel: React.FC<{
           {!impact.isPriceIncreaseViable && (
             <span style={{ color: BAD.fg }}> This price rise still needs more volume, not less — check the assumption.</span>
           )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ============================================================================
+ * MODULE 7 — ACTIVITY / PROCESS-STEP COST PANEL.
+ * ========================================================================== */
+const ActivityCostPanel: React.FC<{
+  offering: CaOffering; resources: CaResource[]; bomLines: CaBomLine[]; offerings: CaOffering[]; M: (v: number) => string;
+}> = ({ offering, resources, bomLines, offerings, M }) => {
+  const breakdown = useMemo(() => activityBreakdown(offering, { resources, bomLines, offerings } as CostWorkspace), [offering, resources, bomLines, offerings]);
+  if (!breakdown.steps.length) return null;
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed " + V("border", "#232838") }}>
+      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.4, color: V("muted", "#8b98a5"), textTransform: "uppercase", marginBottom: 9 }}>
+        Cost by process step — Module 7
+      </div>
+      <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5"), marginBottom: 10, lineHeight: 1.5 }}>
+        Where the cost of one unit actually comes from, in the order your process happens — not just a flat ingredient list.
+      </div>
+      {breakdown.steps.map((s) => (
+        <div key={s.stepName} style={{ marginBottom: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5 }}>
+            <strong>{s.stepName}</strong>
+            <span>{M(s.totalCost)} <span style={{ color: V("muted", "#8b98a5"), fontWeight: 400 }}>({s.sharePct.toFixed(0)}%)</span></span>
+          </div>
+          <div style={{ height: 5, background: V("bg", "#070c18"), borderRadius: 3, overflow: "hidden", marginTop: 3, marginBottom: 3 }}>
+            <div style={{ height: "100%", width: `${s.sharePct}%`, background: "#8b5cf6" }} />
+          </div>
+          <div style={{ fontSize: 9, color: V("muted", "#8b98a5") }}>
+            {s.lines.map((l) => `${l.resourceName} (${M(l.lineCost)})`).join(", ")}
+          </div>
+        </div>
+      ))}
+      {breakdown.subAssemblyCost === 0 && bomLines.some(b => b.offering_id === offering.id && b.child_type === "OFFERING") && (
+        <div style={{ fontSize: 9, color: WARN.fg, marginTop: 6 }}>
+          This product uses another product as a sub-assembly. Its cost is included correctly elsewhere in this
+          product's total, but a step-by-step breakdown of THAT sub-assembly's own process is not shown here yet —
+          a genuinely separate piece of work, stated honestly rather than guessed at.
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ============================================================================
+ * MODULE 8 — COST ALLOCATION TRANSPARENCY PANEL.
+ * ========================================================================== */
+const AllocationPanel: React.FC<{
+  offering: CaOffering; dx: PortfolioDiagnosis; costPools: CaCostPool[]; M: (v: number) => string;
+}> = ({ offering, dx, costPools, M }) => {
+  const allocInputs = useMemo(() => dx.offerings.map((o) => ({
+    offeringId: o.offeringId, volume: o.monthlyVolume,
+    revenue: o.blendedNetRealisation * o.monthlyVolume,
+    directCost: o.marginalCostPerUnit * o.monthlyVolume,
+    constraintMinutes: 0, labourMinutes: 0, machineMinutes: 0,
+  })), [dx]);
+  const result = useMemo(() => allocationBreakdown(offering.id, {
+    resources: [], bomLines: [], offerings: dx.offerings.map(o => ({ id: o.offeringId } as any)),
+    costPools,
+  } as any, allocInputs), [offering.id, dx, costPools, allocInputs]);
+
+  if (!result.pools.length) return null;
+  const hasTimeBasedPool = result.pools.some(p => ["labour_hours", "machine_hours", "constraint_hours"].includes(p.basis));
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed " + V("border", "#232838") }}>
+      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.4, color: V("muted", "#8b98a5"), textTransform: "uppercase", marginBottom: 9 }}>
+        Where your overhead allocation comes from — Module 8
+      </div>
+      <table style={{ width: "100%", fontSize: 11 }}>
+        <thead><tr>
+          <th style={{ textAlign: "left", fontSize: 9, color: V("muted", "#8b98a5"), paddingBottom: 4 }}>Cost pool</th>
+          <th style={{ textAlign: "left", fontSize: 9, color: V("muted", "#8b98a5"), paddingBottom: 4 }}>Basis (how it's shared out)</th>
+          <th style={{ textAlign: "right", fontSize: 9, color: V("muted", "#8b98a5"), paddingBottom: 4 }}>This product's share</th>
+        </tr></thead>
+        <tbody>
+          {result.pools.map((pool) => (
+            <tr key={pool.poolId}>
+              <td style={{ padding: "4px 0" }}>{pool.poolName}{pool.isAvoidable && <span style={{ fontSize: 8.5, color: WARN.fg, marginLeft: 5 }}>avoidable</span>}</td>
+              <td style={{ padding: "4px 0", color: V("muted", "#8b98a5"), textTransform: "capitalize" }}>{pool.basis.replace(/_/g, " ")}</td>
+              <td style={{ padding: "4px 0", textAlign: "right", fontWeight: 700 }}>
+                {["labour_hours", "machine_hours", "constraint_hours"].includes(pool.basis)
+                  ? <span style={{ color: WARN.fg, fontWeight: 600 }} title="Needs process-time data not yet available to this panel">not shown</span>
+                  : M(pool.allocatedToThisOffering)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {hasTimeBasedPool && (
+        <div style={{ fontSize: 9, color: WARN.fg, marginTop: 8, lineHeight: 1.5 }}>
+          One or more pools allocate by labour, machine, or constraint hours (time-based sharing). This panel does
+          not yet have access to the detailed timing data needed to compute those accurately, so it says "not
+          shown" rather than presenting a guessed number. The total elsewhere on this page still uses the real
+          calculation — only this transparency view is limited for those specific pools, stated plainly rather
+          than hidden.
         </div>
       )}
     </div>
