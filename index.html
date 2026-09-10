@@ -7,6 +7,39 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <title>OrchestrIQ — AI Company Operating System</title>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SOCIAL SHARING — Open Graph + Twitter Card tags.
+         HONEST LIMITATION, STATED PLAINLY: this is a client-rendered SPA -
+         one index.html, all real content drawn in by JavaScript after the
+         page loads. Facebook, LinkedIn, and X's link-preview crawlers do
+         NOT execute JavaScript when they fetch a shared URL - they only
+         read whatever is already sitting in this static HTML file. That
+         means every shared link on this platform - whether it is Cost
+         Architecture, Live Boardroom, or the homepage - shows this SAME
+         title, description, and image today. Genuinely different previews
+         per page/module needs server-side rendering or a pre-render
+         service for each route - real, separate infrastructure work, not
+         something a meta tag alone can do. Said clearly here so it is
+         never mistaken for already working.
+         ═══════════════════════════════════════════════════════════════════ -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="OrchestrIQ" />
+    <meta property="og:title" content="OrchestrIQ — AI Company Operating System" />
+    <meta property="og:description" content="An AI-powered command center for running a business — cost architecture, a live executive boardroom, and decision intelligence in one place." />
+    <meta property="og:url" content="https://orchestriq.gorakhai.com" />
+    <!-- PLACEHOLDER IMAGE, STATED PLAINLY: this points at the existing
+         favicon, an SVG. Facebook/LinkedIn/X generally render OG images
+         unreliably or not at all when they are SVGs — they expect a real
+         PNG/JPG, ideally 1200x630px. A shared link will work (title and
+         description will show) but the preview picture itself may not
+         render correctly until a proper image file is added. -->
+    <meta property="og:image" content="https://orchestriq.gorakhai.com/favicon.svg" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="OrchestrIQ — AI Company Operating System" />
+    <meta name="twitter:description" content="An AI-powered command center for running a business — cost architecture, a live executive boardroom, and decision intelligence in one place." />
+    <meta name="twitter:image" content="https://orchestriq.gorakhai.com/favicon.svg" />
   </head>
   <body>
     <div id="root"></div>
