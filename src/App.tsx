@@ -32,6 +32,7 @@ import { detectDocumentRequest, buildDocumentBrief, buildSynthesisOverride, sugg
 import { NVIDIA_DEFAULT_MODEL, nvidiaModelOptions, nvidiaShouldReason, nvidiaTokenBudget } from "./lib/NvidiaModels";
 import { getDisclosure, trainingLabel, providersNeedingCaution, attributionLine } from "./lib/ProviderDisclosure";
 import CostArchitecture from "./CostArchitecture";
+import ShareButtons from "./ShareButtons";
 import { loadCostContext, getCostBrief, publishCostDiagnosis, clearCostContext } from "./lib/CostContext";
 
 // Intelligence Engine — evidence audit line appended to final deliverables (no AI call, fail-safe)
@@ -4039,6 +4040,7 @@ export default function App(){
   const [theme,setTheme]=useState("dark");
   // FEATURE 4/5: export studio
   const [showExport,setShowExport]=useState(false);
+  const [showShare,setShowShare]=useState(false);
   const [expMode,setExpMode]=useState("pdf"); // pdf | pptx
   const [expDocType,setExpDocType]=useState("executive");
   const [expPptType,setExpPptType]=useState("briefing");
@@ -7976,6 +7978,22 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           </button>
           <button onClick={()=>setShowExport(true)} aria-label="Export Studio" title="Export Studio — PDF and PowerPoint"
             style={{background:"none",border:"1px solid #1a2030",borderRadius:8,padding:"4px 10px",color:"#A855F7",cursor:"pointer",fontSize:16,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>🎨</button>
+          {/* SOCIAL SHARING. Global, one integration point rather than
+              touching every module's own header individually - reaches
+              everywhere at once, with far less surface area to risk
+              breaking something. Sharing a link never exposes anything
+              private: it is the current page's URL plus a plain marketing
+              line, nothing about the signed-in session travels with it, and
+              anyone who opens the shared link still has to sign in normally. */}
+          <div style={{position:"relative",display:"inline-block"}}>
+            <button onClick={()=>setShowShare(v=>!v)} aria-label="Share" title="Share on social media"
+              style={{background:showShare?"rgba(20,184,166,0.12)":"none",border:"1px solid "+(showShare?"#14B8A6":"#1a2030"),borderRadius:8,padding:"4px 10px",color:"#14B8A6",cursor:"pointer",fontSize:16,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>🔗</button>
+            {showShare && (
+              <div style={{position:"absolute",top:38,right:0,zIndex:200,background:"#0A0E1A",border:"1px solid #1a2030",borderRadius:10,padding:10,boxShadow:"0 8px 24px rgba(0,0,0,0.4)",whiteSpace:"nowrap"}}>
+                <ShareButtons message={"Check out " + (co?.name ? co.name + "'s" : "my") + " work on OrchestrIQ"} />
+              </div>
+            )}
+          </div>
           <button onClick={()=>{setShowSettings(true);setSTab("api");}} aria-label="Settings" title="Settings"
             style={{background:"none",border:"1px solid #1a2030",borderRadius:8,padding:"4px 10px",color:"#A0AAC0",cursor:"pointer",fontSize:16,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>⚙</button>
           <button onClick={()=>setShowSignOutConfirm(true)} aria-label="Sign out" title="Sign out"
