@@ -17,6 +17,7 @@ import {
   type PortfolioDiagnosis, type Opportunity,
 } from "./lib/CostEngine";
 import { computeCapacity, computeRates, costActivity } from "./lib/WorkforceEngine";
+import { offeringBreakEven, priceForTargetMargin, priceChangeImpact } from "./lib/PricingEngine";
 import {
   validate, summarise,
   type Finding, type Severity,
@@ -1534,6 +1535,15 @@ const ProductsTab: React.FC<{
                     payback in {econ.cacPaybackMonths} months. Below 3x is generally unsustainable.
                   </div>
                 )}
+
+                {/* MODULE 6 — PRICING & BREAK-EVEN, per offering, not just
+                    portfolio-blended. Uses fields CostEngine.ts already
+                    computes (allocatedOverheadPerUnit, contributionPerUnit) -
+                    no new allocation logic, purely a new lens on numbers
+                    that already existed. */}
+                {econ && (
+                  <PricingBreakEvenPanel econ={econ} offering={o} patchOff={p.patchOff} M={p.M} cur={p.cur} />
+                )}
               </div>
             )}
           </div>
@@ -1541,6 +1551,77 @@ const ProductsTab: React.FC<{
       })}
       <button style={S.btn} onClick={p.addOffering}>+ Add product</button>
     </>
+  );
+};
+
+/* ============================================================================
+ * MODULE 6 — PRICING & BREAK-EVEN PANEL.
+ * ========================================================================== */
+const PricingBreakEvenPanel: React.FC<{
+  econ: OfferingEconomics; offering: CaOffering;
+  patchOff: (id: string, p: Partial<CaOffering>) => void;
+  M: (v: number) => string; cur: string;
+}> = ({ econ, offering, patchOff, M, cur }) => {
+  const be = useMemo(() => offeringBreakEven(econ), [econ]);
+  const [whatIfPrice, setWhatIfPrice] = useState<number | null>(null);
+  const variableCostPerUnit = econ.marginalCostPerUnit;
+  const targetMargin = offering.target_margin_pct;
+  const suggestedPrice = targetMargin != null ? priceForTargetMargin(econ.fullyLoadedCostPerUnit, targetMargin) : null;
+  const impact = useMemo(() => whatIfPrice != null
+    ? priceChangeImpact(econ.listPrice, econ.monthlyVolume, econ.contributionPerUnit, variableCostPerUnit, whatIfPrice)
+    : null, [whatIfPrice, econ, variableCostPerUnit]);
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px dashed " + V("border", "#232838") }}>
+      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.4, color: V("muted", "#8b98a5"), textTransform: "uppercase", marginBottom: 9 }}>
+        Pricing &amp; break-even — Module 6
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10,
+        padding: 10, background: be.isBelowBreakEven ? BAD.bg : V("bg", "#070c18"), borderRadius: 6, marginBottom: 10 }}>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Break-even (this product)</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>{be.breakEvenUnits.toFixed(0)} units/mo</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Break-even revenue</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>{M(be.breakEvenRevenue)}</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Current volume</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>{be.currentVolume.toFixed(0)} units/mo</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Margin of safety</div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: be.isBelowBreakEven ? BAD.fg : OK.fg }}>
+            {be.marginOfSafetyPct.toFixed(0)}%
+          </div></div>
+      </div>
+      {be.isBelowBreakEven && (
+        <div style={{ fontSize: 10.5, color: BAD.fg, marginBottom: 10 }}>
+          This product is currently selling BELOW its own break-even — every unit sold at this volume is losing money once its fair share of fixed cost is counted, even if the wider business looks profitable.
+        </div>
+      )}
+
+      {targetMargin != null && suggestedPrice != null && !isNaN(suggestedPrice) && (
+        <div style={{ fontSize: 11, marginBottom: 10 }}>
+          To hit your {targetMargin}% target margin on a fully-loaded cost of {M(econ.fullyLoadedCostPerUnit)}, price should be
+          {" "}<strong style={{ fontSize: 13 }}>{M(suggestedPrice)}</strong>
+          {econ.listPrice > 0 && Math.abs(suggestedPrice - econ.listPrice) > 0.5 && (
+            <span style={{ color: suggestedPrice > econ.listPrice ? WARN.fg : OK.fg }}>
+              {" "}(currently {M(econ.listPrice)}, {suggestedPrice > econ.listPrice ? "under" : "over"}-priced by {M(Math.abs(suggestedPrice - econ.listPrice))})
+            </span>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div><label style={S.lbl}>What if price were...</label>
+          <NumCell value={whatIfPrice} onChange={setWhatIfPrice} placeholder={String(econ.listPrice)} /></div>
+      </div>
+      {impact && (
+        <div style={{ fontSize: 11, marginTop: 8 }}>
+          At {M(impact.newPrice)}, you need <strong>{impact.volumeNeededForSameContribution.toFixed(0)} units/mo</strong>
+          {" "}({impact.volumeChangeNeededPct >= 0 ? "+" : ""}{impact.volumeChangeNeededPct.toFixed(0)}% vs today) just to keep the same total contribution you make now.
+          {!impact.isPriceIncreaseViable && (
+            <span style={{ color: BAD.fg }}> This price rise still needs more volume, not less — check the assumption.</span>
+          )}
+        </div>
+      )}
+    </div>
   );
 };
 
