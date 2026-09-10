@@ -812,13 +812,17 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
   if (loading) return <div style={{ ...S.wrap, ...S.empty }}>Loading your cost model...</div>;
   if (err && !userId) return <div style={{ ...S.wrap, ...S.empty }}>{err}</div>;
 
-  const TABS: Array<{ k: TabKey; label: string; count?: number }> = [
-    { k: "start",       label: "Start here" },
-    { k: "setup",       label: "Setup" },
-    { k: "inputs",      label: "What you buy",  count: resources.length },
-    { k: "products",    label: "What you sell", count: offerings.length },
-    { k: "channels",    label: "Where you sell", count: channels.length },
-    { k: "diagnostics", label: "Diagnostics" },
+  // THE FIX FOR "I don't know what Setup/Buy/Sell/Diagnostics means" - a
+  // one-line, plain-language explanation for every tab, shown right under
+  // the tab bar for whichever one is currently open. Nobody should have to
+  // guess what a section is for.
+  const TABS: Array<{ k: TabKey; label: string; count?: number; hint: string }> = [
+    { k: "start",       label: "Start here", hint: "Describe your business in your own words. The AI researches real prices and drafts your whole cost model automatically - nothing else to do on this screen." },
+    { k: "setup",       label: "Setup", hint: "Basic facts about your business - industry, location, currency, how you measure output. This is used to make every calculation elsewhere on this page realistic for YOUR business, not a generic template." },
+    { k: "inputs",      label: "What you buy",  count: resources.length, hint: "Everything you pay for to run this business - ingredients, materials, people's time, rent, software. Each one shows its true cost after wastage and fees, not just the sticker price." },
+    { k: "products",    label: "What you sell", count: offerings.length, hint: "Each thing you sell, with its full cost, suggested price, break-even point, and where the money actually goes for that one product." },
+    { k: "channels",    label: "Where you sell", count: channels.length, hint: "Every place you sell through - your own shop, a marketplace, a reseller - each with its own commission, fees, and how much of the sale price you actually keep." },
+    { k: "diagnostics", label: "Diagnostics", hint: "The overall verdict for your whole business: is it profitable, where the risk is, and what to fix first - built from everything on the other tabs." },
   ];
   const tabBadge = (k: TabKey) => {
     const t = (tabFlags as any)[k]; if (!t) return null;
@@ -893,6 +897,15 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
           History{projects.filter(p=>p.status==="complete").length>0?` (${projects.filter(p=>p.status==="complete").length})`:""}
         </button>
       </div>
+
+      {/* THE ANSWER TO "I don't know what this tab means" - always visible,
+          never something the user has to hunt for or already know. */}
+      {tab !== "history" && (
+        <div style={{ fontSize: 11, color: V("muted", "#8b98a5"), lineHeight: 1.6, marginBottom: 12,
+          padding: "8px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid " + V("border", "#232838") }}>
+          {TABS.find((t) => t.k === tab)?.hint}
+        </div>
+      )}
 
       {err && userId && (
         <div style={{ ...S.card, borderColor: BAD.fg, background: BAD.bg, marginBottom: 12 }}>
@@ -2071,6 +2084,16 @@ const StartTab: React.FC<{
 }> = ({ callAI, ctx, applyBlueprint, hasData, goTo, companyName }) => {
   const [desc, setDesc] = useState("");
   const [busy, setBusy] = useState(false);
+  // A SAFETY NET, independent of the timeout fix in BusinessBlueprint.ts:
+  // even if a future edge case slips past that timeout, the user must never
+  // feel trapped watching a spinner with no way out. This lets them manually
+  // walk away from a stuck request - it does not literally cancel the
+  // underlying network call (that needs a deeper change to the shared AI
+  // calling code used by every module, not just this one), but it
+  // immediately frees the screen and ignores whatever that call eventually
+  // returns.
+  const cancelledRef = useRef(false);
+  const [elapsedSec, setElapsedSec] = useState(0);
   const [phase, setPhase] = useState("");
   const [res, setRes] = useState<BlueprintResult | null>(null);
   const [skipR, setSkipR] = useState<Set<string>>(new Set());
@@ -2091,7 +2114,8 @@ const StartTab: React.FC<{
 
   const run = async () => {
     if (!callAI) return;
-    setBusy(true); setRes(null); setApplied(false);
+    cancelledRef.current = false;
+    setBusy(true); setRes(null); setApplied(false); setElapsedSec(0);
     setSkipR(new Set()); setSkipO(new Set()); setSkipC(new Set()); setSkipP(new Set());
     const steps = [
       "Working out what kind of business this is...",
@@ -2107,10 +2131,15 @@ const StartTab: React.FC<{
     let i = 0;
     setPhase(steps[0]);
     const timer = setInterval(() => { i = Math.min(i + 1, steps.length - 1); setPhase(steps[i]); }, 6000);
+    // Honest elapsed time - a number that keeps moving proves the app is
+    // still alive even during a slow network call, which the old fixed
+    // phase-message list could not do once it reached its last entry.
+    const clock = setInterval(() => { setElapsedSec((s) => s + 1); }, 1000);
     try {
       const r = await researchBlueprint(callAI, desc, {
         geography: ctx?.geography || "India", currency: cur, depth: "deep",
       });
+      if (cancelledRef.current) return; // the user walked away - ignore this result entirely
       setRes(r);
       // THE ACTUAL BUG, FOUND AND FIXED: this used to only build a preview -
       // a SEPARATE "Apply draft" button further down the page was required
@@ -2130,10 +2159,18 @@ const StartTab: React.FC<{
         if (ok) setApplied(true);
       }
     } catch (e: any) {
+      if (cancelledRef.current) return;
       setRes({ ok: false, blueprint: null, rawLength: 0, stage: "failed", attempts: [], error: e?.message || "Research failed. Please try again." });
     } finally {
-      clearInterval(timer); setBusy(false); setPhase("");
+      clearInterval(timer); clearInterval(clock);
+      if (!cancelledRef.current) { setBusy(false); setPhase(""); }
     }
+  };
+
+  const cancelRun = () => {
+    cancelledRef.current = true;
+    setBusy(false); setPhase(""); setElapsedSec(0);
+    showToast?.("Stopped. You can try again, or edit the description first.", "warning");
   };
 
   const stats = bp ? blueprintStats(bp) : null;
@@ -2182,14 +2219,26 @@ const StartTab: React.FC<{
             style={{ ...S.btn, opacity: busy || desc.trim().length < 12 ? 0.45 : 1, cursor: busy ? "wait" : "pointer" }}>
             {busy ? "Researching..." : "Research and build my cost model"}
           </button>
-          {busy && <span style={{ fontSize: 11, color: V("accent", "#4ADE80") }}>{phase}</span>}
+          {/* THE SAFETY NET: a real, moving elapsed-time counter (proof the
+              app is still alive, not frozen) and a genuine way to stop
+              waiting, requested directly after "it never comes up with a
+              final result" - never make someone feel trapped again. */}
+          {busy && (
+            <>
+              <span style={{ fontSize: 11, color: V("accent", "#4ADE80") }}>{phase} ({elapsedSec}s)</span>
+              <button onClick={cancelRun} style={{ ...S.btnGhost, fontSize: 10.5, padding: "5px 10px" }}>Stop</button>
+            </>
+          )}
           {!busy && hasData && (
             <span style={{ ...S.note, fontSize: 10.5 }}>
               You already have data. Anything generated here is <strong style={{ color: V("ink", "#e6edf3") }}>added alongside</strong> it, never replacing it.
             </span>
           )}
         </div>
-        {busy && <div style={{ ...S.note, marginTop: 9, fontSize: 10.5 }}>This takes 30-60 seconds because it is doing live research, not guessing.</div>}
+        {busy && <div style={{ ...S.note, marginTop: 9, fontSize: 10.5 }}>
+          This takes 30-60 seconds because it is doing live research, not guessing.
+          {elapsedSec > 45 && " If a provider is slow or unresponsive, this will automatically fall back to a faster method within 45 seconds of any single attempt - or press Stop and try again."}
+        </div>}
       </div>
 
       {/* ---------------- error ---------------- */}
