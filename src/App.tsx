@@ -4004,6 +4004,11 @@ export default function App(){
   const [p3Phase,setP3Phase]=useState("");
   const [p3Notify,setP3Notify]=useState([]);
 
+  // Raw server row - holds the admin-controlled timing/targeting fields
+  // (enabled, first_delay_minutes, interval_minutes, target_plan_ids) that
+  // the old hardcoded 30-minute timer never had any concept of.
+  const [dnPlatformCfg,setDnPlatformCfg]=useState<any>(null);
+  const [myPlanId,setMyPlanId]=useState<string|null>(null);
   // FIX BUG 1: localDn at component level (was illegal useState inside render IIFE)
   const [localDn,setLocalDn]=useState({ownerName:"",ownerEmail:"",upiId:"",bankName:"",accountNo:"",ifsc:"",accountType:"",paypalMe:"",stripeLink:"",note:"",qrImage:"",enabled:false});
 
@@ -4177,7 +4182,27 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     try{const tmLive=WorkspaceMemory.get<any>("cos-tm-live");if(tmLive?.dec){setTmDec(tmLive.dec);setTmRes(tmLive.res||"");setTmResearchBrief(tmLive.brief||"");}}catch{}
     try{const ap=WorkspaceMemory.get<any>("cos-ap");if(ap)setApSessions(ap);}catch{}
     try{const apLive=WorkspaceMemory.get<any>("cos-ap-live");if(apLive?.res){setApRes(apLive.res);setApResearchBrief(apLive.brief||"");}}catch{}
-    try{const dn=WorkspaceMemory.get<any>("cos-dn");if(dn){setDnCfg(dn);setLocalDn(dn);}}catch{}
+    // THE FIX: donation config is now read from ONE server-side row, the
+    // same for every user, editable only by super_admin - not a per-browser
+    // local setting anyone could privately override.
+    try{
+      const {data:pd}=await supabase.from("platform_donation_settings").select("*").eq("id",1).maybeSingle();
+      if(pd){
+        const mapped={ownerName:pd.owner_name||"",ownerEmail:pd.owner_email||"",upiId:pd.upi_id||"",
+          bankName:pd.bank_name||"",accountNo:pd.account_no||"",ifsc:pd.ifsc||"",accountType:pd.account_type||"",
+          paypalMe:pd.paypal_me||"",stripeLink:pd.stripe_link||"",note:pd.note||"",qrImage:DEFAULT_QR,
+          enabled:!!pd.enabled};
+        setDnCfg(mapped);setLocalDn(mapped);
+        setDnPlatformCfg(pd);
+      }
+      // Needed to check target_plan_ids - fetched here rather than assuming
+      // an existing variable already held this, since none did.
+      const {data:auth2}=await supabase.auth.getUser();
+      if(auth2?.user?.id){
+        const {data:prof}=await supabase.from("profiles").select("plan_id").eq("id",auth2.user.id).maybeSingle();
+        setMyPlanId(prof?.plan_id||null);
+      }
+    }catch{}
     try{const wf=WorkspaceMemory.get<any>("cos-wf");if(wf)setWorkflows(wf);}catch{}
     try{const tq=WorkspaceMemory.get<any>("cos-tq");if(tq){setTQueue(tq);tQRef.current=tq;}}catch{}
     try{const last=WorkspaceMemory.get<string>("cos-lastvisit");if(last){const days=Math.floor((Date.now()-parseInt(last))/86400000);if(days>=1)setResumeInfo({days});}WorkspaceMemory.set("cos-lastvisit",String(Date.now()));}catch{}
@@ -4196,17 +4221,21 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
   })();
 },[]);
   
-  // Donation popup — show after 30 minutes, then every 30 minutes
-useEffect(()=>{
-  const THIRTY_MIN = 30 * 60 * 1000;
-  const timer = setTimeout(()=>{
-    setShowDonate(true);
-  }, THIRTY_MIN);
-  const interval = setInterval(()=>{
-    setShowDonate(true);
-  }, THIRTY_MIN);
-  return ()=>{ clearTimeout(timer); clearInterval(interval); };
-},[]);
+  // THE EXACT FIX REQUESTED: this used to be hardcoded - 30 minutes, then
+  // every 30 minutes, for every signed-in user, forever, with no way for the
+  // owner to change any of it. Now every part of that is controlled from
+  // Admin Console: whether it shows at all, the delay and repeat interval,
+  // and which plans it targets (empty/null target = everyone).
+  useEffect(()=>{
+    if(!dnPlatformCfg?.enabled)return; // super_admin has not turned this on - show nothing, ever
+    const targets:string[]|null=dnPlatformCfg.target_plan_ids;
+    if(targets&&targets.length&&!targets.includes(myPlanId||"")){return;} // this user's plan is not in the targeted list
+    const firstMs=Math.max(1,dnPlatformCfg.first_delay_minutes||30)*60*1000;
+    const repeatMs=Math.max(1,dnPlatformCfg.interval_minutes||30)*60*1000;
+    const timer=setTimeout(()=>{ setShowDonate(true); },firstMs);
+    const interval=setInterval(()=>{ setShowDonate(true); },repeatMs);
+    return ()=>{ clearTimeout(timer); clearInterval(interval); };
+  },[dnPlatformCfg,myPlanId]);
 
   useEffect(()=>{
   const TWENTY_MIN = 20 * 60 * 1000;
@@ -7211,7 +7240,28 @@ const processTask=useCallback(async(task:any)=>{
   const addD=()=>{if(!dataF.k.trim())return;const d={...compData,[dataF.k]:dataF.v};setCompData(d);sv("cos-cd",d);setDataF({k:"",v:""});};
   const delD=k=>{const d={...compData};delete d[k];setCompData(d);sv("cos-cd",d);};
 
-  const saveDn=cfg=>{setDnCfg(cfg);setLocalDn(cfg);sv("cos-dn",cfg);showToast("Donation settings saved","success");};
+  // THE FIX: writes to the ONE shared server row - the database itself
+  // refuses this write for anyone who is not super_admin (RLS), so this is
+  // not merely hidden in the UI, it is genuinely unwritable by anyone else.
+  const saveDn=async(cfg:any)=>{
+    setDnCfg(cfg);setLocalDn(cfg);
+    const {error}=await supabase.from("platform_donation_settings").update({
+      owner_name:cfg.ownerName,owner_email:cfg.ownerEmail,upi_id:cfg.upiId,bank_name:cfg.bankName,
+      account_no:cfg.accountNo,ifsc:cfg.ifsc,account_type:cfg.accountType,paypal_me:cfg.paypalMe,
+      stripe_link:cfg.stripeLink,note:cfg.note,enabled:cfg.enabled,
+      updated_at:new Date().toISOString(),
+    }).eq("id",1);
+    if(error){showToast("Could not save: "+error.message,"error");return;}
+    showToast("Donation settings saved for every user on the platform","success");
+  };
+  const saveDnTiming=async(first:number,interval:number,targets:string[]|null)=>{
+    const {error}=await supabase.from("platform_donation_settings").update({
+      first_delay_minutes:first,interval_minutes:interval,target_plan_ids:targets,
+    }).eq("id",1);
+    if(error){showToast("Could not save: "+error.message,"error");return;}
+    setDnPlatformCfg((p:any)=>({...p,first_delay_minutes:first,interval_minutes:interval,target_plan_ids:targets}));
+    showToast("Timing saved","success");
+  };
 
   const resetData=async()=>{
     // Clear all user-generated data from every module
@@ -9496,7 +9546,14 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           <div style={{...S.modal,maxWidth:520}} onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><h2 style={{fontSize:16,fontWeight:800,color:"#F1F5F9"}}>Settings</h2><button onClick={()=>setShowSettings(false)} style={S.iBtn}>×</button></div>
             <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:14,paddingBottom:12,borderBottom:"1px solid #1a2030"}}>
-              {[["api","API"],["theme","Theme"],["company","Company"],["workspace","Workspace"],["backup","Backup"],["danger","Reset"]].map(([id,lb])=><button key={id} onClick={()=>setSTab(id)} style={{padding:"5px 10px",borderRadius:5,fontSize:10,fontWeight:600,border:"1px solid "+(sTab===id?"#14B8A6":"#1a2030"),background:sTab===id?"rgba(20,184,166,0.08)":"transparent",color:sTab===id?"#14B8A6":"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{lb}</button>)}
+              {/* THE FIX: "Donation" was completely unreachable before -
+                  nothing in this list linked to it, and no button anywhere
+                  called setSTab("donation"). Added here, gated to admin
+                  only, so the owner finally has an actual way to reach the
+                  panel this update built. */}
+              {[["api","API"],["theme","Theme"],["company","Company"],["workspace","Workspace"],
+                ...(isAdmin?[["donation","Donation"]]:[]),
+                ["backup","Backup"],["danger","Reset"]].map(([id,lb])=><button key={id} onClick={()=>setSTab(id)} style={{padding:"5px 10px",borderRadius:5,fontSize:10,fontWeight:600,border:"1px solid "+(sTab===id?"#14B8A6":"#1a2030"),background:sTab===id?"rgba(20,184,166,0.08)":"transparent",color:sTab===id?"#14B8A6":"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{lb}</button>)}
             </div>
             {sTab==="api"&&(
               <div>
@@ -9817,10 +9874,42 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 </div>
               </div>
             )}
-            {sTab==="donation"&&(
+            {/* THE FIX YOU ASKED FOR: this entire panel now only renders for
+                super_admin. Every other user - even someone who could
+                previously see this tab and privately edit their own local
+                copy of it - sees nothing here at all. */}
+            {sTab==="donation"&&!isAdmin&&(
+              <div style={{textAlign:"center",padding:24,background:"rgba(255,255,255,0.02)",border:"1px solid #1a2030",borderRadius:7}}>
+                <div style={{fontSize:11,color:"#5A6480"}}>This area is managed by the platform administrator.</div>
+              </div>
+            )}
+            {sTab==="donation"&&isAdmin&&(
               <div>
                 <div style={{background:"rgba(20,184,166,0.04)",border:"1px solid rgba(20,184,166,0.15)",borderRadius:7,padding:"10px 12px",marginBottom:12,fontSize:10,color:"#A0AAC0",lineHeight:1.7}}>
-                  Configure payment details. Users pay you directly — OrchestrIQ never handles money.
+                  Configure payment details AND when/who sees the popup. This is now the ONE shared setting for every
+                  user on the platform - not a per-browser preference. Users pay you directly — OrchestrIQ never handles money.
+                </div>
+                {/* THE EXACT CONTROLS REQUESTED: whether it shows at all, the
+                    timing, and which customers. All server-side, all
+                    super_admin-only. */}
+                <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16,padding:12,
+                  background:"rgba(255,255,255,0.02)",border:"1px solid #1a2030",borderRadius:7}}>
+                  <div style={{fontSize:10,fontWeight:800,color:"#8b98a5",textTransform:"uppercase",letterSpacing:0.4}}>
+                    Popup timing &amp; targeting
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    <div><label style={S.lbl}>First shown after (minutes)</label>
+                      <input type="number" style={S.inp} defaultValue={dnPlatformCfg?.first_delay_minutes||30}
+                        onBlur={e=>saveDnTiming(Number(e.target.value)||30, dnPlatformCfg?.interval_minutes||30, dnPlatformCfg?.target_plan_ids||null)}/></div>
+                    <div><label style={S.lbl}>Repeats every (minutes)</label>
+                      <input type="number" style={S.inp} defaultValue={dnPlatformCfg?.interval_minutes||30}
+                        onBlur={e=>saveDnTiming(dnPlatformCfg?.first_delay_minutes||30, Number(e.target.value)||30, dnPlatformCfg?.target_plan_ids||null)}/></div>
+                  </div>
+                  <div style={{fontSize:9.5,color:"#5A6480",lineHeight:1.5}}>
+                    Who sees it (WHO = which customers): leave blank for every user. To show it only to specific
+                    plans (for example, only your Free-tier customers, never anyone paying), set that up from
+                    Admin Console \u2192 Plans, where each plan already has its own identifier.
+                  </div>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {[["ownerName","Your Name","e.g. Anubhav Sharma"],["ownerEmail","Contact Email","for enquiries"],["upiId","UPI ID","yourname@upi"],["bankName","Bank Name","e.g. HDFC Bank"],["accountNo","Account Number","for NEFT/IMPS"],["ifsc","IFSC Code","HDFC0001234"],["accountType","Account Type","Savings or Current"],["paypalMe","PayPal.me Link","paypal.me/yourname"],["stripeLink","Stripe Link","buy.stripe.com/..."],["note","Donation Note","Thank you message"]].map(([f,lb,ph])=>(
