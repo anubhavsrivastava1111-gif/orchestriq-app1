@@ -19,6 +19,7 @@ import {
 import { computeCapacity, computeRates, costActivity } from "./lib/WorkforceEngine";
 import { offeringBreakEven, priceForTargetMargin, priceChangeImpact } from "./lib/PricingEngine";
 import { activityBreakdown, allocationBreakdown } from "./lib/CostTransparencyEngine";
+import { compareSuppliers, makeVsBuy, type SupplierOption } from "./lib/ProcurementEngine";
 import {
   validate, summarise,
   type Finding, type Severity,
@@ -357,6 +358,8 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
 
   const [ctx, setCtx] = useState<CaBusinessContext | null>(null);
   const [resources, setResources] = useState<CaResource[]>([]);
+  // MODULE 08 — alternative supplier quotes, one resource can have several.
+  const [supplierOptions, setSupplierOptions] = useState<Array<SupplierOption & { resource_id: string }>>([]);
   const [offerings, setOfferings] = useState<CaOffering[]>([]);
   const [bomLines, setBomLines] = useState<CaBomLine[]>([]);
   const [costPools, setCostPools] = useState<CaCostPool[]>([]);
@@ -387,7 +390,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
         setUserId(uidNow);
         if (!uidNow) { setErr("Sign in to use Cost Architecture."); setLoading(false); return; }
 
-        const [bc, rs, of, bl, cp, ch, oc, bm, vo, pr] = await Promise.all([
+        const [bc, rs, of, bl, cp, ch, oc, bm, vo, pr, so] = await Promise.all([
           supabase.from("ca_business_context").select("*").eq("user_id", uidNow).maybeSingle(),
           supabase.from("ca_resources").select("*").eq("user_id", uidNow).order("created_at", { ascending: true }),
           supabase.from("ca_offerings").select("*").eq("user_id", uidNow).order("created_at", { ascending: true }),
@@ -398,8 +401,12 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
           supabase.from("ca_benchmarks").select("*"),
           supabase.from("ca_validation_overrides").select("finding_id").eq("user_id", uidNow),
           supabase.from("ca_projects").select("*").eq("user_id", uidNow).order("updated_at", { ascending: false }),
+          // MODULE 8 — alternative supplier quotes, additive to the load
+          // that already exists here; nothing above it changed.
+          supabase.from("ca_supplier_options").select("*").eq("user_id", uidNow),
         ]);
         if (cancelled) return;
+        setSupplierOptions((so.data as any[]) ?? []);
 
         // MODULE 1: the active project is whichever one is not yet complete.
         // If someone genuinely has none yet (shouldn't happen after the
@@ -616,6 +623,26 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
     setOfferingChannels((p) => p.filter((c) => c.offering_id !== id)); void removeRow("ca_offerings", id); };
   const delBom = (id: string) => { setBomLines((p) => p.filter((b) => b.id !== id)); void removeRow("ca_bom_lines", id); };
   const delPool = (id: string) => { setCostPools((p) => p.filter((c) => c.id !== id)); void removeRow("ca_cost_pools", id); };
+  // MODULE 08 — add/remove an alternative supplier quote for a resource.
+  // Deliberately its own small table, not a change to ca_resources itself:
+  // the resource's own fields stay "the supplier you're actually using",
+  // this is purely the other options being compared against it.
+  const addSupplierOption = async (resourceId: string) => {
+    if (!userId) return;
+    const row = { id: uid(), resource_id: resourceId, user_id: userId, supplier_name: "New supplier",
+      purchase_price: 0, freight_cost: 0, duty_cost: 0, other_landed_cost: 0 };
+    setSupplierOptions((p) => [...p, row as any]);
+    const { error } = await supabase.from("ca_supplier_options").insert(row);
+    if (error) { showToast?.("Could not add supplier: " + error.message, "error"); setSupplierOptions((p) => p.filter((s) => s.id !== row.id)); }
+  };
+  const patchSupplierOption = (id: string, patch: Partial<SupplierOption>) => {
+    setSupplierOptions((p) => p.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    void supabase.from("ca_supplier_options").update(patch).eq("id", id);
+  };
+  const delSupplierOption = (id: string) => {
+    setSupplierOptions((p) => p.filter((s) => s.id !== id));
+    void removeRow("ca_supplier_options", id);
+  };
   const delCh = (id: string) => { setChannels((p) => p.filter((c) => c.id !== id));
     setOfferingChannels((p) => p.filter((c) => c.channel_id !== id)); void removeRow("ca_channels", id); };
   const delOC = (id: string) => { setOfferingChannels((p) => p.filter((c) => c.id !== id)); void removeRow("ca_offering_channels", id); };
@@ -1055,7 +1082,9 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
 
             {tab === "inputs" && (
               <InputsTab resources={resources} patchRes={patchRes} addResource={addResource} delRes={delRes} cur={cur}
-                flagFor={flagFor} onAccept={acceptException} />
+                flagFor={flagFor} onAccept={acceptException}
+                supplierOptions={supplierOptions} addSupplierOption={addSupplierOption}
+                patchSupplierOption={patchSupplierOption} delSupplierOption={delSupplierOption} />
             )}
 
             {tab === "products" && (
@@ -1320,11 +1349,84 @@ const WorkforcePanel: React.FC<{
   );
 };
 
+/* ============================================================================
+ * MODULE 08 — SUPPLIER COMPARISON & MAKE-VS-BUY PANEL.
+ * Reuses the exact same landed-cost formula as effectiveCostPerBaseUnit() -
+ * every row here is calculated the identical way, so "cheapest" is a fair
+ * comparison, not a different shortcut per row.
+ * ========================================================================== */
+const SupplierComparisonPanel: React.FC<{
+  resource: CaResource; alternatives: Array<SupplierOption & { resource_id: string }>;
+  onAdd: () => void; onPatch: (id: string, p: Partial<SupplierOption>) => void; onDelete: (id: string) => void;
+  cur: string;
+}> = ({ resource, alternatives, onAdd, onPatch, onDelete, cur }) => {
+  const rows = useMemo(() => compareSuppliers(resource, alternatives), [resource, alternatives]);
+  const M = (v: number) => fmtMoney(v, cur);
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed " + V("border", "#232838") }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}>
+        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.4, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>
+          Compare suppliers — Module 08
+        </div>
+        <button onClick={onAdd} style={S.btnGhost}>+ Add a supplier to compare</button>
+      </div>
+      <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5"), marginBottom: 10 }}>
+        Your current terms against any alternative quotes — same landed-cost math for every row, so the cheapest one really is the cheapest.
+      </div>
+
+      {rows.map((row) => {
+        const alt = alternatives.find((a) => a.id === row.id);
+        return (
+          <div key={row.id} style={{ padding: "10px 0", borderBottom: "1px solid " + V("border", "#1a2030") }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {row.isCurrent
+                  ? <strong style={{ fontSize: 11.5 }}>{row.supplierName} (current)</strong>
+                  : <TextCell value={alt?.supplier_name ?? ""} onChange={(v) => onPatch(row.id, { supplier_name: v })} />}
+                {row.isCheapest && <span style={{ fontSize: 8.5, fontWeight: 800, color: OK.fg, background: OK.bg, padding: "2px 7px", borderRadius: 8 }}>CHEAPEST</span>}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <strong style={{ fontSize: 13 }}>{M(row.landedCostPerUnit)}</strong>
+                {!row.isCurrent && row.savingsVsCurrentPct != null && (
+                  <span style={{ fontSize: 10, color: row.savingsVsCurrentPct > 0 ? OK.fg : BAD.fg }}>
+                    {row.savingsVsCurrentPct > 0 ? "saves " : "costs "}{Math.abs(row.savingsVsCurrentPct).toFixed(0)}%
+                  </span>
+                )}
+                {!row.isCurrent && <button onClick={() => onDelete(row.id)} style={{ background: "none", border: "none", color: BAD.fg, cursor: "pointer", fontSize: 12 }}>{"\u2715"}</button>}
+              </div>
+            </div>
+            {!row.isCurrent && alt && (
+              <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                <div><label style={S.lbl}>Price</label><NumCell value={alt.purchase_price} onChange={(v) => onPatch(row.id, { purchase_price: v })} /></div>
+                <div><label style={S.lbl}>Freight</label><NumCell value={alt.freight_cost} onChange={(v) => onPatch(row.id, { freight_cost: v })} /></div>
+                <div><label style={S.lbl}>Duty</label><NumCell value={alt.duty_cost} onChange={(v) => onPatch(row.id, { duty_cost: v })} /></div>
+                <div><label style={S.lbl}>Other landed cost</label><NumCell value={alt.other_landed_cost} onChange={(v) => onPatch(row.id, { other_landed_cost: v })} /></div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {alternatives.length === 0 && (
+        <div style={{ fontSize: 10, color: V("muted", "#8b98a5"), fontStyle: "italic" }}>
+          No alternatives added yet — add one to see whether you're paying more than you need to.
+        </div>
+      )}
+    </div>
+  );
+};
+
 const InputsTab: React.FC<{
   resources: CaResource[]; patchRes: (id: string, p: Partial<CaResource>) => void;
   addResource: () => void; delRes: (id: string) => void; cur: string;
   flagFor: FlagLookup; onAccept: AcceptFn;
-}> = ({ resources, patchRes, addResource, delRes, cur, flagFor, onAccept }) => {
+  supplierOptions: Array<SupplierOption & { resource_id: string }>;
+  addSupplierOption: (resourceId: string) => void;
+  patchSupplierOption: (id: string, p: Partial<SupplierOption>) => void;
+  delSupplierOption: (id: string) => void;
+}> = ({ resources, patchRes, addResource, delRes, cur, flagFor, onAccept,
+        supplierOptions, addSupplierOption, patchSupplierOption, delSupplierOption }) => {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [autoOpened, setAutoOpened] = useState(false);
 
@@ -1449,6 +1551,12 @@ const InputsTab: React.FC<{
                       {r.resource_class === "LABOUR" && (
                         <WorkforcePanel resource={r} patchRes={patchRes} cur={cur} />
                       )}
+
+                      {/* MODULE 08 — supplier comparison, every resource type. */}
+                      <SupplierComparisonPanel resource={r}
+                        alternatives={supplierOptions.filter((s) => s.resource_id === r.id)}
+                        onAdd={() => addSupplierOption(r.id)} onPatch={patchSupplierOption} onDelete={delSupplierOption}
+                        cur={cur} />
                     </td></tr>
                   )}
                 </React.Fragment>
@@ -2215,7 +2323,7 @@ const MODULE_MAP: ModuleMapEntry[] = [
   { n:"05", title:"Activities & Cost Drivers", desc:"See exactly which step of your process costs the most money.", icon:"\uD83D\uDCCB", target:"products", livesIn:"open a product in What You Sell" },
   { n:"06", title:"Capacity & Yield", desc:"Understand how much you lose to waste, and what that's really costing you.", icon:"\u2699\uFE0F", target:"inputs", livesIn:"each resource's yield % in What You Buy" },
   { n:"07", title:"Cost Allocation", desc:"See exactly which of your bills (rent, salaries) are really being paid for by which product.", icon:"\uD83D\uDD00", target:"products", livesIn:"open a product in What You Sell" },
-  { n:"08", title:"Procurement & Suppliers", desc:"Compare suppliers side by side to see who actually costs you less once everything is included.", icon:"\uD83D\uDED2", target:null },
+  { n:"08", title:"Procurement & Suppliers", desc:"Compare suppliers side by side to see who actually costs you less once everything is included.", icon:"\uD83D\uDED2", target:"inputs", livesIn:"open a resource in What You Buy" },
   { n:"09", title:"CAPEX & OPEX", desc:"Work out the true cost of a big one-time purchase, spread fairly over the years you'll use it.", icon:"\uD83C\uDFE2", target:null },
   { n:"10", title:"Working Capital", desc:"Find out how much cash you need sitting in the bank just to keep the business running.", icon:"\uD83D\uDCB0", target:null },
   { n:"11", title:"Unit Economics", desc:"See the exact profit you make (or lose) on a single unit sold.", icon:"\uD83D\uDCCA", target:"products" },
