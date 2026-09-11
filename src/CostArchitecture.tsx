@@ -812,12 +812,75 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
     } finally { setCompleting(false); }
   }, [userId, activeProject, offerings, resources, bomLines, costPools, channels, offeringChannels, ctx, dx, toast]);
 
+  // HISTORICAL INTELLIGENCE REUSE — starting a new project from a past
+  // completed one, instead of from a blank AI discovery every time. Reuses
+  // ca_project_snapshots exactly as it already exists - no schema change.
+  // Every id is regenerated: this is a genuinely NEW project's data, not a
+  // pointer back to the old one, so editing it can never retroactively
+  // change history you already froze.
+  const startFromSnapshot = useCallback(async (snapshot: CaProjectSnapshot) => {
+    if (!userId || !activeProject) return;
+    if (offerings.length > 0 || resources.length > 0) {
+      const ok = window.confirm("This will replace what's currently in your workspace with the past project's data. Continue?");
+      if (!ok) return;
+    }
+    const idMap = new Map<string, string>();
+    const remap = (oldId: string) => { if (!idMap.has(oldId)) idMap.set(oldId, uid()); return idMap.get(oldId)!; };
+
+    const newResources = (snapshot.resources || []).map((r: any) => ({ ...r, id: remap(r.id), user_id: userId }));
+    const newOfferings = (snapshot.offerings || []).map((o: any) => ({ ...o, id: remap(o.id), user_id: userId }));
+    const newBomLines = (snapshot.bom_lines || []).map((b: any) => ({
+      ...b, id: uid(), user_id: userId,
+      offering_id: idMap.get(b.offering_id) || b.offering_id,
+      child_resource_id: b.child_resource_id ? (idMap.get(b.child_resource_id) || b.child_resource_id) : null,
+      child_offering_id: b.child_offering_id ? (idMap.get(b.child_offering_id) || b.child_offering_id) : null,
+    }));
+    const newPools = (snapshot.cost_pools || []).map((p: any) => ({ ...p, id: remap(p.id), user_id: userId }));
+    const newChannels = (snapshot.channels || []).map((c: any) => ({ ...c, id: remap(c.id), user_id: userId }));
+    const newOfferingChannels = (snapshot.offering_channels || []).map((oc: any) => ({
+      ...oc, id: uid(), user_id: userId,
+      offering_id: idMap.get(oc.offering_id) || oc.offering_id,
+      channel_id: idMap.get(oc.channel_id) || oc.channel_id,
+    }));
+
+    try {
+      // Clear whatever's currently live, exactly like completing a project does.
+      await Promise.all([
+        supabase.from("ca_resources").delete().eq("user_id", userId),
+        supabase.from("ca_offerings").delete().eq("user_id", userId),
+        supabase.from("ca_bom_lines").delete().eq("user_id", userId),
+        supabase.from("ca_cost_pools").delete().eq("user_id", userId),
+        supabase.from("ca_channels").delete().eq("user_id", userId),
+        supabase.from("ca_offering_channels").delete().eq("user_id", userId),
+      ]);
+      await Promise.all([
+        newResources.length ? supabase.from("ca_resources").insert(newResources) : null,
+        newOfferings.length ? supabase.from("ca_offerings").insert(newOfferings) : null,
+        newBomLines.length ? supabase.from("ca_bom_lines").insert(newBomLines) : null,
+        newPools.length ? supabase.from("ca_cost_pools").insert(newPools) : null,
+        newChannels.length ? supabase.from("ca_channels").insert(newChannels) : null,
+        newOfferingChannels.length ? supabase.from("ca_offering_channels").insert(newOfferingChannels) : null,
+      ].filter(Boolean));
+
+      setResources(newResources); setOfferings(newOfferings); setBomLines(newBomLines);
+      setCostPools(newPools); setChannels(newChannels); setOfferingChannels(newOfferingChannels);
+      toast("Copied into your current project. Every number is editable — nothing here is linked back to the old one.", "success");
+    } catch (e: any) {
+      toast("Could not copy that project: " + (e?.message || "unknown error"), "error");
+    }
+  }, [userId, activeProject, offerings.length, resources.length, toast]);
+
   const loadSnapshots = useCallback(async () => {
     if (!userId) return;
     const { data } = await supabase.from("ca_project_snapshots").select("*")
       .eq("user_id", userId).order("created_at", { ascending: false });
     setSnapshots((data as CaProjectSnapshot[]) ?? []);
   }, [userId]);
+
+  // Loaded proactively on mount now, not only when History is opened - the
+  // new "start from a past project" option on Start Here needs this data
+  // available immediately, not after a separate click.
+  useEffect(() => { void loadSnapshots(); }, [loadSnapshots]);
 
   // Aggregated once, from data the engine already computes per-offering per-
   // channel (ChannelEconomics.leakagePerUnit) - not a new calculation, a
@@ -1095,7 +1158,8 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
       <StartTab callAI={callAI} ctx={ctx} applyBlueprint={applyBlueprint}
         hasData={offerings.length > 0} goTo={setTab} companyName={companyName} openaiKey={openaiKey} showToast={showToast}
         resources={resources} delRes={delRes} costPools={costPools} delPool={delPool}
-        channels={channels} delCh={delCh} offerings={offerings} />
+        channels={channels} delCh={delCh} offerings={offerings}
+        completedProjects={projects.filter(p => p.status === "complete")} snapshots={snapshots} startFromSnapshot={startFromSnapshot} />
       <ExploreTheModel goTo={setTab} showToast={showToast} />
 
       {/* ═══════════════════════════════════════════════════════════════
@@ -1158,6 +1222,11 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
             {tab === "diagnostics" && (
               <>
                 <DiagnosticsTab dx={dx} M={M} goTo={setTab} />
+                {/* COST WATERFALL — a visual read of exactly the same numbers
+                    DiagnosticsTab already shows as text above, just easier
+                    to grasp at a glance. Pure display: reads dx, writes
+                    nothing, cannot disagree with the numbers beside it. */}
+                <CostWaterfallChart dx={dx} M={M} />
                 {/* MODULE 17 — TIME VALUE OF MONEY, self-contained: manages
                     its own load/save so nothing about DiagnosticsTab itself
                     needs to change to add this. */}
@@ -2467,6 +2536,61 @@ const DiagnosticsTab: React.FC<{ dx: PortfolioDiagnosis; M: (v: number) => strin
 };
 
 /* ============================================================================
+ * COST WATERFALL — a visual read of Revenue -> Variable Cost -> Fixed Cost
+ * -> Operating Profit, each bar stepping down from where the last one
+ * ended. Pure SVG, no chart library dependency, reads dx directly so it can
+ * never show a number that disagrees with the text elsewhere on this page.
+ * ========================================================================== */
+const CostWaterfallChart: React.FC<{ dx: PortfolioDiagnosis; M: (v: number) => string }> = ({ dx, M }) => {
+  const revenue = Math.max(0, dx.monthlyRevenue);
+  const varCost = Math.max(0, dx.monthlyVariableCost);
+  const fixedCost = Math.max(0, dx.monthlyFixedCost);
+  const profit = dx.monthlyOperatingProfit;
+
+  if (revenue <= 0) return null; // nothing meaningful to draw yet
+
+  const steps = [
+    { label: "Revenue", value: revenue, start: 0, end: revenue, color: "#14B8A6" },
+    { label: "Variable cost", value: -varCost, start: revenue, end: revenue - varCost, color: "#F59E0B" },
+    { label: "Fixed cost", value: -fixedCost, start: revenue - varCost, end: revenue - varCost - fixedCost, color: "#EF4444" },
+    { label: "Operating profit", value: profit, start: 0, end: profit, color: profit >= 0 ? "#4ADE80" : "#EF4444", isTotal: true },
+  ];
+
+  const maxVal = Math.max(revenue, Math.abs(profit), 1);
+  const H = 160, W = 100; // percentage-based, scales to container width
+  const barW = W / (steps.length * 1.6);
+  const gap = barW * 0.6;
+  const toY = (v: number) => H - (v / maxVal) * H;
+
+  return (
+    <div style={{ ...S.card, marginTop: 16 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>Where the money goes — cost waterfall</div>
+      <div style={S.note}>The exact same numbers as above, read as a picture — how revenue steps down through costs to what's actually left.</div>
+      <svg viewBox={`0 0 ${W} ${H + 30}`} style={{ width: "100%", height: 220, marginTop: 10 }} preserveAspectRatio="xMidYMid meet">
+        {steps.map((s, i) => {
+          const x = i * (barW + gap) + gap / 2;
+          const top = toY(Math.max(s.start, s.end));
+          const bottom = toY(Math.min(s.start, s.end));
+          const height = Math.max(1, bottom - top);
+          return (
+            <g key={i}>
+              <rect x={x} y={top} width={barW} height={height} fill={s.color} rx={0.8} />
+              <text x={x + barW / 2} y={H + 10} textAnchor="middle" fontSize={3.6} fill="#8b98a5">{s.label}</text>
+              <text x={x + barW / 2} y={top - 2.5} textAnchor="middle" fontSize={3.6} fontWeight={700} fill={s.color}>
+                {s.isTotal ? M(s.value) : (s.value < 0 ? "−" : "") + M(Math.abs(s.value))}
+              </text>
+              {i > 0 && i < steps.length && !s.isTotal && (
+                <line x1={x - gap / 2} y1={toY(s.start)} x2={x} y2={toY(s.start)} stroke="#5A6480" strokeWidth={0.3} strokeDasharray="1,1" />
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+};
+
+/* ============================================================================
  * MODULE 17 — TIME VALUE OF MONEY: PV, FV, NPV, IRR.
  * Self-contained: manages its own load and save, so DiagnosticsTab itself
  * needed zero changes to gain this.
@@ -2816,8 +2940,13 @@ const StartTab: React.FC<{
   costPools: CaCostPool[]; delPool: (id: string) => void;
   channels: CaChannel[]; delCh: (id: string) => void;
   offerings: CaOffering[];
+  // HISTORICAL INTELLIGENCE REUSE — starting from a past completed project
+  // instead of a blank AI discovery every time.
+  completedProjects: CaProject[]; snapshots: CaProjectSnapshot[];
+  startFromSnapshot: (s: CaProjectSnapshot) => void;
 }> = ({ callAI, ctx, applyBlueprint, hasData, goTo, companyName, openaiKey, showToast,
-        resources, delRes, costPools, delPool, channels, delCh, offerings }) => {
+        resources, delRes, costPools, delPool, channels, delCh, offerings,
+        completedProjects, snapshots, startFromSnapshot }) => {
   const [desc, setDesc] = useState("");
   const [busy, setBusy] = useState(false);
   // A SAFETY NET, independent of the timeout fix in BusinessBlueprint.ts:
@@ -2964,6 +3093,33 @@ const StartTab: React.FC<{
             </button>
           ))}
         </div>
+
+        {/* HISTORICAL INTELLIGENCE REUSE — an alternative to running AI
+            discovery fresh every time. Copies a completed project's real,
+            already-corrected numbers in as a starting point, with brand new
+            ids - editing this can never reach back and change the frozen
+            history it came from. */}
+        {completedProjects.length > 0 && (
+          <div style={{ ...S.card, marginBottom: 14, background: "rgba(255,255,255,0.015)" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>Or start from a past project</div>
+            <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5"), marginBottom: 8 }}>
+              Making something similar to one you've already costed? Copy it in as a starting point instead of researching from scratch — every number stays fully editable.
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {completedProjects.map((p) => {
+                const snap = snapshots.find((s) => s.project_id === p.id);
+                if (!snap) return null;
+                return (
+                  <button key={p.id} onClick={() => startFromSnapshot(snap)}
+                    style={{ ...S.btnGhost, fontSize: 10.5, textAlign: "left", padding: "8px 12px" }}>
+                    <div style={{ fontWeight: 700 }}>{p.name}</div>
+                    <div style={{ fontSize: 9, color: V("muted", "#8b98a5") }}>{snap.offerings.length} product{snap.offerings.length === 1 ? "" : "s"} \u00B7 {snap.resources.length} input{snap.resources.length === 1 ? "" : "s"}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
           <button onClick={run} disabled={busy || desc.trim().length < 12}
