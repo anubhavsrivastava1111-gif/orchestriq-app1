@@ -1010,7 +1010,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
           calculators." AI discovery and the full tile grid never disappear
           behind a tab anymore - this IS the workspace, permanently. */}
       <StartTab callAI={callAI} ctx={ctx} applyBlueprint={applyBlueprint}
-        hasData={offerings.length > 0} goTo={setTab} companyName={companyName} openaiKey={openaiKey} />
+        hasData={offerings.length > 0} goTo={setTab} companyName={companyName} openaiKey={openaiKey} showToast={showToast} />
       <ExploreTheModel goTo={setTab} showToast={showToast} />
 
       {/* ═══════════════════════════════════════════════════════════════
@@ -2263,7 +2263,8 @@ const StartTab: React.FC<{
   goTo: (t: TabKey) => void;
   companyName?: string;
   openaiKey?: string;
-}> = ({ callAI, ctx, applyBlueprint, hasData, goTo, companyName, openaiKey }) => {
+  showToast?: (msg: string, kind?: string) => void;
+}> = ({ callAI, ctx, applyBlueprint, hasData, goTo, companyName, openaiKey, showToast }) => {
   const [desc, setDesc] = useState("");
   const [busy, setBusy] = useState(false);
   // A SAFETY NET, independent of the timeout fix in BusinessBlueprint.ts:
@@ -2338,7 +2339,22 @@ const StartTab: React.FC<{
       // stops depending on a click that was too easy to miss.
       if (r.ok && r.blueprint) {
         const ok = await applyBlueprint(r.blueprint, { resources: new Set(), offerings: new Set(), channels: new Set(), costPools: new Set() });
-        if (ok) setApplied(true);
+        if (ok) {
+          setApplied(true);
+          // THE OTHER CONFIRMED GAP: when every real research attempt fails
+          // and the system falls back to a generic, no-AI starter template,
+          // that fallback was being applied and shown as an ordinary
+          // success - with nothing telling the user their result was NOT
+          // actually researched. For a complex product where every rung
+          // genuinely can fail, silence here is exactly what read as "this
+          // doesn't work" instead of "this is a placeholder, fill it in."
+          if (r.blueprint.confidence === "low" || (r.blueprint.warnings && r.blueprint.warnings.length)) {
+            showToast?.(
+              "Live research could not complete for this description, so a generic starter structure was used instead — every price shows \u201CEnter your price\u201D and needs your real numbers. Try Research again, or fill in What You Buy / What You Sell directly.",
+              "warning"
+            );
+          }
+        }
       }
     } catch (e: any) {
       if (cancelledRef.current) return;
