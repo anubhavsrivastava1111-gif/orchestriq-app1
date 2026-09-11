@@ -1,0 +1,17 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# SPA FALLBACK — REQUIRED FOR STEP 1's URL ROUTING TO WORK ON REFRESH.
+#
+# THE GAP THIS FIXES: without this file, requesting /cost-architecture
+# directly (a hard refresh, a bookmark, a shared link someone clicks) has
+# no matching file for Cloudflare Pages to serve, and returns a 404 - even
+# though the route is completely valid inside the app. This rule tells
+# Cloudflare: for any path that doesn't match a real file (a .js, .css, an
+# image), serve index.html instead, with a 200 status (not a redirect) so
+# the browser's address bar keeps the original URL and React can read it
+# to open the right module.
+#
+# Real static assets (already-existing files) are matched and served
+# normally BEFORE this catch-all rule is ever reached - this does not
+# change how any existing file on the site is served.
+# ═══════════════════════════════════════════════════════════════════════════
+/*    /index.html   200
