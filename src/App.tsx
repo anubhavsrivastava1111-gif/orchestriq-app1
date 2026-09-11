@@ -9176,7 +9176,16 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 check for an OpenAI key, so its voice input could only ever
                 be the free browser engine - confirmed and fixed. Same
                 lookup already used by Workspace and Live Boardroom. */}
-            <CostArchitecture showToast={showToast} companyName={co.name} onDiagnosis={publishCostDiagnosis} callAI={(prompt,useWebSearch)=>ask("You are a senior cost engineering and unit economics researcher. Return ONLY the exact JSON structure requested. No commentary, no markdown fences.",[{role:"user",content:prompt}],8000,!!useWebSearch)}
+            {/* THE CONFIRMED ROOT CAUSE: 8000 tokens is not enough for a
+                genuinely complex product - a laptop's real component list,
+                sub-assemblies and suppliers need far more room than a
+                pickle jar's does. A truncated response fails to parse as
+                JSON, every real research attempt falls through, and the
+                system correctly (by design) falls back to a generic,
+                no-AI placeholder template - which is exactly what looked
+                like "not working." Raised to give complex products enough
+                space to come back as a complete, valid response. */}
+            <CostArchitecture showToast={showToast} companyName={co.name} onDiagnosis={publishCostDiagnosis} callAI={(prompt,useWebSearch)=>ask("You are a senior cost engineering and unit economics researcher. Return ONLY the exact JSON structure requested. No commentary, no markdown fences.",[{role:"user",content:prompt}],16000,!!useWebSearch)}
               getProviderKey={(id:string)=>providerKey(keys,id)||undefined}/>
           </div>
         )}
