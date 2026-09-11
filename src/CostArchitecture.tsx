@@ -340,9 +340,15 @@ export interface CostArchitectureProps {
   onDiagnosis?: (d: PortfolioDiagnosis) => void;
   /** (prompt, useWebSearch) => text. The research ladder toggles search itself. */
   callAI?: (prompt: string, useWebSearch: boolean) => Promise<string>;
+  /** THE FIX: without this, voice input here could only ever be the free
+   *  native browser engine - there was no way for this module to know
+   *  whether the user had an OpenAI key at all. Same key-lookup function
+   *  already threaded into Workspace and Live Boardroom. */
+  getProviderKey?: (providerId: string) => string | undefined;
 }
 
-export default function CostArchitecture({ showToast, companyName, onDiagnosis, callAI }: CostArchitectureProps) {
+export default function CostArchitecture({ showToast, companyName, onDiagnosis, callAI, getProviderKey }: CostArchitectureProps) {
+  const openaiKey = getProviderKey?.("openai");
   const [tab, setTab] = useState<TabKey>("start");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1004,7 +1010,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
           calculators." AI discovery and the full tile grid never disappear
           behind a tab anymore - this IS the workspace, permanently. */}
       <StartTab callAI={callAI} ctx={ctx} applyBlueprint={applyBlueprint}
-        hasData={offerings.length > 0} goTo={setTab} companyName={companyName} />
+        hasData={offerings.length > 0} goTo={setTab} companyName={companyName} openaiKey={openaiKey} />
       <ExploreTheModel goTo={setTab} showToast={showToast} />
 
       {/* ═══════════════════════════════════════════════════════════════
@@ -1039,7 +1045,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
 
             {tab === "setup" && (
               <SetupTab ctx={ctx} patchCtx={patchCtx} costPools={costPools} patchPool={patchPool}
-                addPool={addPool} delPool={delPool} M={M} flagFor={flagFor} onAccept={acceptException} />
+                addPool={addPool} delPool={delPool} M={M} flagFor={flagFor} onAccept={acceptException} openaiKey={openaiKey} />
             )}
 
             {tab === "inputs" && (
@@ -1120,8 +1126,8 @@ const SetupTab: React.FC<{
   ctx: CaBusinessContext | null; patchCtx: (p: Partial<CaBusinessContext>) => void;
   costPools: CaCostPool[]; patchPool: (id: string, p: Partial<CaCostPool>) => void;
   addPool: () => void; delPool: (id: string) => void; M: (v: number) => string;
-  flagFor: FlagLookup; onAccept: AcceptFn;
-}> = ({ ctx, patchCtx, costPools, patchPool, addPool, delPool, M, flagFor, onAccept }) => {
+  flagFor: FlagLookup; onAccept: AcceptFn; openaiKey?: string;
+}> = ({ ctx, patchCtx, costPools, patchPool, addPool, delPool, M, flagFor, onAccept, openaiKey }) => {
   const monthlyFixed = costPools.reduce((s, p) => {
     const a = num(p.amount);
     return s + (p.period === "annual" ? a / 12 : p.period === "quarterly" ? a / 3 : a);
@@ -1148,8 +1154,12 @@ const SetupTab: React.FC<{
           </div>
           <div>
             <label style={S.lbl}>Your bottleneck</label>
-            <TextCell value={ctx?.constraint_resource_label ?? ""} onChange={(v) => patchCtx({ constraint_resource_label: v })}
-              placeholder="Oven hours, machine hours, senior staff time..." />
+            <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+              <TextCell value={ctx?.constraint_resource_label ?? ""} onChange={(v) => patchCtx({ constraint_resource_label: v })}
+                placeholder="Oven hours, machine hours, senior staff time..." />
+              <VoiceField value={ctx?.constraint_resource_label ?? ""} onChange={(v) => patchCtx({ constraint_resource_label: v })}
+                compact allowReadAloud={false} openaiKey={openaiKey} />
+            </div>
           </div>
           <div>
             <label style={S.lbl}>Bottleneck capacity per month</label>
@@ -2252,7 +2262,8 @@ const StartTab: React.FC<{
   hasData: boolean;
   goTo: (t: TabKey) => void;
   companyName?: string;
-}> = ({ callAI, ctx, applyBlueprint, hasData, goTo, companyName }) => {
+  openaiKey?: string;
+}> = ({ callAI, ctx, applyBlueprint, hasData, goTo, companyName, openaiKey }) => {
   const [desc, setDesc] = useState("");
   const [busy, setBusy] = useState(false);
   // A SAFETY NET, independent of the timeout fix in BusinessBlueprint.ts:
@@ -2373,7 +2384,7 @@ const StartTab: React.FC<{
           placeholder={companyName ? `e.g. ${companyName} is a ...` : "e.g. A bakery in Lucknow making birthday cakes and bread, selling walk-in and on Swiggy"}
           style={{ ...S.inp, resize: "vertical", lineHeight: 1.55, minHeight: 84, fontSize: 12.5 }} />
         <div style={{ marginTop: 6 }}>
-          <VoiceField value={desc} onChange={setDesc} disabled={busy} />
+          <VoiceField value={desc} onChange={setDesc} disabled={busy} openaiKey={openaiKey} />
         </div>
 
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "9px 0 12px" }}>
