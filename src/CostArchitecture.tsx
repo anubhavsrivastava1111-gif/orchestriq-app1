@@ -355,6 +355,7 @@ export interface CostArchitectureProps {
 export default function CostArchitecture({ showToast, companyName, onDiagnosis, callAI, getProviderKey }: CostArchitectureProps) {
   const openaiKey = getProviderKey?.("openai");
   const [tab, setTab] = useState<TabKey>("start");
+  const [showSOP, setShowSOP] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -538,7 +539,12 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
 
   const patchRes = (id: string, p: Partial<CaResource>) => {
     setResources((prev) => {
-      const next = prev.map((r) => (r.id === id ? { ...r, ...p } : r));
+      // THE FIX: an "AI ESTIMATE" badge that never clears, even after you've
+      // actually corrected the number, becomes permanently misleading -
+      // exactly the opposite of what it's for. Editing the price you were
+      // actually uncertain about now counts as confirming it.
+      const clearsConfidence = p.purchase_price !== undefined;
+      const next = prev.map((r) => (r.id === id ? { ...r, ...p, ...(clearsConfidence ? { data_confidence: null } : {}) } : r));
       const row = next.find((r) => r.id === id);
       if (row) persist("ca_resources", row);
       return next;
@@ -546,7 +552,8 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
   };
   const patchOff = (id: string, p: Partial<CaOffering>) => {
     setOfferings((prev) => {
-      const next = prev.map((o) => (o.id === id ? { ...o, ...p } : o));
+      const clearsConfidence = p.list_price !== undefined;
+      const next = prev.map((o) => (o.id === id ? { ...o, ...p, ...(clearsConfidence ? { data_confidence: null } : {}) } : o));
       const row = next.find((o) => o.id === id);
       if (row) persist("ca_offerings", row);
       return next;
@@ -996,9 +1003,17 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
 
   return (
     <div style={S.wrap}>
+      {showSOP && <SOPDrawer onClose={() => setShowSOP(false)} />}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h1 style={S.h1}>Cost Architect</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h1 style={S.h1}>Cost Architect</h1>
+            {/* THE SOP BUTTON, top of the module, exactly where asked. */}
+            <button onClick={() => setShowSOP(true)}
+              style={{ ...S.btnGhost, fontSize: 10.5, padding: "5px 11px", display: "flex", alignItems: "center", gap: 5 }}>
+              {"\uD83D\uDCD6"} How to use this
+            </button>
+          </div>
           <div style={S.sub}>
             {companyName ? companyName + " \u00B7 " : ""}Universal Cost, Management Accounting &amp; Economic Intelligence Engine.
           </div>
@@ -2886,6 +2901,151 @@ const MODULE_MAP: ModuleMapEntry[] = [
   { n:"19", title:"Optimization", desc:"Get concrete suggestions on where you can cut cost or improve profit right now.", icon:"\uD83C\uDFAF", target:"diagnostics", livesIn:"Diagnostics tab" },
   { n:"20", title:"Reports & Export", desc:"Get a clean summary of everything, ready to share or print.", icon:"\uD83D\uDCC4", target:"diagnostics", livesIn:"Diagnostics tab" },
 ];
+
+// ============================================================================
+// THE SOP — written by having actually built and personally verified every
+// one of these 20 modules, with the exact real pitfalls found along the way,
+// not a generic description of what each one "should" do.
+// ============================================================================
+interface SopEntry { n: string; title: string; steps: string[]; pitfall: string; troubleshoot: string; }
+const SOP_CONTENT: SopEntry[] = [
+  { n: "01", title: "Project Setup",
+    steps: ["Fill in your industry, location, and currency here first, before entering any costs.", "Every price and calculation elsewhere on this page assumes this is set correctly for YOUR business."],
+    pitfall: "Changing currency later does NOT convert numbers you already entered — ₹500 typed under INR stays \"500\" if you switch to USD. Set currency right at the very start.",
+    troubleshoot: "If numbers look wrong everywhere, check this tab first — a wrong industry or currency here quietly throws off everything downstream." },
+  { n: "02", title: "AI Discovery (Start Here)",
+    steps: ["Describe your business in plain words — what you make or sell, roughly where, and how you sell it (shop, online, wholesale).", "Press \"Research and build my cost model\" — it saves automatically the moment it finishes, no second click needed.", "Review the categorized results that appear — delete anything that doesn't apply to your business."],
+    pitfall: "Vague descriptions get vague results. \"I sell food\" produces a weak, generic model. \"I make 500g jars of mango pickle, sold through local shops and Instagram\" produces a real, specific one.",
+    troubleshoot: "If it says a generic placeholder template was used instead of real research, that means every AI attempt failed for this description — try rephrasing more specifically, or try again; a 45-second limit per attempt means it won't hang forever." },
+  { n: "03", title: "Cost Components (What You Buy)",
+    steps: ["Review every material, ingredient, or supply the AI found.", "Add anything missing with \"+ Add input\".", "Check the \"Usable %\" (yield) on each one — this matters more than people expect."],
+    pitfall: "An \"AI ESTIMATE\" or \"NEEDS YOUR NUMBER\" badge next to an item's name means exactly what it says — check that price against reality. Editing the price clears the badge automatically once you've corrected it.",
+    troubleshoot: "If a cost looks too low, check whether freight, duty, or other landed costs are filled in — the \"sticker price\" alone is rarely the true cost." },
+  { n: "04", title: "Resources & Workforce",
+    steps: ["Open any resource marked \"Labour\".", "Fill in scheduled hours, leave, and how much of paid time is actually productive.", "The Activity Cost calculator at the bottom lets you cost a specific task — e.g. \"100 units × 6 minutes each\"."],
+    pitfall: "The \"effective hourly cost\" shown will be noticeably HIGHER than salary ÷ scheduled hours. That's correct, not a bug — it accounts for leave, meetings, and admin time that salary-only math ignores.",
+    troubleshoot: "If the effective cost seems too high, check the \"meetings + admin\" and \"utilization\" percentages — small changes there move this number a lot." },
+  { n: "05", title: "Activities & Cost Drivers",
+    steps: ["Open a product in What You Sell.", "The \"Cost by process step\" section groups costs by the production step each ingredient is tagged to."],
+    pitfall: "This only groups correctly if each input has a step name filled in (Mixing, Baking, Packaging, etc.). Untagged items land in \"Unassigned\".",
+    troubleshoot: "If everything shows as one lump under \"Unassigned\", go back to What You Buy and check the step name on each BOM line." },
+  { n: "06", title: "Capacity & Yield",
+    steps: ["On each resource in What You Buy, set the realistic \"Usable %\" — how much of what you buy actually ends up in the finished product."],
+    pitfall: "100% yield is almost never realistic. Trimming, spoilage, and rejects are normal — leaving this at 100% quietly understates your true cost.",
+    troubleshoot: "If your break-even number seems optimistic, this is the first place to check — a too-generous yield number is the most common cause." },
+  { n: "07", title: "Cost Allocation",
+    steps: ["Open a product in What You Sell.", "\"Where your overhead allocation comes from\" shows exactly which fixed cost pool contributed how much to this specific product."],
+    pitfall: "Pools that allocate by labour, machine, or constraint hours show \"not shown\" here — that data isn't tracked yet, stated honestly rather than guessed. The total elsewhere still uses the correct number.",
+    troubleshoot: "If a pool's allocation looks too high or low for a product, check its \"basis\" — revenue-based allocation gives more to your best-selling products, which is sometimes not what you want." },
+  { n: "08", title: "Procurement & Suppliers",
+    steps: ["Open any resource.", "\"Compare suppliers\" — add an alternative supplier's price, freight, and duty.", "The cheapest option is flagged automatically."],
+    pitfall: "MOQ (minimum order quantity) and lead time are captured but not factored into the cost comparison — a cheaper supplier with a huge minimum order or a 3-month wait might not actually be practical.",
+    troubleshoot: "If \"cheapest\" doesn't match your gut feeling, double check you've entered ALL landed costs (freight, duty) for the alternative, not just the sticker price." },
+  { n: "09", title: "CAPEX & OPEX",
+    steps: ["In Setup, scroll to \"Big one-time purchases\".", "Enter what you paid, what it'll be worth at the end, and how many years you'll use it.", "It automatically adds a matching monthly cost to your Fixed Costs — nothing else to do."],
+    pitfall: "Do not also manually add the same machine as a separate fixed cost — that double-counts it. Its monthly depreciation already appears automatically.",
+    troubleshoot: "If fixed costs look too high, check Fixed Costs in Setup for a duplicate \"Depreciation — [item]\" entry alongside a manually-added one for the same thing." },
+  { n: "10", title: "Working Capital",
+    steps: ["In Setup, below CAPEX, enter how many days of stock you hold, how long customers take to pay, and how long you take to pay suppliers."],
+    pitfall: "This needs real revenue and cost data from Start Here to convert days into an actual rupee figure — filled in before any sales data exists, it will show ₹0.",
+    troubleshoot: "If the cash-required number seems too low, make sure What You Sell actually has volume and price filled in for your products." },
+  { n: "11", title: "Unit Economics",
+    steps: ["The \"Cost breakdown at a glance\" card on Start Here, and each product's own numbers in What You Sell, show this automatically once data exists."],
+    pitfall: "None significant — this is a straightforward read of already-verified numbers.",
+    troubleshoot: "If a product's cost per unit looks wrong, check its BOM (recipe) in What You Sell for a missing or duplicated ingredient line." },
+  { n: "12", title: "Customer Economics",
+    steps: ["Open a product in What You Sell.", "Fill in monthly churn %, cost to win a customer, and expected customer lifetime.", "The LTV:CAC ratio appears automatically — 3x or higher is generally healthy."],
+    pitfall: "This section is hidden for products marked \"Sub-Assembly\" — those aren't sold directly to an end customer, so customer economics genuinely don't apply.",
+    troubleshoot: "If the ratio seems off, double check \"expected customer lifetime\" — a small change here has an outsized effect on the result." },
+  { n: "13", title: "Marketing & Sales",
+    steps: ["In Where You Sell, add each channel you sell through.", "Fill in commission %, ad spend %, and any other fees each one takes."],
+    pitfall: "Leaving fields blank isn't the same as zero — an unfilled ad spend % will understate how much a channel actually costs you.",
+    troubleshoot: "If \"what you actually keep\" seems too high for a marketplace channel, check every fee field is filled in, not just commission." },
+  { n: "14", title: "Pricing Engine",
+    steps: ["Open a product, set a \"Target Margin %\".", "A suggested price appears automatically, compared against your current price."],
+    pitfall: "The suggested price is based on FULLY LOADED cost — including allocated overhead — so it can be noticeably higher than a simple \"cost plus a bit\" price you might expect.",
+    troubleshoot: "If the suggested price seems too high, check Cost Allocation (Module 07) for this product — a large overhead share could be the reason." },
+  { n: "15", title: "Break-even Analysis",
+    steps: ["Appears automatically on each product once cost, price, and volume are filled in — no separate action needed."],
+    pitfall: "This is PER PRODUCT. Your overall business break-even (in Diagnostics) can differ — a product can be above its own break-even while the business overall isn't, or vice versa.",
+    troubleshoot: "If a product shows red (below its own break-even) but your business looks fine overall, other products are currently subsidizing this one." },
+  { n: "16", title: "Profitability & ROI",
+    steps: ["Check the Diagnostics tab for the overall profit, margin, and confidence picture of your whole business."],
+    pitfall: "None significant.",
+    troubleshoot: "If the confidence score is low, check for resources or products still marked \"NEEDS YOUR NUMBER\" — those pull the confidence score down." },
+  { n: "17", title: "Time Value of Money",
+    steps: ["In Diagnostics, add an investment to check.", "Enter what you'd spend now (as a negative number) and what you expect back each following year.", "NPV and the real rate of return (IRR) appear automatically."],
+    pitfall: "IRR shows \"Not calculable\" when your cash flows never actually turn from negative to positive (or vice versa) — that's mathematically correct, not a bug. Every real investment needs at least one sign change.",
+    troubleshoot: "If NPV is negative but you expected a good investment, double check your \"cost of capital\" percentage — too high a rate will make almost anything look unprofitable on paper." },
+  { n: "18", title: "Scenarios & What-If",
+    steps: ["In Diagnostics, add a scenario.", "Adjust price, volume, cost, or fixed cost percentages to see the effect on profit — without touching your real numbers."],
+    pitfall: "This is a sandbox only — it never changes your actual saved data, no matter what you set the sliders to. To make a change real, edit the actual value in its own tile.",
+    troubleshoot: "If the projected profit doesn't match your own mental math, remember price and volume changes compound together (multiply), not add." },
+  { n: "19", title: "Optimization",
+    steps: ["Check Diagnostics for \"Savings identified\" and the ranked list of opportunities below it — this is generated automatically from your data."],
+    pitfall: "None significant.",
+    troubleshoot: "If no opportunities appear, your model may not have enough data yet — add more resources, products, or channels for it to analyze." },
+  { n: "20", title: "Reports & Export",
+    steps: ["In Diagnostics, find \"Executive summary\".", "Press \"Print / Save as PDF\" — this uses your browser's own print dialog.", "Choose \"Save as PDF\" as the destination instead of a physical printer if you want a file."],
+    pitfall: "Every browser's print dialog looks slightly different — the important part is picking \"Save as PDF\" (or similar) rather than an actual printer, if you want a file rather than a paper copy.",
+    troubleshoot: "If the printed page looks wrong, only the summary itself is meant to print — everything else on the page is intentionally hidden during printing." },
+];
+
+const SOPDrawer: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const [openN, setOpenN] = useState<string | null>(null);
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(5,7,12,0.78)", display: "flex", justifyContent: "flex-end" }} onClick={onClose}>
+      <div style={{ width: "min(760px, 95vw)", height: "100%", background: V("bg", "#0d1117"), borderLeft: "1px solid " + V("border", "#232838"), overflowY: "auto", padding: "18px 22px" }} onClick={(e) => e.stopPropagation()}>
+        <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "#14B8A6", fontSize: 12.5, fontWeight: 800, marginBottom: 16, padding: 0 }}>
+          {"\u2190"} Back to Cost Architect
+        </button>
+        <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>How to use Cost Architect</div>
+        <div style={{ fontSize: 11, color: V("muted", "#8b98a5"), marginBottom: 18, lineHeight: 1.6 }}>
+          Written for someone who has never run a cost model before. Start with Module 01 and 02 in order — everything else builds on what you enter there.
+          Click any module below to expand its steps, its one real pitfall to watch for, and what to do if something looks wrong.
+        </div>
+
+        {SOP_CONTENT.map((s) => {
+          const isOpen = openN === s.n;
+          return (
+            <div key={s.n} style={{ marginBottom: 8, border: "1px solid " + V("border", "#232838"), borderRadius: 8, overflow: "hidden" }}>
+              <button onClick={() => setOpenN(isOpen ? null : s.n)}
+                style={{ width: "100%", textAlign: "left", padding: "10px 14px", background: isOpen ? "rgba(20,184,166,0.06)" : "transparent", border: "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: V("ink", "#e6edf3") }}>{s.n}. {s.title}</span>
+                <span style={{ fontSize: 12, color: "#14B8A6" }}>{isOpen ? "\u2212" : "+"}</span>
+              </button>
+              {isOpen && (
+                <div style={{ padding: "4px 14px 14px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: V("muted", "#8b98a5"), textTransform: "uppercase", marginTop: 8, marginBottom: 4 }}>Steps</div>
+                  <ol style={{ margin: 0, paddingLeft: 18, fontSize: 11, lineHeight: 1.7 }}>
+                    {s.steps.map((step, i) => <li key={i}>{step}</li>)}
+                  </ol>
+                  <div style={{ marginTop: 10, padding: "8px 10px", background: WARN.bg, borderRadius: 6, border: "1px solid " + WARN.fg + "33" }}>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: WARN.fg, textTransform: "uppercase", marginBottom: 3 }}>{"\u26A0"} Watch out for</div>
+                    <div style={{ fontSize: 10.5, lineHeight: 1.6 }}>{s.pitfall}</div>
+                  </div>
+                  <div style={{ marginTop: 8, padding: "8px 10px", background: "rgba(255,255,255,0.02)", borderRadius: 6 }}>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: V("muted", "#8b98a5"), textTransform: "uppercase", marginBottom: 3 }}>If something looks wrong</div>
+                    <div style={{ fontSize: 10.5, lineHeight: 1.6, color: V("muted", "#8b98a5") }}>{s.troubleshoot}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        <div style={{ marginTop: 20, padding: "12px 14px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid " + V("border", "#232838") }}>
+          <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>General troubleshooting</div>
+          <div style={{ fontSize: 10.5, lineHeight: 1.7, color: V("muted", "#8b98a5") }}>
+            <strong>"Saving..." never changes to "Saved":</strong> check your internet connection — the save will retry, and your work stays safely in the browser until it succeeds.<br/>
+            <strong>Numbers seem inconsistent between tabs:</strong> everything on this page recalculates from the same underlying data automatically — if two tabs disagree, refresh the page once to rule out a display delay.<br/>
+            <strong>Lost track of what you changed:</strong> check the History tab — completing a project freezes an exact copy of everything, which you can always look back at.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const ExploreTheModel: React.FC<{ goTo:(t:TabKey)=>void; showToast?:(m:string,k?:string)=>void }> = ({ goTo, showToast }) => {
   const builtCount = MODULE_MAP.filter(m=>m.target!=null).length;
