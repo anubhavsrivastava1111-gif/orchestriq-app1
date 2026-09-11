@@ -827,19 +827,22 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
   // description, both for the new tile grid AND reused by the existing
   // compact tab bar underneath it - one source of truth, zero duplicated
   // labels that could drift apart from each other.
+  // THE FIX: every description below now says what you will ACHIEVE by
+  // filling it in, not just what data lives there - in plain words, no
+  // accounting terms without an explanation attached.
   const TABS: Array<{ k: TabKey; label: string; count?: number; hint: string; icon: string; tileNote: string }> = [
-    { k: "start",       label: "Start here", icon: "\u2728", tileNote: "Describe your business - AI builds your whole model",
-      hint: "Describe your business in your own words. The AI researches real prices and drafts your whole cost model automatically - nothing else to do on this screen." },
-    { k: "setup",       label: "Setup", icon: "\u2699\uFE0F", tileNote: "Industry, location, currency, and units",
-      hint: "Basic facts about your business - industry, location, currency, how you measure output. This is used to make every calculation elsewhere on this page realistic for YOUR business, not a generic template." },
-    { k: "inputs",      label: "What you buy",  count: resources.length, icon: "\uD83D\uDCE6", tileNote: "Ingredients, materials, labour, rent, software - true cost after waste and fees",
-      hint: "Everything you pay for to run this business - ingredients, materials, people's time, rent, software. Each one shows its true cost after wastage and fees, not just the sticker price." },
-    { k: "products",    label: "What you sell", count: offerings.length, icon: "\uD83C\uDFF7\uFE0F", tileNote: "Full cost, pricing, break-even, and customer economics per product",
-      hint: "Each thing you sell, with its full cost, suggested price, break-even point, and where the money actually goes for that one product." },
-    { k: "channels",    label: "Where you sell", count: channels.length, icon: "\uD83D\uDED2", tileNote: "Commission, fees, and what you actually keep per channel",
-      hint: "Every place you sell through - your own shop, a marketplace, a reseller - each with its own commission, fees, and how much of the sale price you actually keep." },
-    { k: "diagnostics", label: "Diagnostics", icon: "\uD83E\uDE7A", tileNote: "The overall verdict for your whole business",
-      hint: "The overall verdict for your whole business: is it profitable, where the risk is, and what to fix first - built from everything on the other tabs." },
+    { k: "start",       label: "Start here", icon: "\u2728", tileNote: "Tell us what you're making or selling - we'll find the real costs for you",
+      hint: "Just describe your business in plain words. We'll research real prices and build your whole cost picture automatically - you don't need to know any accounting terms to start." },
+    { k: "setup",       label: "Setup", icon: "\u2699\uFE0F", tileNote: "A few basics so every number elsewhere is calculated correctly for YOU",
+      hint: "Your industry, location, and currency. Getting this right means every number on every other tile is calculated for your actual business, not a generic guess." },
+    { k: "inputs",      label: "What you buy",  count: resources.length, icon: "\uD83D\uDCE6", tileNote: "See the REAL cost of everything you pay for - after waste, after fees",
+      hint: "Everything you spend money on - materials, people's time, rent, software. You'll see the true cost of each one after accounting for waste and fees, not just the price tag." },
+    { k: "products",    label: "What you sell", count: offerings.length, icon: "\uD83C\uDFF7\uFE0F", tileNote: "Find out what price to charge to actually make money",
+      hint: "For each thing you sell: what it truly costs you, what price you should charge to make a profit, and how many you need to sell before you stop losing money." },
+    { k: "channels",    label: "Where you sell", count: channels.length, icon: "\uD83D\uDED2", tileNote: "See how much of each sale you actually keep, after fees",
+      hint: "Every place you sell through - your own shop, a marketplace, a reseller. Each one takes a cut - this shows you exactly how much reaches your pocket after they take theirs." },
+    { k: "diagnostics", label: "Diagnostics", icon: "\uD83E\uDE7A", tileNote: "The bottom line: is your business actually going to make money?",
+      hint: "One clear verdict on your whole business - are you profitable, where's the biggest risk, and what's the single most important thing to fix first." },
   ];
   const tabBadge = (k: TabKey) => {
     const t = (tabFlags as any)[k]; if (!t) return null;
@@ -1010,7 +1013,9 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
           calculators." AI discovery and the full tile grid never disappear
           behind a tab anymore - this IS the workspace, permanently. */}
       <StartTab callAI={callAI} ctx={ctx} applyBlueprint={applyBlueprint}
-        hasData={offerings.length > 0} goTo={setTab} companyName={companyName} openaiKey={openaiKey} showToast={showToast} />
+        hasData={offerings.length > 0} goTo={setTab} companyName={companyName} openaiKey={openaiKey} showToast={showToast}
+        resources={resources} delRes={delRes} costPools={costPools} delPool={delPool}
+        channels={channels} delCh={delCh} offerings={offerings} />
       <ExploreTheModel goTo={setTab} showToast={showToast} />
 
       {/* ═══════════════════════════════════════════════════════════════
@@ -2198,27 +2203,31 @@ interface ModuleMapEntry {
   target: TabKey | null;   // null = not built yet
   livesIn?: string;        // shown when the module is real but nested inside another tab
 }
+// THE FIX: every single one of these now says what you'll be able to DO or
+// KNOW once it's filled in - in words anyone can understand, whether or not
+// they've ever run a business before. No term is used without saying what
+// it means in plain English right there in the same sentence.
 const MODULE_MAP: ModuleMapEntry[] = [
-  { n:"01", title:"Project Setup", desc:"Define your business, scope, location, currency and timeline", icon:"\uD83D\uDCC4", target:"setup" },
-  { n:"02", title:"AI Discovery", desc:"Automatically identify all cost components and assumptions", icon:"\u2728", target:"start" },
-  { n:"03", title:"Cost Components", desc:"Materials, labour, overhead, logistics and more", icon:"\uD83D\uDCE6", target:"inputs" },
-  { n:"04", title:"Resources & Workforce", desc:"Employee costs, FTE, capacity and rate cards", icon:"\uD83D\uDC65", target:"inputs", livesIn:"open a Labour resource in What You Buy" },
-  { n:"05", title:"Activities & Cost Drivers", desc:"Activity-based costing for any process or operation", icon:"\uD83D\uDCCB", target:"products", livesIn:"open a product in What You Sell" },
-  { n:"06", title:"Capacity & Yield", desc:"Production/service capacity, utilization and wastage", icon:"\u2699\uFE0F", target:"inputs", livesIn:"each resource's yield % in What You Buy" },
-  { n:"07", title:"Cost Allocation", desc:"Allocate fixed and indirect costs using multiple methods", icon:"\uD83D\uDD00", target:"products", livesIn:"open a product in What You Sell" },
-  { n:"08", title:"Procurement & Suppliers", desc:"Supplier comparison, landed cost and make vs buy", icon:"\uD83D\uDED2", target:null },
-  { n:"09", title:"CAPEX & OPEX", desc:"Investment, depreciation and lifecycle costs", icon:"\uD83C\uDFE2", target:null },
-  { n:"10", title:"Working Capital", desc:"Inventory, receivables, payables and cash conversion cycle", icon:"\uD83D\uDCB0", target:null },
-  { n:"11", title:"Unit Economics", desc:"Cost per unit, contribution, margins and pricing", icon:"\uD83D\uDCCA", target:"products" },
-  { n:"12", title:"Customer Economics", desc:"CAC, retention, LTV and customer profitability", icon:"\uD83D\uDC64", target:"products", livesIn:"open a product in What You Sell" },
-  { n:"13", title:"Marketing & Sales", desc:"Marketing spend, conversion, CAC and sales economics", icon:"\uD83D\uDCE2", target:"channels" },
-  { n:"14", title:"Pricing Engine", desc:"Cost-plus, target margin, market and value-based pricing", icon:"\uD83C\uDFF7\uFE0F", target:"products", livesIn:"open a product in What You Sell" },
-  { n:"15", title:"Break-even Analysis", desc:"Break-even units, revenue, customers and time to break-even", icon:"\uD83D\uDCC8", target:"products", livesIn:"open a product in What You Sell" },
-  { n:"16", title:"Profitability & ROI", desc:"P&L, contribution, ROI, payback and financial returns", icon:"\uD83D\uDCC8", target:"diagnostics" },
-  { n:"17", title:"Time Value of Money", desc:"PV, FV, NPV, IRR, inflation and escalation", icon:"\u23F1\uFE0F", target:null },
-  { n:"18", title:"Scenarios & What-If", desc:"Base, upside, downside and custom scenarios", icon:"\uD83D\uDD00", target:null },
-  { n:"19", title:"Optimization", desc:"Identify savings, automation and improvement opportunities", icon:"\uD83C\uDFAF", target:"diagnostics", livesIn:"Diagnostics tab" },
-  { n:"20", title:"Reports & Export", desc:"Executive summary and detailed analysis reports", icon:"\uD83D\uDCC4", target:null },
+  { n:"01", title:"Project Setup", desc:"A few basic facts so every number elsewhere gets calculated correctly for YOUR business.", icon:"\uD83D\uDCC4", target:"setup" },
+  { n:"02", title:"AI Discovery", desc:"Tell us what you're making or selling - we'll find real costs and fill in the rest for you.", icon:"\u2728", target:"start" },
+  { n:"03", title:"Cost Components", desc:"See every single thing you spend money on, listed out clearly.", icon:"\uD83D\uDCE6", target:"inputs" },
+  { n:"04", title:"Resources & Workforce", desc:"Find out what an employee or worker really costs you per hour, once everything is accounted for.", icon:"\uD83D\uDC65", target:"inputs", livesIn:"open a Labour resource in What You Buy" },
+  { n:"05", title:"Activities & Cost Drivers", desc:"See exactly which step of your process costs the most money.", icon:"\uD83D\uDCCB", target:"products", livesIn:"open a product in What You Sell" },
+  { n:"06", title:"Capacity & Yield", desc:"Understand how much you lose to waste, and what that's really costing you.", icon:"\u2699\uFE0F", target:"inputs", livesIn:"each resource's yield % in What You Buy" },
+  { n:"07", title:"Cost Allocation", desc:"See exactly which of your bills (rent, salaries) are really being paid for by which product.", icon:"\uD83D\uDD00", target:"products", livesIn:"open a product in What You Sell" },
+  { n:"08", title:"Procurement & Suppliers", desc:"Compare suppliers side by side to see who actually costs you less once everything is included.", icon:"\uD83D\uDED2", target:null },
+  { n:"09", title:"CAPEX & OPEX", desc:"Work out the true cost of a big one-time purchase, spread fairly over the years you'll use it.", icon:"\uD83C\uDFE2", target:null },
+  { n:"10", title:"Working Capital", desc:"Find out how much cash you need sitting in the bank just to keep the business running.", icon:"\uD83D\uDCB0", target:null },
+  { n:"11", title:"Unit Economics", desc:"See the exact profit you make (or lose) on a single unit sold.", icon:"\uD83D\uDCCA", target:"products" },
+  { n:"12", title:"Customer Economics", desc:"Find out if a typical customer is worth more than what it costs you to win them.", icon:"\uD83D\uDC64", target:"products", livesIn:"open a product in What You Sell" },
+  { n:"13", title:"Marketing & Sales", desc:"See what it actually costs to find and win one new customer.", icon:"\uD83D\uDCE2", target:"channels" },
+  { n:"14", title:"Pricing Engine", desc:"Get told exactly what price to charge to hit the profit margin you want.", icon:"\uD83C\uDFF7\uFE0F", target:"products", livesIn:"open a product in What You Sell" },
+  { n:"15", title:"Break-even Analysis", desc:"Find the exact number you need to sell before you stop losing money and start earning.", icon:"\uD83D\uDCC8", target:"products", livesIn:"open a product in What You Sell" },
+  { n:"16", title:"Profitability & ROI", desc:"See the full picture of whether the business actually makes money overall.", icon:"\uD83D\uDCC8", target:"diagnostics" },
+  { n:"17", title:"Time Value of Money", desc:"See what a big future cost or return is really worth in today's money.", icon:"\u23F1\uFE0F", target:null },
+  { n:"18", title:"Scenarios & What-If", desc:"See what happens to your profit if prices, costs, or sales change - before it actually happens.", icon:"\uD83D\uDD00", target:null },
+  { n:"19", title:"Optimization", desc:"Get concrete suggestions on where you can cut cost or improve profit right now.", icon:"\uD83C\uDFAF", target:"diagnostics", livesIn:"Diagnostics tab" },
+  { n:"20", title:"Reports & Export", desc:"Get a clean summary of everything, ready to share or print.", icon:"\uD83D\uDCC4", target:null },
 ];
 
 const ExploreTheModel: React.FC<{ goTo:(t:TabKey)=>void; showToast?:(m:string,k?:string)=>void }> = ({ goTo, showToast }) => {
@@ -2264,7 +2273,18 @@ const StartTab: React.FC<{
   companyName?: string;
   openaiKey?: string;
   showToast?: (msg: string, kind?: string) => void;
-}> = ({ callAI, ctx, applyBlueprint, hasData, goTo, companyName, openaiKey, showToast }) => {
+  // THE FIX FOR "SHOW ME EVERYTHING FIRST, FRAGMENTED BY COST TYPE": this
+  // screen previously said "Added to your model" and nothing else - the
+  // user then had to go open several different tiles just to see what was
+  // actually found. These let this screen show the real, complete,
+  // categorized result right here, with a working delete on every single
+  // line, before anyone has to touch another tile.
+  resources: CaResource[]; delRes: (id: string) => void;
+  costPools: CaCostPool[]; delPool: (id: string) => void;
+  channels: CaChannel[]; delCh: (id: string) => void;
+  offerings: CaOffering[];
+}> = ({ callAI, ctx, applyBlueprint, hasData, goTo, companyName, openaiKey, showToast,
+        resources, delRes, costPools, delPool, channels, delCh, offerings }) => {
   const [desc, setDesc] = useState("");
   const [busy, setBusy] = useState(false);
   // A SAFETY NET, independent of the timeout fix in BusinessBlueprint.ts:
@@ -2727,17 +2747,122 @@ const StartTab: React.FC<{
           {/* ---- saved automatically - no separate click required anymore ---- */}
           <div style={{ ...S.card, borderColor: V("accent", "#4ADE80") }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: applied ? OK.fg : undefined }}>
-              {applied ? "\u2713 Added to your model" : "Saving\u2026"}
+              {applied ? "\u2713 Here\u2019s everything found for you" : "Saving\u2026"}
             </div>
             <div style={S.note}>
               {applied
-                ? "This has already been saved - there is nothing further to press. Go to What you sell and correct anything marked \u201CYou must enter\u201D. If anything above does not apply to your business, delete it from that tab; everything here can be edited or removed afterwards."
+                ? "Every cost below is already saved and grouped by type, so you can see the whole picture before opening any tile. Not right? Delete anything below with the \u2715, or fix the exact number later in its own tile."
                 : "Saving what was found\u2026"}
             </div>
           </div>
+
+          {/* THE ACTUAL FIX REQUESTED: "give me all the costing parameters,
+              fragmented into different types of cost" - before this, the
+              only way to see what was discovered was to open several
+              different tiles one at a time. This groups every real,
+              already-saved cost by its actual category (the same categories
+              CostEngine.ts itself uses - not invented buckets), in plain
+              language, with a working delete on every single line, right
+              here, before anyone has to touch another tile. */}
+          {applied && <FullCostBreakdown resources={resources} delRes={delRes} costPools={costPools}
+            delPool={delPool} channels={channels} delCh={delCh} offerings={offerings} cur={cur} />}
         </>
       )}
     </>
+  );
+};
+
+/* ============================================================================
+ * THE FULL, FRAGMENTED COST BREAKDOWN - every discovered item, grouped by
+ * real cost type, in plain language, editable inline.
+ * ========================================================================== */
+const RESOURCE_CLASS_INFO: Record<string, { label: string; explain: string; icon: string }> = {
+  MATERIAL:    { label: "Materials & Ingredients", explain: "What goes directly into making your product.", icon: "\uD83C\uDF3E" },
+  LABOUR:      { label: "Labour & People", explain: "What you pay people to do the work.", icon: "\uD83D\uDC65" },
+  PACKAGING:   { label: "Packaging", explain: "Boxes, jars, labels, wrapping - anything around the product itself.", icon: "\uD83D\uDCE6" },
+  LOGISTICS:   { label: "Logistics & Delivery", explain: "Getting your product from where it's made to where it's sold.", icon: "\uD83D\uDE9A" },
+  EQUIPMENT:   { label: "Equipment & Machinery", explain: "Tools and machines you use to make or deliver your product.", icon: "\u2699\uFE0F" },
+  FACILITY:    { label: "Facility & Space", explain: "Rent, workspace, and anywhere the work physically happens.", icon: "\uD83C\uDFE2" },
+  ENERGY:      { label: "Energy & Utilities", explain: "Electricity, gas, water, and similar running costs.", icon: "\u26A1" },
+  DIGITAL:     { label: "Software & Technology", explain: "Apps, subscriptions, and digital tools you pay for.", icon: "\uD83D\uDCBB" },
+  SUBCONTRACT: { label: "Outside Help & Contractors", explain: "Work you pay someone else to do for you.", icon: "\uD83E\uDD1D" },
+  OTHER:       { label: "Other Costs", explain: "Anything that didn't fit a more specific category.", icon: "\uD83D\uDCC4" },
+};
+
+const FullCostBreakdown: React.FC<{
+  resources: CaResource[]; delRes: (id: string) => void;
+  costPools: CaCostPool[]; delPool: (id: string) => void;
+  channels: CaChannel[]; delCh: (id: string) => void;
+  offerings: CaOffering[]; cur: string;
+}> = ({ resources, delRes, costPools, delPool, channels, delCh, offerings, cur }) => {
+  const M = (v: number) => fmtMoney(v, cur);
+  const byClass = new Map<string, CaResource[]>();
+  resources.forEach((r) => {
+    const k = r.resource_class || "OTHER";
+    if (!byClass.has(k)) byClass.set(k, []);
+    byClass.get(k)!.push(r);
+  });
+
+  const Row: React.FC<{ name: string; cost: string; onDelete: () => void }> = ({ name, cost, onDelete }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid " + V("border", "#1a2030") }}>
+      <span style={{ fontSize: 11.5 }}>{name}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700 }}>{cost}</span>
+        <button onClick={onDelete} title="Remove this" style={{ background: "none", border: "none", color: BAD.fg, cursor: "pointer", fontSize: 12, padding: 0 }}>{"\u2715"}</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+      {Array.from(byClass.entries()).map(([cls, items]) => {
+        const info = RESOURCE_CLASS_INFO[cls] || RESOURCE_CLASS_INFO.OTHER;
+        return (
+          <div key={cls} style={S.card}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: 16 }}>{info.icon}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 800 }}>{info.label}</span>
+            </div>
+            <div style={{ fontSize: 10, color: V("muted", "#8b98a5"), marginBottom: 8 }}>{info.explain}</div>
+            {items.map((r) => (
+              <Row key={r.id} name={r.name} cost={M(effectiveCostPerBaseUnit(r)) + " / " + (r.base_uom || "unit")} onDelete={() => delRes(r.id)} />
+            ))}
+          </div>
+        );
+      })}
+
+      {costPools.length > 0 && (
+        <div style={S.card}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 16 }}>{"\uD83D\uDCC4"}</span>
+            <span style={{ fontSize: 12.5, fontWeight: 800 }}>Overhead & Fixed Costs</span>
+          </div>
+          <div style={{ fontSize: 10, color: V("muted", "#8b98a5"), marginBottom: 8 }}>Bills you pay every month regardless of how much you sell - rent, salaries, software.</div>
+          {costPools.map((p) => (
+            <Row key={p.id} name={p.name} cost={M(num(p.amount)) + " / " + (p.period || "month")} onDelete={() => delPool(p.id)} />
+          ))}
+        </div>
+      )}
+
+      {channels.length > 0 && (
+        <div style={S.card}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 16 }}>{"\uD83D\uDED2"}</span>
+            <span style={{ fontSize: 12.5, fontWeight: 800 }}>Marketing & Sales Channels</span>
+          </div>
+          <div style={{ fontSize: 10, color: V("muted", "#8b98a5"), marginBottom: 8 }}>What it costs to find and sell to a customer through each place you sell.</div>
+          {channels.map((c) => (
+            <Row key={c.id} name={c.name} cost={(num(c.commission_pct) + num(c.ad_spend_pct)).toFixed(0) + "% of each sale"} onDelete={() => delCh(c.id)} />
+          ))}
+        </div>
+      )}
+
+      {offerings.length > 0 && (
+        <div style={{ fontSize: 10.5, color: V("muted", "#8b98a5"), padding: "8px 4px" }}>
+          {offerings.length} product{offerings.length===1?"":"s"} or service{offerings.length===1?"":"s"} found and saved - open "What you sell" to see the full price, profit and break-even for each one.
+        </div>
+      )}
+    </div>
   );
 };
 
