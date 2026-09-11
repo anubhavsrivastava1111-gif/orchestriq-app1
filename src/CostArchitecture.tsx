@@ -1585,19 +1585,49 @@ const ProductsTab: React.FC<{
                     <NumCell value={o.batch_size} onChange={(v) => p.patchOff(o.id, { batch_size: v })} /></div>
                   <div><label style={S.lbl}>Target margin %</label>
                     <NumCell value={o.target_margin_pct} onChange={(v) => p.patchOff(o.id, { target_margin_pct: v })} suffix="%" /></div>
-                  {o.offering_type === "SUBSCRIPTION" && (<>
-                    <div><label style={S.lbl}>Monthly churn %</label>
+                  {/* MODULE 12 — CUSTOMER ECONOMICS.
+                      THE CONFIRMED BUG: this was gated to offering_type ===
+                      "SUBSCRIPTION" only - meaning a bakery, a pickle brand,
+                      a consultancy, anyone with genuine repeat customers who
+                      isn't formally a "subscription" business, could never
+                      even TYPE a churn rate or acquisition cost, let alone
+                      see the resulting lifetime value. The calculation
+                      (ltv, ltvCacRatio, cacPaybackMonths) was already
+                      correct - only the gate was wrong. Widened to every
+                      type except SUB_ASSEMBLY, which isn't sold directly to
+                      an end customer, so "acquiring a customer" genuinely
+                      doesn't apply there. Also added: expected customer
+                      lifetime, which had NO input field anywhere at all -
+                      the lifetime-value number depended on a field nobody
+                      could ever actually fill in through the interface. */}
+                  {o.offering_type !== "SUB_ASSEMBLY" && (<>
+                    <div><label style={S.lbl}>Monthly churn % (customers who don't come back)</label>
                       <NumCell value={o.churn_rate_monthly_pct} onChange={(v) => p.patchOff(o.id, { churn_rate_monthly_pct: v })} suffix="%" /></div>
                     <div><label style={S.lbl}>Cost to win a customer</label>
                       <NumCell value={o.cac} onChange={(v) => p.patchOff(o.id, { cac: v })} /></div>
+                    <div><label style={S.lbl}>Expected customer lifetime (months)</label>
+                      <NumCell value={o.expected_lifetime_months} onChange={(v) => p.patchOff(o.id, { expected_lifetime_months: v })} suffix="mo" /></div>
                   </>)}
                 </div>
 
-                {econ && o.offering_type === "SUBSCRIPTION" && econ.ltvCacRatio != null && (
-                  <div style={{ ...S.note, marginTop: 10 }}>
-                    Lifetime value <strong style={{ color: V("ink", "#e6edf3") }}>{p.M(econ.ltv || 0)}</strong> against
-                    acquisition cost - ratio <strong style={{ color: econ.ltvCacRatio >= 3 ? OK.fg : BAD.fg }}>{econ.ltvCacRatio}x</strong>,
-                    payback in {econ.cacPaybackMonths} months. Below 3x is generally unsustainable.
+                {econ && econ.ltvCacRatio != null && (
+                  <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed " + V("border", "#232838") }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.4, color: V("muted", "#8b98a5"), textTransform: "uppercase", marginBottom: 9 }}>
+                      Customer economics — Module 12
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10 }}>
+                      <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Lifetime value</div>
+                        <div style={{ fontSize: 16, fontWeight: 800 }}>{p.M(econ.ltv || 0)}</div></div>
+                      <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>LTV : CAC ratio</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: econ.ltvCacRatio >= 3 ? OK.fg : BAD.fg }}>{econ.ltvCacRatio}x</div></div>
+                      <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Payback period</div>
+                        <div style={{ fontSize: 16, fontWeight: 800 }}>{econ.cacPaybackMonths} months</div></div>
+                    </div>
+                    <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5"), marginTop: 8 }}>
+                      {econ.ltvCacRatio >= 3
+                        ? "A ratio of 3x or higher is generally considered healthy — each customer is worth meaningfully more than it costs to win them."
+                        : "Below 3x is generally unsustainable long-term — you're spending close to (or more than) what a customer is actually worth."}
+                    </div>
                   </div>
                 )}
 
