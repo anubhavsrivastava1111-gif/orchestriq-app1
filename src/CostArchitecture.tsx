@@ -816,13 +816,24 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
   // one-line, plain-language explanation for every tab, shown right under
   // the tab bar for whichever one is currently open. Nobody should have to
   // guess what a section is for.
-  const TABS: Array<{ k: TabKey; label: string; count?: number; hint: string }> = [
-    { k: "start",       label: "Start here", hint: "Describe your business in your own words. The AI researches real prices and drafts your whole cost model automatically - nothing else to do on this screen." },
-    { k: "setup",       label: "Setup", hint: "Basic facts about your business - industry, location, currency, how you measure output. This is used to make every calculation elsewhere on this page realistic for YOUR business, not a generic template." },
-    { k: "inputs",      label: "What you buy",  count: resources.length, hint: "Everything you pay for to run this business - ingredients, materials, people's time, rent, software. Each one shows its true cost after wastage and fees, not just the sticker price." },
-    { k: "products",    label: "What you sell", count: offerings.length, hint: "Each thing you sell, with its full cost, suggested price, break-even point, and where the money actually goes for that one product." },
-    { k: "channels",    label: "Where you sell", count: channels.length, hint: "Every place you sell through - your own shop, a marketplace, a reseller - each with its own commission, fees, and how much of the sale price you actually keep." },
-    { k: "diagnostics", label: "Diagnostics", hint: "The overall verdict for your whole business: is it profitable, where the risk is, and what to fix first - built from everything on the other tabs." },
+  // TILE LAUNCHER — the answer to "every module should show as a tile".
+  // Each entry now also carries an icon and a short "what lives here"
+  // description, both for the new tile grid AND reused by the existing
+  // compact tab bar underneath it - one source of truth, zero duplicated
+  // labels that could drift apart from each other.
+  const TABS: Array<{ k: TabKey; label: string; count?: number; hint: string; icon: string; tileNote: string }> = [
+    { k: "start",       label: "Start here", icon: "\u2728", tileNote: "Describe your business - AI builds your whole model",
+      hint: "Describe your business in your own words. The AI researches real prices and drafts your whole cost model automatically - nothing else to do on this screen." },
+    { k: "setup",       label: "Setup", icon: "\u2699\uFE0F", tileNote: "Industry, location, currency, and units",
+      hint: "Basic facts about your business - industry, location, currency, how you measure output. This is used to make every calculation elsewhere on this page realistic for YOUR business, not a generic template." },
+    { k: "inputs",      label: "What you buy",  count: resources.length, icon: "\uD83D\uDCE6", tileNote: "Ingredients, materials, labour, rent, software - true cost after waste and fees",
+      hint: "Everything you pay for to run this business - ingredients, materials, people's time, rent, software. Each one shows its true cost after wastage and fees, not just the sticker price." },
+    { k: "products",    label: "What you sell", count: offerings.length, icon: "\uD83C\uDFF7\uFE0F", tileNote: "Full cost, pricing, break-even, and customer economics per product",
+      hint: "Each thing you sell, with its full cost, suggested price, break-even point, and where the money actually goes for that one product." },
+    { k: "channels",    label: "Where you sell", count: channels.length, icon: "\uD83D\uDED2", tileNote: "Commission, fees, and what you actually keep per channel",
+      hint: "Every place you sell through - your own shop, a marketplace, a reseller - each with its own commission, fees, and how much of the sale price you actually keep." },
+    { k: "diagnostics", label: "Diagnostics", icon: "\uD83E\uDE7A", tileNote: "The overall verdict for your whole business",
+      hint: "The overall verdict for your whole business: is it profitable, where the risk is, and what to fix first - built from everything on the other tabs." },
   ];
   const tabBadge = (k: TabKey) => {
     const t = (tabFlags as any)[k]; if (!t) return null;
@@ -886,6 +897,48 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
         </div>
       )}
 
+      {/* THE TILE LAUNCHER. Every module as its own clickable card, with an
+          icon and a one-line description - directly answering "every topic
+          should show as a tile". This is a PURE presentation layer: clicking
+          a tile calls the exact same setTab() used by the compact bar below
+          it, so every existing calculation, save, and data flow underneath
+          is completely untouched - only how you GET to a module changed. */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(170px,1fr))", gap:10, marginBottom:16 }}>
+        {TABS.map((t) => (
+          <button key={t.k} onClick={() => setTab(t.k)}
+            style={{ textAlign:"left", padding:"12px 14px", borderRadius:10, cursor:"pointer",
+              background: tab===t.k ? "rgba(20,184,166,0.10)" : "rgba(255,255,255,0.02)",
+              border: "1px solid " + (tab===t.k ? "#14B8A6" : V("border","#232838")),
+              display:"flex", flexDirection:"column", gap:6 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:7 }}>
+              <span style={{ fontSize:18 }}>{t.icon}</span>
+              <span style={{ fontSize:12.5, fontWeight:800, color: tab===t.k ? "#14B8A6" : V("ink","#e6edf3") }}>
+                {t.label}{t.count != null && t.count > 0 ? ` (${t.count})` : ""}
+              </span>
+              {tabBadge(t.k)}
+            </div>
+            <div style={{ fontSize:9.5, color: V("muted","#8b98a5"), lineHeight:1.4 }}>{t.tileNote}</div>
+          </button>
+        ))}
+        <button onClick={() => { setTab("history"); void loadSnapshots(); }}
+          style={{ textAlign:"left", padding:"12px 14px", borderRadius:10, cursor:"pointer",
+            background: tab==="history" ? "rgba(20,184,166,0.10)" : "rgba(255,255,255,0.02)",
+            border: "1px solid " + (tab==="history" ? "#14B8A6" : V("border","#232838")),
+            display:"flex", flexDirection:"column", gap:6 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:7 }}>
+            <span style={{ fontSize:18 }}>{"\uD83D\uDCDA"}</span>
+            <span style={{ fontSize:12.5, fontWeight:800, color: tab==="history" ? "#14B8A6" : V("ink","#e6edf3") }}>
+              History{projects.filter(p=>p.status==="complete").length>0?` (${projects.filter(p=>p.status==="complete").length})`:""}
+            </span>
+          </div>
+          <div style={{ fontSize:9.5, color: V("muted","#8b98a5"), lineHeight:1.4 }}>Past completed projects, saved in full</div>
+        </button>
+      </div>
+
+      {/* The compact bar stays too, directly under the tiles - once you've
+          picked a module, switching between the others without re-scanning
+          the whole grid every time keeps actual work fast. Both controls
+          drive the exact same tab state. */}
       <div style={S.tabs}>
         {TABS.map((t) => (
           <button key={t.k} onClick={() => setTab(t.k)} style={{ ...S.tab, ...(tab === t.k ? S.tabOn : {}) }}>
