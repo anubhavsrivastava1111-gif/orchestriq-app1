@@ -1015,8 +1015,11 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
       )}
 
       {tab === "start" && (
-        <StartTab callAI={callAI} ctx={ctx} applyBlueprint={applyBlueprint}
-          hasData={offerings.length > 0} goTo={setTab} companyName={companyName} />
+        <>
+          <StartTab callAI={callAI} ctx={ctx} applyBlueprint={applyBlueprint}
+            hasData={offerings.length > 0} goTo={setTab} companyName={companyName} />
+          <ExploreTheModel goTo={setTab} showToast={showToast} />
+        </>
       )}
 
       {tab === "setup" && (
@@ -2156,6 +2159,78 @@ const EXAMPLES = [
   "A 6-person management consulting firm in Bengaluru doing market entry projects and monthly advisory retainers.",
   "A D2C skincare brand selling on our own website and Amazon, we get the products made by a third-party manufacturer.",
 ];
+
+/* ============================================================================
+ * "EXPLORE THE MODEL" — the full 20-module map, matching the reference
+ * design directly and numbered the same way. Every entry is honest about
+ * its real state: a BUILT module navigates to exactly where that work
+ * actually lives today (several modules are real but currently live nested
+ * inside an existing tab, not yet split into their own dedicated screen -
+ * that is named explicitly rather than implied to be something it isn't).
+ * A module not yet built is visibly greyed out and says so when clicked,
+ * rather than being hidden or silently doing nothing.
+ * ========================================================================== */
+interface ModuleMapEntry {
+  n: string; title: string; desc: string; icon: string;
+  target: TabKey | null;   // null = not built yet
+  livesIn?: string;        // shown when the module is real but nested inside another tab
+}
+const MODULE_MAP: ModuleMapEntry[] = [
+  { n:"01", title:"Project Setup", desc:"Define your business, scope, location, currency and timeline", icon:"\uD83D\uDCC4", target:"setup" },
+  { n:"02", title:"AI Discovery", desc:"Automatically identify all cost components and assumptions", icon:"\u2728", target:"start" },
+  { n:"03", title:"Cost Components", desc:"Materials, labour, overhead, logistics and more", icon:"\uD83D\uDCE6", target:"inputs" },
+  { n:"04", title:"Resources & Workforce", desc:"Employee costs, FTE, capacity and rate cards", icon:"\uD83D\uDC65", target:"inputs", livesIn:"open a Labour resource in What You Buy" },
+  { n:"05", title:"Activities & Cost Drivers", desc:"Activity-based costing for any process or operation", icon:"\uD83D\uDCCB", target:"products", livesIn:"open a product in What You Sell" },
+  { n:"06", title:"Capacity & Yield", desc:"Production/service capacity, utilization and wastage", icon:"\u2699\uFE0F", target:"inputs", livesIn:"each resource's yield % in What You Buy" },
+  { n:"07", title:"Cost Allocation", desc:"Allocate fixed and indirect costs using multiple methods", icon:"\uD83D\uDD00", target:"products", livesIn:"open a product in What You Sell" },
+  { n:"08", title:"Procurement & Suppliers", desc:"Supplier comparison, landed cost and make vs buy", icon:"\uD83D\uDED2", target:null },
+  { n:"09", title:"CAPEX & OPEX", desc:"Investment, depreciation and lifecycle costs", icon:"\uD83C\uDFE2", target:null },
+  { n:"10", title:"Working Capital", desc:"Inventory, receivables, payables and cash conversion cycle", icon:"\uD83D\uDCB0", target:null },
+  { n:"11", title:"Unit Economics", desc:"Cost per unit, contribution, margins and pricing", icon:"\uD83D\uDCCA", target:"products" },
+  { n:"12", title:"Customer Economics", desc:"CAC, retention, LTV and customer profitability", icon:"\uD83D\uDC64", target:"products", livesIn:"open a product in What You Sell" },
+  { n:"13", title:"Marketing & Sales", desc:"Marketing spend, conversion, CAC and sales economics", icon:"\uD83D\uDCE2", target:"channels" },
+  { n:"14", title:"Pricing Engine", desc:"Cost-plus, target margin, market and value-based pricing", icon:"\uD83C\uDFF7\uFE0F", target:"products", livesIn:"open a product in What You Sell" },
+  { n:"15", title:"Break-even Analysis", desc:"Break-even units, revenue, customers and time to break-even", icon:"\uD83D\uDCC8", target:"products", livesIn:"open a product in What You Sell" },
+  { n:"16", title:"Profitability & ROI", desc:"P&L, contribution, ROI, payback and financial returns", icon:"\uD83D\uDCC8", target:"diagnostics" },
+  { n:"17", title:"Time Value of Money", desc:"PV, FV, NPV, IRR, inflation and escalation", icon:"\u23F1\uFE0F", target:null },
+  { n:"18", title:"Scenarios & What-If", desc:"Base, upside, downside and custom scenarios", icon:"\uD83D\uDD00", target:null },
+  { n:"19", title:"Optimization", desc:"Identify savings, automation and improvement opportunities", icon:"\uD83C\uDFAF", target:"diagnostics", livesIn:"Diagnostics tab" },
+  { n:"20", title:"Reports & Export", desc:"Executive summary and detailed analysis reports", icon:"\uD83D\uDCC4", target:null },
+];
+
+const ExploreTheModel: React.FC<{ goTo:(t:TabKey)=>void; showToast?:(m:string,k?:string)=>void }> = ({ goTo, showToast }) => {
+  const builtCount = MODULE_MAP.filter(m=>m.target!=null).length;
+  return (
+    <div style={{ marginTop: 24 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:10 }}>
+        <div style={{ fontSize:13, fontWeight:800 }}>Explore the model</div>
+        <div style={{ fontSize:10, color:"#5A6480" }}>{builtCount} of {MODULE_MAP.length} modules built and working</div>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:10 }}>
+        {MODULE_MAP.map((m) => {
+          const built = m.target != null;
+          return (
+            <button key={m.n}
+              onClick={() => built ? goTo(m.target as TabKey) : showToast?.(`Module ${m.n} — ${m.title} isn't built yet.`, "warning")}
+              style={{ textAlign:"left", padding:"12px 14px", borderRadius:10, cursor:"pointer",
+                background: built ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.01)",
+                border: "1px solid " + (built ? "#232838" : "#1a1e28"),
+                opacity: built ? 1 : 0.55, display:"flex", flexDirection:"column", gap:5 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:7 }}>
+                <span style={{ fontSize:9, fontWeight:800, color:"#5A6480" }}>{m.n}</span>
+                <span style={{ fontSize:15 }}>{m.icon}</span>
+                <span style={{ fontSize:11.5, fontWeight:800 }}>{m.title}</span>
+                {!built && <span style={{ marginLeft:"auto", fontSize:8, fontWeight:800, color:"#8b98a5", background:"rgba(255,255,255,0.05)", padding:"2px 6px", borderRadius:6 }}>NOT BUILT</span>}
+              </div>
+              <div style={{ fontSize:9.5, color:"#8b98a5", lineHeight:1.4 }}>{m.desc}</div>
+              {built && m.livesIn && <div style={{ fontSize:8.5, color:"#14B8A6", fontStyle:"italic" }}>Currently inside: {m.livesIn}</div>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 const StartTab: React.FC<{
   callAI?: (prompt: string, useWebSearch: boolean) => Promise<string>;
