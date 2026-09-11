@@ -21,6 +21,8 @@ import { offeringBreakEven, priceForTargetMargin, priceChangeImpact } from "./li
 import { activityBreakdown, allocationBreakdown } from "./lib/CostTransparencyEngine";
 import { compareSuppliers, makeVsBuy, type SupplierOption } from "./lib/ProcurementEngine";
 import { calculateDepreciation, type CapexItem } from "./lib/CapexEngine";
+import { calculateWorkingCapital } from "./lib/WorkingCapitalEngine";
+import { presentValue, futureValue, netPresentValue, internalRateOfReturn } from "./lib/TimeValueEngine";
 import {
   validate, summarise,
   type Finding, type Severity,
@@ -1128,7 +1130,8 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
             {tab === "setup" && (
               <SetupTab ctx={ctx} patchCtx={patchCtx} costPools={costPools} patchPool={patchPool}
                 addPool={addPool} delPool={delPool} M={M} flagFor={flagFor} onAccept={acceptException} openaiKey={openaiKey}
-                capexItems={capexItems} addCapexItem={addCapexItem} patchCapexItem={patchCapexItem} delCapexItem={delCapexItem} cur={cur} />
+                capexItems={capexItems} addCapexItem={addCapexItem} patchCapexItem={patchCapexItem} delCapexItem={delCapexItem} cur={cur}
+                monthlyRevenue={dx.monthlyRevenue} monthlyCogs={dx.monthlyVariableCost} />
             )}
 
             {tab === "inputs" && (
@@ -1151,7 +1154,15 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
                 flagFor={flagFor} onAccept={acceptException} />
             )}
 
-            {tab === "diagnostics" && <DiagnosticsTab dx={dx} M={M} goTo={setTab} />}
+            {tab === "diagnostics" && (
+              <>
+                <DiagnosticsTab dx={dx} M={M} goTo={setTab} />
+                {/* MODULE 17 — TIME VALUE OF MONEY, self-contained: manages
+                    its own load/save so nothing about DiagnosticsTab itself
+                    needs to change to add this. */}
+                <InvestmentAnalysisPanel userId={userId} cur={cur} showToast={showToast} />
+              </>
+            )}
 
             {tab === "history" && (
               <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
@@ -1217,8 +1228,9 @@ const SetupTab: React.FC<{
   patchCapexItem: (id: string, p: Partial<CapexItem>, linkedPoolId?: string | null) => void;
   delCapexItem: (id: string, linkedPoolId?: string | null) => void;
   cur: string;
+  monthlyRevenue: number; monthlyCogs: number;   // MODULE 10
 }> = ({ ctx, patchCtx, costPools, patchPool, addPool, delPool, M, flagFor, onAccept, openaiKey,
-        capexItems, addCapexItem, patchCapexItem, delCapexItem, cur }) => {
+        capexItems, addCapexItem, patchCapexItem, delCapexItem, cur, monthlyRevenue, monthlyCogs }) => {
   const monthlyFixed = costPools.reduce((s, p) => {
     const a = num(p.amount);
     return s + (p.period === "annual" ? a / 12 : p.period === "quarterly" ? a / 3 : a);
@@ -1347,8 +1359,62 @@ const SetupTab: React.FC<{
           })}
           <button style={{ ...S.btnGhost, marginTop: 10 }} onClick={addCapexItem}>+ Add a big purchase</button>
         </div>
+
+        {/* MODULE 10 — WORKING CAPITAL. Deliberately asks for days, not
+            rupee values nobody tracks precisely - then converts to a real
+            cash figure using cost data this platform already has. */}
+        <WorkingCapitalPanel ctx={ctx} patchCtx={patchCtx} monthlyRevenue={monthlyRevenue} monthlyCogs={monthlyCogs} cur={cur} />
       </div>
     </>
+  );
+};
+
+/* ============================================================================
+ * MODULE 10 — WORKING CAPITAL PANEL.
+ * ========================================================================== */
+const WorkingCapitalPanel: React.FC<{
+  ctx: CaBusinessContext | null; patchCtx: (p: Partial<CaBusinessContext>) => void;
+  monthlyRevenue: number; monthlyCogs: number; cur: string;
+}> = ({ ctx, patchCtx, monthlyRevenue, monthlyCogs, cur }) => {
+  const result = useMemo(() => calculateWorkingCapital({
+    inventoryDays: num(ctx?.inventory_days), receivablesDays: num(ctx?.receivables_days),
+    payablesDays: num(ctx?.payables_days), monthlyRevenue, monthlyCogs,
+  }), [ctx, monthlyRevenue, monthlyCogs]);
+
+  const M = (v: number) => fmtMoney(v, cur);
+  const hasInputs = ctx?.inventory_days != null || ctx?.receivables_days != null || ctx?.payables_days != null;
+
+  return (
+    <div style={{ ...S.card, marginTop: 14 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>Cash tied up in running the business</div>
+      <div style={S.note}>
+        Even a profitable business can run out of cash if money is stuck in unsold stock or unpaid invoices.
+        This tells you how much cash you need sitting in the bank just to keep operating — separate from profit.
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+        <div><label style={S.lbl}>Days of stock you usually hold</label>
+          <NumCell value={ctx?.inventory_days} onChange={(v) => patchCtx({ inventory_days: v })} suffix="days" /></div>
+        <div><label style={S.lbl}>Days customers take to pay you</label>
+          <NumCell value={ctx?.receivables_days} onChange={(v) => patchCtx({ receivables_days: v })} suffix="days" /></div>
+        <div><label style={S.lbl}>Days you take to pay suppliers</label>
+          <NumCell value={ctx?.payables_days} onChange={(v) => patchCtx({ payables_days: v })} suffix="days" /></div>
+      </div>
+      {hasInputs && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px dashed " + V("border", "#232838") }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10 }}>
+            <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Cash conversion cycle</div>
+              <div style={{ fontSize: 16, fontWeight: 800 }}>{result.cashConversionCycleDays.toFixed(0)} days</div></div>
+            <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Cash you need on hand</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: result.interpretation === "concerning" ? BAD.fg : result.interpretation === "tight" ? WARN.fg : OK.fg }}>{M(result.workingCapitalRequired)}</div></div>
+          </div>
+          <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5"), marginTop: 8, lineHeight: 1.6 }}>
+            {result.interpretation === "healthy" && "This is a healthy cycle \u2014 your suppliers are effectively helping fund your operations."}
+            {result.interpretation === "tight" && "This is on the tighter side \u2014 worth keeping an eye on, especially before taking on a big new order."}
+            {result.interpretation === "concerning" && "This ties up a lot of cash for a long time \u2014 worth looking at whether stock, collections, or supplier terms can improve."}
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -2374,6 +2440,95 @@ const DiagnosticsTab: React.FC<{ dx: PortfolioDiagnosis; M: (v: number) => strin
 };
 
 /* ============================================================================
+ * MODULE 17 — TIME VALUE OF MONEY: PV, FV, NPV, IRR.
+ * Self-contained: manages its own load and save, so DiagnosticsTab itself
+ * needed zero changes to gain this.
+ * ========================================================================== */
+const InvestmentAnalysisPanel: React.FC<{
+  userId: string | null; cur: string; showToast?: (m: string, k?: string) => void;
+}> = ({ userId, cur, showToast }) => {
+  const [scenarios, setScenarios] = useState<Array<{ id: string; name: string; discount_rate_pct: number; cash_flows: number[] }>>([]);
+  const [loaded, setLoaded] = useState(false);
+  const M = (v: number) => fmtMoney(v, cur);
+
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      const { data } = await supabase.from("ca_investment_scenarios").select("*").eq("user_id", userId).order("created_at", { ascending: true });
+      setScenarios((data as any[]) ?? []);
+      setLoaded(true);
+    })();
+  }, [userId]);
+
+  const addScenario = async () => {
+    if (!userId) return;
+    const row = { id: uid(), user_id: userId, name: "New investment", discount_rate_pct: 12, cash_flows: [-100000, 30000, 30000, 30000, 30000, 30000] };
+    setScenarios((p) => [...p, row]);
+    await supabase.from("ca_investment_scenarios").insert(row);
+  };
+  const patchScenario = (id: string, patch: Partial<{ name: string; discount_rate_pct: number; cash_flows: number[] }>) => {
+    setScenarios((p) => p.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    void supabase.from("ca_investment_scenarios").update(patch).eq("id", id);
+  };
+  const delScenario = (id: string) => {
+    setScenarios((p) => p.filter((s) => s.id !== id));
+    void supabase.from("ca_investment_scenarios").delete().eq("id", id);
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <div style={{ ...S.card, marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700 }}>Is a big investment actually worth it? — Module 17</div>
+        <button onClick={addScenario} style={S.btnGhost}>+ Add an investment to check</button>
+      </div>
+      <div style={S.note}>
+        Enter what you'd spend now and what you expect back over the following years. This tells you whether it's
+        genuinely worth it once you account for the fact that money today is worth more than the same money later.
+      </div>
+
+      {scenarios.map((sc) => {
+        const npv = netPresentValue(sc.cash_flows, sc.discount_rate_pct);
+        const irr = internalRateOfReturn(sc.cash_flows);
+        return (
+          <div key={sc.id} style={{ marginTop: 12, paddingTop: 12, borderTop: "1px dashed " + V("border", "#232838") }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <TextCell value={sc.name} onChange={(v) => patchScenario(sc.id, { name: v })} />
+              <div><label style={S.lbl}>Your cost of capital</label>
+                <NumCell value={sc.discount_rate_pct} onChange={(v) => patchScenario(sc.id, { discount_rate_pct: v ?? 12 })} suffix="%" /></div>
+              <button onClick={() => delScenario(sc.id)} style={{ background: "none", border: "none", color: BAD.fg, cursor: "pointer", fontSize: 13 }}>{"\u2715"}</button>
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+              {sc.cash_flows.map((cf, i) => (
+                <div key={i}><label style={S.lbl}>{i === 0 ? "Now" : "Year " + i}</label>
+                  <NumCell value={cf} onChange={(v) => {
+                    const next = [...sc.cash_flows]; next[i] = v ?? 0; patchScenario(sc.id, { cash_flows: next });
+                  }} /></div>
+              ))}
+              <button onClick={() => patchScenario(sc.id, { cash_flows: [...sc.cash_flows, 0] })}
+                style={{ ...S.btnGhost, alignSelf: "flex-end" }}>+ year</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginTop: 10 }}>
+              <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Net present value</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: npv >= 0 ? OK.fg : BAD.fg }}>{M(npv)}</div></div>
+              <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Real rate of return</div>
+                <div style={{ fontSize: 15, fontWeight: 800 }}>{irr.irrPct != null ? irr.irrPct.toFixed(1) + "%" : "Not calculable"}</div></div>
+            </div>
+            <div style={{ fontSize: 9.5, color: V("muted", "#8b98a5"), marginTop: 6 }}>
+              {npv >= 0
+                ? "Positive — this is expected to be worth more than what you put in, even after accounting for the time value of money."
+                : "Negative — on these numbers, this investment is expected to cost you more than it returns."}
+            </div>
+          </div>
+        );
+      })}
+      {!scenarios.length && <div style={{ fontSize: 10, color: V("muted", "#8b98a5"), fontStyle: "italic", marginTop: 8 }}>No investments checked yet.</div>}
+    </div>
+  );
+};
+
+/* ============================================================================
  * TAB :: START HERE
  * Describe the business in plain words. The system researches it, drafts the
  * whole cost model, and hands back a checklist to verify - instead of a blank
@@ -2423,14 +2578,14 @@ const MODULE_MAP: ModuleMapEntry[] = [
   { n:"07", title:"Cost Allocation", desc:"See exactly which of your bills (rent, salaries) are really being paid for by which product.", icon:"\uD83D\uDD00", target:"products", livesIn:"open a product in What You Sell" },
   { n:"08", title:"Procurement & Suppliers", desc:"Compare suppliers side by side to see who actually costs you less once everything is included.", icon:"\uD83D\uDED2", target:"inputs", livesIn:"open a resource in What You Buy" },
   { n:"09", title:"CAPEX & OPEX", desc:"Work out the true cost of a big one-time purchase, spread fairly over the years you'll use it.", icon:"\uD83C\uDFE2", target:"setup", livesIn:"Setup tab, below Fixed Costs" },
-  { n:"10", title:"Working Capital", desc:"Find out how much cash you need sitting in the bank just to keep the business running.", icon:"\uD83D\uDCB0", target:null },
+  { n:"10", title:"Working Capital", desc:"Find out how much cash you need sitting in the bank just to keep the business running.", icon:"\uD83D\uDCB0", target:"setup", livesIn:"Setup tab, below CAPEX" },
   { n:"11", title:"Unit Economics", desc:"See the exact profit you make (or lose) on a single unit sold.", icon:"\uD83D\uDCCA", target:"products" },
   { n:"12", title:"Customer Economics", desc:"Find out if a typical customer is worth more than what it costs you to win them.", icon:"\uD83D\uDC64", target:"products", livesIn:"open a product in What You Sell" },
   { n:"13", title:"Marketing & Sales", desc:"See what it actually costs to find and win one new customer.", icon:"\uD83D\uDCE2", target:"channels" },
   { n:"14", title:"Pricing Engine", desc:"Get told exactly what price to charge to hit the profit margin you want.", icon:"\uD83C\uDFF7\uFE0F", target:"products", livesIn:"open a product in What You Sell" },
   { n:"15", title:"Break-even Analysis", desc:"Find the exact number you need to sell before you stop losing money and start earning.", icon:"\uD83D\uDCC8", target:"products", livesIn:"open a product in What You Sell" },
   { n:"16", title:"Profitability & ROI", desc:"See the full picture of whether the business actually makes money overall.", icon:"\uD83D\uDCC8", target:"diagnostics" },
-  { n:"17", title:"Time Value of Money", desc:"See what a big future cost or return is really worth in today's money.", icon:"\u23F1\uFE0F", target:null },
+  { n:"17", title:"Time Value of Money", desc:"See what a big future cost or return is really worth in today's money.", icon:"\u23F1\uFE0F", target:"diagnostics", livesIn:"Diagnostics tab" },
   { n:"18", title:"Scenarios & What-If", desc:"See what happens to your profit if prices, costs, or sales change - before it actually happens.", icon:"\uD83D\uDD00", target:null },
   { n:"19", title:"Optimization", desc:"Get concrete suggestions on where you can cut cost or improve profit right now.", icon:"\uD83C\uDFAF", target:"diagnostics", livesIn:"Diagnostics tab" },
   { n:"20", title:"Reports & Export", desc:"Get a clean summary of everything, ready to share or print.", icon:"\uD83D\uDCC4", target:null },
