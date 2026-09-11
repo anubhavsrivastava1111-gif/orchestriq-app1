@@ -781,9 +781,17 @@ export function computeOffering(
   const top3 = sorted.slice(0, 3);
   const top3Share = pct(top3.reduce((s, l) => s + l.lineCost, 0), marginalCost);
 
-  // Subscription economics
+  // MODULE 12 — CUSTOMER ECONOMICS. THE CONFIRMED BUG, FOUND BY TESTING WITH
+  // REAL NUMBERS RATHER THAN TRUSTING A CLEAN COMPILE: this calculation was
+  // gated to offering_type === "SUBSCRIPTION" at THIS level too, not only in
+  // the UI. A pickle brand, a bakery, or a consultancy with genuine repeat
+  // customers - sold as UNIT, BATCH, or any other type - could fill in
+  // churn, CAC and lifetime and still get null back from the one place that
+  // was supposed to calculate it. Widened to every type except
+  // SUB_ASSEMBLY, which is never sold directly to an end customer, so
+  // "acquiring a customer" has no meaning there.
   let ltv: number | null = null, ltvCac: number | null = null, payback: number | null = null;
-  if (off.offering_type === "SUBSCRIPTION") {
+  if (off.offering_type !== "SUB_ASSEMBLY") {
     const churn = num(off.churn_rate_monthly_pct);
     const lifetime = off.expected_lifetime_months != null
       ? num(off.expected_lifetime_months)
