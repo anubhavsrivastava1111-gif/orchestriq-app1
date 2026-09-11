@@ -1648,7 +1648,21 @@ const InputsTab: React.FC<{
                   <tr>
                     <td style={S.td}>
                       <Flag findings={flagFor(r.id, "recipe")} onAccept={onAccept}>
-                        <TextCell value={r.name} onChange={(v) => patchRes(r.id, { name: v })} placeholder="Butter, welder time, AWS..." />
+                        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                          <TextCell value={r.name} onChange={(v) => patchRes(r.id, { name: v })} placeholder="Butter, welder time, AWS..." />
+                          {/* DATA PROVENANCE, THE CONFIRMED FIX: this used to
+                              vanish the moment a discovered item was saved -
+                              no way to ever again tell "AI estimated this"
+                              from "I typed this myself and I know it's
+                              right." Now permanent, not just during the
+                              first review. */}
+                          {r.data_confidence === "must_supply" && (
+                            <span title="The AI could not find a real number for this - please check and correct it." style={{ fontSize: 8, fontWeight: 800, color: BAD.fg, background: BAD.bg, padding: "2px 6px", borderRadius: 8, flexShrink: 0 }}>NEEDS YOUR NUMBER</span>
+                          )}
+                          {r.data_confidence === "needs_check" && (
+                            <span title="The AI estimated this - worth double-checking against your real cost." style={{ fontSize: 8, fontWeight: 800, color: WARN.fg, background: WARN.bg, padding: "2px 6px", borderRadius: 8, flexShrink: 0 }}>AI ESTIMATE</span>
+                          )}
+                        </div>
                       </Flag>
                     </td>
                     <td style={S.td}><SelectCell value={r.resource_class} onChange={(v) => patchRes(r.id, { resource_class: v as ResourceClass })}
@@ -1780,7 +1794,15 @@ const ProductsTab: React.FC<{
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <div style={{ flex: "2 1 190px", minWidth: 160 }}>
                 <label style={S.lbl}>Name</label>
-                <TextCell value={o.name} onChange={(v) => p.patchOff(o.id, { name: v })} placeholder="Birthday cake 1kg" />
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <TextCell value={o.name} onChange={(v) => p.patchOff(o.id, { name: v })} placeholder="Birthday cake 1kg" />
+                  {o.data_confidence === "must_supply" && (
+                    <span title="The AI could not find a real number for this - please check and correct it." style={{ fontSize: 8, fontWeight: 800, color: BAD.fg, background: BAD.bg, padding: "2px 6px", borderRadius: 8, flexShrink: 0 }}>NEEDS YOUR NUMBER</span>
+                  )}
+                  {o.data_confidence === "needs_check" && (
+                    <span title="The AI estimated this - worth double-checking against your real price." style={{ fontSize: 8, fontWeight: 800, color: WARN.fg, background: WARN.bg, padding: "2px 6px", borderRadius: 8, flexShrink: 0 }}>AI ESTIMATE</span>
+                  )}
+                </div>
               </div>
               <div style={{ flex: "1 1 130px" }}>
                 <label style={S.lbl}>Type</label>
