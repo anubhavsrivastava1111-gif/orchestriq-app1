@@ -4041,6 +4041,7 @@ export default function App(){
   // FEATURE 4/5: export studio
   const [showExport,setShowExport]=useState(false);
   const [showShare,setShowShare]=useState(false);
+  const [showShareSB,setShowShareSB]=useState(false); // the sidebar-footer copy of the same control
   const [expMode,setExpMode]=useState("pdf"); // pdf | pptx
   const [expDocType,setExpDocType]=useState("executive");
   const [expPptType,setExpPptType]=useState("briefing");
@@ -8117,6 +8118,21 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
             <div style={{fontSize:9.5,color:"var(--oiq-sbDim)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
               {(me.role==="super_admin"?"Super Admin":me.role==="admin"?"Admin":"User")}{co.location?" · "+co.location:""}
             </div>
+          </div>
+          {/* THE REAL FIX: this sidebar footer - "Anubhav Srivastava · Super
+              Admin · Gurgaon" - is the control cluster visible in every
+              screenshot shared throughout this entire engagement. The share
+              button was added to a DIFFERENT, top-right header row, which
+              this codebase apparently renders as a second, separate toolbar.
+              Added here too, so it is visible exactly where attention
+              actually is, not just where I assumed it would be. */}
+          <div style={{position:"relative"}}>
+            <button onClick={()=>setShowShareSB(v=>!v)} title="Share on social media" style={{background:"none",border:"none",cursor:"pointer",fontSize:14,padding:2,color:"var(--oiq-sbDim)"}}>🔗</button>
+            {showShareSB && (
+              <div style={{position:"absolute",bottom:24,left:0,zIndex:200,background:"#0A0E1A",border:"1px solid #1a2030",borderRadius:10,padding:10,boxShadow:"0 8px 24px rgba(0,0,0,0.4)",whiteSpace:"nowrap"}}>
+                <ShareButtons message={"Check out " + (co?.name ? co.name + "'s" : "my") + " work on OrchestrIQ"} />
+              </div>
+            )}
           </div>
           <button onClick={()=>{setShowSettings(true);setSTab("api");}} title="Settings" style={{background:"none",border:"none",cursor:"pointer",fontSize:14,padding:2,color:"var(--oiq-sbDim)"}}>⚙</button>
           <button onClick={()=>setShowSignOutConfirm(true)} title="Sign Out" style={{background:"none",border:"none",cursor:"pointer",fontSize:14,padding:2,color:"#EF4444"}}>⎋</button>
