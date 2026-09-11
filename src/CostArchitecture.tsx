@@ -935,30 +935,13 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
         </button>
       </div>
 
-      {/* The compact bar stays too, directly under the tiles - once you've
-          picked a module, switching between the others without re-scanning
-          the whole grid every time keeps actual work fast. Both controls
-          drive the exact same tab state. */}
-      <div style={S.tabs}>
-        {TABS.map((t) => (
-          <button key={t.k} onClick={() => setTab(t.k)} style={{ ...S.tab, ...(tab === t.k ? S.tabOn : {}) }}>
-            {t.label}{t.count != null && t.count > 0 ? ` (${t.count})` : ""}{tabBadge(t.k)}
-          </button>
-        ))}
-        <button onClick={() => { setTab("history"); void loadSnapshots(); }}
-          style={{ ...S.tab, ...(tab === "history" ? S.tabOn : {}) }}>
-          History{projects.filter(p=>p.status==="complete").length>0?` (${projects.filter(p=>p.status==="complete").length})`:""}
-        </button>
-      </div>
-
-      {/* THE ANSWER TO "I don't know what this tab means" - always visible,
-          never something the user has to hunt for or already know. */}
-      {tab !== "history" && (
-        <div style={{ fontSize: 11, color: V("muted", "#8b98a5"), lineHeight: 1.6, marginBottom: 12,
-          padding: "8px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid " + V("border", "#232838") }}>
-          {TABS.find((t) => t.k === tab)?.hint}
-        </div>
-      )}
+      {/* THE OLD COMPACT TAB BAR AND ITS DUPLICATE DESCRIPTION LINE WERE
+          REMOVED HERE. Your reference document is explicit: "no excessive
+          tabs, no confusing navigation hierarchy." Now that every tile opens
+          a drawer with its own name and description already shown at the
+          top, keeping a second, flatter row of the identical buttons right
+          below the tiles was exactly the clutter that principle rules out -
+          not a different feature, a second way to trigger the same one. */}
 
       {err && userId && (
         <div style={{ ...S.card, borderColor: BAD.fg, background: BAD.bg, marginBottom: 12 }}>
@@ -1014,85 +997,115 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
         </div>
       )}
 
-      {tab === "start" && (
-        <>
-          <StartTab callAI={callAI} ctx={ctx} applyBlueprint={applyBlueprint}
-            hasData={offerings.length > 0} goTo={setTab} companyName={companyName} />
-          <ExploreTheModel goTo={setTab} showToast={showToast} />
-        </>
-      )}
+      {/* ═══════════════════════════════════════════════════════════════
+          THE COST ARCHITECT HOME — ALWAYS VISIBLE, PER YOUR REFERENCE DOC
+          PART 4 & 53: "the main page should immediately communicate I am
+          building ONE economic model, not navigating 20 unrelated
+          calculators." AI discovery and the full tile grid never disappear
+          behind a tab anymore - this IS the workspace, permanently. */}
+      <StartTab callAI={callAI} ctx={ctx} applyBlueprint={applyBlueprint}
+        hasData={offerings.length > 0} goTo={setTab} companyName={companyName} />
+      <ExploreTheModel goTo={setTab} showToast={showToast} />
 
-      {tab === "setup" && (
-        <SetupTab ctx={ctx} patchCtx={patchCtx} costPools={costPools} patchPool={patchPool}
-          addPool={addPool} delPool={delPool} M={M} flagFor={flagFor} onAccept={acceptException} />
-      )}
-
-      {tab === "inputs" && (
-        <InputsTab resources={resources} patchRes={patchRes} addResource={addResource} delRes={delRes} cur={cur}
-          flagFor={flagFor} onAccept={acceptException} />
-      )}
-
-      {tab === "products" && (
-        <ProductsTab offerings={offerings} resources={resources} bomLines={bomLines} channels={channels}
-          offeringChannels={offeringChannels} dx={dx} costPools={costPools} openOffering={openOffering} setOpenOffering={setOpenOffering}
-          patchOff={patchOff} patchBom={patchBom} patchOC={patchOC} addOffering={addOffering}
-          addBomLine={addBomLine} linkChannel={linkChannel} delOff={delOff} delBom={delBom} delOC={delOC} M={M}
-          flagFor={flagFor} onAccept={acceptException} />
-      )}
-
-      {tab === "channels" && (
-        <ChannelsTab channels={channels} patchCh={patchCh} addChannel={addChannel} delCh={delCh} cur={cur}
-          flagFor={flagFor} onAccept={acceptException} />
-      )}
-
-      {tab === "diagnostics" && <DiagnosticsTab dx={dx} M={M} goTo={setTab} />}
-
-      {/* MODULE 1 — HISTORY. Spec Section 57: "view, duplicate as new project,
-          compare with current, use as historical reference." This ships the
-          "view" capability now, real and working; duplicate/compare are the
-          natural next increment on top of this same table, not pretended to
-          exist here. */}
-      {tab === "history" && (
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          {!snapshots.length && (
-            <div style={S.card}>
-              <div style={{ fontSize:12, color: V("muted","#8b98a5") }}>
-                No completed projects yet. When you press "Complete project", everything currently in your
-                workspace is frozen here exactly as it was — components, assumptions, calculations and all.
-              </div>
+      {/* ═══════════════════════════════════════════════════════════════
+          THE DRAWER — PART 54 OF YOUR REFERENCE DOCUMENT, IMPLEMENTED
+          EXACTLY: "Clicking a tile should open that module in a focused
+          workspace. Prefer a drawer... rather than unnecessarily
+          navigating away from the main Cost Architect model. When the
+          user returns, the tile should immediately show updated
+          status/results."
+          THIS FIXES BOTH NAMED COMPLAINTS AT ONCE: a tile no longer swaps
+          the whole page to "the same old thing" - it opens a visually
+          distinct panel ON TOP of the home screen, and there is now an
+          unmissable "Back to Cost Architect" action at its top, always in
+          the same place, every single time. */}
+      {tab !== "start" && (
+        <div style={{ position:"fixed", inset:0, zIndex:300, background:"rgba(5,7,12,0.72)",
+          display:"flex", justifyContent:"flex-end" }} onClick={() => setTab("start")}>
+          <div style={{ width:"min(880px, 94vw)", height:"100%", background: V("bg","#0d1117"),
+            borderLeft:"1px solid "+V("border","#232838"), overflowY:"auto", padding:"18px 22px" }}
+            onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setTab("start")}
+              style={{ display:"flex", alignItems:"center", gap:6, background:"none", border:"none",
+                cursor:"pointer", color:"#14B8A6", fontSize:12.5, fontWeight:800, marginBottom:16, padding:0 }}>
+              {"\u2190"} Back to Cost Architect
+            </button>
+            <div style={{ fontSize:15, fontWeight:800, marginBottom:4 }}>
+              {TABS.find(t=>t.k===tab)?.label || (tab==="history" ? "History" : "")}
             </div>
-          )}
-          {snapshots.map(s => {
-            const p = projects.find(pr => pr.id === s.project_id);
-            return (
-              <div key={s.id} style={S.card}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-                  <div>
-                    <div style={{ fontSize:13, fontWeight:700 }}>{p?.name || "Completed project"}</div>
-                    <div style={{ fontSize:10, color: V("muted","#8b98a5") }}>
-                      Completed {new Date(s.created_at).toLocaleDateString()} \u00B7 {s.offerings.length} thing{s.offerings.length===1?"":"s"} sold \u00B7 {s.resources.length} input{s.resources.length===1?"":"s"}
+            <div style={{ fontSize:10.5, color: V("muted","#8b98a5"), marginBottom:16, lineHeight:1.5 }}>
+              {TABS.find(t=>t.k===tab)?.hint}
+            </div>
+
+            {tab === "setup" && (
+              <SetupTab ctx={ctx} patchCtx={patchCtx} costPools={costPools} patchPool={patchPool}
+                addPool={addPool} delPool={delPool} M={M} flagFor={flagFor} onAccept={acceptException} />
+            )}
+
+            {tab === "inputs" && (
+              <InputsTab resources={resources} patchRes={patchRes} addResource={addResource} delRes={delRes} cur={cur}
+                flagFor={flagFor} onAccept={acceptException} />
+            )}
+
+            {tab === "products" && (
+              <ProductsTab offerings={offerings} resources={resources} bomLines={bomLines} channels={channels}
+                offeringChannels={offeringChannels} dx={dx} costPools={costPools} openOffering={openOffering} setOpenOffering={setOpenOffering}
+                patchOff={patchOff} patchBom={patchBom} patchOC={patchOC} addOffering={addOffering}
+                addBomLine={addBomLine} linkChannel={linkChannel} delOff={delOff} delBom={delBom} delOC={delOC} M={M}
+                flagFor={flagFor} onAccept={acceptException} />
+            )}
+
+            {tab === "channels" && (
+              <ChannelsTab channels={channels} patchCh={patchCh} addChannel={addChannel} delCh={delCh} cur={cur}
+                flagFor={flagFor} onAccept={acceptException} />
+            )}
+
+            {tab === "diagnostics" && <DiagnosticsTab dx={dx} M={M} goTo={setTab} />}
+
+            {tab === "history" && (
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                {!snapshots.length && (
+                  <div style={S.card}>
+                    <div style={{ fontSize:12, color: V("muted","#8b98a5") }}>
+                      No completed projects yet. When you press "Complete project", everything currently in your
+                      workspace is frozen here exactly as it was — components, assumptions, calculations and all.
                     </div>
                   </div>
-                  <button style={S.btnGhost} onClick={()=>setViewingSnapshot(viewingSnapshot?.id===s.id?null:s)}>
-                    {viewingSnapshot?.id===s.id ? "Close" : "View"}
-                  </button>
-                </div>
-                {viewingSnapshot?.id===s.id && s.diagnosis && (
-                  <div style={{ marginTop:10, paddingTop:10, borderTop:"1px solid "+V("border","#232838"),
-                    display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:10 }}>
-                    <div><div style={{fontSize:9,color:V("muted","#8b98a5"),textTransform:"uppercase"}}>Monthly Revenue</div>
-                      <div style={{fontSize:14,fontWeight:700}}>{M(s.diagnosis.monthlyRevenue)}</div></div>
-                    <div><div style={{fontSize:9,color:V("muted","#8b98a5"),textTransform:"uppercase"}}>Fixed Cost</div>
-                      <div style={{fontSize:14,fontWeight:700}}>{M(s.diagnosis.monthlyFixedCost)}</div></div>
-                    <div><div style={{fontSize:9,color:V("muted","#8b98a5"),textTransform:"uppercase"}}>Variable Cost</div>
-                      <div style={{fontSize:14,fontWeight:700}}>{M(s.diagnosis.monthlyVariableCost)}</div></div>
-                    <div><div style={{fontSize:9,color:V("muted","#8b98a5"),textTransform:"uppercase"}}>Contribution Margin</div>
-                      <div style={{fontSize:14,fontWeight:700}}>{s.diagnosis.contributionMarginPct?.toFixed(1)}%</div></div>
-                  </div>
                 )}
+                {snapshots.map(s => {
+                  const p = projects.find(pr => pr.id === s.project_id);
+                  return (
+                    <div key={s.id} style={S.card}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+                        <div>
+                          <div style={{ fontSize:13, fontWeight:700 }}>{p?.name || "Completed project"}</div>
+                          <div style={{ fontSize:10, color: V("muted","#8b98a5") }}>
+                            Completed {new Date(s.created_at).toLocaleDateString()} \u00B7 {s.offerings.length} thing{s.offerings.length===1?"":"s"} sold \u00B7 {s.resources.length} input{s.resources.length===1?"":"s"}
+                          </div>
+                        </div>
+                        <button style={S.btnGhost} onClick={()=>setViewingSnapshot(viewingSnapshot?.id===s.id?null:s)}>
+                          {viewingSnapshot?.id===s.id ? "Close" : "View"}
+                        </button>
+                      </div>
+                      {viewingSnapshot?.id===s.id && s.diagnosis && (
+                        <div style={{ marginTop:10, paddingTop:10, borderTop:"1px solid "+V("border","#232838"),
+                          display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:10 }}>
+                          <div><div style={{fontSize:9,color:V("muted","#8b98a5"),textTransform:"uppercase"}}>Monthly Revenue</div>
+                            <div style={{fontSize:14,fontWeight:700}}>{M(s.diagnosis.monthlyRevenue)}</div></div>
+                          <div><div style={{fontSize:9,color:V("muted","#8b98a5"),textTransform:"uppercase"}}>Fixed Cost</div>
+                            <div style={{fontSize:14,fontWeight:700}}>{M(s.diagnosis.monthlyFixedCost)}</div></div>
+                          <div><div style={{fontSize:9,color:V("muted","#8b98a5"),textTransform:"uppercase"}}>Variable Cost</div>
+                            <div style={{fontSize:14,fontWeight:700}}>{M(s.diagnosis.monthlyVariableCost)}</div></div>
+                          <div><div style={{fontSize:9,color:V("muted","#8b98a5"),textTransform:"uppercase"}}>Contribution Margin</div>
+                            <div style={{fontSize:14,fontWeight:700}}>{s.diagnosis.contributionMarginPct?.toFixed(1)}%</div></div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            )}
+          </div>
         </div>
       )}
     </div>
