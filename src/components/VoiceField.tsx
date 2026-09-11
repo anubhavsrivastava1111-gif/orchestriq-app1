@@ -37,11 +37,17 @@ export interface VoiceFieldProps {
   /** Language for the recogniser. Indian English by default. */
   lang?: string;
   disabled?: boolean;
+  /** THE FIX: if the caller has an OpenAI key, dictation uses OpenAI's
+   *  transcription instead of the free browser engine - properly punctuated,
+   *  matching the exact experience already shipped in Workspace and Live
+   *  Boardroom. With no key, behaviour is completely unchanged: the existing
+   *  free path, with its own business-vocabulary correction, still runs. */
+  openaiKey?: string;
 }
 
 export default function VoiceField({
   value, onChange, allowReadAloud = true, mode = "append",
-  compact = false, lang = "en-IN", disabled = false,
+  compact = false, lang = "en-IN", disabled = false, openaiKey,
 }: VoiceFieldProps) {
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -51,6 +57,10 @@ export default function VoiceField({
 
   const recRef = useRef<any>(null);
   const baseRef = useRef<string>("");
+  const mediaRecRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
 
   const canListen = speechInputSupported();
   const canSpeak = speechOutputSupported();
@@ -62,12 +72,64 @@ export default function VoiceField({
   }, []);
 
   const stopListening = useCallback(() => {
+    if (openaiKey && mediaRecRef.current) {
+      if (mediaRecRef.current.state === "recording") mediaRecRef.current.stop();
+      setListening(false);
+      return;
+    }
     try { recRef.current?.stop?.(); } catch { /* already stopped */ }
     setListening(false); setInterim("");
-  }, []);
+  }, [openaiKey]);
+
+  // THE ENHANCED PATH — reuses the exact same OpenAI transcription endpoint
+  // already proven in Workspace and Live Boardroom's voice input, so the
+  // quality and behaviour here is identical to what those two already do.
+  const startOpenAI = useCallback(async () => {
+    setErr(null); setFixes([]);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+      const recorder = new MediaRecorder(stream, { mimeType: mime });
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        const blob = new Blob(chunksRef.current, { type: mime });
+        setTranscribing(true);
+        try {
+          const { transcribeAudio } = await import("../lib/Voice");
+          const result = await transcribeAudio(blob, (id) => (id === "openai" ? openaiKey : undefined));
+          if (result.text) {
+            const base = mode === "append" ? (value || "") : "";
+            onChange(base ? base.replace(/\s*$/, "") + " " + result.text : result.text);
+          }
+        } catch (e: any) {
+          setErr(String(e?.message || e).slice(0, 150));
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      mediaRecRef.current = recorder;
+      recorder.start();
+      setListening(true);
+    } catch (e: any) {
+      setErr(
+        e?.name === "NotAllowedError" ? "Microphone permission was refused. Allow it in your browser's address bar, then try again."
+        : e?.name === "NotFoundError" ? "No microphone was found on this device."
+        : "Could not start recording."
+      );
+    }
+  }, [openaiKey, mode, value, onChange]);
 
   const startListening = useCallback(() => {
-    if (!canListen || disabled) return;
+    if (disabled) return;
+    // THE FIX: when a key exists, take the enhanced path instead of the free
+    // one - everything else about this component (the single toggle button,
+    // the states, the error handling) stays exactly as it already was.
+    if (openaiKey) { void startOpenAI(); return; }
+    if (!canListen) return;
     setErr(null); setFixes([]);
 
     const w = window as any;
@@ -134,7 +196,7 @@ export default function VoiceField({
     } catch { setSpeaking(false); }
   }, [canSpeak, value, speaking, lang]);
 
-  if (!canListen && !canSpeak) return null;
+  if (!canListen && !canSpeak && !openaiKey) return null;
 
   const size = compact ? 22 : 26;
   const btn = (active: boolean, tone: string): React.CSSProperties => ({
@@ -151,12 +213,12 @@ export default function VoiceField({
   return (
     <span style={{ display: "inline-flex", flexDirection: "column", gap: 4 }}>
       <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-        {canListen && (
-          <button type="button" disabled={disabled}
+        {(canListen || openaiKey) && (
+          <button type="button" disabled={disabled || transcribing}
             onClick={() => (listening ? stopListening() : startListening())}
-            title={listening ? "Stop dictating" : "Dictate with your voice (free, uses your browser)"}
+            title={transcribing ? "Transcribing\u2026" : listening ? "Stop dictating" : openaiKey ? "Dictate with your voice (enhanced, OpenAI)" : "Dictate with your voice (free, uses your browser)"}
             style={btn(listening, "#F87171")}>
-            {listening ? "\u25A0" : "\u{1F3A4}"}
+            {transcribing ? "\u2026" : listening ? "\u25A0" : "\u{1F3A4}"}
           </button>
         )}
         {canSpeak && allowReadAloud && !!value.trim() && (
