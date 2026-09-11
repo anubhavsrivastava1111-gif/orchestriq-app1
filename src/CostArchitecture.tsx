@@ -2907,85 +2907,129 @@ const MODULE_MAP: ModuleMapEntry[] = [
 // one of these 20 modules, with the exact real pitfalls found along the way,
 // not a generic description of what each one "should" do.
 // ============================================================================
-interface SopEntry { n: string; title: string; steps: string[]; pitfall: string; troubleshoot: string; }
+interface SopEntry { n: string; title: string; concept: string; steps: string[]; pitfall: string; troubleshoot: string; }
+// THE FIX: every entry below now leads with the actual underlying concept and
+// the EXACT formula this platform calculates with — not a rewording of the
+// button labels. These are the real formulas from the engine files actually
+// written and numerically verified against known answers earlier in this
+// project — copied from that source, not reconstructed from memory.
 const SOP_CONTENT: SopEntry[] = [
   { n: "01", title: "Project Setup",
+    concept: "This isn't a calculation — it's the context every other formula on this page depends on. Your industry, location, and currency don't get computed from anything; they're the inputs that make every OTHER formula here apply to YOUR business specifically, rather than a generic template.",
     steps: ["Fill in your industry, location, and currency here first, before entering any costs.", "Every price and calculation elsewhere on this page assumes this is set correctly for YOUR business."],
     pitfall: "Changing currency later does NOT convert numbers you already entered — ₹500 typed under INR stays \"500\" if you switch to USD. Set currency right at the very start.",
     troubleshoot: "If numbers look wrong everywhere, check this tab first — a wrong industry or currency here quietly throws off everything downstream." },
+
   { n: "02", title: "AI Discovery (Start Here)",
+    concept: "Not a formula — a research step. The AI is asked to find REAL current prices, typical wastage %, and typical channel fees for a business like yours, then structure them into the same data model every other module reads. Every discovered number is tagged: \"confirmed\" (AI is confident), \"needs_check\" (AI estimated), or \"must_supply\" (AI genuinely couldn't find a number) — this tag is now saved permanently as the \"AI ESTIMATE\" / \"NEEDS YOUR NUMBER\" badges you see later, not discarded after the first look.",
     steps: ["Describe your business in plain words — what you make or sell, roughly where, and how you sell it (shop, online, wholesale).", "Press \"Research and build my cost model\" — it saves automatically the moment it finishes, no second click needed.", "Review the categorized results that appear — delete anything that doesn't apply to your business."],
     pitfall: "Vague descriptions get vague results. \"I sell food\" produces a weak, generic model. \"I make 500g jars of mango pickle, sold through local shops and Instagram\" produces a real, specific one.",
     troubleshoot: "If it says a generic placeholder template was used instead of real research, that means every AI attempt failed for this description — try rephrasing more specifically, or try again; a 45-second limit per attempt means it won't hang forever." },
+
   { n: "03", title: "Cost Components (What You Buy)",
+    concept: "THE FORMULA: Effective Cost per Unit = (Purchase Price + Freight + Duty + Other Landed Cost − Input Tax Credit − Scrap Recovery Value) ÷ (Purchase Quantity × Conversion Factor × Yield%). This is called \"landed cost\" — everything it actually costs you to get one usable unit into your hands, not the sticker price alone. The \"Yield%\" divides at the end specifically because waste means you pay for more than you actually use.",
     steps: ["Review every material, ingredient, or supply the AI found.", "Add anything missing with \"+ Add input\".", "Check the \"Usable %\" (yield) on each one — this matters more than people expect."],
     pitfall: "An \"AI ESTIMATE\" or \"NEEDS YOUR NUMBER\" badge next to an item's name means exactly what it says — check that price against reality. Editing the price clears the badge automatically once you've corrected it.",
     troubleshoot: "If a cost looks too low, check whether freight, duty, or other landed costs are filled in — the \"sticker price\" alone is rarely the true cost." },
+
   { n: "04", title: "Resources & Workforce",
+    concept: "THE FORMULA, a waterfall: Gross Hours/Year = Scheduled Hours/Day × Working Days/Year. Net Available = Gross − (Holidays+Leave+Sick+Training days × Hours/Day). Productive Hours = Net Available × (1 − Meetings/Admin%). Effective Hourly Cost = (Annual Salary × (1 + Employer Add-on%)) ÷ Productive Hours. This exists because Salary ÷ Scheduled Hours understates true cost — it ignores that paid time isn't all productive time.",
     steps: ["Open any resource marked \"Labour\".", "Fill in scheduled hours, leave, and how much of paid time is actually productive.", "The Activity Cost calculator at the bottom lets you cost a specific task — e.g. \"100 units × 6 minutes each\"."],
     pitfall: "The \"effective hourly cost\" shown will be noticeably HIGHER than salary ÷ scheduled hours. That's correct, not a bug — it accounts for leave, meetings, and admin time that salary-only math ignores.",
     troubleshoot: "If the effective cost seems too high, check the \"meetings + admin\" and \"utilization\" percentages — small changes there move this number a lot." },
+
   { n: "05", title: "Activities & Cost Drivers",
+    concept: "THE FORMULA: for every ingredient/resource line tagged to a process step (Mixing, Baking, Packaging...), Line Cost = Effective Cost per Unit × Quantity per Unit × (1 ÷ (1 − Scrap%)). All lines sharing the same step name are summed into that step's total, and each step's share of the whole product's cost is shown as a percentage. This exists to answer \"which part of my process actually costs the most\" — not just \"what's my total cost.\"",
     steps: ["Open a product in What You Sell.", "The \"Cost by process step\" section groups costs by the production step each ingredient is tagged to."],
     pitfall: "This only groups correctly if each input has a step name filled in (Mixing, Baking, Packaging, etc.). Untagged items land in \"Unassigned\".",
     troubleshoot: "If everything shows as one lump under \"Unassigned\", go back to What You Buy and check the step name on each BOM line." },
+
   { n: "06", title: "Capacity & Yield",
+    concept: "THE FORMULA: this compares Naive Cost (Purchase Price ÷ Quantity, ignoring waste) against Effective Cost (the same, divided again by Yield%). The gap between the two IS the hidden cost of waste — a real rupee number, not an abstract percentage. If you buy 1kg at ₹100 with 80% yield, effective cost per usable kg is ₹125, not ₹100.",
     steps: ["On each resource in What You Buy, set the realistic \"Usable %\" — how much of what you buy actually ends up in the finished product."],
     pitfall: "100% yield is almost never realistic. Trimming, spoilage, and rejects are normal — leaving this at 100% quietly understates your true cost.",
     troubleshoot: "If your break-even number seems optimistic, this is the first place to check — a too-generous yield number is the most common cause." },
+
   { n: "07", title: "Cost Allocation",
+    concept: "THE FORMULA depends on the pool's chosen \"basis\": revenue-basis gives each product (Its Own Monthly Revenue ÷ Total Portfolio Revenue) × Pool Amount; units-basis uses Volume instead of Revenue; direct-cost-basis uses each product's own direct cost as the share; equal-basis simply divides the pool evenly across every product. This exists because a shared bill (rent, one manager's salary) has to be split across everything it supports SOMEHOW — the basis you choose decides HOW fairly, and different bases genuinely give different answers.",
     steps: ["Open a product in What You Sell.", "\"Where your overhead allocation comes from\" shows exactly which fixed cost pool contributed how much to this specific product."],
     pitfall: "Pools that allocate by labour, machine, or constraint hours show \"not shown\" here — that data isn't tracked yet, stated honestly rather than guessed. The total elsewhere still uses the correct number.",
     troubleshoot: "If a pool's allocation looks too high or low for a product, check its \"basis\" — revenue-based allocation gives more to your best-selling products, which is sometimes not what you want." },
+
   { n: "08", title: "Procurement & Suppliers",
+    concept: "Uses the IDENTICAL landed-cost formula as Module 03 (Purchase Price + Freight + Duty + Other Landed Cost, divided by usable quantity) — applied once for your current supplier and once for each alternative you add, so every row is compared on exactly the same basis. The cheapest true landed cost is flagged automatically, not just the cheapest sticker price.",
     steps: ["Open any resource.", "\"Compare suppliers\" — add an alternative supplier's price, freight, and duty.", "The cheapest option is flagged automatically."],
     pitfall: "MOQ (minimum order quantity) and lead time are captured but not factored into the cost comparison — a cheaper supplier with a huge minimum order or a 3-month wait might not actually be practical.",
     troubleshoot: "If \"cheapest\" doesn't match your gut feeling, double check you've entered ALL landed costs (freight, duty) for the alternative, not just the sticker price." },
+
   { n: "09", title: "CAPEX & OPEX",
+    concept: "THE FORMULA — straight-line depreciation, the simplest and most common method: Monthly Depreciation = (Purchase Cost − Salvage Value) ÷ Useful Life in Months. Current Book Value = Purchase Cost − (Monthly Depreciation × Months Since Purchase). This exists because a big one-time purchase shouldn't make ONE month look terrible and every other month look artificially better — spreading it evenly reflects that the machine helps you every month it's used, not just the month you bought it.",
     steps: ["In Setup, scroll to \"Big one-time purchases\".", "Enter what you paid, what it'll be worth at the end, and how many years you'll use it.", "It automatically adds a matching monthly cost to your Fixed Costs — nothing else to do."],
     pitfall: "Do not also manually add the same machine as a separate fixed cost — that double-counts it. Its monthly depreciation already appears automatically.",
     troubleshoot: "If fixed costs look too high, check Fixed Costs in Setup for a duplicate \"Depreciation — [item]\" entry alongside a manually-added one for the same thing." },
+
   { n: "10", title: "Working Capital",
+    concept: "THE FORMULA: Cash Conversion Cycle (days) = Inventory Days + Receivables Days − Payables Days. Working Capital Required (₹) = (Daily Cost of Goods Sold × Inventory Days) + (Daily Revenue × Receivables Days) − (Daily Cost of Goods Sold × Payables Days). This exists because a profitable business can still run out of CASH if money is stuck in unsold stock or unpaid customer invoices longer than your own suppliers give you credit for.",
     steps: ["In Setup, below CAPEX, enter how many days of stock you hold, how long customers take to pay, and how long you take to pay suppliers."],
     pitfall: "This needs real revenue and cost data from Start Here to convert days into an actual rupee figure — filled in before any sales data exists, it will show ₹0.",
     troubleshoot: "If the cash-required number seems too low, make sure What You Sell actually has volume and price filled in for your products." },
+
   { n: "11", title: "Unit Economics",
+    concept: "THE FORMULA: Contribution per Unit = Selling Price − Variable Cost per Unit. This is the money left from ONE sale after only the costs that scale with that sale — it deliberately excludes fixed costs like rent, because contribution answers \"does making one more actually help\" rather than \"is the whole business profitable.\"",
     steps: ["The \"Cost breakdown at a glance\" card on Start Here, and each product's own numbers in What You Sell, show this automatically once data exists."],
     pitfall: "None significant — this is a straightforward read of already-verified numbers.",
     troubleshoot: "If a product's cost per unit looks wrong, check its BOM (recipe) in What You Sell for a missing or duplicated ingredient line." },
+
   { n: "12", title: "Customer Economics",
-    steps: ["Open a product in What You Sell.", "Fill in monthly churn %, cost to win a customer, and expected customer lifetime.", "The LTV:CAC ratio appears automatically — 3x or higher is generally healthy."],
+    concept: "THE FORMULA: Lifetime Value (LTV) = Contribution per Unit × Expected Customer Lifetime in Months (or, if lifetime isn't given directly, derived from churn as 100 ÷ Monthly Churn%). LTV:CAC Ratio = LTV ÷ Cost to Acquire a Customer. Payback Period (months) = CAC ÷ Contribution per Unit. A ratio of 3x or higher is a widely-used rule of thumb for a healthy business — below that, you're spending close to (or more than) what a customer is actually worth.",
+    steps: ["Open a product in What You Sell.", "Fill in monthly churn %, cost to win a customer, and expected customer lifetime.", "The LTV:CAC ratio appears automatically."],
     pitfall: "This section is hidden for products marked \"Sub-Assembly\" — those aren't sold directly to an end customer, so customer economics genuinely don't apply.",
     troubleshoot: "If the ratio seems off, double check \"expected customer lifetime\" — a small change here has an outsized effect on the result." },
+
   { n: "13", title: "Marketing & Sales",
+    concept: "THE FORMULA: Net Realisation per Sale = Gross Price × (1 − Commission% − Discount% − Ad Spend% − Payment Gateway%) − Packaging Cost − Delivery Subsidy. This is what actually reaches you after every fee a sales channel takes — the \"leakage\" between your listed price and your real income.",
     steps: ["In Where You Sell, add each channel you sell through.", "Fill in commission %, ad spend %, and any other fees each one takes."],
     pitfall: "Leaving fields blank isn't the same as zero — an unfilled ad spend % will understate how much a channel actually costs you.",
     troubleshoot: "If \"what you actually keep\" seems too high for a marketplace channel, check every fee field is filled in, not just commission." },
+
   { n: "14", title: "Pricing Engine",
+    concept: "THE FORMULA: Price for a Target Margin = Fully Loaded Cost per Unit ÷ (1 − Target Margin%). This is solved algebraically from the definition of margin (Margin% = (Price − Cost) ÷ Price) so the price you get back genuinely produces the margin you asked for — not an approximation.",
     steps: ["Open a product, set a \"Target Margin %\".", "A suggested price appears automatically, compared against your current price."],
     pitfall: "The suggested price is based on FULLY LOADED cost — including allocated overhead — so it can be noticeably higher than a simple \"cost plus a bit\" price you might expect.",
     troubleshoot: "If the suggested price seems too high, check Cost Allocation (Module 07) for this product — a large overhead share could be the reason." },
+
   { n: "15", title: "Break-even Analysis",
+    concept: "THE FORMULA: Break-even Units = Fixed Cost Allocated to This Product ÷ Contribution per Unit. Break-even Revenue = Break-even Units × Net Selling Price. This is the exact point where total contribution equals the fixed cost this product carries — sell fewer than this and the product is losing money once its fair share of overhead is counted, even if it looks fine on a simple per-unit basis.",
     steps: ["Appears automatically on each product once cost, price, and volume are filled in — no separate action needed."],
     pitfall: "This is PER PRODUCT. Your overall business break-even (in Diagnostics) can differ — a product can be above its own break-even while the business overall isn't, or vice versa.",
     troubleshoot: "If a product shows red (below its own break-even) but your business looks fine overall, other products are currently subsidizing this one." },
+
   { n: "16", title: "Profitability & ROI",
+    concept: "THE FORMULA: Operating Profit = Total Contribution (Revenue − Variable Cost) − Total Fixed Cost. Operating Margin% = Operating Profit ÷ Revenue. This is the actual bottom line for the whole business, built by summing every product's contribution and subtracting every fixed cost pool — the same numbers you've already entered elsewhere, combined once at the portfolio level.",
     steps: ["Check the Diagnostics tab for the overall profit, margin, and confidence picture of your whole business."],
     pitfall: "None significant.",
     troubleshoot: "If the confidence score is low, check for resources or products still marked \"NEEDS YOUR NUMBER\" — those pull the confidence score down." },
+
   { n: "17", title: "Time Value of Money",
+    concept: "THE FORMULAS: Present Value = Future Value ÷ (1 + rate)^periods — what a future rupee is worth today. Net Present Value (NPV) = the sum of every cash flow, each divided by (1 + rate) raised to its own year number — year 0 (usually your initial spend, negative) counts fully, later years count for progressively less. Internal Rate of Return (IRR) is the exact discount rate at which NPV becomes zero — found by trying rates between −99% and 1000% and narrowing in (a method called bisection) until NPV is close enough to zero. This exists because ₹1,00,000 received in 5 years is genuinely worth less than ₹1,00,000 today — these formulas make that comparison honest.",
     steps: ["In Diagnostics, add an investment to check.", "Enter what you'd spend now (as a negative number) and what you expect back each following year.", "NPV and the real rate of return (IRR) appear automatically."],
     pitfall: "IRR shows \"Not calculable\" when your cash flows never actually turn from negative to positive (or vice versa) — that's mathematically correct, not a bug. Every real investment needs at least one sign change.",
     troubleshoot: "If NPV is negative but you expected a good investment, double check your \"cost of capital\" percentage — too high a rate will make almost anything look unprofitable on paper." },
+
   { n: "18", title: "Scenarios & What-If",
+    concept: "THE FORMULA: Projected Revenue = Base Revenue × (1 + Price Change%) × (1 + Volume Change%) — multiplied together, not added, because raising price AND changing volume both affect revenue at the same time. Projected Variable Cost = Base Variable Cost × (1 + Volume Change%) × (1 + Cost Change%) — cost scales with volume too. Projected Fixed Cost = Base Fixed Cost × (1 + Fixed Cost Change%). This exists to let you test a real decision — a price rise, a cost increase — against your ACTUAL current numbers, before committing to it.",
     steps: ["In Diagnostics, add a scenario.", "Adjust price, volume, cost, or fixed cost percentages to see the effect on profit — without touching your real numbers."],
     pitfall: "This is a sandbox only — it never changes your actual saved data, no matter what you set the sliders to. To make a change real, edit the actual value in its own tile.",
     troubleshoot: "If the projected profit doesn't match your own mental math, remember price and volume changes compound together (multiply), not add." },
+
   { n: "19", title: "Optimization",
+    concept: "Not a single formula — this scans your actual data for specific, named patterns worth acting on (for example: overhead running well above a typical benchmark for your industry, or a product selling below its own break-even) and estimates the annual rupee impact of fixing each one, then ranks them by that impact. Every suggestion traces back to real numbers already on this page, not a generic tip.",
     steps: ["Check Diagnostics for \"Savings identified\" and the ranked list of opportunities below it — this is generated automatically from your data."],
     pitfall: "None significant.",
     troubleshoot: "If no opportunities appear, your model may not have enough data yet — add more resources, products, or channels for it to analyze." },
+
   { n: "20", title: "Reports & Export",
+    concept: "No formula — a clean read-out of numbers already calculated everywhere else on this page, laid out for printing or saving as a PDF via your browser's own print function.",
     steps: ["In Diagnostics, find \"Executive summary\".", "Press \"Print / Save as PDF\" — this uses your browser's own print dialog.", "Choose \"Save as PDF\" as the destination instead of a physical printer if you want a file."],
     pitfall: "Every browser's print dialog looks slightly different — the important part is picking \"Save as PDF\" (or similar) rather than an actual printer, if you want a file rather than a paper copy.",
     troubleshoot: "If the printed page looks wrong, only the summary itself is meant to print — everything else on the page is intentionally hidden during printing." },
@@ -3016,7 +3060,14 @@ const SOPDrawer: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               </button>
               {isOpen && (
                 <div style={{ padding: "4px 14px 14px" }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: V("muted", "#8b98a5"), textTransform: "uppercase", marginTop: 8, marginBottom: 4 }}>Steps</div>
+                  {/* THE FIX: the actual concept and formula, first and most
+                      prominent — so the underlying calculation can be judged
+                      independently of whether the screen "looks right". */}
+                  <div style={{ marginTop: 8, padding: "10px 12px", background: "rgba(20,184,166,0.05)", borderRadius: 6, border: "1px solid rgba(20,184,166,0.25)" }}>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: "#14B8A6", textTransform: "uppercase", marginBottom: 4 }}>What this actually calculates</div>
+                    <div style={{ fontSize: 11, lineHeight: 1.7 }}>{s.concept}</div>
+                  </div>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: V("muted", "#8b98a5"), textTransform: "uppercase", marginTop: 12, marginBottom: 4 }}>Steps</div>
                   <ol style={{ margin: 0, paddingLeft: 18, fontSize: 11, lineHeight: 1.7 }}>
                     {s.steps.map((step, i) => <li key={i}>{step}</li>)}
                   </ol>
