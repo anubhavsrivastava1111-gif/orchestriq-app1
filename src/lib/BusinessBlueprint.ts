@@ -876,6 +876,9 @@ export function blueprintToRows(
       freight_cost: 0, duty_cost: 0, other_landed_cost: 0, input_tax_credit: 0, scrap_recovery_value: 0,
       is_variable: true, is_substitutable: false,
       notes: [r.price_basis, r.note].filter(Boolean).join(" | ") || null,
+      // THE FIX: this was being discarded here, the ONE place it could ever
+      // be captured - once this row is built without it, it is gone forever.
+      data_confidence: r.verify,
     });
   }
 
@@ -892,6 +895,7 @@ export function blueprintToRows(
       monthly_volume: f.monthly_volume,
       constraint_minutes_per_unit: f.constraint_minutes_per_unit,
       is_active: true, notes: f.price_basis || null,
+      data_confidence: f.verify,
     });
     f.recipe.forEach((l, i) => {
       const rid = resIdByName.get(l.resource_name.toLowerCase());
