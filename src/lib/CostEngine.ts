@@ -81,6 +81,10 @@ export interface CaResource {
   scrap_recovery_value?: number | null;
   notes?: string | null;
   effective_cost_per_base_unit?: number | null;
+  // DATA PROVENANCE — the confirmed gap: this was captured at AI discovery
+  // time and thrown away before it was ever saved. Now persisted, so "AI
+  // estimated this, please check" doesn't vanish the moment you look away.
+  data_confidence?: "confirmed" | "needs_check" | "must_supply" | null;
 }
 
 export interface CaOffering {
@@ -102,6 +106,7 @@ export interface CaOffering {
   is_active?: boolean | null;
   target_margin_pct?: number | null;
   notes?: string | null;
+  data_confidence?: "confirmed" | "needs_check" | "must_supply" | null;
 }
 
 export interface CaBomLine {
