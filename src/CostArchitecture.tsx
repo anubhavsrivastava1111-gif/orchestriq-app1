@@ -23,6 +23,7 @@ import { compareSuppliers, makeVsBuy, type SupplierOption } from "./lib/Procurem
 import { calculateDepreciation, type CapexItem } from "./lib/CapexEngine";
 import { calculateWorkingCapital } from "./lib/WorkingCapitalEngine";
 import { presentValue, futureValue, netPresentValue, internalRateOfReturn } from "./lib/TimeValueEngine";
+import { runScenario } from "./lib/ScenarioEngine";
 import {
   validate, summarise,
   type Finding, type Severity,
@@ -1161,6 +1162,10 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
                     its own load/save so nothing about DiagnosticsTab itself
                     needs to change to add this. */}
                 <InvestmentAnalysisPanel userId={userId} cur={cur} showToast={showToast} />
+                {/* MODULE 18 — SCENARIOS & WHAT-IF, also self-contained. */}
+                <ScenarioPanel userId={userId} cur={cur} dx={dx} showToast={showToast} />
+                {/* MODULE 20 — REPORTS & EXPORT. */}
+                <ExecutiveSummaryPanel dx={dx} M={M} companyName={companyName} ctx={ctx} />
               </>
             )}
 
@@ -2529,6 +2534,151 @@ const InvestmentAnalysisPanel: React.FC<{
 };
 
 /* ============================================================================
+ * MODULE 18 — SCENARIOS & WHAT-IF PANEL.
+ * Reuses ca_scenarios, a table that already existed with exactly the right
+ * shape (assumptions jsonb, computed_snapshot jsonb) - zero schema changes
+ * needed. Price and volume changes are applied multiplicatively, matching
+ * how they actually interact, not added together as if independent.
+ * ========================================================================== */
+const ScenarioPanel: React.FC<{
+  userId: string | null; cur: string; dx: PortfolioDiagnosis; showToast?: (m: string, k?: string) => void;
+}> = ({ userId, cur, dx, showToast }) => {
+  const [scenarios, setScenarios] = useState<Array<{ id: string; name: string; scenario_type: string; assumptions: any }>>([]);
+  const [loaded, setLoaded] = useState(false);
+  const M = (v: number) => fmtMoney(v, cur);
+
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      const { data } = await supabase.from("ca_scenarios").select("*").eq("user_id", userId).order("created_at", { ascending: true });
+      setScenarios((data as any[]) ?? []);
+      setLoaded(true);
+    })();
+  }, [userId]);
+
+  const addScenario = async () => {
+    if (!userId) return;
+    const row = { id: uid(), user_id: userId, name: "What if...", scenario_type: "custom",
+      assumptions: { priceChangePct: 0, volumeChangePct: 0, variableCostChangePct: 0, fixedCostChangePct: 0 } };
+    setScenarios((p) => [...p, row]);
+    await supabase.from("ca_scenarios").insert(row);
+  };
+  const patchScenario = (id: string, assumptionsPatch: any, namePatch?: string) => {
+    setScenarios((p) => p.map((s) => (s.id === id ? { ...s, name: namePatch ?? s.name, assumptions: { ...s.assumptions, ...assumptionsPatch } } : s)));
+    const updated = scenarios.find((s) => s.id === id);
+    void supabase.from("ca_scenarios").update({ name: namePatch ?? updated?.name, assumptions: { ...updated?.assumptions, ...assumptionsPatch } }).eq("id", id);
+  };
+  const delScenario = (id: string) => {
+    setScenarios((p) => p.filter((s) => s.id !== id));
+    void supabase.from("ca_scenarios").delete().eq("id", id);
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <div style={{ ...S.card, marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700 }}>What if things changed? — Module 18</div>
+        <button onClick={addScenario} style={S.btnGhost}>+ Add a scenario</button>
+      </div>
+      <div style={S.note}>
+        Try a change without actually touching your real numbers — a price rise, a cost increase, a drop in sales — and see what it would do to your profit before it happens.
+      </div>
+
+      {scenarios.map((sc) => {
+        const result = runScenario(
+          { monthlyRevenue: dx.monthlyRevenue, monthlyVariableCost: dx.monthlyVariableCost, monthlyFixedCost: dx.monthlyFixedCost },
+          sc.assumptions
+        );
+        return (
+          <div key={sc.id} style={{ marginTop: 12, paddingTop: 12, borderTop: "1px dashed " + V("border", "#232838") }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <TextCell value={sc.name} onChange={(v) => patchScenario(sc.id, {}, v)} />
+              <button onClick={() => delScenario(sc.id)} style={{ background: "none", border: "none", color: BAD.fg, cursor: "pointer", fontSize: 13 }}>{"\u2715"}</button>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+              <div><label style={S.lbl}>Price change</label>
+                <NumCell value={sc.assumptions.priceChangePct} onChange={(v) => patchScenario(sc.id, { priceChangePct: v ?? 0 })} suffix="%" /></div>
+              <div><label style={S.lbl}>Volume change</label>
+                <NumCell value={sc.assumptions.volumeChangePct} onChange={(v) => patchScenario(sc.id, { volumeChangePct: v ?? 0 })} suffix="%" /></div>
+              <div><label style={S.lbl}>Cost change</label>
+                <NumCell value={sc.assumptions.variableCostChangePct} onChange={(v) => patchScenario(sc.id, { variableCostChangePct: v ?? 0 })} suffix="%" /></div>
+              <div><label style={S.lbl}>Fixed cost change</label>
+                <NumCell value={sc.assumptions.fixedCostChangePct} onChange={(v) => patchScenario(sc.id, { fixedCostChangePct: v ?? 0 })} suffix="%" /></div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+              <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Profit today</div>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>{M(result.base.operatingProfit)}</div></div>
+              <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Profit under this scenario</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: result.profitChangeAbsolute >= 0 ? OK.fg : BAD.fg }}>{M(result.projected.operatingProfit)}</div></div>
+            </div>
+            <div style={{ fontSize: 10, marginTop: 6, color: result.profitChangeAbsolute >= 0 ? OK.fg : BAD.fg }}>
+              {result.profitChangeAbsolute >= 0 ? "+" : ""}{M(result.profitChangeAbsolute)} per month
+              {result.profitChangePct != null && ` (${result.profitChangePct >= 0 ? "+" : ""}${result.profitChangePct.toFixed(0)}%)`}
+            </div>
+          </div>
+        );
+      })}
+      {!scenarios.length && <div style={{ fontSize: 10, color: V("muted", "#8b98a5"), fontStyle: "italic", marginTop: 8 }}>No scenarios yet.</div>}
+    </div>
+  );
+};
+
+/* ============================================================================
+ * MODULE 20 — REPORTS & EXPORT: EXECUTIVE SUMMARY.
+ * Uses the browser's own native print function - genuinely reliable, no new
+ * dependencies, and it already correctly handles "save as PDF" on every
+ * modern browser's print dialog. @media print rules hide everything else on
+ * the page so only this clean summary prints or saves.
+ * ========================================================================== */
+const ExecutiveSummaryPanel: React.FC<{
+  dx: PortfolioDiagnosis; M: (v: number) => string; companyName?: string; ctx: CaBusinessContext | null;
+}> = ({ dx, M, companyName, ctx }) => {
+  return (
+    <div style={{ ...S.card, marginTop: 16 }} id="oiq-executive-summary">
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #oiq-executive-summary, #oiq-executive-summary * { visibility: visible; }
+          #oiq-executive-summary { position: absolute; top: 0; left: 0; width: 100%; }
+        }
+      `}</style>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700 }}>Executive summary — Module 20</div>
+        <button onClick={() => window.print()} style={S.btnGhost}>Print / Save as PDF</button>
+      </div>
+      <div style={S.note}>A clean summary of your whole business, ready to print or save as a PDF from your browser's own print dialog.</div>
+
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 16, fontWeight: 800 }}>{companyName || "Your Business"}</div>
+        <div style={{ fontSize: 10, color: V("muted", "#8b98a5") }}>{ctx?.industry_label || ""} {ctx?.geography ? "\u00B7 " + ctx.geography : ""} \u00B7 Generated {new Date().toLocaleDateString()}</div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginTop: 14 }}>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Monthly revenue</div><div style={{ fontSize: 16, fontWeight: 800 }}>{M(dx.monthlyRevenue)}</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Fixed cost</div><div style={{ fontSize: 16, fontWeight: 800 }}>{M(dx.monthlyFixedCost)}</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Variable cost</div><div style={{ fontSize: 16, fontWeight: 800 }}>{M(dx.monthlyVariableCost)}</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Operating profit</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: dx.monthlyOperatingProfit >= 0 ? OK.fg : BAD.fg }}>{M(dx.monthlyOperatingProfit)}</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Contribution margin</div><div style={{ fontSize: 16, fontWeight: 800 }}>{dx.contributionMarginPct?.toFixed(1)}%</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Break-even revenue</div><div style={{ fontSize: 16, fontWeight: 800 }}>{M(dx.breakevenRevenue)}</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Confidence score</div><div style={{ fontSize: 16, fontWeight: 800 }}>{dx.confidenceScore}%</div></div>
+        <div><div style={{ fontSize: 9, color: V("muted", "#8b98a5"), textTransform: "uppercase" }}>Savings identified</div><div style={{ fontSize: 16, fontWeight: 800, color: OK.fg }}>{M(dx.totalAnnualOpportunity)}/yr</div></div>
+      </div>
+
+      {dx.opportunities?.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>Top opportunities</div>
+          {dx.opportunities.slice(0, 5).map((o: Opportunity, i: number) => (
+            <div key={i} style={{ fontSize: 10.5, padding: "4px 0", color: V("muted", "#8b98a5") }}>{i + 1}. {o.title} — {M(o.annualImpact)}/yr</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ============================================================================
  * TAB :: START HERE
  * Describe the business in plain words. The system researches it, drafts the
  * whole cost model, and hands back a checklist to verify - instead of a blank
@@ -2586,9 +2736,9 @@ const MODULE_MAP: ModuleMapEntry[] = [
   { n:"15", title:"Break-even Analysis", desc:"Find the exact number you need to sell before you stop losing money and start earning.", icon:"\uD83D\uDCC8", target:"products", livesIn:"open a product in What You Sell" },
   { n:"16", title:"Profitability & ROI", desc:"See the full picture of whether the business actually makes money overall.", icon:"\uD83D\uDCC8", target:"diagnostics" },
   { n:"17", title:"Time Value of Money", desc:"See what a big future cost or return is really worth in today's money.", icon:"\u23F1\uFE0F", target:"diagnostics", livesIn:"Diagnostics tab" },
-  { n:"18", title:"Scenarios & What-If", desc:"See what happens to your profit if prices, costs, or sales change - before it actually happens.", icon:"\uD83D\uDD00", target:null },
+  { n:"18", title:"Scenarios & What-If", desc:"See what happens to your profit if prices, costs, or sales change - before it actually happens.", icon:"\uD83D\uDD00", target:"diagnostics", livesIn:"Diagnostics tab" },
   { n:"19", title:"Optimization", desc:"Get concrete suggestions on where you can cut cost or improve profit right now.", icon:"\uD83C\uDFAF", target:"diagnostics", livesIn:"Diagnostics tab" },
-  { n:"20", title:"Reports & Export", desc:"Get a clean summary of everything, ready to share or print.", icon:"\uD83D\uDCC4", target:null },
+  { n:"20", title:"Reports & Export", desc:"Get a clean summary of everything, ready to share or print.", icon:"\uD83D\uDCC4", target:"diagnostics", livesIn:"Diagnostics tab" },
 ];
 
 const ExploreTheModel: React.FC<{ goTo:(t:TabKey)=>void; showToast?:(m:string,k?:string)=>void }> = ({ goTo, showToast }) => {
