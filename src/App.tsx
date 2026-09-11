@@ -3906,6 +3906,71 @@ export default function App(){
   const [adminConfig,setAdminConfig]=useState<{[k:string]:boolean}>({ledgerEnabled:true,dispatchEnabled:true,actionsEnabled:true});
   const [dataF,setDataF]=useState({k:"",v:""});
   const [view,setView]=useState("home");
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // STEP 1 — REAL URLS PER MODULE. Deliberately isolated: this reads and
+  // writes the browser address bar by WATCHING the existing `view` state,
+  // and does not change a single one of the ~100 places elsewhere in this
+  // file that already call setView(...). If this block had a bug, the
+  // worst case is the address bar simply not updating — every existing
+  // setView() call, every menu click, every screen keeps working exactly
+  // as it does today, completely unaffected.
+  const VIEW_TO_PATH: Record<string,string> = {
+    home:"/", nerve:"/nerve-center", workflow:"/workflow", agentic:"/agentic-ai",
+    agents:"/ai-agents", p3:"/autopilot", chat:"/chat", data:"/data-hub",
+    costarch:"/cost-architecture", ledger:"/ledger", finance:"/finance",
+    dispatch:"/pulse", actions:"/tasks", studio:"/studio", funding:"/funding",
+    tokens:"/tokens", workspace:"/ai-workspace", liveboard:"/live-boardroom",
+    account:"/account", admin:"/admin", servicedesk:"/support",
+  };
+  const PATH_TO_VIEW: Record<string,string> = Object.fromEntries(
+    Object.entries(VIEW_TO_PATH).map(([v,p])=>[p,v])
+  );
+  const didRestoreFromUrl=useRef(false);
+
+  // Runs once, only after the user is genuinely inside the app (page==="app")
+  // - never while still on the login/onboarding screens, so a deep link can
+  // never skip past authentication. Reads whatever path is already in the
+  // address bar (e.g. someone opened /cost-architecture directly, or hit
+  // refresh) and opens that module instead of always defaulting to home.
+  useEffect(()=>{
+    if(page!=="app"||didRestoreFromUrl.current)return;
+    didRestoreFromUrl.current=true;
+    const path=window.location.pathname;
+    const matchedView=PATH_TO_VIEW[path];
+    if(matchedView&&matchedView!==view){
+      setView(matchedView);
+    }else{
+      // No known path (or already "/") - normalise the address bar to match
+      // whatever view is actually showing, without adding a history entry.
+      window.history.replaceState(null,"",VIEW_TO_PATH[view]||"/");
+    }
+  },[page]);
+
+  // Runs on every subsequent view change and keeps the address bar in sync.
+  // Skipped on the very first run (handled above) to avoid pushing a
+  // duplicate history entry the instant the app opens.
+  const isFirstViewSync=useRef(true);
+  useEffect(()=>{
+    if(page!=="app")return;
+    if(isFirstViewSync.current){isFirstViewSync.current=false;return;}
+    const target=VIEW_TO_PATH[view]||"/";
+    if(window.location.pathname!==target){
+      window.history.pushState(null,"",target);
+    }
+  },[view,page]);
+
+  // Browser back/forward buttons - the ONE other thing that can change the
+  // address bar besides this code itself. Kept in sync the same way.
+  useEffect(()=>{
+    const onPop=()=>{
+      const matchedView=PATH_TO_VIEW[window.location.pathname];
+      if(matchedView)setView(matchedView);
+    };
+    window.addEventListener("popstate",onPop);
+    return ()=>window.removeEventListener("popstate",onPop);
+  },[]);
+  // ═══════════════════════════════════════════════════════════════════════
   const [nTab,setNTab]=useState("boardroom");
   const [brQ,setBrQ]=useState("");
   const [brAg,setBrAg]=useState(["ceo","cfo","cto","cmo"]);
