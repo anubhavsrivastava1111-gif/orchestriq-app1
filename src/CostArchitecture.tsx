@@ -20,6 +20,7 @@ import { computeCapacity, computeRates, costActivity } from "./lib/WorkforceEngi
 import { offeringBreakEven, priceForTargetMargin, priceChangeImpact } from "./lib/PricingEngine";
 import { activityBreakdown, allocationBreakdown } from "./lib/CostTransparencyEngine";
 import { compareSuppliers, makeVsBuy, type SupplierOption } from "./lib/ProcurementEngine";
+import { calculateDepreciation, type CapexItem } from "./lib/CapexEngine";
 import {
   validate, summarise,
   type Finding, type Severity,
@@ -363,6 +364,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
   const [offerings, setOfferings] = useState<CaOffering[]>([]);
   const [bomLines, setBomLines] = useState<CaBomLine[]>([]);
   const [costPools, setCostPools] = useState<CaCostPool[]>([]);
+  const [capexItems, setCapexItems] = useState<Array<CapexItem & { linked_cost_pool_id?: string | null }>>([]); // MODULE 9
   const [channels, setChannels] = useState<CaChannel[]>([]);
   const [offeringChannels, setOfferingChannels] = useState<CaOfferingChannel[]>([]);
   const [benchmarks, setBenchmarks] = useState<CaBenchmark[]>([]);
@@ -390,7 +392,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
         setUserId(uidNow);
         if (!uidNow) { setErr("Sign in to use Cost Architecture."); setLoading(false); return; }
 
-        const [bc, rs, of, bl, cp, ch, oc, bm, vo, pr, so] = await Promise.all([
+        const [bc, rs, of, bl, cp, ch, oc, bm, vo, pr, so, cx] = await Promise.all([
           supabase.from("ca_business_context").select("*").eq("user_id", uidNow).maybeSingle(),
           supabase.from("ca_resources").select("*").eq("user_id", uidNow).order("created_at", { ascending: true }),
           supabase.from("ca_offerings").select("*").eq("user_id", uidNow).order("created_at", { ascending: true }),
@@ -404,9 +406,12 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
           // MODULE 8 — alternative supplier quotes, additive to the load
           // that already exists here; nothing above it changed.
           supabase.from("ca_supplier_options").select("*").eq("user_id", uidNow),
+          // MODULE 9 — CAPEX items, also purely additive.
+          supabase.from("ca_capex_items").select("*").eq("user_id", uidNow),
         ]);
         if (cancelled) return;
         setSupplierOptions((so.data as any[]) ?? []);
+        setCapexItems((cx.data as CapexItem[]) ?? []);
 
         // MODULE 1: the active project is whichever one is not yet complete.
         // If someone genuinely has none yet (shouldn't happen after the
@@ -642,6 +647,51 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
   const delSupplierOption = (id: string) => {
     setSupplierOptions((p) => p.filter((s) => s.id !== id));
     void removeRow("ca_supplier_options", id);
+  };
+
+  // MODULE 9 — THE DESIGN CHOICE: adding or editing a CAPEX item keeps a
+  // linked ca_cost_pools row in sync with its calculated monthly
+  // depreciation. This is the ENTIRE mechanism by which CAPEX affects real
+  // numbers - CostEngine.ts's allocateOverhead() already reads cost pools
+  // correctly and is completely unmodified; depreciation simply becomes
+  // "another fixed cost" the moment this sync runs.
+  const syncCapexToCostPool = async (item: CapexItem, existingPoolId?: string | null) => {
+    const dep = calculateDepreciation(item);
+    if (existingPoolId) {
+      setCostPools((p) => p.map((cp) => (cp.id === existingPoolId ? { ...cp, amount: dep.monthlyDepreciation } : cp)));
+      await supabase.from("ca_cost_pools").update({ amount: dep.monthlyDepreciation }).eq("id", existingPoolId);
+      return existingPoolId;
+    }
+    const poolId = uid();
+    const pool: CaCostPool = { id: poolId, user_id: userId!, name: "Depreciation \u2014 " + item.name,
+      category: "depreciation", amount: dep.monthlyDepreciation, period: "monthly",
+      allocation_basis: "revenue", is_avoidable: false } as CaCostPool;
+    setCostPools((p) => [...p, pool]);
+    await supabase.from("ca_cost_pools").insert(pool);
+    return poolId;
+  };
+
+  const addCapexItem = async () => {
+    if (!userId) return;
+    const item: CapexItem & { user_id: string; linked_cost_pool_id?: string } = {
+      id: uid(), user_id: userId, name: "New equipment", purchase_cost: 0, salvage_value: 0, useful_life_months: 60,
+    };
+    const poolId = await syncCapexToCostPool(item);
+    const withLink = { ...item, linked_cost_pool_id: poolId };
+    setCapexItems((p) => [...p, withLink]);
+    await supabase.from("ca_capex_items").insert(withLink);
+  };
+  const patchCapexItem = async (id: string, patch: Partial<CapexItem>, linkedPoolId?: string | null) => {
+    setCapexItems((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    await supabase.from("ca_capex_items").update(patch).eq("id", id);
+    const updated = { ...capexItems.find((c) => c.id === id)!, ...patch };
+    await syncCapexToCostPool(updated, linkedPoolId);
+  };
+  const delCapexItem = (id: string, linkedPoolId?: string | null) => {
+    setCapexItems((p) => p.filter((c) => c.id !== id));
+    void removeRow("ca_capex_items", id);
+    // The linked fixed cost goes too - the equipment is gone, so is its depreciation.
+    if (linkedPoolId) { setCostPools((p) => p.filter((cp) => cp.id !== linkedPoolId)); void removeRow("ca_cost_pools", linkedPoolId); }
   };
   const delCh = (id: string) => { setChannels((p) => p.filter((c) => c.id !== id));
     setOfferingChannels((p) => p.filter((c) => c.channel_id !== id)); void removeRow("ca_channels", id); };
@@ -1077,7 +1127,8 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
 
             {tab === "setup" && (
               <SetupTab ctx={ctx} patchCtx={patchCtx} costPools={costPools} patchPool={patchPool}
-                addPool={addPool} delPool={delPool} M={M} flagFor={flagFor} onAccept={acceptException} openaiKey={openaiKey} />
+                addPool={addPool} delPool={delPool} M={M} flagFor={flagFor} onAccept={acceptException} openaiKey={openaiKey}
+                capexItems={capexItems} addCapexItem={addCapexItem} patchCapexItem={patchCapexItem} delCapexItem={delCapexItem} cur={cur} />
             )}
 
             {tab === "inputs" && (
@@ -1161,7 +1212,13 @@ const SetupTab: React.FC<{
   costPools: CaCostPool[]; patchPool: (id: string, p: Partial<CaCostPool>) => void;
   addPool: () => void; delPool: (id: string) => void; M: (v: number) => string;
   flagFor: FlagLookup; onAccept: AcceptFn; openaiKey?: string;
-}> = ({ ctx, patchCtx, costPools, patchPool, addPool, delPool, M, flagFor, onAccept, openaiKey }) => {
+  capexItems: Array<CapexItem & { linked_cost_pool_id?: string | null }>;
+  addCapexItem: () => void;
+  patchCapexItem: (id: string, p: Partial<CapexItem>, linkedPoolId?: string | null) => void;
+  delCapexItem: (id: string, linkedPoolId?: string | null) => void;
+  cur: string;
+}> = ({ ctx, patchCtx, costPools, patchPool, addPool, delPool, M, flagFor, onAccept, openaiKey,
+        capexItems, addCapexItem, patchCapexItem, delCapexItem, cur }) => {
   const monthlyFixed = costPools.reduce((s, p) => {
     const a = num(p.amount);
     return s + (p.period === "annual" ? a / 12 : p.period === "quarterly" ? a / 3 : a);
@@ -1249,6 +1306,47 @@ const SetupTab: React.FC<{
             <button style={{ ...S.btnGhost, marginTop: 10 }} onClick={addPool}>+ Add fixed cost</button>
           </div>
         )}
+
+        {/* MODULE 09 — CAPEX & DEPRECIATION. A big one-time purchase spread
+            fairly over the years you'll use it, added automatically to your
+            fixed costs above the moment it's created - open "Fixed costs"
+            and you'll see a matching "Depreciation \u2014 [item name]" row
+            appear, kept in sync every time this changes. */}
+        <div style={{ ...S.card, marginTop: 14 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>Big one-time purchases (CAPEX)</div>
+          <div style={S.note}>
+            A machine, a vehicle, a big renovation - anything expensive that will keep helping your business for
+            years, not just this month. We spread its cost evenly across how long you'll use it, so one big
+            purchase doesn't wrongly make one month look terrible and every other month look artificially better.
+          </div>
+          {capexItems.map((item) => {
+            const dep = calculateDepreciation(item);
+            return (
+              <div key={item.id} style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed " + V("border", "#232838") }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                  <div style={{ flex: "1 1 160px" }}><label style={S.lbl}>What is it?</label>
+                    <TextCell value={item.name} onChange={(v) => patchCapexItem(item.id, { name: v }, item.linked_cost_pool_id)} /></div>
+                  <div><label style={S.lbl}>Purchase cost</label>
+                    <NumCell value={item.purchase_cost} onChange={(v) => patchCapexItem(item.id, { purchase_cost: v }, item.linked_cost_pool_id)} /></div>
+                  <div><label style={S.lbl}>Worth at the end (optional)</label>
+                    <NumCell value={item.salvage_value} onChange={(v) => patchCapexItem(item.id, { salvage_value: v }, item.linked_cost_pool_id)} /></div>
+                  <div><label style={S.lbl}>Years you'll use it</label>
+                    <NumCell value={item.useful_life_months ? item.useful_life_months / 12 : null}
+                      onChange={(v) => patchCapexItem(item.id, { useful_life_months: (v || 0) * 12 }, item.linked_cost_pool_id)} /></div>
+                  <button onClick={() => delCapexItem(item.id, item.linked_cost_pool_id)} style={{ background: "none", border: "none", color: BAD.fg, cursor: "pointer", fontSize: 13 }}>{"\u2715"}</button>
+                </div>
+                <div style={{ fontSize: 10.5, marginTop: 6 }}>
+                  Spread over {(item.useful_life_months / 12).toFixed(1)} years, this adds
+                  {" "}<strong>{fmtMoney(dep.monthlyDepreciation, cur)}</strong> to your fixed costs every month.
+                  {item.purchase_date && !dep.isFullyDepreciated && (
+                    <span style={{ color: V("muted", "#8b98a5") }}> Currently worth about {fmtMoney(dep.currentBookValue, cur)} on paper, with {dep.monthsRemaining} months of useful life left.</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          <button style={{ ...S.btnGhost, marginTop: 10 }} onClick={addCapexItem}>+ Add a big purchase</button>
+        </div>
       </div>
     </>
   );
@@ -2324,7 +2422,7 @@ const MODULE_MAP: ModuleMapEntry[] = [
   { n:"06", title:"Capacity & Yield", desc:"Understand how much you lose to waste, and what that's really costing you.", icon:"\u2699\uFE0F", target:"inputs", livesIn:"each resource's yield % in What You Buy" },
   { n:"07", title:"Cost Allocation", desc:"See exactly which of your bills (rent, salaries) are really being paid for by which product.", icon:"\uD83D\uDD00", target:"products", livesIn:"open a product in What You Sell" },
   { n:"08", title:"Procurement & Suppliers", desc:"Compare suppliers side by side to see who actually costs you less once everything is included.", icon:"\uD83D\uDED2", target:"inputs", livesIn:"open a resource in What You Buy" },
-  { n:"09", title:"CAPEX & OPEX", desc:"Work out the true cost of a big one-time purchase, spread fairly over the years you'll use it.", icon:"\uD83C\uDFE2", target:null },
+  { n:"09", title:"CAPEX & OPEX", desc:"Work out the true cost of a big one-time purchase, spread fairly over the years you'll use it.", icon:"\uD83C\uDFE2", target:"setup", livesIn:"Setup tab, below Fixed Costs" },
   { n:"10", title:"Working Capital", desc:"Find out how much cash you need sitting in the bank just to keep the business running.", icon:"\uD83D\uDCB0", target:null },
   { n:"11", title:"Unit Economics", desc:"See the exact profit you make (or lose) on a single unit sold.", icon:"\uD83D\uDCCA", target:"products" },
   { n:"12", title:"Customer Economics", desc:"Find out if a typical customer is worth more than what it costs you to win them.", icon:"\uD83D\uDC64", target:"products", livesIn:"open a product in What You Sell" },
