@@ -9172,7 +9172,12 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
         {/* COST ARCHITECTURE */}
         {view==="costarch"&&(
           <div style={{flex:1,overflowY:"auto"}}>
-            <CostArchitecture showToast={showToast} companyName={co.name} onDiagnosis={publishCostDiagnosis} callAI={(prompt,useWebSearch)=>ask("You are a senior cost engineering and unit economics researcher. Return ONLY the exact JSON structure requested. No commentary, no markdown fences.",[{role:"user",content:prompt}],8000,!!useWebSearch)}/>
+            {/* THE MISSING LINK: Cost Architecture never received a way to
+                check for an OpenAI key, so its voice input could only ever
+                be the free browser engine - confirmed and fixed. Same
+                lookup already used by Workspace and Live Boardroom. */}
+            <CostArchitecture showToast={showToast} companyName={co.name} onDiagnosis={publishCostDiagnosis} callAI={(prompt,useWebSearch)=>ask("You are a senior cost engineering and unit economics researcher. Return ONLY the exact JSON structure requested. No commentary, no markdown fences.",[{role:"user",content:prompt}],8000,!!useWebSearch)}
+              getProviderKey={(id:string)=>providerKey(keys,id)||undefined}/>
           </div>
         )}
 
