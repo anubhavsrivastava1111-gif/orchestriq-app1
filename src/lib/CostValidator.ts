@@ -139,14 +139,21 @@ export function validate(ws: CostWorkspace, overrides: Set<string> = new Set()):
       const conv = num(r.conversion_factor, 1);
       if (looksLikeAPeriod && conv <= 1) {
         const linesUsingThis = ws.bomLines.filter((b) => b.child_resource_id === r.id);
-        const smallQty = linesUsingThis.some((b) => num(b.qty_per_unit) > 0 && num(b.qty_per_unit) < 20);
-        if (smallQty) {
+        // THE FIX, FOUND ON RE-REVIEW: this used to always quote the FIRST
+        // line using this resource in the warning text, even if a DIFFERENT
+        // line further down the list was the one that actually looked
+        // suspicious. If a resource is used in several recipes at different
+        // quantities, that could show an unrelated, correct-looking number
+        // right next to a warning about a completely different line — a
+        // genuinely misleading message, not just an imprecise one.
+        const suspiciousLine = linesUsingThis.find((b) => num(b.qty_per_unit) > 0 && num(b.qty_per_unit) < 20);
+        if (suspiciousLine) {
           push({
             id: key("LABOUR_UNIT_MISMATCH", r.id), rule: "LABOUR_UNIT_MISMATCH", severity: "error",
             scope: "resource", entityId: r.id, entityName: r.name || "This role",
             field: "conversion_factor", fieldLabel: "Hours per " + (purchaseUom || "period"),
             title: "This role's price and how it's used don't match up",
-            why: `This is priced per ${purchaseUom || "period"} (${money(num(r.purchase_price), cur)}), but a recipe uses only ${linesUsingThis[0] ? num(linesUsingThis[0].qty_per_unit) : "a small amount"} of it per unit — that looks like hours, not a whole ${purchaseUom || "period"}. Without telling the system how many hours are in one ${purchaseUom || "period"}, the full ${purchaseUom || "period"}ly price gets charged for what should be a fraction of it. Set "hours per ${purchaseUom || "period"}" (for example 176 for a typical month) to fix this.`,
+            why: `This is priced per ${purchaseUom || "period"} (${money(num(r.purchase_price), cur)}), but a recipe uses only ${num(suspiciousLine.qty_per_unit)} of it per unit — that looks like hours, not a whole ${purchaseUom || "period"}. Without telling the system how many hours are in one ${purchaseUom || "period"}, the full ${purchaseUom || "period"}ly price gets charged for what should be a fraction of it. Set "hours per ${purchaseUom || "period"}" (for example 176 for a typical month) to fix this.`,
             currentValue: `${conv} (no real conversion set)`, suggestedValue: "e.g. 176 hours/month",
             impact: null,
           });
