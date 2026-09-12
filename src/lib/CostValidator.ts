@@ -118,6 +118,41 @@ export function validate(ws: CostWorkspace, overrides: Set<string> = new Set()):
     const clsLabel = CLASS_LABEL[cls] || "input";
     const yieldPct = num(r.effective_yield_pct, 100);
     const ceiling = YIELD_CEILING[cls] ?? 95;
+
+    // R0 :: LABOUR UNIT-CONFUSION GUARD.
+    // THE ONE GENUINE RISK FOUND WHILE AUDITING A REPORTED "35-50x cost
+    // inflation" claim: the core formula (effectiveCostPerBaseUnit) is
+    // verified correct - it divides landed cost by (purchase_qty ×
+    // conversion_factor × yield%) to get a true PER-BASE-UNIT cost. That is
+    // only safe if conversion_factor genuinely reflects "how many base units
+    // are in one purchase unit" (e.g. hours per month). If a labour resource
+    // is priced per month but conversion_factor is left at its default of 1
+    // (no real conversion configured) AND a recipe consumes it in small,
+    // hour-like quantities, the FULL MONTHLY SALARY gets treated as a
+    // per-hour rate - which is exactly the kind of unit-confusion overstatement
+    // a report like this would be right to worry about, even though it is a
+    // data-entry risk, not a formula bug. This flags that specific, checkable
+    // configuration rather than guessing at intent.
+    if (cls === "LABOUR" && usedResourceIds.has(r.id)) {
+      const purchaseUom = (r.purchase_uom || "").toLowerCase();
+      const looksLikeAPeriod = /month|year|week/.test(purchaseUom);
+      const conv = num(r.conversion_factor, 1);
+      if (looksLikeAPeriod && conv <= 1) {
+        const linesUsingThis = ws.bomLines.filter((b) => b.child_resource_id === r.id);
+        const smallQty = linesUsingThis.some((b) => num(b.qty_per_unit) > 0 && num(b.qty_per_unit) < 20);
+        if (smallQty) {
+          push({
+            id: key("LABOUR_UNIT_MISMATCH", r.id), rule: "LABOUR_UNIT_MISMATCH", severity: "error",
+            scope: "resource", entityId: r.id, entityName: r.name || "This role",
+            field: "conversion_factor", fieldLabel: "Hours per " + (purchaseUom || "period"),
+            title: "This role's price and how it's used don't match up",
+            why: `This is priced per ${purchaseUom || "period"} (${money(num(r.purchase_price), cur)}), but a recipe uses only ${linesUsingThis[0] ? num(linesUsingThis[0].qty_per_unit) : "a small amount"} of it per unit — that looks like hours, not a whole ${purchaseUom || "period"}. Without telling the system how many hours are in one ${purchaseUom || "period"}, the full ${purchaseUom || "period"}ly price gets charged for what should be a fraction of it. Set "hours per ${purchaseUom || "period"}" (for example 176 for a typical month) to fix this.`,
+            currentValue: `${conv} (no real conversion set)`, suggestedValue: "e.g. 176 hours/month",
+            impact: null,
+          });
+        }
+      }
+    }
     const typical = YIELD_TYPICAL[cls] ?? 85;
     const eff = effectiveCostPerBaseUnit(r);
     const naive = naiveCostPerBaseUnit(r);
