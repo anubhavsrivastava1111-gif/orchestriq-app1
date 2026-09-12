@@ -1754,7 +1754,18 @@ const InputsTab: React.FC<{
                     <td style={S.td}><Flag findings={flagFor(r.id, "purchase_price")} onAccept={onAccept}><NumCell value={r.purchase_price} onChange={(v) => patchRes(r.id, { purchase_price: v })} /></Flag></td>
                     <td style={S.td}><NumCell value={r.purchase_qty} onChange={(v) => patchRes(r.id, { purchase_qty: v })} /></td>
                     <td style={S.td}><TextCell value={r.purchase_uom} onChange={(v) => patchRes(r.id, { purchase_uom: v, base_uom: r.base_uom || v })} placeholder="kg" /></td>
-                    <td style={S.td}><Flag findings={flagFor(r.id, "effective_yield_pct")} onAccept={onAccept}><NumCell value={r.effective_yield_pct} onChange={(v) => patchRes(r.id, { effective_yield_pct: v })} suffix="%" /></Flag></td>
+                    <td style={S.td}><Flag findings={flagFor(r.id, "effective_yield_pct")} onAccept={onAccept}>
+                      {/* HARD BOUNDS, ON TOP OF THE EXISTING SOFT WARNINGS:
+                          a usable % below 0 or above 100 is not "unusual",
+                          it is meaningless — you cannot use more material
+                          than you bought, or a negative amount of it. The
+                          validator already warns on suspicious-but-possible
+                          values (e.g. 15% usable); this stops the genuinely
+                          impossible ones from being entered at all. */}
+                      <NumCell value={r.effective_yield_pct} onChange={(v) => {
+                        const clamped = v == null ? v : Math.min(100, Math.max(0, v));
+                        patchRes(r.id, { effective_yield_pct: clamped });
+                      }} suffix="%" /></Flag></td>
                     <td style={{ ...S.td, textAlign: "right", fontWeight: 700, whiteSpace: "nowrap" }}>
                       {fmtMoney(eff, cur)}
                       <span style={{ fontSize: 9.5, fontWeight: 500, color: V("muted", "#8b98a5") }}> / {r.base_uom || r.purchase_uom || "unit"}</span>
