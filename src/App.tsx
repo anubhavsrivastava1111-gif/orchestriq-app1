@@ -2073,6 +2073,46 @@ if(typeof window!=="undefined"){
   window.addEventListener("beforeunload",()=>{try{flushUsageQueue();}catch{}});
 }
  
+// ─────────────────────────────────────────────────────────────────────────
+// IMAGE/DOCUMENT ATTACHMENTS — SHARED ACROSS EVERY CHAT SURFACE.
+//
+// THE REAL COMPLEXITY, CONFIRMED BY READING EACH PROVIDER FUNCTION DIRECTLY:
+// Claude and OpenAI each expect a genuinely different JSON shape for an
+// attached image; Gemini/NVIDIA/DeepSeek/Groq/Kimi's calling functions here
+// assume message content is always a plain string and would send a broken
+// request (or silently drop the image) if handed an array instead. Rather
+// than let that happen invisibly, this builds the correct shape for the two
+// providers that actually support it, and for every other provider replaces
+// the image with an honest, visible note instead of failing silently.
+//
+// A single attachment is: { dataUrl: "data:image/png;base64,...", name }.
+// Returns whatever `content` should be for THIS provider's message.
+function buildAttachedContent(text, attachment, provider){
+  if(!attachment) return text;
+  const m = /^data:([^;]+);base64,(.+)$/.exec(attachment.dataUrl||"");
+  if(!m){
+    return text + "\n\n[Attachment \"" + (attachment.name||"file") + "\" could not be read.]";
+  }
+  const mediaType = m[1], base64 = m[2];
+  if(provider === "claude"){
+    return [
+      { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+      { type: "text", text: text || "What's in this image?" },
+    ];
+  }
+  if(provider === "openai"){
+    return [
+      { type: "text", text: text || "What's in this image?" },
+      { type: "image_url", image_url: { url: attachment.dataUrl } },
+    ];
+  }
+  // GRACEFUL DEGRADE — every other provider. Never send a malformed request,
+  // never silently drop the image without saying so.
+  return (text||"") + "\n\n[The user attached an image (\"" + (attachment.name||"file") +
+    "\"), but this AI provider cannot read images. Tell them plainly that image " +
+    "attachments currently need a Claude or OpenAI key configured in Settings \u2192 API to be read.]";
+}
+
 async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,modelOverride=""){
   if(!key?.trim())throw new Error("No API key for "+(MODELS[provider]?.name||provider)+". Add it in Settings.");
   const msgs=rawMsgs.map(m=>({role:m.role==="user"?"user":"assistant",content:m.content}));
@@ -3886,6 +3926,26 @@ export default function App(){
   const [mediaMode,setMediaMode]=useState({image:"prompts",video:"veo"});
   const [showMediaPicker,setShowMediaPicker]=useState(false);
   const [defP,setDefP]=useState("nvidia"); // free, zero-setup default
+  // THE ATTACHMENT STAGING AREA — a picked or pasted image sits here,
+  // shown as a thumbnail, until the user actually sends the message. Held
+  // separately from `input` (the text) since they have completely
+  // different lifecycles: text accumulates as you type, an attachment is
+  // added all at once and can be removed with a single click.
+  const [pendingAttachment,setPendingAttachment]=useState<{dataUrl:string;name:string}|null>(null);
+  const MAX_ATTACHMENT_MB=8;
+  const handleIncomingFile=useCallback((file:File)=>{
+    if(!file.type.startsWith("image/")){
+      showToast("Only images can be attached to chat right now — PDF, Word, and Excel reading is coming next.","warning");
+      return;
+    }
+    if(file.size>MAX_ATTACHMENT_MB*1024*1024){
+      showToast("That image is over "+MAX_ATTACHMENT_MB+"MB — try a smaller one.","error");
+      return;
+    }
+    const rd=new FileReader();
+    rd.onload=ev=>setPendingAttachment({dataUrl:ev.target.result as string,name:file.name});
+    rd.readAsDataURL(file);
+  },[showToast]);
   const [multiAI,setMultiAI]=useState(false);
   const [respQuality,setRespQuality]=useState<"standard"|"professional"|"excellent">("professional");
   const [co,setCo]=useState({name:"",industry:"",stage:"idea",location:"",markets:"",currency:"INR"});
@@ -4558,18 +4618,27 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     const d=await r.json();return d.content?.map((b:any)=>b.text||"").join("\n")||"";
   };
 
-  const send=useCallback(async(text)=>{
+  const send=useCallback(async(text,attachment)=>{
+    // THE FIX: attachment is now optional and threaded through, matching
+    // the request to have every chat surface accept images the way Claude
+    // and ChatGPT's own chat windows do. Text is still required — an image
+    // alone with no question is ambiguous about what the user actually
+    // wants explained.
     if(!text.trim()||loading||!selRole)return;
     setError(null);
     const role=AR.find(r=>r.id===selRole);if(!role)return;
     const msgs=chats[selRole]||[];
-    const nm={role:"user",content:text};
+    // The LOCAL chat history keeps a thumbnail-friendly shape (plain text +
+    // a separate attachment field for rendering) - only the OUTGOING API
+    // call needs the provider-specific multimodal array.
+    const nm={role:"user",content:text,attachment:attachment||undefined};
     const upd={...chats,[selRole]:[...msgs,nm]};
     setChats(upd);setInput("");setLoading(true);announceLoading(true,role.t);
     setUsageFeature("Executive Chat — "+role.t,"💬");
     try{
       const sys=buildSys(role,co,compData,LIVE_RATES.loaded?LIVE_RATES.data:"");
-      const apiM=[...msgs,nm].map(m=>({role:m.role==="user"?"user":"assistant",content:m.content})).slice(-16);
+      const apiM=[...msgs,nm].map(m=>({role:m.role==="user"?"user":"assistant",
+        content:m.attachment?buildAttachedContent(m.content,m.attachment,defP):m.content})).slice(-16);
       const reply=await ask(sys,apiM,3500,searchMode);
       const fin={...upd,[selRole]:[...upd[selRole],{role:"assistant",content:reply}]};
       setChats(fin);sv("cos-ch",fin);
@@ -9411,7 +9480,9 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               {curMsgs.map((msg,i)=>(
                 <div key={i} style={{marginBottom:8,animation:"fadeIn 0.2s"}}>
                   {msg.role==="user"
-                    ?<div style={S.uMsg}><div style={S.mLbl}>YOU</div><div style={{fontSize:11,lineHeight:1.65,color:"#A0AAC0",whiteSpace:"pre-wrap"}}>{msg.content}</div></div>
+                    ?<div style={S.uMsg}><div style={S.mLbl}>YOU</div>
+                        {msg.attachment&&<img src={msg.attachment.dataUrl} style={{maxWidth:180,maxHeight:180,borderRadius:8,marginBottom:6,display:"block"}}/>}
+                        <div style={{fontSize:11,lineHeight:1.65,color:"#A0AAC0",whiteSpace:"pre-wrap"}}>{msg.content}</div></div>
                     :<div style={S.aMsg}>
                       <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><div style={{...S.mLbl,color:curRole.dc}}>{curRole.ic} {curRole.t}</div><button onClick={()=>cp(msg.content)} style={{background:"none",border:"none",color:"#3A4060",fontSize:8,cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>Copy</button></div>
                       <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={msg.content} ac={curRole.dc}/></div>
@@ -9447,12 +9518,43 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               <div ref={chatEnd}/>
             </div>
             <div style={S.inpA}>
+              {/* THE STAGED ATTACHMENT — shown before sending, exactly like
+                  Claude and ChatGPT's own chat windows, with a one-click
+                  remove before it's ever sent anywhere. */}
+              {pendingAttachment&&(
+                <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",marginBottom:6,background:"rgba(20,184,166,0.06)",border:"1px solid #14B8A633",borderRadius:8}}>
+                  <img src={pendingAttachment.dataUrl} style={{width:36,height:36,objectFit:"cover",borderRadius:6}}/>
+                  <span style={{fontSize:11,color:"#A0AAC0",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{pendingAttachment.name}</span>
+                  <button onClick={()=>setPendingAttachment(null)} style={{background:"none",border:"none",color:"#F87171",cursor:"pointer",fontSize:14}}>×</button>
+                </div>
+              )}
               <div style={S.inpR}>
-                <textarea style={S.ta} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send(input);}}} placeholder={"Message "+curRole.t+"… (Enter to send, Shift+Enter for newline)"} rows={1} disabled={loading}/>
+                <input type="file" id="exec-chat-file-input" accept="image/*" style={{display:"none"}}
+                  onChange={e=>{const f=e.target.files?.[0];if(f)handleIncomingFile(f);e.target.value="";}}/>
+                <button onClick={()=>document.getElementById("exec-chat-file-input")?.click()}
+                  title="Attach an image — paste one directly into the box, or click to browse"
+                  style={{background:"none",border:"1px solid #1a2030",borderRadius:6,padding:"4px 8px",color:"#5A6480",cursor:"pointer",fontSize:14,height:28,display:"flex",alignItems:"center",flexShrink:0}}>📎</button>
+                <textarea style={S.ta} value={input} onChange={e=>setInput(e.target.value)}
+                  onPaste={e=>{
+                    // THE ACTUAL "paste a screenshot" FEATURE — the exact
+                    // behaviour requested: copy an image anywhere, paste it
+                    // straight into the chat box, no separate upload step.
+                    const items=e.clipboardData?.items;
+                    if(!items)return;
+                    for(const item of items){
+                      if(item.type.startsWith("image/")){
+                        const file=item.getAsFile();
+                        if(file){e.preventDefault();handleIncomingFile(file);}
+                        break;
+                      }
+                    }
+                  }}
+                  onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();if(input.trim()||pendingAttachment){send(input||"What's in this image?",pendingAttachment);setPendingAttachment(null);}}}}
+                  placeholder={pendingAttachment?"Ask something about this image… (Enter to send)":"Message "+curRole.t+"… (Enter to send, Shift+Enter for newline, or paste an image)"} rows={1} disabled={loading}/>
                 <LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/>
                 <button onClick={()=>setSearchMode(v=>!v)} title={searchMode?"Live web search ON — click to turn off":"Turn on live web search for this message"} style={{background:searchMode?"rgba(20,184,166,0.15)":"none",border:"1px solid "+(searchMode?"#14B8A6":"#1a2030"),borderRadius:6,padding:"4px 8px",color:searchMode?"#14B8A6":"#5A6480",cursor:"pointer",fontSize:13,fontFamily:"Manrope,sans-serif",height:28,display:"flex",alignItems:"center",gap:4,flexShrink:0,transition:"all 0.15s"}}>🔍{searchMode&&<span style={{fontSize:9,fontWeight:700}}>LIVE</span>}</button>
                 <VoiceEngine send={send} setInput={setInput} lang={vLang} roleColor={curRole?.dc||"#14B8A6"} disabled={loading}/>
-                <button onClick={()=>send(input)} disabled={!input.trim()||loading} style={{...S.sBtn,background:curRole.dc,opacity:input.trim()&&!loading?1:0.2}}>↑</button>
+                <button onClick={()=>{send(input||"What's in this image?",pendingAttachment);setPendingAttachment(null);}} disabled={(!input.trim()&&!pendingAttachment)||loading} style={{...S.sBtn,background:curRole.dc,opacity:(input.trim()||pendingAttachment)&&!loading?1:0.2}}>↑</button>
               </div>
             </div>
           </div>
