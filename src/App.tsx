@@ -3933,6 +3933,18 @@ export default function App(){
   // added all at once and can be removed with a single click.
   const [pendingAttachment,setPendingAttachment]=useState<{dataUrl:string;name:string}|null>(null);
   const MAX_ATTACHMENT_MB=8;
+  // THE ACTUAL BUG, CONFIRMED FROM YOUR SCREENSHOT: showToast is declared
+  // further down in this same component (as a const, via its own
+  // useCallback). Listing it in the dependency array below made this run
+  // IMMEDIATELY, at the moment this hook is defined - which is BEFORE
+  // showToast's own declaration line has executed. That is a genuine
+  // "temporal dead zone" violation: JavaScript throws "Cannot access
+  // 'showToast' before initialization" the instant that array is evaluated,
+  // which is why this broke the entire page, not just this one feature.
+  // Removing it from the array is the correct fix, not a workaround:
+  // showToast is itself a stable useCallback reference that never changes
+  // identity, so this function never actually needed to be recreated when
+  // it "changed" - it doesn't.
   const handleIncomingFile=useCallback((file:File)=>{
     if(!file.type.startsWith("image/")){
       showToast("Only images can be attached to chat right now — PDF, Word, and Excel reading is coming next.","warning");
@@ -3945,7 +3957,7 @@ export default function App(){
     const rd=new FileReader();
     rd.onload=ev=>setPendingAttachment({dataUrl:ev.target.result as string,name:file.name});
     rd.readAsDataURL(file);
-  },[showToast]);
+  },[]);
   const [multiAI,setMultiAI]=useState(false);
   const [respQuality,setRespQuality]=useState<"standard"|"professional"|"excellent">("professional");
   const [co,setCo]=useState({name:"",industry:"",stage:"idea",location:"",markets:"",currency:"INR"});
