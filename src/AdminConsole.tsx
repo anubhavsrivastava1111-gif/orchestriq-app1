@@ -119,6 +119,12 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
     ["features", "Advanced", "admin_manage_plans"],
     ["support", "Support", "admin_manage_support"],
     ["access", "Roles & Access", "__owner"],
+    // THE FIX: moved here from Settings, as requested - this decides real
+    // money and bank details for the whole platform, which belongs with
+    // every other owner-level control, not tucked inside personal settings.
+    // Owner-only: staff admins can manage users and support without ever
+    // seeing where donations are routed.
+    ["donation", "Donation", "__owner"],
   ].filter(([, , cap]) => cap === "__owner" ? caps.is_owner : can(cap as string));
 
   return (
@@ -147,6 +153,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
       {tab === "features" && <FeaturesTab rpc={rpc} caps={caps} say={say} />}
       {tab === "support"  && <SupportTab rpc={rpc} say={say} />}
       {tab === "access"   && <AccessTab rpc={rpc} say={say} isOwner={caps.is_owner} />}
+      {tab === "donation" && <DonationTab say={say} />}
     </div>
   );
 }
@@ -830,5 +837,128 @@ function AccessTab({ rpc, say, isOwner }: any) {
         </Note>
       </div>
     </>
+  );
+}
+
+/* ============================================================================
+ * DONATION — moved here from Settings, exactly as requested. Fully
+ * self-contained: reads and writes platform_donation_settings (the single
+ * shared row, id=1) directly, the same table and shape the old Settings tab
+ * used, so nothing about how the actual donation popup reads this data
+ * changes - only where an owner goes to edit it.
+ * ========================================================================== */
+function DonationTab({ say }: any) {
+  const [cfg, setCfg] = useState<any>(null);
+  const [local, setLocal] = useState({
+    ownerName: "", ownerEmail: "", upiId: "", bankName: "", accountNo: "", ifsc: "",
+    accountType: "", paypalMe: "", stripeLink: "", note: "", qrImage: "", enabled: false,
+  });
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from("platform_donation_settings").select("*").eq("id", 1).maybeSingle();
+    if (data) {
+      setLocal({
+        ownerName: data.owner_name || "", ownerEmail: data.owner_email || "", upiId: data.upi_id || "",
+        bankName: data.bank_name || "", accountNo: data.account_no || "", ifsc: data.ifsc || "",
+        accountType: data.account_type || "", paypalMe: data.paypal_me || "", stripeLink: data.stripe_link || "",
+        note: data.note || "", qrImage: data.qr_image || "", enabled: !!data.enabled,
+      });
+      setCfg(data);
+    }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const saveDetails = async () => {
+    const { error } = await supabase.from("platform_donation_settings").update({
+      owner_name: local.ownerName, owner_email: local.ownerEmail, upi_id: local.upiId,
+      bank_name: local.bankName, account_no: local.accountNo, ifsc: local.ifsc,
+      account_type: local.accountType, paypal_me: local.paypalMe, stripe_link: local.stripeLink,
+      note: local.note, qr_image: local.qrImage, enabled: local.enabled,
+      updated_at: new Date().toISOString(),
+    }).eq("id", 1);
+    if (error) { say("Could not save: " + error.message, "bad"); return; }
+    say("Donation settings saved for every user on the platform", "info");
+    load();
+  };
+
+  const saveTiming = async (first: number, interval: number) => {
+    const { error } = await supabase.from("platform_donation_settings").update({
+      first_delay_minutes: first, interval_minutes: interval,
+    }).eq("id", 1);
+    if (error) { say("Could not save: " + error.message, "bad"); return; }
+    setCfg((p: any) => ({ ...p, first_delay_minutes: first, interval_minutes: interval }));
+    say("Timing saved", "info");
+  };
+
+  if (loading) return <div style={{ color: C.faint, fontSize: 11 }}>Loading…</div>;
+
+  return (
+    <div style={S.card}>
+      <div style={S.h}>Donation</div>
+      <div style={S.sub}>
+        Whether the donation button appears on the site, when it shows, and where the money actually goes.
+        This is the one shared setting for every user on the platform, not a per-browser preference.
+        Users pay you directly — OrchestrIQ never handles money.
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16, padding: 12,
+        background: "rgba(255,255,255,0.02)", border: "1px solid " + C.line, borderRadius: 7 }}>
+        <div style={{ fontSize: 10, fontWeight: 800, color: C.dim, textTransform: "uppercase", letterSpacing: 0.4 }}>
+          Popup timing
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div><label style={S.lbl}>First shown after (minutes)</label>
+            <input type="number" style={S.inp} defaultValue={cfg?.first_delay_minutes || 30}
+              onBlur={e => saveTiming(Number(e.target.value) || 30, cfg?.interval_minutes || 30)} /></div>
+          <div><label style={S.lbl}>Repeats every (minutes)</label>
+            <input type="number" style={S.inp} defaultValue={cfg?.interval_minutes || 30}
+              onBlur={e => saveTiming(cfg?.first_delay_minutes || 30, Number(e.target.value) || 30)} /></div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {([["ownerName", "Your Name", "e.g. Anubhav Sharma"], ["ownerEmail", "Contact Email", "for enquiries"],
+          ["upiId", "UPI ID", "yourname@upi"], ["bankName", "Bank Name", "e.g. HDFC Bank"],
+          ["accountNo", "Account Number", "for NEFT/IMPS"], ["ifsc", "IFSC Code", "HDFC0001234"],
+          ["accountType", "Account Type", "Savings or Current"], ["paypalMe", "PayPal.me Link", "paypal.me/yourname"],
+          ["stripeLink", "Stripe Link", "buy.stripe.com/..."], ["note", "Donation Note", "Thank you message"]] as const)
+          .map(([f, lb, ph]) => (
+          <div key={f}><label style={S.lbl}>{lb}</label>
+            <input style={S.inp} value={(local as any)[f] || ""}
+              onChange={e => setLocal(p => ({ ...p, [f]: e.target.value }))} placeholder={ph} /></div>
+        ))}
+        <div>
+          <label style={S.lbl}>Payment QR Code (image)</label>
+          {local.qrImage ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 8,
+              background: "#0a0e1a", border: "1px solid " + C.line, borderRadius: 6 }}>
+              <img src={local.qrImage} alt="QR" style={{ width: 56, height: 56, borderRadius: 4, objectFit: "contain", background: "#fff" }} />
+              <div style={{ flex: 1, fontSize: 10, color: C.green }}>QR code uploaded ✓</div>
+              <button onClick={() => setLocal(p => ({ ...p, qrImage: "" }))} style={S.danger}>Remove</button>
+            </div>
+          ) : (
+            <label style={{ ...S.inp, display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer", color: C.faint, fontSize: 11, padding: 12 }}>
+              📷 Upload QR code image (PNG / JPG)
+              <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => {
+                const file = e.target.files?.[0]; if (!file) return;
+                if (file.size > 2 * 1024 * 1024) { say("Image too large (max 2MB)", "bad"); return; }
+                const rd = new FileReader();
+                rd.onload = ev => setLocal(p => ({ ...p, qrImage: ev.target?.result as string }));
+                rd.readAsDataURL(file);
+              }} />
+            </label>
+          )}
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 4 }}>
+          <input type="checkbox" checked={!!local.enabled} onChange={e => setLocal(p => ({ ...p, enabled: e.target.checked }))} style={{ accentColor: C.teal }} />
+          <span style={{ fontSize: 12, color: C.ink, fontWeight: 600 }}>Enable donation button on landing page</span>
+        </label>
+        <button onClick={saveDetails} style={{ ...S.prim, marginTop: 4, width: "fit-content" }}>Save Donation Settings</button>
+      </div>
+    </div>
   );
 }
