@@ -6168,15 +6168,23 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
     return {type:"image",dalle,midjourney:dalle+" --ar 16:9 --style raw --q 2",stability:dalle};
   },[]);
 
+  // THE FIX: this was the THIRD independent copy of the same bug found across
+  // this file - calling dall-e-3, a model OpenAI removed from its API on
+  // May 12, 2026. This one specifically is used in FOUR places in Project
+  // Engine, so this single fix repairs all four call sites at once. Switched
+  // to gpt-image-2 (current flagship), and to base64 parsing - confirmed
+  // against OpenAI's own official API reference that GPT Image models never
+  // return a hosted url the way the old DALL-E models did.
   const callDallE=useCallback(async(prompt,openaiKey)=>{
     const r=await fetch("https://api.openai.com/v1/images/generations",{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+openaiKey.trim()},
-      body:JSON.stringify({model:"dall-e-3",prompt:prompt.slice(0,3900),n:1,size:"1792x1024",quality:"standard"})
+      body:JSON.stringify({model:"gpt-image-2",prompt:prompt.slice(0,32000),n:1,size:"1536x1024",quality:"high"})
     });
-    if(!r.ok){const t=await r.text().catch(()=>"");throw new Error("DALL-E: "+r.status+" "+t.slice(0,100));}
+    if(!r.ok){const t=await r.text().catch(()=>"");throw new Error("OpenAI image: "+r.status+" "+t.slice(0,100));}
     const d=await r.json();
-    return d.data?.[0]?.url||null;
+    const b64=d.data?.[0]?.b64_json;
+    return b64?("data:image/png;base64,"+b64):null;
   },[]);
 
   const callStabilityAI=useCallback(async(prompt,stabilityKey)=>{
@@ -8757,7 +8765,44 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                                       });
                                       await pptx.writeFile({fileName:nm+".pptx"});
                                     }catch(e){showToast("PPT: "+e.message,"error");}}
-                                    else if(["linkedin_post","facebook_post","instagram_post","whatsapp_message","email"].includes(fmt)){dlFile(nm+".txt",stripMd(cnt).trim(),"text/plain");} else{dlFile(nm+"."+(fmt||"txt"),cnt,"text/plain");}
+                                    else if(["linkedin_post","facebook_post","instagram_post","whatsapp_message","email"].includes(fmt)){dlFile(nm+".txt",stripMd(cnt).trim(),"text/plain");}
+                                    else if(fmt==="image"||fmt==="video"){
+                                      // THE ACTUAL BUG, CONFIRMED FROM THE SCREENSHOT: this branch did not
+                                      // exist at all - an image/video deliverable fell straight into the
+                                      // generic text-dump below, producing a file literally named
+                                      // "...-Image.image" containing a raw text prompt, which is why
+                                      // Windows had no app that could open it. It was never a real image.
+                                      // This now does what the ZIP-package flow already does correctly:
+                                      // try to generate the real file, OpenAI first.
+                                      try{
+                                        const _ctx=projectExecution?.context;
+                                        const mp=buildMediaPrompt(del,_ctx);
+                                        const genPrompt=fmt==="video"?(mp.veo||mp.kling||del.name):(mp.dalle||del.description||del.name);
+                                        const falK=providerKey(keys,"fal");
+                                        const _oa=providerKey(keys,"openai");
+                                        let url:string|null=null;
+                                        if(fmt==="video"){
+                                          if(falK){setProjectExecPhase("🎬 Generating video via fal.ai: "+del.name+"...");url=await callFalVideo(falK,genPrompt);}
+                                        }else if(_oa){
+                                          try{setProjectExecPhase("🎨 Generating image via OpenAI: "+del.name+"...");url=await callDallE(genPrompt,_oa);if(!url)throw new Error("no image returned");}
+                                          catch{if(falK){setProjectExecPhase("🎨 OpenAI unavailable — trying fal.ai: "+del.name);url=await callFalImage(falK,genPrompt);}}
+                                        }else if(falK){
+                                          setProjectExecPhase("🎨 Generating image via fal.ai: "+del.name+"...");url=await callFalImage(falK,genPrompt);
+                                        }
+                                        if(!url)throw new Error("No image/video provider configured — add an OpenAI or fal.ai key in Settings.");
+                                        const resp=await fetch(url,{signal:AbortSignal.timeout(120000)});
+                                        if(!resp.ok)throw new Error("media download failed: HTTP "+resp.status);
+                                        const blob=await resp.blob();
+                                        const ext=fmt==="video"?"mp4":(((blob.type||"image/png").split("/")[1]||"png").split("+")[0]);
+                                        const u=URL.createObjectURL(blob);const a=document.createElement("a");a.href=u;a.download=nm+"."+ext;a.style.display="none";
+                                        document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(u),200);
+                                      }catch(e:any){
+                                        // Never fall back to a fake ".image"/".video" file again — an
+                                        // honest .md with the real prompt and the real reason it failed.
+                                        dlFile(nm+"-GENERATION-FAILED.md","⚠ "+fmt.toUpperCase()+" COULD NOT BE GENERATED\n\nWHY: "+(e?.message||String(e))+"\n\nFIX: add an OpenAI or fal.ai key in Settings → API, then try again.\n\n## Prompt\n\n"+cnt,"text/markdown");
+                                      }
+                                    }
+                                    else{dlFile(nm+"."+(fmt||"txt"),cnt,"text/plain");}
                                   }} style={{...S.hBtn,fontSize:8}}>↓</button>
                                 </div>
                                 {del.qaResult&&(
