@@ -4165,8 +4165,9 @@ export default function App(){
   // the old hardcoded 30-minute timer never had any concept of.
   const [dnPlatformCfg,setDnPlatformCfg]=useState<any>(null);
   const [myPlanId,setMyPlanId]=useState<string|null>(null);
-  // FIX BUG 1: localDn at component level (was illegal useState inside render IIFE)
-  const [localDn,setLocalDn]=useState({ownerName:"",ownerEmail:"",upiId:"",bankName:"",accountNo:"",ifsc:"",accountType:"",paypalMe:"",stripeLink:"",note:"",qrImage:"",enabled:false});
+  // localDn/saveDn/saveDnTiming removed: the editing UI they supported moved
+  // to Admin Console's own self-contained Donation tab. dnCfg below is kept -
+  // it still drives the actual donation popup shown to regular users.
 
   // Derived currency — declared early so callbacks (runExport, quickExport) can reference it safely
   // Hard ceiling on AI requests per board session. Sized for 9 executives with
@@ -4235,9 +4236,6 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     setToasts(prev=>[...prev.slice(-4),{id,msg:String(msg),type}]);
     setTimeout(()=>setToasts(prev=>prev.filter(t=>t.id!==id)),7000);
   },[]);
-
-  // FIX BUG 1: sync localDn when dnCfg changes (e.g. on load)
-  useEffect(()=>setLocalDn({...dnCfg}),[dnCfg]);
 
   // Load persisted data
  useEffect(()=>{
@@ -4348,9 +4346,14 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
       if(pd){
         const mapped={ownerName:pd.owner_name||"",ownerEmail:pd.owner_email||"",upiId:pd.upi_id||"",
           bankName:pd.bank_name||"",accountNo:pd.account_no||"",ifsc:pd.ifsc||"",accountType:pd.account_type||"",
-          paypalMe:pd.paypal_me||"",stripeLink:pd.stripe_link||"",note:pd.note||"",qrImage:DEFAULT_QR,
+          // THE FIX, FOUND WHILE MOVING THIS TO ADMIN CONSOLE: qr_image never
+          // existed as a column - any QR code an owner uploaded was silently
+          // discarded on every reload, replaced by this hardcoded placeholder.
+          // The column now exists; read the real value, falling back to the
+          // placeholder only when nothing has ever been uploaded.
+          paypalMe:pd.paypal_me||"",stripeLink:pd.stripe_link||"",note:pd.note||"",qrImage:pd.qr_image||DEFAULT_QR,
           enabled:!!pd.enabled};
-        setDnCfg(mapped);setLocalDn(mapped);
+        setDnCfg(mapped);
         setDnPlatformCfg(pd);
       }
       // Needed to check target_plan_ids - fetched here rather than assuming
@@ -7415,28 +7418,10 @@ const processTask=useCallback(async(task:any)=>{
   const addD=()=>{if(!dataF.k.trim())return;const d={...compData,[dataF.k]:dataF.v};setCompData(d);sv("cos-cd",d);setDataF({k:"",v:""});};
   const delD=k=>{const d={...compData};delete d[k];setCompData(d);sv("cos-cd",d);};
 
-  // THE FIX: writes to the ONE shared server row - the database itself
-  // refuses this write for anyone who is not super_admin (RLS), so this is
-  // not merely hidden in the UI, it is genuinely unwritable by anyone else.
-  const saveDn=async(cfg:any)=>{
-    setDnCfg(cfg);setLocalDn(cfg);
-    const {error}=await supabase.from("platform_donation_settings").update({
-      owner_name:cfg.ownerName,owner_email:cfg.ownerEmail,upi_id:cfg.upiId,bank_name:cfg.bankName,
-      account_no:cfg.accountNo,ifsc:cfg.ifsc,account_type:cfg.accountType,paypal_me:cfg.paypalMe,
-      stripe_link:cfg.stripeLink,note:cfg.note,enabled:cfg.enabled,
-      updated_at:new Date().toISOString(),
-    }).eq("id",1);
-    if(error){showToast("Could not save: "+error.message,"error");return;}
-    showToast("Donation settings saved for every user on the platform","success");
-  };
-  const saveDnTiming=async(first:number,interval:number,targets:string[]|null)=>{
-    const {error}=await supabase.from("platform_donation_settings").update({
-      first_delay_minutes:first,interval_minutes:interval,target_plan_ids:targets,
-    }).eq("id",1);
-    if(error){showToast("Could not save: "+error.message,"error");return;}
-    setDnPlatformCfg((p:any)=>({...p,first_delay_minutes:first,interval_minutes:interval,target_plan_ids:targets}));
-    showToast("Timing saved","success");
-  };
+  // saveDn/saveDnTiming removed: editing now happens entirely inside Admin
+  // Console's own Donation tab, which reads and writes this same table
+  // directly. dnCfg/dnPlatformCfg here still drive the real popup shown to
+  // regular users - only the admin-facing editing form moved.
 
   const resetData=async()=>{
     // Clear all user-generated data from every module
@@ -9836,13 +9821,10 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           <div style={{...S.modal,maxWidth:520}} onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><h2 style={{fontSize:16,fontWeight:800,color:"#F1F5F9"}}>Settings</h2><button onClick={()=>setShowSettings(false)} style={S.iBtn}>×</button></div>
             <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:14,paddingBottom:12,borderBottom:"1px solid #1a2030"}}>
-              {/* THE FIX: "Donation" was completely unreachable before -
-                  nothing in this list linked to it, and no button anywhere
-                  called setSTab("donation"). Added here, gated to admin
-                  only, so the owner finally has an actual way to reach the
-                  panel this update built. */}
+              {/* THE FIX: "Donation" moved to Admin Console, as requested -
+                  real money and bank details belong with every other
+                  owner-level control, not tucked inside personal settings. */}
               {[["api","API"],["theme","Theme"],["company","Company"],["workspace","Workspace"],
-                ...(isAdmin?[["donation","Donation"]]:[]),
                 ["backup","Backup"],["danger","Reset"]].map(([id,lb])=><button key={id} onClick={()=>setSTab(id)} style={{padding:"5px 10px",borderRadius:5,fontSize:10,fontWeight:600,border:"1px solid "+(sTab===id?"#14B8A6":"#1a2030"),background:sTab===id?"rgba(20,184,166,0.08)":"transparent",color:sTab===id?"#14B8A6":"#5A6480",cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>{lb}</button>)}
             </div>
             {sTab==="api"&&(
@@ -10161,70 +10143,6 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                   <div><label style={S.lbl}>Currency</label><select style={{...S.inp,padding:"8px"}} value={co.currency} onChange={e=>{const n={...co,currency:e.target.value};setCo(n);sv("cos-co",n);}}>{CURRENCIES.map(c=><option key={c.code} value={c.code} style={{background:"#0a0e1a"}}>{c.sym} {c.code}</option>)}</select></div>
                   <div><label style={S.lbl}>Stage</label><select style={{...S.inp,padding:"8px"}} value={co.stage} onChange={e=>{const n={...co,stage:e.target.value};setCo(n);sv("cos-co",n);}}>{STAGES.map(st=><option key={st.id} value={st.id} style={{background:"#0a0e1a"}}>{st.ic} {st.l}</option>)}</select></div>
-                </div>
-              </div>
-            )}
-            {/* THE FIX YOU ASKED FOR: this entire panel now only renders for
-                super_admin. Every other user - even someone who could
-                previously see this tab and privately edit their own local
-                copy of it - sees nothing here at all. */}
-            {sTab==="donation"&&!isAdmin&&(
-              <div style={{textAlign:"center",padding:24,background:"rgba(255,255,255,0.02)",border:"1px solid #1a2030",borderRadius:7}}>
-                <div style={{fontSize:11,color:"#5A6480"}}>This area is managed by the platform administrator.</div>
-              </div>
-            )}
-            {sTab==="donation"&&isAdmin&&(
-              <div>
-                <div style={{background:"rgba(20,184,166,0.04)",border:"1px solid rgba(20,184,166,0.15)",borderRadius:7,padding:"10px 12px",marginBottom:12,fontSize:10,color:"#A0AAC0",lineHeight:1.7}}>
-                  Configure payment details AND when/who sees the popup. This is now the ONE shared setting for every
-                  user on the platform - not a per-browser preference. Users pay you directly — OrchestrIQ never handles money.
-                </div>
-                {/* THE EXACT CONTROLS REQUESTED: whether it shows at all, the
-                    timing, and which customers. All server-side, all
-                    super_admin-only. */}
-                <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16,padding:12,
-                  background:"rgba(255,255,255,0.02)",border:"1px solid #1a2030",borderRadius:7}}>
-                  <div style={{fontSize:10,fontWeight:800,color:"#8b98a5",textTransform:"uppercase",letterSpacing:0.4}}>
-                    Popup timing &amp; targeting
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                    <div><label style={S.lbl}>First shown after (minutes)</label>
-                      <input type="number" style={S.inp} defaultValue={dnPlatformCfg?.first_delay_minutes||30}
-                        onBlur={e=>saveDnTiming(Number(e.target.value)||30, dnPlatformCfg?.interval_minutes||30, dnPlatformCfg?.target_plan_ids||null)}/></div>
-                    <div><label style={S.lbl}>Repeats every (minutes)</label>
-                      <input type="number" style={S.inp} defaultValue={dnPlatformCfg?.interval_minutes||30}
-                        onBlur={e=>saveDnTiming(dnPlatformCfg?.first_delay_minutes||30, Number(e.target.value)||30, dnPlatformCfg?.target_plan_ids||null)}/></div>
-                  </div>
-                  <div style={{fontSize:9.5,color:"#5A6480",lineHeight:1.5}}>
-                    Who sees it (WHO = which customers): leave blank for every user. To show it only to specific
-                    plans (for example, only your Free-tier customers, never anyone paying), set that up from
-                    Admin Console \u2192 Plans, where each plan already has its own identifier.
-                  </div>
-                </div>
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  {[["ownerName","Your Name","e.g. Anubhav Sharma"],["ownerEmail","Contact Email","for enquiries"],["upiId","UPI ID","yourname@upi"],["bankName","Bank Name","e.g. HDFC Bank"],["accountNo","Account Number","for NEFT/IMPS"],["ifsc","IFSC Code","HDFC0001234"],["accountType","Account Type","Savings or Current"],["paypalMe","PayPal.me Link","paypal.me/yourname"],["stripeLink","Stripe Link","buy.stripe.com/..."],["note","Donation Note","Thank you message"]].map(([f,lb,ph])=>(
-                    <div key={f}><label style={S.lbl}>{lb}</label><input style={S.inp} value={localDn[f]||""} onChange={e=>setLocalDn(p=>({...p,[f]:e.target.value}))} placeholder={ph}/></div>
-                  ))}
-                  <div>
-                    <label style={S.lbl}>Payment QR Code (image)</label>
-                    {localDn.qrImage?(
-                      <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px",background:"#0a0e1a",border:"1px solid #1a2030",borderRadius:6}}>
-                        <img src={localDn.qrImage} alt="QR" style={{width:56,height:56,borderRadius:4,objectFit:"contain",background:"#fff"}}/>
-                        <div style={{flex:1,fontSize:10,color:"#10B981"}}>QR code uploaded ✓</div>
-                        <button onClick={()=>setLocalDn(p=>({...p,qrImage:""}))} style={{...S.hBtn,color:"#EF4444",borderColor:"#EF444433"}}>Remove</button>
-                      </div>
-                    ):(
-                      <label style={{...S.inp,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#5A6480",fontSize:11,padding:"12px"}}>
-                        📷 Upload QR code image (PNG / JPG)
-                        <input type="file" accept="image/*" onChange={e=>{const file=e.target.files[0];if(!file)return;if(file.size>2*1024*1024){showToast("Image too large (max 2MB)","error");return;}const rd=new FileReader();rd.onload=ev=>setLocalDn(p=>({...p,qrImage:ev.target.result}));rd.readAsDataURL(file);}} style={{display:"none"}}/>
-                      </label>
-                    )}
-                  </div>
-                  <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginTop:4}}>
-                    <input type="checkbox" checked={!!localDn.enabled} onChange={e=>setLocalDn(p=>({...p,enabled:e.target.checked}))} style={{accentColor:"#14B8A6"}}/>
-                    <span style={{fontSize:12,color:"#F1F5F9",fontWeight:600}}>Enable donation button on landing page</span>
-                  </label>
-                  <button onClick={()=>saveDn(localDn)} style={{...S.pBtn,marginTop:4}}>Save Donation Settings</button>
                 </div>
               </div>
             )}
