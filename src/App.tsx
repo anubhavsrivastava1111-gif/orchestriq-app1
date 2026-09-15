@@ -207,7 +207,7 @@ const DEFAULT_QR = "";
 const NVIDIA_FALLBACK=["nvidia"];
 const TASK_ROUTING: Record<string,string[]> = {
   // ── MEDIA (non-text — fal.ai is the exclusive gateway) ──────────────────
-  image_gen:      ["fal","openai","stability"],             // fal.ai first; OpenAI DALL-E then Stability AI if fal is missing, out of credits, or fails
+  image_gen:      ["openai","fal","stability"],              // THE FIX: OpenAI (GPT Image) is now tried FIRST whenever a key is configured - fal.ai and Stability AI remain as fallbacks if OpenAI has no key or fails
   video_gen:      ["fal"],                                  // fal.ai: Kling, Seedance, Wan, Veo, Sora — no second video provider wired in yet
   diagram:        ["fal","openai"],                         // Ideogram v3 via fal for text-accurate diagrams
   // ── SPECIALIST TEXT (Claude Sonnet = best quality) ───────────────────────
@@ -286,7 +286,7 @@ const QUALITY_TIER_ROUTING: Record<string,Record<string,string[]>> = {
 // Pure data. Adding a provider = one entry here + a key field; zero logic edits.
 const PROVIDER_META = {
   claude:   {name:"Claude",   cost:"$$$",speed:"medium",quality:"best", blurb:"Best for documents, Excel, decks, deep reasoning"},
-  openai:   {name:"ChatGPT",  cost:"$$$",speed:"medium",quality:"best", blurb:"Strong all-rounder; images via DALL·E"},
+  openai:   {name:"ChatGPT",  cost:"$$$",speed:"medium",quality:"best", blurb:"Strong all-rounder; images via GPT Image"},
   deepseek: {name:"DeepSeek", cost:"$",  speed:"fast",  quality:"great",blurb:"Best value for general work and code"},
   gemini:   {name:"Gemini",   cost:"$",  speed:"fast",  quality:"great",blurb:"Fast, generous free tier, good research"},
   groq:     {name:"Groq",     cost:"$",  speed:"fast",  quality:"good", blurb:"Fastest responses; great for drafts"},
@@ -312,7 +312,13 @@ function resolveRoute(task:string,primary:string):string[]{
 
 function detectTaskType(prompt: string, context = ""): string {
   const t = (prompt + " " + context).toLowerCase();
-  if (/\b(generate\s+(?:an?\s+)?image|create\s+(?:an?\s+)?(?:image|photo|picture)|make\s+(?:an?\s+)?image|draw\s+(?:an?\s+)?image|render\s+(?:an?\s+)?(?:image|photo)|design\s+(?:an?\s+)?logo\s+for\s+me)\b/.test(t)) return "image_gen";
+  // THE FIX: the original phrasing only matched a request that literally
+  // said "image", "photo" or "picture". "Design an Instagram post about our
+  // launch" or "create a LinkedIn marketing campaign" describe a visual just
+  // as clearly, but neither used those words - so they were misrouted as
+  // ordinary text requests. Widened to also catch marketing/campaign/social
+  // post language, which is exactly how a real request like this gets phrased.
+  if (/\b(generate\s+(?:an?\s+)?image|create\s+(?:an?\s+)?(?:image|photo|picture)|make\s+(?:an?\s+)?image|draw\s+(?:an?\s+)?image|render\s+(?:an?\s+)?(?:image|photo)|design\s+(?:an?\s+)?logo\s+for\s+me|(?:design|create|make)\s+(?:an?\s+)?(?:instagram|linkedin|facebook|social(?:\s+media)?)\s+(?:post|ad|banner|creative|graphic)|(?:marketing|social(?:\s+media)?|ad)\s+(?:campaign|creative|graphic|visual)s?\s+(?:for|on|about)?)\b/.test(t)) return "image_gen";
   if (/\b(generate\s+(?:an?\s+)?video|create\s+(?:an?\s+)?video\s+(?:for|of|showing)|make\s+(?:an?\s+)?video|produce\s+(?:an?\s+)?video|render\s+(?:an?\s+)?video|animate\s+this|generate\s+(?:an?\s+)?reel)\b/.test(t)) return "video_gen";
   if (/\b(draw\s+(?:me\s+)?(?:a\s+)?diagram|generate\s+(?:a\s+)?(?:flowchart|diagram)|create\s+(?:a\s+)?(?:flowchart|org\s+chart|process\s+map|architecture\s+diagram))\b/.test(t)) return "diagram";
   if (/\b(p&l|profit.*loss|balance.*sheet|cash.*flow|forecast|budget.*model|ebitda|irr|npv|financial.*model|variance.*analysis|mis.*report|revenue.*projection)\b/.test(t)) return "financial";
@@ -1881,16 +1887,28 @@ async function callFalVideo(key:string, prompt:string, durationSec=5, _model="fa
 
 // DALL-E and Stability AI — the fallback chain for images when fal.ai is
 // missing a key, out of credits, or fails for any other reason.
-async function callDallEImage(key:string, prompt:string):Promise<string>{
+// THE FIX, CONFIRMED AGAINST THE OFFICIAL OPENAI API REFERENCE: dall-e-3 was
+// removed from the API on May 12, 2026 - this function was calling a model
+// that no longer exists. Replaced with gpt-image-2, OpenAI's current
+// flagship. One more confirmed difference: DALL-E returned a hosted `url`;
+// GPT Image models return base64 ONLY (`b64_json`) - "unsupported for the
+// GPT image models" is the exact wording in OpenAI's own reference for the
+// url field. Converted to a data: URL here so every caller elsewhere in
+// this file keeps working with a plain image URL string, unchanged.
+async function callGptImage(key:string, prompt:string, quality:"low"|"medium"|"high"="high"):Promise<string>{
   const r=await fetch("https://api.openai.com/v1/images/generations",{
     method:"POST",
     headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},
-    body:JSON.stringify({model:"dall-e-3",prompt:prompt.slice(0,3900),n:1,size:"1792x1024",quality:"standard"})
+    body:JSON.stringify({model:"gpt-image-2",prompt:prompt.slice(0,32000),n:1,size:"1536x1024",quality})
   });
-  if(!r.ok){const t=await r.text().catch(()=>"");throw new Error("DALL-E: "+r.status+" "+t.slice(0,150));}
+  if(!r.ok){const t=await r.text().catch(()=>"");throw new Error("OpenAI image: "+r.status+" "+t.slice(0,150));}
   const d=await r.json();
-  return d.data?.[0]?.url||"";
+  const b64=d.data?.[0]?.b64_json;
+  return b64?("data:image/png;base64,"+b64):"";
 }
+// Old name kept as an alias so nothing elsewhere in this very large file
+// needs to change to pick up the fix - same signature, corrected behaviour.
+const callDallEImage=callGptImage;
 async function callStabilityImage(key:string, prompt:string):Promise<string>{
   const r=await fetch("https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image",{
     method:"POST",
