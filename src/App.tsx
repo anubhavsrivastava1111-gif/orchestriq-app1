@@ -6085,7 +6085,16 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
     // your own review and specific feedback below, not an automated gate.
     if(completedCount===0)showToast("⚠ No deliverables completed","warning");
 
-  },[projectExecuting,keys,buildProjectContext,showToast,sv,isRateLimit,markProviderExhausted,waitWithCountdown,stripMd,callAI]);
+  // THE FIX: same bug class as the one already documented in
+  // runProjectPackage below (keys missing from its list once caused every
+  // image to fail) — here it's defP, the setting that decides which AI
+  // provider gets tried for EVERY deliverable this function generates.
+  // Without it listed, this function could keep using whatever defP was on
+  // the very first render, forever - even after you changed your actual
+  // default provider in Settings. If your one working key isn't the
+  // provider this stale value points at, every deliverable fails, which
+  // matches "anything I try gives an error" exactly.
+  },[projectExecuting,keys,defP,buildProjectContext,showToast,sv,isRateLimit,markProviderExhausted,waitWithCountdown,stripMd,callAI]);
   // Keep ref current so approveProjectPlan can call it without dep ordering issues
   runProjectExecutionRef.current=runProjectExecution;
 
@@ -7045,7 +7054,7 @@ Now produce the complete ${del.name}. Start with content immediately — no prea
   // both. This function simply could not see either, and reported
   // "fal.ai key required" and "no OpenAI key saved" - about keys you had
   // definitely saved. Exactly the message in the ZIP you sent me.
-  },[projectPackaging,showToast,keys,co,compData,ask,mediaMode,cur]);
+  },[projectPackaging,showToast,keys,defP,co,compData,ask,mediaMode,cur]);
 
 const runWorkflow=useCallback(async(customChainOverride?:string[],preflightAnswers?:{questions:{persona:string;q:string}[];answers:string[]}|null)=>{
   const taskText=wfTask.trim();
