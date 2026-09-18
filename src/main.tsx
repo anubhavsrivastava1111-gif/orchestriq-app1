@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import ReactDOM from "react-dom/client";
 import { supabase } from "./lib/supabase";
 import Auth from "./Auth";
@@ -18,13 +18,35 @@ type Screen = "loading" | "auth" | "profile" | "plan" | "app";
 
 function Root() {
   const [screen, setScreen] = useState<Screen>("loading");
+  // THE ACTUAL BUG, CONFIRMED: this file has its own separate auth-state
+  // listener from Auth.tsx's, and it did not know the difference between
+  // "a normal sign-in" and "someone just clicked a password-recovery link."
+  // A recovery link can also trigger this listener's SIGNED_IN branch,
+  // which calls checkUser() and - finding a valid session - jumps straight
+  // to the main app. That is precisely "click the link, get logged in,
+  // never asked to set a new password." This ref locks the screen to the
+  // reset flow the moment a recovery session is detected, and blocks any
+  // later checkUser() call (including one already in flight) from
+  // overriding it back to "app" - checkUser() is async and could otherwise
+  // resolve after this check runs, re-opening the exact same bug.
+  const isRecoveryRef = useRef(false);
 
   useEffect(() => {
-    checkUser();
+    if (window.location.hash.includes("type=recovery")) {
+      isRecoveryRef.current = true;
+      setScreen("auth");
+    } else {
+      checkUser();
+    }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT") setScreen("auth");
-      if (event === "SIGNED_IN") checkUser();
+      if (event === "PASSWORD_RECOVERY") {
+        isRecoveryRef.current = true;
+        setScreen("auth");
+        return;
+      }
+      if (event === "SIGNED_OUT") { isRecoveryRef.current = false; setScreen("auth"); }
+      if (event === "SIGNED_IN" && !isRecoveryRef.current) checkUser();
     });
 
     return () => subscription.unsubscribe();
@@ -52,6 +74,13 @@ function Root() {
         .select("full_name, company_name, trial_login_count, trial_exhausted, plan_id, plan_name, profile_setup_complete")
         .eq("id", user.id)
         .single();
+
+      // A LATE CHECK, NEEDED SEPARATELY FROM THE ONES ABOVE: this function
+      // is async and can still be waiting on the two calls above at the
+      // exact moment a recovery link is detected elsewhere. Without this,
+      // an already-in-flight call could finish afterward and set "app"
+      // anyway, silently undoing the fix.
+      if (isRecoveryRef.current) return;
 
       if (!userData) {
         setScreen("auth");
