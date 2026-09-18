@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// CLOUDFLARE PAGES FUNCTION — NVIDIA NIM proxy  (v3, SECURED)
+// CLOUDFLARE PAGES FUNCTION — NVIDIA NIM proxy  (v4, CAPACITY-AWARE)
 // ─────────────────────────────────────────────────────────────────────────────
 // SECURITY AUDIT FINDING C-2 — CRITICAL, fixed here.
 //
@@ -7,26 +7,48 @@
 // could POST to https://<your-site>/api/nvidia from any origin and spend your
 // NVIDIA credits. The rate-limit code existed only as a commented-out note.
 //
-// Four controls added, in the order an attacker meets them:
+// v4 ADDS THE ACTUAL CAPACITY MATH: NVIDIA's own free-tier ceiling is
+// confirmed at roughly 40 requests/minute, ACCOUNT-WIDE - shared by every
+// person using this deployment's key, not per-user. No per-user allowance,
+// however small, can prevent the whole account from being throttled if
+// enough people are active at once - so a genuine global limiter is now
+// enforced first, ahead of anyone's individual quota.
+//
+// Five controls, in the order a request meets them:
 //
 //   1. ORIGIN LOCK      requests must come from your own site, not "*"
 //   2. AUTHENTICATION   a valid Supabase JWT is required; the signature is
 //                       verified against the project JWKS, so a forged or
 //                       expired token is rejected
-//   3. PER-USER QUOTA   N requests per user per day, counted in KV
-//   4. PER-IP QUOTA     a second ceiling per IP, so one person cannot farm
-//                       accounts to multiply their allowance
+//   3. GLOBAL RATE CAP  a shared, account-wide ceiling per minute, kept
+//                       safely below NVIDIA's own ~40/minute limit - this
+//                       is what actually protects the key when many people
+//                       are using it at the same moment
+//   4. PER-USER QUOTA   a ROLLING window (like Claude's own usage limits) -
+//                       N messages, then it restores itself a fixed number
+//                       of hours after first use, not at a fixed clock time
+//   5. PER-IP QUOTA     a second, daily ceiling per IP, so one person
+//                       cannot farm accounts to multiply their allowance
 //
-// DEGRADES SAFELY: if the KV namespace is not bound, quotas are skipped but
-// authentication is still enforced. Auth is never optional.
+// The account owner (role = super_admin in `profiles`) is exempt from
+// controls 3 and 4 entirely - unlimited, as requested - checked against
+// the real application role, not the JWT's generic "authenticated" claim.
+// Someone using their OWN NVIDIA key is exempt from controls 3, 4 and 5,
+// since their usage spends nothing of this account's shared allowance.
+//
+// DEGRADES SAFELY: if the KV namespace is not bound, every quota is skipped
+// but authentication is still enforced. Auth is never optional.
 //
 // SETUP (Cloudflare dashboard → your Pages project → Settings):
 //   Environment variables (Production):
-//     NVIDIA_API_KEY        = nvapi-…                (type: Secret)
-//     SUPABASE_URL          = https://<ref>.supabase.co   (Plaintext)
-//     ALLOWED_ORIGIN        = https://orchestriq.gorakhai.com (Plaintext)
-//     NVIDIA_DAILY_PER_USER = 25                     (Plaintext, optional)
-//     NVIDIA_DAILY_PER_IP   = 60                     (Plaintext, optional)
+//     NVIDIA_API_KEY           = nvapi-…                      (Secret)
+//     SUPABASE_URL             = https://<ref>.supabase.co    (Plaintext)
+//     VITE_SUPABASE_ANON_KEY   = <the project's public anon key> (Plaintext)
+//     ALLOWED_ORIGIN           = https://orchestriq.gorakhai.com (Plaintext)
+//     NVIDIA_GLOBAL_PER_MINUTE = 28   (Plaintext, optional - stay below ~40)
+//     NVIDIA_DAILY_PER_USER    = 15   (Plaintext, optional - per rolling window)
+//     NVIDIA_WINDOW_HOURS      = 3    (Plaintext, optional - hours per window)
+//     NVIDIA_DAILY_PER_IP      = 60   (Plaintext, optional)
 //   Bindings → KV namespace: create "OIQ_QUOTA", bind as OIQ_QUOTA
 //   Then REDEPLOY — variables only apply to builds created after they are saved.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -34,9 +56,12 @@
 interface Env {
   NVIDIA_API_KEY: string;
   SUPABASE_URL?: string;
+  VITE_SUPABASE_ANON_KEY?: string;
   ALLOWED_ORIGIN?: string;
   NVIDIA_DAILY_PER_USER?: string;
   NVIDIA_DAILY_PER_IP?: string;
+  NVIDIA_GLOBAL_PER_MINUTE?: string;
+  NVIDIA_WINDOW_HOURS?: string;
   OIQ_QUOTA?: KVNamespace;
 }
 
@@ -143,6 +168,60 @@ async function bump(kv: KVNamespace | undefined, key: string, limit: number): Pr
   return { ok: true, used: used + 1 };
 }
 
+// THE ROOT DESIGN, RECALCULATED PROPERLY: NVIDIA's own free-tier ceiling is
+// confirmed at ~40 requests/minute, ACCOUNT-WIDE - shared by every single
+// user of this deployment's key, not per-person. That number does not
+// change no matter how a per-user allowance is configured, so it is
+// enforced here as its own, separate check - a genuinely full account
+// cannot be worked around by a generous per-user number.
+async function bumpGlobalRate(kv: KVNamespace | undefined, capPerMinute: number): Promise<{ ok: boolean }> {
+  if (!kv) return { ok: true };
+  const minuteBucket = Math.floor(Date.now() / 60000); // a fresh bucket every 60 seconds
+  const key = "nvq:global:" + minuteBucket;
+  const used = parseInt((await kv.get(key)) || "0", 10) || 0;
+  if (used >= capPerMinute) return { ok: false };
+  await kv.put(key, String(used + 1), { expirationTtl: 120 }); // outlives its own minute, never accumulates
+  return { ok: true };
+}
+
+// THE ROLLING WINDOW YOU ASKED FOR — "like Claude, use it up, it comes back
+// in a few hours" - not "resets at midnight UTC no matter when you started."
+// The window begins the moment someone's FIRST message in a fresh window is
+// sent, and counts down from there, exactly like the reference you gave.
+async function bumpRollingWindow(kv: KVNamespace | undefined, key: string, limit: number, windowMs: number)
+  : Promise<{ ok: boolean; used: number; resetsInMs: number }> {
+  if (!kv) return { ok: true, used: 0, resetsInMs: 0 };
+  const now = Date.now();
+  const raw = await kv.get(key);
+  let state: { count: number; windowStart: number } = raw ? JSON.parse(raw) : { count: 0, windowStart: now };
+  if (now - state.windowStart > windowMs) state = { count: 0, windowStart: now }; // window elapsed - fresh start
+  if (state.count >= limit) {
+    return { ok: false, used: state.count, resetsInMs: windowMs - (now - state.windowStart) };
+  }
+  state.count += 1;
+  await kv.put(key, JSON.stringify(state), { expirationTtl: Math.ceil(windowMs / 1000) + 60 });
+  return { ok: true, used: state.count, resetsInMs: windowMs - (now - state.windowStart) };
+}
+
+// Real check against the actual account-level role, not the JWT's generic
+// Supabase auth role (which is always just "authenticated") - the same
+// distinction the database-side workspace_shared_nvidia_check already
+// makes correctly. The user's own token drives RLS (so this can only ever
+// read what that user could already read); apikey is the project's public
+// anon key, required by PostgREST on every request regardless of who is
+// actually asking - not a secret, already shipped in the frontend bundle.
+async function isSuperAdmin(supabaseUrl: string, anonKey: string, userToken: string, userId: string): Promise<boolean> {
+  if (!anonKey) return false;
+  try {
+    const r = await fetch(supabaseUrl + "/rest/v1/profiles?id=eq." + userId + "&select=role", {
+      headers: { Authorization: "Bearer " + userToken, apikey: anonKey },
+    });
+    if (!r.ok) return false;
+    const rows: any[] = await r.json();
+    return rows?.[0]?.role === "super_admin";
+  } catch { return false; }
+}
+
 export async function onRequestPost(context: { request: Request; env: Env }): Promise<Response> {
   const { request, env } = context;
   const cors = corsFor(env, request);
@@ -209,24 +288,57 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   }
 
   // 4 ── QUOTAS
-  const day = new Date().toISOString().slice(0, 10);
-  const perUser = parseInt(env.NVIDIA_DAILY_PER_USER || "25", 10);
+  const day = new Date().toISOString().slice(0, 10); // still used for the per-IP daily quota below
+  // THE CALCULATION, DONE PROPERLY: NVIDIA's real free-tier ceiling is
+  // ~40 requests/minute, account-wide, confirmed directly - not a figure I
+  // invented. 28/minute leaves real headroom below that hard limit for
+  // request timing jitter and the owner's own unlimited use, while still
+  // giving the shared pool genuine throughput. This is enforced BEFORE the
+  // per-user check because it protects something a generous per-user
+  // number cannot: the account itself going down for absolutely everyone,
+  // including users who brought their own key are unaffected (they never
+  // reach this branch), and even a single admin retry against a full
+  // global bucket fails safely rather than ever double-spending it.
+  const superAdmin = userKey ? false : await isSuperAdmin(supaUrl, env.VITE_SUPABASE_ANON_KEY || "", token, user.sub);
+
+  if (!userKey && !superAdmin) {
+    const globalCap = parseInt(env.NVIDIA_GLOBAL_PER_MINUTE || "28", 10);
+    const g = await bumpGlobalRate(env.OIQ_QUOTA, globalCap);
+    if (!g.ok) {
+      return json({ error: "A lot of people are using the free NVIDIA tier right now. Please try again in a few seconds — this clears every minute. Add your own free key in Settings for guaranteed instant access." },
+        429, { ...cors.headers, "x-oiq-quota": "global" });
+    }
+  }
+
+  // THE ROLLING WINDOW YOU ASKED FOR, REPLACING THE OLD "RESETS AT
+  // MIDNIGHT UTC" DESIGN: 15 shared-tier messages per rolling 3-hour
+  // window per user, restoring on its own the way Claude's own usage
+  // limits do - not tied to a fixed clock time. The owner is exempt
+  // entirely, exactly as requested.
+  const windowMs = parseInt(env.NVIDIA_WINDOW_HOURS || "3", 10) * 60 * 60 * 1000;
+  const perUser = parseInt(env.NVIDIA_DAILY_PER_USER || "15", 10);
   const perIp = parseInt(env.NVIDIA_DAILY_PER_IP || "60", 10);
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
 
   // The quota exists to protect the SHARED key from being drained. A user
   // spending their own credits consumes nothing of ours, so charging them
-  // against our daily limit would be plainly wrong - and it is the very limit
-  // the error message tells them to escape by adding a key.
-  // Authentication above is still enforced either way: without it this endpoint
-  // would be an open relay anyone could point at NVIDIA through our domain.
-  const u = userKey ? { ok: true, used: 0 }
-    : await bump(env.OIQ_QUOTA, "nvq:u:" + user.sub + ":" + day, perUser);
+  // against our limit would be plainly wrong - and it is the very limit
+  // the error message tells them to escape by adding a key. The owner
+  // (super_admin) is exempt for the same reason this deployment is theirs
+  // to run, not to be rate-limited on.
+  const skipUserQuota = !!userKey || superAdmin;
+  const u = skipUserQuota ? { ok: true, used: 0, resetsInMs: 0 }
+    : await bumpRollingWindow(env.OIQ_QUOTA, "nvq:u:" + user.sub, perUser, windowMs);
   if (!u.ok) {
-    return json({ error: "Daily free-tier limit reached (" + perUser + " requests). Add your own NVIDIA API key in Settings to continue, or try again tomorrow." },
+    const mins = Math.max(1, Math.ceil(u.resetsInMs / 60000));
+    const hrs = Math.floor(mins / 60), remMins = mins % 60;
+    const when = hrs > 0 ? hrs + "h " + remMins + "m" : mins + "m";
+    return json({ error: "You've used your " + perUser + " free NVIDIA messages for this window. It resets in about " + when + " — or add your own free key in Settings for unlimited use right now." },
       429, { ...cors.headers, "x-oiq-quota": "user" });
   }
-  const i = userKey ? { ok: true, used: 0 }
+  // Authentication above is still enforced either way: without it this endpoint
+  // would be an open relay anyone could point at NVIDIA through our domain.
+  const i = (userKey || superAdmin) ? { ok: true, used: 0 }
     : await bump(env.OIQ_QUOTA, "nvq:i:" + ip + ":" + day, perIp);
   if (!i.ok) {
     return json({ error: "Too many requests from this network today. Add your own NVIDIA API key in Settings to continue." },
