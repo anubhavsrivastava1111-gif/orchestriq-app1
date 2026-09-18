@@ -1475,7 +1475,14 @@ async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string,userK
   // So interactive chat runs WITHOUT deep reasoning. Boardroom, workflows and
   // documents keep it. This is the difference between NVIDIA feeling instant
   // and NVIDIA feeling broken.
-  const _interactive=/chat|message|quick|ask|assistant|general/i.test(String(nvTask));
+  // THE EXACT GAP IN THE FIX ABOVE, CONFIRMED: this regex was meant to catch
+  // every interactive-chat task and keep it fast - but AI Workspace passes
+  // its task as the literal string "workspace", which this pattern never
+  // matched. Every other interactive surface was correctly protected from
+  // slow reasoning mode; Workspace alone fell through the gap, which is
+  // exactly why a large attached document there could trigger the same
+  // 504 this fix was already written to prevent everywhere else.
+  const _interactive=/chat|message|quick|ask|assistant|general|workspace/i.test(String(nvTask));
   const nvReason=_interactive?false:nvidiaShouldReason(nvModel,nvTask);
   const nvBudget=nvidiaTokenBudget(nvModel,maxT,nvReason);
   // The proxy now REQUIRES a verified Supabase session. Without this header the
