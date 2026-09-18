@@ -56,6 +56,14 @@ export default function MyAccount({ onOpenHelp }: { onOpenHelp?: () => void }) {
           fontSize:10.5, color:C.dim, marginBottom:14 }}>{note}</div>
       )}
 
+      {/* ── CHANGE PASSWORD — THE CONFIRMED MISSING PIECE ────────────────
+          There was no way anywhere in the product for a logged-in user to
+          change their own password. The only path that touched a password
+          at all was the forgot-password email flow. This is the real,
+          separate feature: change it any time, while already signed in,
+          no email round-trip needed. */}
+      <ChangePasswordCard />
+
       {/* ── YOUR PLAN ─────────────────────────────────────────────── */}
       <div style={card}>
         <div style={h}>Your plan</div>
@@ -226,6 +234,75 @@ export default function MyAccount({ onOpenHelp }: { onOpenHelp?: () => void }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ============================================================================
+ * CHANGE PASSWORD — a genuinely new, standalone feature. Requires the
+ * current password re-entered as a real check before allowing a change
+ * (re-authenticates via signInWithPassword first) - a logged-in browser
+ * session alone should not be enough to silently change the account's
+ * password, in case the device is shared or left unlocked.
+ * ========================================================================== */
+function ChangePasswordCard() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const submit = async () => {
+    setMsg(null);
+    if (!current.trim() || !next.trim() || !confirm.trim()) {
+      setMsg({ text: "Fill in your current password and the new one, twice.", ok: false });
+      return;
+    }
+    if (next.length < 6) {
+      setMsg({ text: "New password must be at least 6 characters.", ok: false });
+      return;
+    }
+    if (next !== confirm) {
+      setMsg({ text: "New passwords do not match.", ok: false });
+      return;
+    }
+    setBusy(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.email) { setMsg({ text: "Could not verify your account. Try refreshing the page.", ok: false }); return; }
+      // Re-check the CURRENT password is actually correct before changing
+      // anything - this is the real verification step, not decorative.
+      const { error: reAuthErr } = await supabase.auth.signInWithPassword({ email: user.email, password: current });
+      if (reAuthErr) { setMsg({ text: "Current password is incorrect.", ok: false }); return; }
+      const { error } = await supabase.auth.updateUser({ password: next });
+      if (error) { setMsg({ text: error.message, ok: false }); return; }
+      setMsg({ text: "Password updated.", ok: true });
+      setCurrent(""); setNext(""); setConfirm("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const inputStyle = { width: "100%", background: "#0a0e1a", border: "1px solid #1a2030", borderRadius: 6,
+    padding: "8px 10px", color: "#F1F5F9", fontSize: 12.5, fontFamily: "Manrope,sans-serif", boxSizing: "border-box" as const };
+  const lbl = { fontSize: 9, fontWeight: 700, color: C.dim, textTransform: "uppercase" as const, letterSpacing: 0.5, display: "block", marginBottom: 4 };
+
+  return (
+    <div style={card}>
+      <div style={h}>Change password</div>
+      <div style={sub}>Update your password any time — no email needed, just confirm your current one.</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 340, marginTop: 8 }}>
+        <div><label style={lbl}>Current password</label>
+          <input type="password" value={current} onChange={e => setCurrent(e.target.value)} style={inputStyle} /></div>
+        <div><label style={lbl}>New password</label>
+          <input type="password" value={next} onChange={e => setNext(e.target.value)} placeholder="Minimum 6 characters" style={inputStyle} /></div>
+        <div><label style={lbl}>Confirm new password</label>
+          <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} style={inputStyle} /></div>
+        {msg && <div style={{ fontSize: 11, color: msg.ok ? C.teal : "#EF4444" }}>{msg.text}</div>}
+        <button onClick={submit} disabled={busy} style={{ ...prim, width: "fit-content", opacity: busy ? 0.6 : 1 }}>
+          {busy ? "Updating…" : "Update password"}
+        </button>
+      </div>
     </div>
   );
 }
