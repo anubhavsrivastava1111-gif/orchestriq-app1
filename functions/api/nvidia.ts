@@ -55,6 +55,14 @@
 
 interface Env {
   NVIDIA_API_KEY: string;
+  // THE POOL: your existing key stays exactly where it is, as slot 1 - you
+  // do not need to touch, rename, or re-save it. These four are purely
+  // additive; leaving any of them blank is completely safe, and the pool
+  // simply runs on however many are actually filled in.
+  NVIDIA_API_KEY_2?: string;
+  NVIDIA_API_KEY_3?: string;
+  NVIDIA_API_KEY_4?: string;
+  NVIDIA_API_KEY_5?: string;
   SUPABASE_URL?: string;
   VITE_SUPABASE_ANON_KEY?: string;
   ALLOWED_ORIGIN?: string;
@@ -170,18 +178,48 @@ async function bump(kv: KVNamespace | undefined, key: string, limit: number): Pr
 
 // THE ROOT DESIGN, RECALCULATED PROPERLY: NVIDIA's own free-tier ceiling is
 // confirmed at ~40 requests/minute, ACCOUNT-WIDE - shared by every single
-// user of this deployment's key, not per-person. That number does not
-// change no matter how a per-user allowance is configured, so it is
-// enforced here as its own, separate check - a genuinely full account
-// cannot be worked around by a generous per-user number.
-async function bumpGlobalRate(kv: KVNamespace | undefined, capPerMinute: number): Promise<{ ok: boolean }> {
+// user of ONE account's key. This is why the bucket below is now keyed by
+// WHICH key was used (keyIndex), not one single shared counter - five
+// separate NVIDIA accounts each get their own independent ~40/minute
+// ceiling, and treating them as one combined bucket would have thrown away
+// four-fifths of the real capacity five keys actually provide.
+async function bumpGlobalRate(kv: KVNamespace | undefined, keyIndex: number, capPerMinute: number): Promise<{ ok: boolean }> {
   if (!kv) return { ok: true };
-  const minuteBucket = Math.floor(Date.now() / 60000); // a fresh bucket every 60 seconds
-  const key = "nvq:global:" + minuteBucket;
+  const minuteBucket = Math.floor(Date.now() / 60000);
+  const key = "nvq:global:" + keyIndex + ":" + minuteBucket;
   const used = parseInt((await kv.get(key)) || "0", 10) || 0;
   if (used >= capPerMinute) return { ok: false };
-  await kv.put(key, String(used + 1), { expirationTtl: 120 }); // outlives its own minute, never accumulates
+  await kv.put(key, String(used + 1), { expirationTtl: 120 });
   return { ok: true };
+}
+
+// THE ACTUAL POOL: collects every key that is actually filled in (1 to 5 -
+// none of this cares how many are configured), and hands back one that
+// currently has headroom on ITS OWN per-minute bucket. A random starting
+// point means that, across many requests over time, load lands on all
+// configured keys roughly evenly - not "key 1 takes everything until it's
+// full, then key 2 starts." If the first key tried is momentarily busy,
+// this tries the next one before giving up, so five keys behave like one
+// genuinely larger pool rather than five separate, isolated allowances.
+async function pickNvidiaKey(env: Env, capPerMinute: number)
+  : Promise<{ key: string; index: number } | null> {
+  const candidates: { key: string; index: number }[] = [
+    { key: env.NVIDIA_API_KEY, index: 1 },
+    { key: env.NVIDIA_API_KEY_2 || "", index: 2 },
+    { key: env.NVIDIA_API_KEY_3 || "", index: 3 },
+    { key: env.NVIDIA_API_KEY_4 || "", index: 4 },
+    { key: env.NVIDIA_API_KEY_5 || "", index: 5 },
+  ].filter(k => k.key && k.key.trim().length > 0);
+
+  if (candidates.length === 0) return null;
+
+  const start = Math.floor(Math.random() * candidates.length);
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[(start + i) % candidates.length];
+    const r = await bumpGlobalRate(env.OIQ_QUOTA, candidate.index, capPerMinute);
+    if (r.ok) return candidate;
+  }
+  return null; // every configured key is at capacity for this minute
 }
 
 // THE ROLLING WINDOW YOU ASKED FOR — "like Claude, use it up, it comes back
@@ -282,32 +320,45 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
     return json({ error: "The NVIDIA key in your Settings does not look right. It should start with nvapi- and be at least 20 characters. Copy it again from build.nvidia.com, with no spaces before or after." },
       400, { ...cors.headers, "x-oiq-key": "rejected" });
   }
-  if (!env.NVIDIA_API_KEY && !userKey) {
-    return json({ error: "NVIDIA free tier is unavailable on this deployment, and no personal key was supplied. Add your own free key in Settings \u2192 API \u2014 it takes about three minutes at build.nvidia.com and removes this problem permanently. (Owner: the NVIDIA_API_KEY secret is not reaching the Pages Function at runtime.)" },
+  const poolKeys = [env.NVIDIA_API_KEY, env.NVIDIA_API_KEY_2, env.NVIDIA_API_KEY_3, env.NVIDIA_API_KEY_4, env.NVIDIA_API_KEY_5]
+    .filter(k => k && k.trim().length > 0);
+  if (poolKeys.length === 0 && !userKey) {
+    return json({ error: "NVIDIA free tier is unavailable on this deployment, and no personal key was supplied. Add your own free key in Settings \u2192 API \u2014 it takes about three minutes at build.nvidia.com and removes this problem permanently. (Owner: no NVIDIA_API_KEY secret is reaching the Pages Function at runtime.)" },
       503, { ...cors.headers, "x-oiq-key": "none" });
   }
 
   // 4 ── QUOTAS
   const day = new Date().toISOString().slice(0, 10); // still used for the per-IP daily quota below
   // THE CALCULATION, DONE PROPERLY: NVIDIA's real free-tier ceiling is
-  // ~40 requests/minute, account-wide, confirmed directly - not a figure I
-  // invented. 28/minute leaves real headroom below that hard limit for
-  // request timing jitter and the owner's own unlimited use, while still
-  // giving the shared pool genuine throughput. This is enforced BEFORE the
-  // per-user check because it protects something a generous per-user
-  // number cannot: the account itself going down for absolutely everyone,
-  // including users who brought their own key are unaffected (they never
-  // reach this branch), and even a single admin retry against a full
-  // global bucket fails safely rather than ever double-spending it.
+  // ~40 requests/minute PER ACCOUNT - five separate accounts genuinely
+  // give five separate ceilings, which is the entire point of the pool
+  // below. This is enforced BEFORE the per-user check because it protects
+  // something a generous per-user number cannot: an individual account
+  // going down for everyone currently routed to it, while users who
+  // brought their own key are unaffected (they never reach this branch).
   const superAdmin = userKey ? false : await isSuperAdmin(supaUrl, env.VITE_SUPABASE_ANON_KEY || "", token, user.sub);
 
-  if (!userKey && !superAdmin) {
+  // THE ACTUAL KEY THIS REQUEST WILL USE, DECIDED ONCE, HERE. Everything
+  // below (the per-user window, the actual NVIDIA call) uses this same
+  // value - never re-selected mid-request, so a rolling-window rejection
+  // later can never accidentally happen against a different key than the
+  // one that was actually rate-checked just now.
+  let activeNvidiaKey: string;
+  if (userKey) {
+    activeNvidiaKey = userKey;
+  } else if (superAdmin) {
+    // The owner is exempt from the rate check itself, but still needs an
+    // actual key to call NVIDIA with - the first configured one is fine,
+    // since this path never contends with the shared-tier bucket at all.
+    activeNvidiaKey = poolKeys[0];
+  } else {
     const globalCap = parseInt(env.NVIDIA_GLOBAL_PER_MINUTE || "28", 10);
-    const g = await bumpGlobalRate(env.OIQ_QUOTA, globalCap);
-    if (!g.ok) {
+    const picked = await pickNvidiaKey(env, globalCap);
+    if (!picked) {
       return json({ error: "A lot of people are using the free NVIDIA tier right now. Please try again in a few seconds — this clears every minute. Add your own free key in Settings for guaranteed instant access." },
         429, { ...cors.headers, "x-oiq-quota": "global" });
     }
+    activeNvidiaKey = picked.key;
   }
 
   // THE ROLLING WINDOW YOU ASKED FOR, REPLACING THE OLD "RESETS AT
@@ -417,7 +468,7 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
       method: "POST",
       // The caller's own key when they brought one; otherwise the shared
       // free-tier key, exactly as before.
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + (userKey || env.NVIDIA_API_KEY) },
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + activeNvidiaKey },
       body: JSON.stringify(payload),
       // WAS 120000. THIS IS WHY YOU SAW RAW HTML INSTEAD OF AN ERROR MESSAGE.
       // Cloudflare kills a Worker subrequest at about 90 seconds, and the edge
