@@ -529,9 +529,24 @@ function isProviderOff(id:string){return !!OFF_PROVIDERS[id];}
 // previously a user with no key of their own and the toggle off could still be
 // billed on a system key they never configured.
 function providerKey(keys:any,id:string):string{
-  if(isProviderOff(id))return "";
+  // THE ACTUAL BUG, CONFIRMED: isProviderOff reads a toggle stored ONLY in
+  // this one browser's local storage - never synced anywhere, invisible to
+  // you as admin, and easy to end up switched off by an old test click.
+  // NVIDIA's entire design elsewhere in this file is to be the one
+  // provider that ALWAYS works with no setup - a stray local toggle
+  // silently breaking that guarantee, differently on every device, is
+  // exactly the "works for me, not for them" inconsistency reported. It is
+  // no longer allowed to disable the one thing meant to never be disabled.
+  if(isProviderOff(id)&&id!=="nvidia")return "";
   const own=(keys?.[id]||"").trim();
-  if(own)return own;
+  // A SECOND, RELATED BUG THIS EXPLAINS: typing even one wrong character
+  // into the NVIDIA field used to be preferred over the working shared-tier
+  // fallback below, since ANY non-empty value took priority - so a single
+  // stray digit could break NVIDIA entirely instead of being ignored in
+  // favour of the free tier that was working fine a moment before. A
+  // genuinely well-formed key is still always used; anything that doesn't
+  // look like a real one is now simply disregarded here, not trusted.
+  if(own&&(id!=="nvidia"||(own.startsWith("nvapi-")&&own.length>=20)))return own;
   if(id==="gemini"&&EFF_GEMINI?.trim())return EFF_GEMINI.trim();
   if(id==="groq"&&EFF_GROQ?.trim())return EFF_GROQ.trim();
   if(id==="claude"&&EFF_CLAUDE?.trim())return EFF_CLAUDE.trim();
@@ -4503,8 +4518,13 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
   };
 
   const completeOnboard=async()=>{
+    // THE ACTUAL BUG, CONFIRMED: the button's disabled state was fixed to
+    // respect skipApiKeyAck, but this function had its OWN, separate check
+    // that never knew that state existed - so clicking the now-enabled
+    // button silently did nothing at all. Same guard, now aware of the
+    // same acknowledgment.
     const hasAnyKey=Object.values(keys).some(k=>k?.trim())||!!EFF_GEMINI;
-if(!hasAnyKey||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
+    if((!hasAnyKey&&!skipApiKeyAck)||!co.name.trim()||!co.industry.trim()||!co.location.trim())return;
     sv("cos-keys",{keys,defaultProvider:defP,multiAI});sv("cos-co",co);
     // SUPER_ADMIN: persist keys to Supabase so they survive page refresh,
     // code deploys, and new devices automatically.
