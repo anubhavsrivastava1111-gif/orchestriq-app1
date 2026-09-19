@@ -119,6 +119,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
     ["features", "Advanced", "admin_manage_plans"],
     ["support", "Support", "admin_manage_support"],
     ["access", "Roles & Access", "__owner"],
+    ["nvidia_access", "NVIDIA Access", "__owner"],
     // THE FIX: moved here from Settings, as requested - this decides real
     // money and bank details for the whole platform, which belongs with
     // every other owner-level control, not tucked inside personal settings.
@@ -153,6 +154,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
       {tab === "features" && <FeaturesTab rpc={rpc} caps={caps} say={say} />}
       {tab === "support"  && <SupportTab rpc={rpc} say={say} />}
       {tab === "access"   && <AccessTab rpc={rpc} say={say} isOwner={caps.is_owner} />}
+      {tab === "nvidia_access" && <NvidiaAccessTab rpc={rpc} say={say} />}
       {tab === "donation" && <DonationTab say={say} />}
     </div>
   );
@@ -835,6 +837,116 @@ function AccessTab({ rpc, say, isOwner }: any) {
           side. The database stops you removing your own OWNER role, so the product can never be
           left with no administrator — but it cannot stop you appointing the wrong person.
         </Note>
+      </div>
+    </>
+  );
+}
+
+/* ============================================================================
+ * NVIDIA ACCESS — decides who can use the shared NVIDIA key, exactly as
+ * asked: a toggle per plan (Enterprise, etc.), and a search-and-grant list
+ * for individual people regardless of their plan. Both reuse the existing,
+ * already-secured admin_set_plan_feature / admin_grant_feature /
+ * admin_revoke_grant functions - no new database logic, only a real UI for
+ * a control that already existed underneath but had nowhere to be used.
+ * ========================================================================== */
+function NvidiaAccessTab({ rpc, say }: any) {
+  const FEATURE_KEY = "workspace_shared_nvidia";
+  const [plans, setPlans] = useState<any[]>([]);
+  const [planFeatures, setPlanFeatures] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [grants, setGrants] = useState<any[]>([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data: pl } = await supabase.from("plans").select("id,name").order("name");
+      setPlans(pl || []);
+      const { data: feat } = await supabase.from("features").select("id").eq("key", FEATURE_KEY).single();
+      if (feat) {
+        const { data: pf } = await supabase.from("plan_features").select("*").eq("feature_id", feat.id);
+        setPlanFeatures(pf || []);
+        const { data: g } = await supabase.from("user_feature_grants").select("*").eq("feature_id", feat.id);
+        setGrants(g || []);
+      }
+      setUsers(await rpc("admin_list_users") || []);
+    } catch (e: any) { say(e.message, "bad"); }
+    setLoading(false);
+  }, [rpc, say]);
+  useEffect(() => { load(); }, [load]);
+
+  const planEnabled = (planId: string) => !!planFeatures.find(pf => pf.plan_id === planId && pf.enabled);
+  const togglePlan = async (planId: string, enabled: boolean) => {
+    try { await rpc("admin_set_plan_feature", { p_plan_id: planId, p_feature_key: FEATURE_KEY, p_enabled: enabled }); load(); }
+    catch (e: any) { say(e.message, "bad"); }
+  };
+
+  const userGrant = (userId: string) => grants.find(g => g.user_id === userId);
+  const toggleUserGrant = async (userId: string, enable: boolean) => {
+    try {
+      if (enable) await rpc("admin_grant_feature", { p_user_id: userId, p_feature_key: FEATURE_KEY, p_enabled: true, p_reason: "Individual grant — NVIDIA Access tab" });
+      else await rpc("admin_revoke_grant", { p_user_id: userId, p_feature_key: FEATURE_KEY });
+      load();
+    } catch (e: any) { say(e.message, "bad"); }
+  };
+
+  const filteredUsers = users.filter((u: any) =>
+    !search.trim() || (u.email || "").toLowerCase().includes(search.toLowerCase()) || (u.full_name || "").toLowerCase().includes(search.toLowerCase()));
+
+  if (loading) return <div style={{ color: C.faint, fontSize: 11 }}>Loading…</div>;
+
+  return (
+    <>
+      <Note tone="warn">
+        This controls who can use the shared NVIDIA key you've saved in Cloudflare, at no cost to
+        them. It has nothing to do with anyone bringing their own key — that always works
+        regardless of what's set here.
+      </Note>
+
+      <div style={S.card}>
+        <div style={S.h}>Access by plan</div>
+        <div style={S.sub}>Anyone on a plan with this switched on gets the shared free tier automatically.</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+          {plans.map(p => (
+            <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+              <input type="checkbox" checked={planEnabled(p.id)} onChange={e => togglePlan(p.id, e.target.checked)} style={{ accentColor: C.teal }} />
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: C.ink }}>{p.name}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div style={S.card}>
+        <div style={S.h}>Access for a specific person</div>
+        <div style={S.sub}>Grant or remove access for one individual, regardless of their plan — useful for someone on a plan that doesn't normally include it.</div>
+        <input style={{ ...S.inp, marginTop: 8, marginBottom: 10, maxWidth: 320 }} placeholder="Search by name or email…" value={search} onChange={e => setSearch(e.target.value)} />
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>
+            <th style={TD("left")}>User</th><th style={TD("left")}>Plan</th><th style={TD("center")}>Access</th>
+          </tr></thead>
+          <tbody>
+            {filteredUsers.slice(0, 50).map((u: any) => {
+              const fromPlan = plans.find(p => p.name === u.plan_name && planEnabled(p.id));
+              const g = userGrant(u.user_id);
+              const individuallyOn = g?.enabled;
+              return (
+                <tr key={u.user_id}>
+                  <td style={TD("left")}>{u.full_name || u.email}<div style={{ fontSize: 9.5, color: C.faint }}>{u.email}</div></td>
+                  <td style={TD("left")}>{u.plan_name || "—"}{fromPlan && <span style={{ fontSize: 9, color: C.teal, marginLeft: 6 }}>(via plan)</span>}</td>
+                  <td style={TD("center")}>
+                    <input type="checkbox" checked={!!fromPlan || !!individuallyOn} disabled={!!fromPlan}
+                      title={fromPlan ? "Already granted through their plan" : ""}
+                      onChange={e => toggleUserGrant(u.user_id, e.target.checked)}
+                      style={{ cursor: fromPlan ? "not-allowed" : "pointer", accentColor: C.teal }} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {filteredUsers.length > 50 && <div style={{ fontSize: 10, color: C.faint, marginTop: 8 }}>Showing first 50 matches — narrow your search to see more.</div>}
       </div>
     </>
   );
