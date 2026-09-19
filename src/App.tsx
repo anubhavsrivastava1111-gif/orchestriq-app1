@@ -1507,7 +1507,15 @@ async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string,userK
   try{const {data:{session}}=await supabase.auth.getSession();nvAuth=session?.access_token||"";}catch{}
   if(!nvAuth)throw new Error("NVIDIA (Free) requires you to be signed in. Sign in, or add your own provider key in Settings.");
   const r=await fetch("/api/nvidia",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+nvAuth},body:JSON.stringify({sys,messages:msgs,model:nvModel,max_tokens:nvBudget,reasoning:nvReason,task:nvTask,user_key:(userKey&&userKey!=="nvidia")?userKey:""})});
-  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error;}catch{m=httpErrText(t,r.status);}if(r.status===429)throw new Error("NVIDIA: Free daily limit reached. Add your own key in Settings for unlimited use.");if(r.status===503)throw new Error("NVIDIA: Free tier not yet configured on this deployment.");
+  if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error;}catch{m=httpErrText(t,r.status);}
+    // THE FIX: this used to show one fixed sentence for every 429 and every
+    // 503, no matter what the server actually said - so a genuinely
+    // different reason (pool exhausted, plan not granted, key rejected)
+    // was invisible to you and to the person hitting it. The server's own
+    // message is now shown directly; the two lines below only supply a
+    // sensible fallback if that message is ever missing entirely.
+    if(r.status===429)throw new Error(m||"NVIDIA: Free daily limit reached. Add your own key in Settings for unlimited use.");
+    if(r.status===503)throw new Error(m||"NVIDIA: Free tier not yet configured on this deployment.");
     // YOUR "NVIDIA 404: " WITH NOTHING AFTER THE COLON.
     // 404 from NVIDIA means one thing: the MODEL NAME does not exist on their
     // service. Not a limit, not a key problem, not our proxy. NVIDIA retires
@@ -4065,6 +4073,20 @@ export default function App(){
   const [selRole,setSelRole]=useState(null);
   const [chats,setChats]=useState({});
   const [input,setInput]=useState("");
+  // THE FIRST REAL PIECE OF THE TEAMS-STYLE REQUEST: hovering a message
+  // reveals Reply/Copy actions, exactly like Teams. Reply quotes the
+  // message above the input box, with a clear way to cancel it - a real,
+  // working reply flow, not the full multi-user threading Live Boardroom
+  // has (that only makes sense where multiple people are actually
+  // speaking; this is one person and one AI).
+  const [hoveredMsgIdx,setHoveredMsgIdx]=useState<number|null>(null);
+  const [replyingTo,setReplyingTo]=useState<{role:string;content:string}|null>(null);
+  const sendWithReply=(text:string,attachment?:any)=>{
+    const quoted=replyingTo?`> ${replyingTo.content.slice(0,200).replace(/\n/g," ")}\n\n${text}`:text;
+    send(quoted,attachment);
+    setReplyingTo(null);
+    setPendingAttachment(null);
+  };
   const [searchMode,setSearchMode]=useState(false);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState(null);
@@ -9650,7 +9672,17 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 </div>
               )}
               {curMsgs.map((msg,i)=>(
-                <div key={i} style={{marginBottom:8,animation:"fadeIn 0.2s",display:"flex",justifyContent:msg.role==="user"?"flex-end":"flex-start"}}>
+                <div key={i} onMouseEnter={()=>setHoveredMsgIdx(i)} onMouseLeave={()=>setHoveredMsgIdx(h=>h===i?null:h)}
+                  style={{marginBottom:8,animation:"fadeIn 0.2s",display:"flex",justifyContent:msg.role==="user"?"flex-end":"flex-start",gap:6,alignItems:"flex-start"}}>
+                  {/* THE HOVER ACTION BAR — Teams-style: appears only on the
+                      message you're pointing at, sits on the opposite side
+                      from the bubble so it never covers the text. */}
+                  {hoveredMsgIdx===i&&msg.role!=="user"&&(
+                    <div style={{display:"flex",gap:3,alignSelf:"center",opacity:0.9}}>
+                      <button onClick={()=>setReplyingTo({role:msg.role,content:msg.content})} title="Reply" style={{background:"#131825",border:"1px solid #232838",borderRadius:5,padding:"4px 6px",cursor:"pointer",fontSize:11}}>↩</button>
+                      <button onClick={()=>cp(msg.content)} title="Copy" style={{background:"#131825",border:"1px solid #232838",borderRadius:5,padding:"4px 6px",cursor:"pointer",fontSize:11}}>⧉</button>
+                    </div>
+                  )}
                   {msg.role==="user"
                     ?<div style={{...S.uMsg,maxWidth:"78%",minWidth:0}}><div style={{...S.mLbl,textAlign:"right"}}>YOU</div>
                         {msg.attachment&&<img src={msg.attachment.dataUrl} style={{maxWidth:180,maxHeight:180,borderRadius:8,marginBottom:6,display:"block",marginLeft:"auto"}}/>}
@@ -9690,6 +9722,15 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               <div ref={chatEnd}/>
             </div>
             <div style={S.inpA}>
+              {/* THE REPLY PREVIEW — Teams-style: quotes what you're
+                  replying to, with a clear way to cancel before sending. */}
+              {replyingTo&&(
+                <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",marginBottom:6,background:"rgba(255,255,255,0.03)",borderLeft:"2px solid "+curRole.dc,borderRadius:6}}>
+                  <span style={{fontSize:9,fontWeight:700,color:curRole.dc}}>↩ Replying to {curRole.t}</span>
+                  <span style={{fontSize:10.5,color:"#5A6480",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{replyingTo.content.slice(0,80)}</span>
+                  <button onClick={()=>setReplyingTo(null)} style={{background:"none",border:"none",color:"#F87171",cursor:"pointer",fontSize:14}}>×</button>
+                </div>
+              )}
               {/* THE STAGED ATTACHMENT — shown before sending, exactly like
                   Claude and ChatGPT's own chat windows, with a one-click
                   remove before it's ever sent anywhere. */}
@@ -9721,12 +9762,12 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                       }
                     }
                   }}
-                  onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();if(input.trim()||pendingAttachment){send(input||"What's in this image?",pendingAttachment);setPendingAttachment(null);}}}}
+                  onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();if(input.trim()||pendingAttachment){sendWithReply(input||"What's in this image?",pendingAttachment);}}}}
                   placeholder={pendingAttachment?"Ask something about this image… (Enter to send)":"Message "+curRole.t+"… (Enter to send, Shift+Enter for newline, or paste an image)"} rows={1} disabled={loading}/>
                 <LangPick value={vLang} onChange={vl=>{setVLang(vl);sv("cos-vl",vl);}}/>
                 <button onClick={()=>setSearchMode(v=>!v)} title={searchMode?"Live web search ON — click to turn off":"Turn on live web search for this message"} style={{background:searchMode?"rgba(20,184,166,0.15)":"none",border:"1px solid "+(searchMode?"#14B8A6":"#1a2030"),borderRadius:6,padding:"4px 8px",color:searchMode?"#14B8A6":"#5A6480",cursor:"pointer",fontSize:13,fontFamily:"Manrope,sans-serif",height:28,display:"flex",alignItems:"center",gap:4,flexShrink:0,transition:"all 0.15s"}}>🔍{searchMode&&<span style={{fontSize:9,fontWeight:700}}>LIVE</span>}</button>
                 <VoiceEngine send={send} setInput={setInput} lang={vLang} roleColor={curRole?.dc||"#14B8A6"} disabled={loading}/>
-                <button onClick={()=>{send(input||"What's in this image?",pendingAttachment);setPendingAttachment(null);}} disabled={(!input.trim()&&!pendingAttachment)||loading} style={{...S.sBtn,background:curRole.dc,opacity:(input.trim()||pendingAttachment)&&!loading?1:0.2}}>↑</button>
+                <button onClick={()=>sendWithReply(input||"What's in this image?",pendingAttachment)} disabled={(!input.trim()&&!pendingAttachment)||loading} style={{...S.sBtn,background:curRole.dc,opacity:(input.trim()||pendingAttachment)&&!loading?1:0.2}}>↑</button>
               </div>
             </div>
           </div>
