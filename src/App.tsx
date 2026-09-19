@@ -3966,6 +3966,14 @@ const S={
 
 export default function App(){
   const [page,setPage]=useState("landing");
+  // THE FIX: this legacy onboarding screen (pre-dating the current
+  // NVIDIA free tier - it only ever knew about Gemini/Claude/OpenAI) was
+  // hard-blocking anyone with no key from ever finishing signup, even
+  // with every company detail correctly filled in. This lets someone
+  // explicitly acknowledge they're continuing without their own key,
+  // rather than removing the requirement silently - they should know
+  // what that choice means before making it.
+  const [skipApiKeyAck,setSkipApiKeyAck]=useState(false);
   const [sbOpen,setSbOpen]=useState(false);
   const [showModules,setShowModules]=useState(false);
   const [me,setMe]=useState<{email:string;role:string}>({email:"",role:""});
@@ -8168,7 +8176,22 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
             <div><label style={S.lbl}>Currency</label><select style={{...S.inp,padding:"8px"}} value={co.currency} onChange={e=>setCo({...co,currency:e.target.value})}>{CURRENCIES.map(c=><option key={c.code} value={c.code} style={{background:"#0a0e1a"}}>{c.sym} {c.code}</option>)}</select></div>
             <div><label style={S.lbl}>Stage</label><select style={{...S.inp,padding:"8px"}} value={co.stage} onChange={e=>setCo({...co,stage:e.target.value})}>{STAGES.map(st=><option key={st.id} value={st.id} style={{background:"#0a0e1a"}}>{st.ic} {st.l}</option>)}</select></div>
           </div>
-          <button onClick={completeOnboard} disabled={!(Object.values(keys).some(k=>k?.trim())||!!EFF_GEMINI)||!co.name.trim()||!co.industry.trim()||!co.location.trim()} style={{...S.pBtn,opacity:hasKey&&co.name.trim()&&co.industry.trim()&&co.location.trim()?1:0.3}}>Launch {BRAND}</button>
+          {/* THE ACTUAL FIX: previously there was no way past this screen at
+              all without a key - a real signup blocker, exactly as
+              reported. Company details are still required either way;
+              only the API key requirement becomes optional, and only once
+              explicitly acknowledged. */}
+          {!hasKey && !skipApiKeyAck && (
+            <div style={{background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.25)",borderRadius:8,padding:"12px 14px",marginBottom:12}}>
+              <div style={{fontSize:11.5,color:"#F1F5F9",lineHeight:1.6,marginBottom:10}}>
+                Don't have an API key yet? You can still continue — you'll get free access to the platform's shared AI tier.
+                Some heavier or premium capabilities are reserved for Enterprise members with their own key, but you can explore
+                and use the core product right away, and add your own key later in Settings whenever you're ready.
+              </div>
+              <button onClick={()=>setSkipApiKeyAck(true)} style={{...S.btnGhost,fontSize:11}}>I understand — continue without an API key</button>
+            </div>
+          )}
+          <button onClick={completeOnboard} disabled={!(hasKey||skipApiKeyAck)||!co.name.trim()||!co.industry.trim()||!co.location.trim()} style={{...S.pBtn,opacity:(hasKey||skipApiKeyAck)&&co.name.trim()&&co.industry.trim()&&co.location.trim()?1:0.3}}>Launch {BRAND}</button>
           <button onClick={()=>setPage("landing")} style={{background:"none",border:"none",color:"#5A6480",fontSize:12,cursor:"pointer",fontFamily:"Manrope,sans-serif",marginTop:8,display:"block"}}>Back to home</button>
         </div>
         <Toaster toasts={toasts} onDismiss={id=>setToasts(prev=>prev.filter(t=>t.id!==id))}/>
@@ -9607,12 +9630,12 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 </div>
               )}
               {curMsgs.map((msg,i)=>(
-                <div key={i} style={{marginBottom:8,animation:"fadeIn 0.2s"}}>
+                <div key={i} style={{marginBottom:8,animation:"fadeIn 0.2s",display:"flex",justifyContent:msg.role==="user"?"flex-end":"flex-start"}}>
                   {msg.role==="user"
-                    ?<div style={S.uMsg}><div style={S.mLbl}>YOU</div>
-                        {msg.attachment&&<img src={msg.attachment.dataUrl} style={{maxWidth:180,maxHeight:180,borderRadius:8,marginBottom:6,display:"block"}}/>}
+                    ?<div style={{...S.uMsg,maxWidth:"78%",minWidth:0}}><div style={{...S.mLbl,textAlign:"right"}}>YOU</div>
+                        {msg.attachment&&<img src={msg.attachment.dataUrl} style={{maxWidth:180,maxHeight:180,borderRadius:8,marginBottom:6,display:"block",marginLeft:"auto"}}/>}
                         <div style={{fontSize:11,lineHeight:1.65,color:"#A0AAC0",whiteSpace:"pre-wrap"}}>{msg.content}</div></div>
-                    :<div style={S.aMsg}>
+                    :<div style={{...S.aMsg,maxWidth:"78%",minWidth:0}}>
                       <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><div style={{...S.mLbl,color:curRole.dc}}>{curRole.ic} {curRole.t}</div><button onClick={()=>cp(msg.content)} style={{background:"none",border:"none",color:"#3A4060",fontSize:8,cursor:"pointer",fontFamily:"Manrope,sans-serif"}}>Copy</button></div>
                       <div style={{fontSize:11,lineHeight:1.7,color:"#A0AAC0"}}><Md text={msg.content} ac={curRole.dc}/></div>
                       {i===curMsgs.length-1&&(
