@@ -556,7 +556,8 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
           )}
 
           {msgs.map((m,i) => (
-            <div key={m.id||i} style={{ marginBottom:14, maxWidth:820 }}>
+            <div key={m.id||i} style={{ display:"flex", justifyContent: m.role==="user" ? "flex-end" : "flex-start", marginBottom:14 }}>
+            <div style={{ maxWidth:"78%", minWidth:0 }}>
               <div style={{ fontSize:8.5, fontWeight:800, color: m.role==="user"?C.faint:C.teal, marginBottom:4, letterSpacing:0.5 }}>
                 {m.role==="user" ? "YOU" : (m.assets?.[0]?.kind==="image" ? "IMAGE" : (findModel(m.provider,m.model)?.label || m.model || "ASSISTANT")).toUpperCase()}
               </div>
@@ -610,6 +611,7 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
                   )}
                 </div>
               )}
+            </div>
             </div>
           ))}
           {busy && <div style={{ fontSize:11, color:C.teal, padding:"6px 0" }}>Thinking…</div>}
