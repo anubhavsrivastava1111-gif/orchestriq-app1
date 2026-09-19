@@ -877,7 +877,8 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
               </div>
             ) : null;
             return (
-              <div key={m.id} id={"msg-"+m.id} style={{ marginBottom:14, maxWidth:680,
+              <div key={m.id} style={{ display:"flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom:14 }}>
+              <div id={"msg-"+m.id} style={{ maxWidth:"78%", minWidth:0,
                 borderLeft: !isUser && !isSystem ? "2.5px solid "+color : "none",
                 paddingLeft: !isUser && !isSystem ? 10 : 0 }}>
                 {isSystem ? (
@@ -933,6 +934,7 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
                     </div>
                   </div>
                 )}
+              </div>
               </div>
             );
           })}
