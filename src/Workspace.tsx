@@ -238,6 +238,13 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
   const [convId, setConvId]     = useState<string>("");
   const [msgs, setMsgs]         = useState<any[]>([]);
   const [input, setInput]       = useState("");
+  // THE LAST PIECE OF THE HOVER REPLY/COPY WORK: same pattern as Executive
+  // Chat. workspace_messages has no reply_to column, so - deliberately, to
+  // avoid a database migration nobody asked for - this quotes the original
+  // text into the new message rather than storing a structured reference,
+  // exactly like Executive Chat's own version.
+  const [hoveredMsgId, setHoveredMsgId] = useState<string|number|null>(null);
+  const [replyingTo, setReplyingTo] = useState<{ role:string; content:string } | null>(null);
   const [busy, setBusy]         = useState(false);
   const [provider, setProvider] = useState("");
   const [model, setModel]       = useState("");
@@ -365,8 +372,12 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
   };
 
   const send = async () => {
-    const text = input.trim();
-    if (!text || busy) return;
+    const raw = input.trim();
+    if (!raw || busy) return;
+    // Prepending here, not via setInput first, avoids any async timing gap
+    // between updating the input box and this function reading it.
+    const text = replyingTo ? `> ${replyingTo.content.slice(0,200).replace(/\n/g," ")}\n\n${raw}` : raw;
+    setReplyingTo(null);
     if (!provider) { showToast?.("Add an API key in Settings first — NVIDIA's is free.", "warning"); return; }
 
     // Shared-key quota, checked server-side before spending anything.
@@ -383,7 +394,7 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
 
       if (!cid) {
         const { data: c, error } = await supabase.from("workspace_conversations")
-          .insert({ user_id: uid, title: text.slice(0,60), provider, model }).select().single();
+          .insert({ user_id: uid, title: raw.slice(0,60), provider, model }).select().single();
         if (error) throw error;
         cid = c.id; setConvId(cid); loadConvs();
       } else {
@@ -556,7 +567,16 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
           )}
 
           {msgs.map((m,i) => (
-            <div key={m.id||i} style={{ display:"flex", justifyContent: m.role==="user" ? "flex-end" : "flex-start", marginBottom:14 }}>
+            <div key={m.id||i} onMouseEnter={()=>setHoveredMsgId(m.id||i)} onMouseLeave={()=>setHoveredMsgId(h=>h===(m.id||i)?null:h)}
+              style={{ display:"flex", justifyContent: m.role==="user" ? "flex-end" : "flex-start", marginBottom:14, gap:6, alignItems:"flex-start" }}>
+              {hoveredMsgId===(m.id||i) && (
+                <div style={{ display:"flex", gap:3, alignSelf:"center", opacity:0.9, order: m.role==="user" ? -1 : 1 }}>
+                  <button onClick={()=>setReplyingTo({ role: m.role, content: m.content })} title="Reply"
+                    style={{ background:C.panel, border:"1px solid "+C.line, borderRadius:5, padding:"4px 6px", cursor:"pointer", fontSize:11, color:C.ink }}>↩</button>
+                  <button onClick={()=>{ navigator.clipboard?.writeText(m.content); }} title="Copy"
+                    style={{ background:C.panel, border:"1px solid "+C.line, borderRadius:5, padding:"4px 6px", cursor:"pointer", fontSize:11, color:C.ink }}>⧉</button>
+                </div>
+              )}
             <div style={{ maxWidth:"78%", minWidth:0 }}>
               <div style={{ fontSize:8.5, fontWeight:800, color: m.role==="user"?C.faint:C.teal, marginBottom:4, letterSpacing:0.5 }}>
                 {m.role==="user" ? "YOU" : (m.assets?.[0]?.kind==="image" ? "IMAGE" : (findModel(m.provider,m.model)?.label || m.model || "ASSISTANT")).toUpperCase()}
@@ -642,6 +662,17 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
               <span style={{ color:C.teal }}>\uD83D\uDCCE {attachedText.name}</span>
               <span style={{ color:C.faint }}>({attachedText.text.length.toLocaleString()} characters — sent with your next message)</span>
               <button onClick={()=>setAttachedText(null)} style={{ marginLeft:"auto", background:"none", border:"none", color:C.faint, cursor:"pointer", fontSize:12 }}>\u2715</button>
+            </div>
+          )}
+
+          {/* THE REPLY PREVIEW — same pattern as Executive Chat and Live
+              Boardroom, quoting the text into the next message on send. */}
+          {replyingTo && (
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8,
+              background:"rgba(255,255,255,0.03)", borderLeft:"2px solid "+C.teal, borderRadius:6, padding:"6px 10px" }}>
+              <span style={{ fontSize:9, fontWeight:700, color:C.teal }}>↩ Replying</span>
+              <span style={{ fontSize:10.5, color:C.faint, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{replyingTo.content.slice(0,80)}</span>
+              <button onClick={()=>setReplyingTo(null)} style={{ background:"none", border:"none", color:"#F87171", cursor:"pointer", fontSize:14 }}>×</button>
             </div>
           )}
 
