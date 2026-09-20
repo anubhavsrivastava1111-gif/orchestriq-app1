@@ -120,6 +120,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
     ["support", "Support", "admin_manage_support"],
     ["access", "Roles & Access", "__owner"],
     ["nvidia_access", "NVIDIA Access", "__owner"],
+    ["jarvis_access", "JARVIS Access", "__owner"],
     // THE FIX: moved here from Settings, as requested - this decides real
     // money and bank details for the whole platform, which belongs with
     // every other owner-level control, not tucked inside personal settings.
@@ -155,6 +156,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
       {tab === "support"  && <SupportTab rpc={rpc} say={say} />}
       {tab === "access"   && <AccessTab rpc={rpc} say={say} isOwner={caps.is_owner} />}
       {tab === "nvidia_access" && <NvidiaAccessTab rpc={rpc} say={say} />}
+      {tab === "jarvis_access" && <JarvisAccessTab rpc={rpc} say={say} />}
       {tab === "donation" && <DonationTab say={say} />}
     </div>
   );
@@ -940,6 +942,86 @@ function NvidiaAccessTab({ rpc, say }: any) {
                       title={fromPlan ? "Already granted through their plan" : ""}
                       onChange={e => toggleUserGrant(u.user_id, e.target.checked)}
                       style={{ cursor: fromPlan ? "not-allowed" : "pointer", accentColor: C.teal }} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {filteredUsers.length > 50 && <div style={{ fontSize: 10, color: C.faint, marginTop: 8 }}>Showing first 50 matches — narrow your search to see more.</div>}
+      </div>
+    </>
+  );
+}
+
+/* ============================================================================
+ * JARVIS ACCESS — deliberately simpler than NVIDIA Access: individual
+ * grants only, no per-plan toggle. JARVIS defaults to owner-only; the only
+ * way anyone else gets it is an explicit grant here, exactly as asked.
+ * ========================================================================== */
+function JarvisAccessTab({ rpc, say }: any) {
+  const FEATURE_KEY = "jarvis_access";
+  const [users, setUsers] = useState<any[]>([]);
+  const [grants, setGrants] = useState<any[]>([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data: feat } = await supabase.from("features").select("id").eq("key", FEATURE_KEY).maybeSingle();
+      if (feat) {
+        const { data: g } = await supabase.from("user_feature_grants").select("*").eq("feature_id", feat.id);
+        setGrants(g || []);
+      }
+      setUsers(await rpc("admin_list_users") || []);
+    } catch (e: any) { say(e.message, "bad"); }
+    setLoading(false);
+  }, [rpc, say]);
+  useEffect(() => { load(); }, [load]);
+
+  const userGrant = (userId: string) => grants.find(g => g.user_id === userId);
+  const toggleUserGrant = async (userId: string, enable: boolean) => {
+    try {
+      if (enable) await rpc("admin_grant_feature", { p_user_id: userId, p_feature_key: FEATURE_KEY, p_enabled: true, p_reason: "Individual grant — JARVIS Access tab" });
+      else await rpc("admin_revoke_grant", { p_user_id: userId, p_feature_key: FEATURE_KEY });
+      load();
+    } catch (e: any) { say(e.message, "bad"); }
+  };
+
+  const filteredUsers = users.filter((u: any) =>
+    !search.trim() || (u.email || "").toLowerCase().includes(search.toLowerCase()) || (u.full_name || "").toLowerCase().includes(search.toLowerCase()));
+
+  if (loading) return <div style={{ color: C.faint, fontSize: 11 }}>Loading…</div>;
+
+  return (
+    <>
+      <Note tone="warn">
+        JARVIS is owner-only by default — no plan includes it automatically. Grant it to a specific
+        person here if they need it; a granted user only ever sees their own account's data through
+        JARVIS, never platform-wide numbers.
+      </Note>
+
+      <div style={S.card}>
+        <div style={S.h}>Access for a specific person</div>
+        <input style={{ ...S.inp, marginTop: 8, marginBottom: 10, maxWidth: 320 }} placeholder="Search by name or email…" value={search} onChange={e => setSearch(e.target.value)} />
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>
+            <th style={TD("left")}>User</th><th style={TD("left")}>Role</th><th style={TD("center")}>Access</th>
+          </tr></thead>
+          <tbody>
+            {filteredUsers.slice(0, 50).map((u: any) => {
+              const g = userGrant(u.user_id);
+              const isOwner = u.role === "super_admin";
+              return (
+                <tr key={u.user_id}>
+                  <td style={TD("left")}>{u.full_name || u.email}<div style={{ fontSize: 9.5, color: C.faint }}>{u.email}</div></td>
+                  <td style={TD("left")}>{u.role}</td>
+                  <td style={TD("center")}>
+                    <input type="checkbox" checked={isOwner || !!g?.enabled} disabled={isOwner}
+                      title={isOwner ? "The owner always has access" : ""}
+                      onChange={e => toggleUserGrant(u.user_id, e.target.checked)}
+                      style={{ cursor: isOwner ? "not-allowed" : "pointer", accentColor: C.teal }} />
                   </td>
                 </tr>
               );
