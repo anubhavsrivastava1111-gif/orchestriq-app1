@@ -513,11 +513,13 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
     if (!text || !session?.id) return;
     setInput(""); setShowMentions(false);
     const wasWaiting = session.status === "waiting_for_user";
+    const replyToId = replyingTo?.id || null;
+    setReplyingTo(null);
 
     // P0-4: an answer to a pending question is recorded as a decision INPUT,
     // not appended as ordinary chat text \u2014 the spec is explicit that this
     // distinction matters for recommendation quality.
-    await BE.postMessage(session.id, "user", null, text, { kind: wasWaiting ? "user_answer" : "text", activeRoles: activeRoleIds });
+    await BE.postMessage(session.id, "user", null, text, { kind: wasWaiting ? "user_answer" : "text", activeRoles: activeRoleIds, replyTo: replyToId });
     if (wasWaiting) {
       await BE.mergeDecisionState(session.id, { user_constraints: [text] });
       if (session.pending_question?.messageId) {
@@ -607,6 +609,13 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
   // ── P0-1: @mention autocomplete. Frontend suggestion; backend already
   // understands any @role in a message regardless of how it was typed. ──
   const [showMentions, setShowMentions] = useState(false);
+  // THE NEXT PIECE OF THE TEAMS-STYLE REQUEST: hovering a message reveals
+  // Reply/Copy, same as Executive Chat. This one uses the REAL reply_to
+  // column the engine already writes and displays - postMessage already
+  // accepts opts.replyTo, so this wires the existing mechanism to an actual
+  // user action instead of building a separate, weaker one.
+  const [hoveredMsgId, setHoveredMsgId] = useState<string|null>(null);
+  const [replyingTo, setReplyingTo] = useState<{id:string; role_id:string|null; content:string}|null>(null);
   const [mentionQuery, setMentionQuery] = useState("");
   const mentionCandidates = participants
     .filter(p => p.active && p.label.toLowerCase().includes(mentionQuery.toLowerCase()));
@@ -877,7 +886,20 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
               </div>
             ) : null;
             return (
-              <div key={m.id} style={{ display:"flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom:14 }}>
+              <div key={m.id} onMouseEnter={()=>setHoveredMsgId(m.id)} onMouseLeave={()=>setHoveredMsgId(h=>h===m.id?null:h)}
+                style={{ display:"flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom:14, gap:6, alignItems:"flex-start" }}>
+                {/* THE HOVER ACTION BAR — same pattern as Executive Chat.
+                    Every message can be replied to or copied, including the
+                    user's own, since in a group setting replying to your
+                    own earlier point is a genuine, normal thing to do. */}
+                {hoveredMsgId===m.id && (
+                  <div style={{ display:"flex", gap:3, alignSelf:"center", opacity:0.9, order: isUser ? -1 : 1 }}>
+                    <button onClick={()=>setReplyingTo({id:m.id, role_id:m.author_role, content:m.content})} title="Reply"
+                      style={{ background:C.panel, border:"1px solid "+C.line, borderRadius:5, padding:"4px 6px", cursor:"pointer", fontSize:11, color:C.ink }}>↩</button>
+                    <button onClick={()=>{ navigator.clipboard?.writeText(m.content); }} title="Copy"
+                      style={{ background:C.panel, border:"1px solid "+C.line, borderRadius:5, padding:"4px 6px", cursor:"pointer", fontSize:11, color:C.ink }}>⧉</button>
+                  </div>
+                )}
               <div id={"msg-"+m.id} style={{ maxWidth:"78%", minWidth:0,
                 borderLeft: !isUser && !isSystem ? "2.5px solid "+color : "none",
                 paddingLeft: !isUser && !isSystem ? 10 : 0 }}>
@@ -985,6 +1007,17 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
             <button style={{ ...btn, fontSize:10, padding:"5px 10px" }} onClick={skipQuestion}>
               Skip \u2014 continue without this
             </button>
+          </div>
+        )}
+
+        {/* THE REPLY PREVIEW — quotes what's being replied to, with a clear
+            way to cancel, matching the same pattern used in Executive Chat. */}
+        {replyingTo && (
+          <div style={{ margin:"0 16px 8px", padding:"6px 10px", display:"flex", alignItems:"center", gap:8,
+            background:"rgba(255,255,255,0.03)", borderLeft:"2px solid "+(replyingTo.role_id?(ROLE_COLOR[replyingTo.role_id]||C.dim):C.dim), borderRadius:6 }}>
+            <span style={{ fontSize:9, fontWeight:700, color:C.teal }}>↩ Replying</span>
+            <span style={{ fontSize:10.5, color:C.faint, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{replyingTo.content.slice(0,80)}</span>
+            <button onClick={()=>setReplyingTo(null)} style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:14 }}>×</button>
           </div>
         )}
 
