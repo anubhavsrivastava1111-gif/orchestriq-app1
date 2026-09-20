@@ -125,18 +125,36 @@ export default function Jarvis({ ask, isOwner }: { ask:(sys:string,msg:any,maxT:
     setMessages(nextMsgs);
     setThinking(true); setError(null);
     try {
-      const snapshot = await getSnapshot();
-      const sys = "You are JARVIS, the operating intelligence for a business platform called OrchestrIQ, speaking directly with " +
-        (isOwner ? "the platform's owner" : "a user of the platform") + ". " +
-        "You are informative and direct, like a genuinely knowledgeable colleague — not a customer support script. " +
-        "You currently have NO ability to change, delete, or execute anything — you can only observe, analyze, and " +
-        "recommend. If asked to do something that would change real data, say plainly that you're not able to act " +
-        "yet, only advise, and say what you'd recommend instead.\n\n" +
-        "REAL, CURRENT PLATFORM DATA (use this for any question about users, plans, or open issues — never guess a number):\n" +
-        JSON.stringify(snapshot || {}) + "\n\n" +
-        ARCHITECTURE_BRIEFING;
-      const history = nextMsgs.slice(-12).map(m => ({ role:m.role, content:m.content }));
-      const reply = await ask(sys, history, 900, true); // enableSearch: true — see the note on NVIDIA below
+      // TOKEN EFFICIENCY, THE ACTUAL FIX ASKED FOR: the platform snapshot
+      // and the architecture briefing do not change between messages in
+      // the same conversation, but were being resent in full on every
+      // single turn — real, wasted cost on every reply after the first.
+      // Now they load once, right when a fresh conversation starts, and
+      // every later message in that same conversation reuses the same
+      // short system prompt instead of re-sending either block again.
+      const isFirstTurn = messages.length === 0;
+      const snapshot = isFirstTurn ? await getSnapshot() : null;
+
+      const corePersonality = "You are JARVIS, the operating intelligence for a business platform called OrchestrIQ, speaking directly with " +
+        (isOwner ? "the platform's owner" : "a user of the platform") + ". Be direct, specific, and genuinely knowledgeable — " +
+        "like a top-tier colleague, not a scripted assistant. You currently have NO ability to change, delete, or execute " +
+        "anything — you can only observe, analyze, and recommend; say so plainly if asked to act. " +
+        "If a question needs information, access, or a capability you don't currently have, say exactly that — name what's " +
+        "missing and what would need to be added to do it — rather than pretending, refusing vaguely, or staying silent.";
+
+      const sys = isFirstTurn
+        ? corePersonality + "\n\nREAL, CURRENT PLATFORM DATA (use this for any question about users, plans, or open issues — never guess a number):\n" +
+          JSON.stringify(snapshot || {}) + "\n\n" + ARCHITECTURE_BRIEFING
+        : corePersonality; // later turns rely on the conversation history below for continuity, not a resent briefing
+
+      const history = nextMsgs.slice(-10).map(m => ({ role:m.role, content:m.content }));
+      // A DEFENSIVE TIMEOUT: if a reply never comes back for any reason,
+      // this turns silence into a clear message within a bounded wait,
+      // rather than a chat that just looks frozen with no explanation.
+      const reply = await Promise.race([
+        ask(sys, history, 900, true),
+        new Promise<string>((_, reject) => setTimeout(() => reject(new Error("JARVIS didn't respond in time. This is usually a busy AI provider — try again in a moment, or switch models in Settings.")), 45000)),
+      ]);
       setMessages(m => [...m, { role:"assistant", content:reply }]);
     } catch (e:any) {
       setError(e.message);
@@ -220,7 +238,7 @@ export default function Jarvis({ ask, isOwner }: { ask:(sys:string,msg:any,maxT:
         </div>
         <div style={{ display:"flex", gap:6 }}>
           <button onClick={()=>setView("chat")} style={{ background: view==="chat"?C.teal:C.panel, color: view==="chat"?"#04070F":C.dim,
-            border:"1px solid "+C.line, borderRadius:6, padding:"6px 12px", fontSize:11, fontWeight:700, cursor:"pointer" }}>Talk to JARVIS</button>
+            border:"1px solid "+C.line, borderRadius:6, padding:"6px 12px", fontSize:11, fontWeight:700, cursor:"pointer" }}>Chat</button>
           <button onClick={()=>setView("signals")} style={{ background: view==="signals"?C.teal:C.panel, color: view==="signals"?"#04070F":C.dim,
             border:"1px solid "+C.line, borderRadius:6, padding:"6px 12px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
             Signals{signals.length ? ` (${signals.length})` : ""}
