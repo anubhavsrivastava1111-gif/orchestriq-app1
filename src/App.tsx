@@ -9433,7 +9433,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 )}
 
 {view==="jarvis"&&(
-  <Jarvis ask={(s,m,t)=>ask(s,m,t)}/>
+  <Jarvis ask={(s,m,t,es)=>ask(s,m,t,es)} isOwner={me.role==="super_admin"}/>
 )}
 
 {view==="home"&&(
