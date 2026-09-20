@@ -115,6 +115,8 @@ import Ledger, { type JournalEntry, COA, computeBalances, getAllAccounts } from 
 import { deriveFinancials, reconcile, buildFinancialBrief, financialHeadline, parseAmount } from "./lib/FinancialEngine";
 import FinanceSuite from "./FinanceSuite";
 import Jarvis from "./Jarvis";
+import JarvisLab from "./JarvisLab";
+import ErrorBoundary from "./components/ErrorBoundary";
 import CommandCenter from "./CommandCenter";
 import Dispatch, { type DispatchTemplate } from "./Dispatch";
 import ActionTracker, { ExtractReviewModal, extractItemsFromJSON, EXTRACTION_PROMPT, type ActionItem, type ExtractedItem } from "./ActionTracker";
@@ -4214,6 +4216,11 @@ export default function App(){
   // Admin Console → JARVIS Access, checked directly against the real
   // grant, not assumed.
   const [hasJarvisAccess,setHasJarvisAccess]=useState(false);
+  // PHASE 1 SWITCHING MECHANISM: defaults to "stable" the instant this
+  // component mounts, before the database is even asked - so if the
+  // fetch below fails for any reason, the app has already chosen the
+  // safe option and never silently sits in an undefined state.
+  const [jarvisMode,setJarvisMode]=useState<"stable"|"experimental">("stable");
   // What this account's plan actually allows. Loaded once at sign-in from the
   // database, which is also where it is enforced - this copy only decides what
   // the menu shows.
@@ -4383,6 +4390,15 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
             }else{setHasJarvisAccess(false);}
           }
         }catch{setHasJarvisAccess(false);}
+        // Reads the switch itself. Any failure here - network, RPC missing,
+        // anything - leaves jarvisMode at its already-set default of
+        // "stable", never at "experimental" by accident. Failing toward
+        // the proven implementation, not the one being tested, is the
+        // entire point of this mechanism.
+        try{
+          const {data:mode}=await supabase.rpc("get_jarvis_mode");
+          if(mode==="experimental")setJarvisMode("experimental");
+        }catch(e){console.warn("[OIQ] jarvis mode check failed, staying on stable:",e);}
         // If this call fails for any reason we keep the default of unlimited.
         // Failing OPEN is deliberate: a database hiccup should never lock a
         // paying customer out of the product they bought. Session limits are
@@ -9455,7 +9471,17 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 )}
 
 {view==="jarvis"&&hasJarvisAccess&&(
-  <Jarvis ask={askDirect} isOwner={me.role==="super_admin"} availableProviders={wsProviders}/>
+  // SAFE SWITCH: experimental only ever renders for the owner, regardless
+  // of jarvisMode's value — a stray flag flip can never expose an
+  // unfinished build to anyone else with JARVIS access. And even for the
+  // owner, any render failure inside JarvisLab falls back to the real,
+  // proven Jarvis component automatically via ErrorBoundary's fallback —
+  // experimental code can misbehave without ever taking JARVIS itself down.
+  jarvisMode==="experimental"&&me.role==="super_admin"
+    ? <ErrorBoundary fallback={<Jarvis ask={askDirect} isOwner={true} availableProviders={wsProviders}/>}>
+        <JarvisLab ask={askDirect} isOwner={true} availableProviders={wsProviders}/>
+      </ErrorBoundary>
+    : <Jarvis ask={askDirect} isOwner={me.role==="super_admin"} availableProviders={wsProviders}/>
 )}
 
 {view==="home"&&(
