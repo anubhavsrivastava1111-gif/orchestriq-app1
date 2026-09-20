@@ -637,7 +637,47 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
     setBomLines((p) => p.filter((b) => b.offering_id !== id));
     setOfferingChannels((p) => p.filter((c) => c.offering_id !== id)); void removeRow("ca_offerings", id); };
   const delBom = (id: string) => { setBomLines((p) => p.filter((b) => b.id !== id)); void removeRow("ca_bom_lines", id); };
+  // THE DIRECT FIX FOR THE REPORTED PROBLEM: previously the only way to
+  // start completely fresh was the indirect "Complete Project" flow, and
+  // Settings' own "Reset Data" button never actually touched this
+  // module's real database rows at all - only local browser state. This
+  // calls the new, verified reset_cost_architecture function, which does
+  // the real thing, scoped strictly to this account.
   const delPool = (id: string) => { setCostPools((p) => p.filter((c) => c.id !== id)); void removeRow("ca_cost_pools", id); };
+  // THE DIRECT FIX FOR THE REPORTED PROBLEM: previously the only way to
+  // start completely fresh was the indirect "Complete Project" flow, and
+  // Settings' own "Reset Data" button never actually touched this
+  // module's real database rows at all - only local browser state. This
+  // calls the new, verified reset_cost_architecture function, which does
+  // the real thing, scoped strictly to this account.
+  const resetWorkspace = async () => {
+    if (!userId) return;
+    if (!window.confirm("This permanently deletes ALL Cost Architecture data — every resource, offering, cost pool, and project in History. This cannot be undone. Continue?")) return;
+    try {
+      const { error } = await supabase.rpc("reset_cost_architecture", { p_user_id: userId });
+      if (error) throw error;
+      setResources([]); setOfferings([]); setBomLines([]); setCostPools([]);
+      setChannels([]); setOfferingChannels([]); setProjects([]); setSnapshots([]);
+      setOverrides(new Set()); setCtx(null);
+      const { data: created } = await supabase.from("ca_projects")
+        .insert({ user_id: userId, name: "New Cost Model", status: "draft" }).select().single();
+      setActiveProject(created as CaProject);
+      setTab("start");
+      toast("Cost Architecture reset. Starting fresh.", "success");
+    } catch (e:any) { toast("Could not reset: " + (e?.message || "unknown error"), "error"); }
+  };
+  // THE OTHER CONFIRMED GAP: individual resources and offerings could
+  // already be deleted, but a completed project sitting in History never
+  // could be - the only way to make it go away was a full workspace wipe.
+  // Its snapshot cascade-deletes automatically (confirmed against the
+  // schema before writing this), so removing the project row is enough.
+  const delProject = async (id: string) => {
+    if (!window.confirm("Delete this project from History permanently? This cannot be undone.")) return;
+    setProjects((p) => p.filter((pr) => pr.id !== id));
+    setSnapshots((s) => s.filter((sn) => sn.project_id !== id));
+    try { const { error } = await supabase.from("ca_projects").delete().eq("id", id); if (error) throw error; }
+    catch (e:any) { toast("Could not delete: " + (e?.message || "unknown error"), "error"); }
+  };
   // MODULE 08 — add/remove an alternative supplier quote for a resource.
   // Deliberately its own small table, not a change to ca_resources itself:
   // the resource's own fields stay "the supplier you're actually using",
@@ -1174,7 +1214,7 @@ export default function CostArchitecture({ showToast, companyName, onDiagnosis, 
         hasData={offerings.length > 0} goTo={setTab} companyName={companyName} openaiKey={openaiKey} showToast={showToast}
         resources={resources} delRes={delRes} costPools={costPools} delPool={delPool}
         channels={channels} delCh={delCh} offerings={offerings}
-        completedProjects={projects.filter(p => p.status === "complete")} snapshots={snapshots} startFromSnapshot={startFromSnapshot} />
+        completedProjects={projects.filter(p => p.status === "complete")} snapshots={snapshots} startFromSnapshot={startFromSnapshot} delProject={delProject} resetWorkspace={resetWorkspace} />
       <ExploreTheModel goTo={setTab} showToast={showToast} />
 
       {/* ═══════════════════════════════════════════════════════════════
@@ -3165,10 +3205,11 @@ const StartTab: React.FC<{
   // HISTORICAL INTELLIGENCE REUSE — starting from a past completed project
   // instead of a blank AI discovery every time.
   completedProjects: CaProject[]; snapshots: CaProjectSnapshot[];
-  startFromSnapshot: (s: CaProjectSnapshot) => void;
+  startFromSnapshot: (s: CaProjectSnapshot) => void; delProject: (id: string) => void;
+  resetWorkspace: () => void;
 }> = ({ callAI, ctx, applyBlueprint, hasData, goTo, companyName, openaiKey, showToast,
         resources, delRes, costPools, delPool, channels, delCh, offerings,
-        completedProjects, snapshots, startFromSnapshot }) => {
+        completedProjects, snapshots, startFromSnapshot, delProject, resetWorkspace }) => {
   const [desc, setDesc] = useState("");
   const [busy, setBusy] = useState(false);
   // A SAFETY NET, independent of the timeout fix in BusinessBlueprint.ts:
@@ -3332,14 +3373,32 @@ const StartTab: React.FC<{
                 const snap = snapshots.find((s) => s.project_id === p.id);
                 if (!snap) return null;
                 return (
-                  <button key={p.id} onClick={() => startFromSnapshot(snap)}
-                    style={{ ...S.btnGhost, fontSize: 10.5, textAlign: "left", padding: "8px 12px" }}>
-                    <div style={{ fontWeight: 700 }}>{p.name}</div>
-                    <div style={{ fontSize: 9, color: V("muted", "#8b98a5") }}>{snap.offerings.length} product{snap.offerings.length === 1 ? "" : "s"} \u00B7 {snap.resources.length} input{snap.resources.length === 1 ? "" : "s"}</div>
-                  </button>
+                  <div key={p.id} style={{ position: "relative", display: "inline-block" }}>
+                    <button onClick={() => startFromSnapshot(snap)}
+                      style={{ ...S.btnGhost, fontSize: 10.5, textAlign: "left", padding: "8px 26px 8px 12px" }}>
+                      <div style={{ fontWeight: 700 }}>{p.name}</div>
+                      <div style={{ fontSize: 9, color: V("muted", "#8b98a5") }}>{snap.offerings.length} product{snap.offerings.length === 1 ? "" : "s"} \u00B7 {snap.resources.length} input{snap.resources.length === 1 ? "" : "s"}</div>
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); delProject(p.id); }} title="Delete this project"
+                      style={{ position: "absolute", top: 4, right: 4, background: "none", border: "none",
+                        color: V("muted", "#8b98a5"), cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 2 }}>&times;</button>
+                  </div>
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {/* THE DIRECT FIX FOR THE REPORTED PROBLEM: a real, standalone
+            reset — no longer buried inside "Complete Project", and calling
+            a function that actually deletes the real database rows. */}
+        {(resources.length > 0 || offerings.length > 0 || completedProjects.length > 0) && (
+          <div style={{ marginBottom: 14, paddingTop: 10, borderTop: "1px dashed " + V("border","#232838") }}>
+            <button onClick={resetWorkspace}
+              style={{ background: "transparent", border: "1px solid #EF444455", color: "#EF4444",
+                borderRadius: 6, padding: "6px 12px", fontSize: 10.5, fontWeight: 600, cursor: "pointer" }}>
+              Reset Cost Architecture — delete everything and start fresh
+            </button>
           </div>
         )}
 
