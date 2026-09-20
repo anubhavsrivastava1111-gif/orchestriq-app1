@@ -82,7 +82,7 @@ type Recommendation = {
   confidence:string; provider:string; model:string; created_at:string;
 };
 
-export default function Jarvis({ ask, isOwner }: { ask:(sys:string,msg:any,maxT:number,enableSearch?:boolean)=>Promise<string>; isOwner?:boolean }) {
+export default function Jarvis({ ask, isOwner, availableProviders }: { ask:(sys:any,msg:any,maxT:number,enableSearch?:boolean,taskType?:string,provider?:string,model?:string)=>Promise<string>; isOwner?:boolean; availableProviders?: Array<{id:string;label:string}> }) {
   const [view, setView] = useState<"chat"|"signals">("chat");
   const [signals, setSignals] = useState<Signal[]>([]);
   const [recos, setRecos] = useState<Record<string,Recommendation>>({});
@@ -93,9 +93,60 @@ export default function Jarvis({ ask, isOwner }: { ask:(sys:string,msg:any,maxT:
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  // VOICE — JARVIS speaks its replies aloud, on by default, one click to
+  // mute. Uses the browser's own built-in speech synthesis - no new
+  // provider, key, or cost involved.
+  const [voiceOn, setVoiceOn] = useState(true);
+  const [listening, setListening] = useState(false);
+  const [provider, setProvider] = useState<string>("");
   const endRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior:"smooth" }); }, [messages, thinking]);
+
+  // PERSISTENCE, THE CONFIRMED GAP: conversations previously lived only in
+  // React state and vanished on refresh — never actually saved anywhere,
+  // despite looking like a real chat history.
+  useEffect(() => {
+    (async () => {
+      const { data:{ user } } = await supabase.auth.getUser();
+      if (!user) { setLoadingHistory(false); return; }
+      const { data } = await supabase.from("jarvis_conversations").select("role,content")
+        .eq("user_id", user.id).order("created_at",{ascending:true}).limit(40);
+      setMessages((data||[]).map((m:any)=>({ role:m.role, content:m.content })));
+      setLoadingHistory(false);
+    })();
+  }, []);
+
+  const saveMsg = async (role:"user"|"assistant", content:string) => {
+    try {
+      const { data:{ user } } = await supabase.auth.getUser();
+      if (user) await supabase.from("jarvis_conversations").insert({ user_id:user.id, role, content, provider: provider||null });
+    } catch {}
+  };
+
+  const speak = (text:string) => {
+    if (!voiceOn || !("speechSynthesis" in window)) return;
+    try {
+      window.speechSynthesis.cancel(); // never speaks two replies on top of each other
+      const clean = text.replace(/[*#_`]/g,"").slice(0,1000); // strip markdown JARVIS would otherwise read literally
+      const u = new SpeechSynthesisUtterance(clean);
+      u.rate = 1.02;
+      window.speechSynthesis.speak(u);
+    } catch {}
+  };
+
+  const toggleListen = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { setError("Voice input isn't supported in this browser — try Chrome or Edge."); return; }
+    if (listening) { recognitionRef.current?.stop(); setListening(false); return; }
+    const rec = new SR(); rec.lang = "en-US"; rec.interimResults = false;
+    rec.onresult = (e:any) => { setChatInput(prev => (prev ? prev + " " : "") + e.results[0][0].transcript); };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    recognitionRef.current = rec; rec.start(); setListening(true);
+  };
 
   const load = useCallback(async () => {
     const { data: sigs } = await supabase.from("jarvis_signals").select("*")
@@ -117,22 +168,26 @@ export default function Jarvis({ ask, isOwner }: { ask:(sys:string,msg:any,maxT:
     } catch { return null; }
   };
 
+  const sentContextThisSession = useRef(false);
+
   const sendChat = async (text?: string) => {
     const userText = (text ?? chatInput).trim();
     if (!userText || thinking) return;
     setChatInput("");
+    saveMsg("user", userText);
     const nextMsgs: ChatMsg[] = [...messages, { role:"user", content:userText }];
     setMessages(nextMsgs);
     setThinking(true); setError(null);
     try {
-      // TOKEN EFFICIENCY, THE ACTUAL FIX ASKED FOR: the platform snapshot
-      // and the architecture briefing do not change between messages in
-      // the same conversation, but were being resent in full on every
-      // single turn — real, wasted cost on every reply after the first.
-      // Now they load once, right when a fresh conversation starts, and
-      // every later message in that same conversation reuses the same
-      // short system prompt instead of re-sending either block again.
-      const isFirstTurn = messages.length === 0;
+      // TOKEN EFFICIENCY, FIXED PROPERLY: with conversations now persisted
+      // across sessions, messages.length is no longer a safe way to tell
+      // "is this genuinely the first turn" — loaded history would make it
+      // look like every session is a continuation, so the platform
+      // snapshot would never refresh again after the very first day. This
+      // tracks it per browser session instead, so it's still sent once
+      // when you open JARVIS today, even if yesterday's conversation loaded in.
+      const isFirstTurn = !sentContextThisSession.current;
+      sentContextThisSession.current = true;
       const snapshot = isFirstTurn ? await getSnapshot() : null;
 
       const corePersonality = "You are JARVIS, the operating intelligence for a business platform called OrchestrIQ, speaking directly with " +
@@ -152,10 +207,12 @@ export default function Jarvis({ ask, isOwner }: { ask:(sys:string,msg:any,maxT:
       // this turns silence into a clear message within a bounded wait,
       // rather than a chat that just looks frozen with no explanation.
       const reply = await Promise.race([
-        ask(sys, history, 900, true),
+        ask(sys, history, 900, true, "jarvis", provider || undefined),
         new Promise<string>((_, reject) => setTimeout(() => reject(new Error("JARVIS didn't respond in time. This is usually a busy AI provider — try again in a moment, or switch models in Settings.")), 45000)),
       ]);
       setMessages(m => [...m, { role:"assistant", content:reply }]);
+      saveMsg("assistant", reply);
+      speak(reply);
     } catch (e:any) {
       setError(e.message);
       setMessages(m => [...m, { role:"assistant", content:"I ran into a problem answering that: " + e.message }]);
@@ -253,7 +310,24 @@ export default function Jarvis({ ask, isOwner }: { ask:(sys:string,msg:any,maxT:
 
       {view === "chat" && (
         <div style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0, marginTop:14 }}>
-          {messages.length === 0 && (
+          {/* MODEL PICKER + VOICE TOGGLE — pick which real, configured
+              provider answers (Claude/NVIDIA/DeepSeek/Gemini/OpenAI, or
+              "Auto" for the platform's normal routing), and mute JARVIS
+              speaking its replies aloud without losing text output. */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <select value={provider} onChange={e=>setProvider(e.target.value)}
+              style={{ background:C.raised, border:"1px solid "+C.line, borderRadius:6, padding:"5px 8px", color:C.dim, fontSize:11 }}>
+              <option value="">Auto (recommended)</option>
+              {(availableProviders||[]).map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+            <button onClick={()=>setVoiceOn(v=>{ if(v) window.speechSynthesis?.cancel(); return !v; })}
+              title={voiceOn ? "Mute JARVIS's voice" : "Un-mute JARVIS's voice"}
+              style={{ background:"transparent", border:"1px solid "+C.line, borderRadius:6, padding:"5px 10px", color: voiceOn?C.teal:C.faint, fontSize:11, cursor:"pointer" }}>
+              {voiceOn ? "🔊 Voice on" : "🔇 Voice off"}
+            </button>
+          </div>
+          {loadingHistory && <div style={{ fontSize:11, color:C.faint, textAlign:"center", padding:10 }}>Loading your last conversation…</div>}
+          {!loadingHistory && messages.length === 0 && (
             <div style={{ textAlign:"center", padding:"40px 20px", color:C.faint }}>
               <div style={{ fontSize:32, marginBottom:10, opacity:0.4 }}>◈</div>
               <div style={{ fontSize:13, marginBottom:4 }}>Ask me anything about the platform, or the world.</div>
@@ -279,9 +353,14 @@ export default function Jarvis({ ask, isOwner }: { ask:(sys:string,msg:any,maxT:
             <div ref={endRef} />
           </div>
           <div style={{ display:"flex", gap:8, paddingTop:10, borderTop:"1px solid "+C.line }}>
+            <button onClick={toggleListen} title="Push to talk"
+              style={{ background: listening?"#EF4444":C.raised, border:"1px solid "+(listening?"#EF4444":C.line), borderRadius:8,
+                padding:"0 14px", color: listening?"#fff":C.dim, fontSize:14, cursor:"pointer" }}>
+              {listening ? "◉" : "🎙"}
+            </button>
             <input value={chatInput} onChange={e=>setChatInput(e.target.value)}
               onKeyDown={e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); sendChat(); } }}
-              placeholder="Ask JARVIS anything…" disabled={thinking}
+              placeholder="Ask JARVIS anything, or press 🎙 to speak…" disabled={thinking}
               style={{ flex:1, background:C.raised, border:"1px solid "+C.line, borderRadius:8, padding:"9px 12px",
                 color:C.ink, fontSize:12.5, fontFamily:"inherit" }} />
             <button onClick={()=>sendChat()} disabled={thinking || !chatInput.trim()}
