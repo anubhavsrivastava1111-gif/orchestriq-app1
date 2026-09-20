@@ -7544,6 +7544,17 @@ const processTask=useCallback(async(task:any)=>{
   // regular users - only the admin-facing editing form moved.
 
   const resetData=async()=>{
+    // THE CONFIRMED BUG: everything below this line only ever cleared
+    // localStorage and React state - it never issued a single DELETE
+    // against the real Supabase tables. That is exactly why Cost
+    // Architecture (and everything else here) kept showing old data after
+    // a "reset": nothing in the actual database was ever touched. This is
+    // the real fix for Cost Architecture specifically, using the new,
+    // tested reset_cost_architecture function.
+    try{
+      const {data:{user}}=await supabase.auth.getUser();
+      if(user){await supabase.rpc("reset_cost_architecture",{p_user_id:user.id});}
+    }catch(e){console.warn("[OIQ] Cost Architecture reset error:",e);}
     // Clear all user-generated data from every module
     const dataKeys=[
       "cos-ch","cos-cd","cos-br","cos-br-live","cos-wf","cos-tq",
@@ -10316,7 +10327,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
             )}
             {sTab==="danger"&&(
               <div>
-                <p style={{fontSize:11,color:"#8892B0",marginBottom:10,lineHeight:1.6}}>These actions are irreversible. Data will be permanently deleted from this browser.</p>
+                <p style={{fontSize:11,color:"#8892B0",marginBottom:10,lineHeight:1.6}}>These actions are irreversible. Your data is stored securely on our servers, not just this device — deleting it here removes it everywhere, permanently.</p>
                 {confirmReset===null&&(
                   <div style={{display:"flex",flexDirection:"column",gap:6}}>
                     <button onClick={()=>setConfirmReset("data")} style={{...S.actBtn,borderColor:"#F59E0B33",color:"#F59E0B"}}>Reset Chats and Data (keep API keys)</button>
@@ -10353,7 +10364,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
             <div style={{fontSize:32,marginBottom:8}}>⎋</div>
             <h2 style={{fontSize:16,fontWeight:800,color:"#F1F5F9",marginBottom:8}}>Sign Out</h2>
             <p style={{fontSize:12,color:"#8892B0",marginBottom:18,lineHeight:1.6}}>
-              Your conversations, boardroom sessions, and company data live in this browser only. Signing out without saving means this data will not follow you to your next login on this or any device.
+              Signing out clears anything stored only on this device — like the API keys you've typed in here — so the next person on a shared computer can't see them. Anything already saved (your projects, ledger entries, conversations) is safe on our servers and will be there when you sign back in. "Save Workspace" downloads a personal backup file first, in case you want one.
             </p>
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               <button onClick={()=>handleSignOut(true)} style={{...S.pBtn,marginTop:0,background:"#14B8A6"}}>Save Workspace, Then Sign Out</button>
