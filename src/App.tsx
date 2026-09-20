@@ -4209,6 +4209,11 @@ export default function App(){
   // or a staff member the owner has appointed. The console re-checks with the
   // database itself, so this only decides whether the menu entry appears.
   const [isAdmin,setIsAdmin]=useState(false);
+  // ACCESS RESTRICTION, AS REQUESTED: JARVIS defaults to owner-only. A
+  // regular user only sees it if explicitly granted via
+  // Admin Console → JARVIS Access, checked directly against the real
+  // grant, not assumed.
+  const [hasJarvisAccess,setHasJarvisAccess]=useState(false);
   // What this account's plan actually allows. Loaded once at sign-in from the
   // database, which is also where it is enforced - this copy only decides what
   // the menu shows.
@@ -4367,6 +4372,17 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
         // against the profiles table, so editing this value in a browser buys
         // nothing but an error message.
         try{setIsAdmin(prof?.role==="super_admin"||prof?.role==="admin");}catch{}
+        try{
+          if(prof?.role==="super_admin"){setHasJarvisAccess(true);}
+          else{
+            const {data:feat}=await supabase.from("features").select("id").eq("key","jarvis_access").maybeSingle();
+            if(feat){
+              const {data:grant}=await supabase.from("user_feature_grants").select("enabled")
+                .eq("user_id",user.id).eq("feature_id",feat.id).eq("enabled",true).maybeSingle();
+              setHasJarvisAccess(!!grant);
+            }else{setHasJarvisAccess(false);}
+          }
+        }catch{setHasJarvisAccess(false);}
         // If this call fails for any reason we keep the default of unlimited.
         // Failing OPEN is deliberate: a database hiccup should never lock a
         // paying customer out of the product they bought. Session limits are
@@ -8345,7 +8361,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           </button>
           {showModules&&(
             <div style={{position:"absolute",top:"calc(100% - 2px)",left:10,right:10,background:"var(--oiq-sbBg,var(--oiq-surface2,#0c1120))",backdropFilter:"none",border:"1px solid var(--sb-bdr)",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:7,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["home","🎛️","Command Center"],["jarvis","◈","JARVIS"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["workspace","✳️","AI Workspace"],["liveboard","🗣️","Live Boardroom"],["account","👤","My Account"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>{
+              {[["home","🎛️","Command Center"],["jarvis","◈","JARVIS"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["workspace","✳️","AI Workspace"],["liveboard","🗣️","Live Boardroom"],["account","👤","My Account"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="jarvis"||hasJarvisAccess).filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>{
                 // WAS: modules the plan did not include were REMOVED from the
                 // menu entirely, so a user had no idea they existed or that
                 // upgrading would unlock them. A customer who cannot see what
@@ -9432,7 +9448,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
   <FinanceSuite curSym={cur.sym} ask={(s,m,t)=>ask(s,m,t)} showToast={showToast}/>
 )}
 
-{view==="jarvis"&&(
+{view==="jarvis"&&hasJarvisAccess&&(
   <Jarvis ask={(s,m,t,es)=>ask(s,m,t,es)} isOwner={me.role==="super_admin"}/>
 )}
 
