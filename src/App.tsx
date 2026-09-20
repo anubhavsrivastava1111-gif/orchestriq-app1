@@ -4593,12 +4593,18 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
   // a way to override the app's normal routing. Everything else is unchanged:
   // the same callAI, the same keys, the same failure handling. This adds a
   // choice; it does not add a second AI layer.
-  const askDirect=useCallback(async(sys:any,msgs:any,maxT?:any,_s?:any,_t?:any,provider?:string,model?:string)=>{
-    if(!provider)return (await callMulti(keys,defP,sys,msgs,maxT,false,"workspace")).primary;
+  const askDirect=useCallback(async(sys:any,msgs:any,maxT?:any,enableSearch?:boolean,taskType?:any,provider?:string,model?:string)=>{
+    // THE FIX: this previously hardcoded search off in both branches below,
+    // regardless of what a caller asked for. JARVIS needs real search for
+    // general questions (news, prices); this now honors the flag instead
+    // of silently discarding it. Existing callers passing false/undefined
+    // (Workspace's own calls) see no change in behavior.
+    const featureLabel=taskType==="jarvis"?"JARVIS":"Universal Workspace";
+    if(!provider)return (await callMulti(keys,defP,sys,msgs,maxT,!!enableSearch,taskType||"workspace")).primary;
     const k=providerKey(keys,provider);
     if(!k)throw new Error("No key configured for "+provider+". Add one in Settings \u2192 API.");
-    setUsageFeature("Universal Workspace","\u2733");
-    const r=await callAI(provider,k,sys,msgs,maxT||4000,false,model);
+    setUsageFeature(featureLabel,"\u2733");
+    const r=await callAI(provider,k,sys,msgs,maxT||4000,!!enableSearch,model);
     return typeof r==="string"?r:(r?.text||"");
   },[keys,defP]);
  
@@ -9449,7 +9455,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 )}
 
 {view==="jarvis"&&hasJarvisAccess&&(
-  <Jarvis ask={(s,m,t,es)=>ask(s,m,t,es)} isOwner={me.role==="super_admin"}/>
+  <Jarvis ask={askDirect} isOwner={me.role==="super_admin"} availableProviders={wsProviders}/>
 )}
 
 {view==="home"&&(
