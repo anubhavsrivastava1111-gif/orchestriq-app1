@@ -76,11 +76,20 @@ async function currentUserId():Promise<string|null>{
   return user?.id || null;
 }
 
+// EXPLICIT ROLLBACK, PER YOUR REQUEST: no execution capability of any kind
+// right now, not even the low-risk auto-executing kind. JARVIS only does
+// what you directly ask - analyze, investigate, check one module - and
+// nothing acts on the platform on its own. The Phase 3 tools below are
+// kept, tested and working exactly as before; they are simply filtered
+// out before JARVIS ever sees them, so re-enabling this later is a
+// one-line change, not rebuilding anything.
+const EXECUTION_ENABLED = false;
+
 // Now a function, not a constant: get_ledger_status needs to react to
 // whatever ledger data is actually loaded in THIS browser session right
 // now - a module-level constant could never see that.
 function buildJarvisTools(ctx:{ ledgerEntries?: any[] }) {
-return [
+const allTools = [
   {
     name: "get_open_signals",
     description: "Get the current list of open (unresolved) signals JARVIS has already detected — anomalies, risks, or opportunities across the platform. Use this before answering any question about current problems or what needs attention.",
@@ -196,6 +205,10 @@ return [
     },
   },
 ];
+// The actual filter: with EXECUTION_ENABLED false, only read_only tools
+// ever reach JARVIS - dismiss_signal and propose_resource_price_update
+// are excluded entirely, not just visually hidden.
+return EXECUTION_ENABLED ? allTools : allTools.filter(t => t.riskLevel === "read_only");
 }
 
 
@@ -222,6 +235,16 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
   // is actually loaded in this session right now - not a stale snapshot
   // from when the chat first opened.
   const jarvisTools = useMemo(() => buildJarvisTools({ ledgerEntries }), [ledgerEntries]);
+  // EXECUTION DISABLED FOR NOW, AS REQUESTED: only riskLevel "read_only"
+  // tools are ever offered to the model right now — this excludes even
+  // dismiss_signal, which auto-executes without approval. JARVIS can
+  // analyze a specific module or check something specific, exactly as
+  // asked, but cannot change or dismiss anything until this is
+  // deliberately turned back on. The Tier 2 tools and the approval
+  // machinery from Phase 3 are untouched underneath — this only changes
+  // which tools get offered in a conversation, so re-enabling later is a
+  // one-line change, not a rebuild.
+  const observeOnlyTools = useMemo(() => jarvisTools.filter(t => t.riskLevel === "read_only"), [jarvisTools]);
   const [view, setView] = useState<"chat"|"signals"|"approvals">("chat");
   const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
   const [decidingId, setDecidingId] = useState<string|null>(null);
@@ -250,6 +273,13 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
   // provider, key, or cost involved.
   const [voiceOn, setVoiceOn] = useState(true);
   const [listening, setListening] = useState(false);
+  // Declared here, well before toggleListen and its sync effect below,
+  // deliberately — the exact class of "used before its own declaration"
+  // bug that caused a real production crash earlier in this project is
+  // not something to risk again on subtle closure-timing reasoning.
+  const [lastHeard, setLastHeard] = useState<string>("");
+  const [wakeError, setWakeError] = useState<string|null>(null);
+  const toggleListenRef = useRef<() => void>(() => {});
   const [provider, setProvider] = useState<string>("");
   const endRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -298,6 +328,7 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
     rec.onerror = () => setListening(false);
     recognitionRef.current = rec; rec.start(); setListening(true);
   };
+  useEffect(() => { toggleListenRef.current = toggleListen; }); // no dependency array: syncs every render, deliberately
 
   // ============================================================================
   // WAKE WORD — explicit opt-in only, OFF by default, exactly as specified.
@@ -331,31 +362,47 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
       }
       setRecordingWakePhrase(false);
     };
-    rec.onerror = () => setRecordingWakePhrase(false);
+    rec.onerror = (e:any) => { setRecordingWakePhrase(false); setError("Couldn't hear you: "+(e?.error||"unknown error")+". Check microphone permission and try again."); };
     rec.onend = () => setRecordingWakePhrase(false);
     rec.start();
   };
 
   const startWakeListener = useCallback(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) return;
+    if (!SR) { setWakeError("This browser doesn't support voice recognition at all — try Chrome or Edge."); setWakeWordOn(false); wakeWordOnRef.current=false; return; }
+    setWakeError(null);
     const rec = new SR();
     rec.lang = "en-US"; rec.continuous = true; rec.interimResults = true;
     rec.onresult = (e:any) => {
       const last = e.results[e.results.length-1];
       const heard = (last[0].transcript || "").toLowerCase();
+      setLastHeard(heard); // THE LIVE PROOF this is actually hearing something
       if (heard.includes(effectiveWakePhrase)) {
-        rec.stop(); // stop listening for the wake word so it doesn't also try to capture the command that follows
-        toggleListen(); // hands off to the exact same one-shot capture push-to-talk already uses
+        rec.stop();
+        toggleListenRef.current();
       }
     };
     // Browsers stop continuous recognition after periods of silence on
     // their own; this restarts it automatically for as long as wake-word
     // mode is switched on, so "continuous" actually stays continuous.
     rec.onend = () => { if (wakeWordOnRef.current) { try { rec.start(); } catch {} } };
-    rec.onerror = () => { if (wakeWordOnRef.current) { try { rec.start(); } catch {} } };
+    rec.onerror = (e:any) => {
+      // THE ACTUAL FIX: a permission denial is permanent - retrying it in
+      // a loop forever produced no visible error and no working feature,
+      // which is exactly what looked like "no response at all." This now
+      // stops and says plainly what's wrong instead of silently spinning.
+      const reason = e?.error || "unknown";
+      if (reason === "not-allowed" || reason === "service-not-allowed") {
+        setWakeError("Microphone access is blocked for this site. Check your browser's site permissions and allow the microphone, then turn wake word back on.");
+        setWakeWordOn(false); wakeWordOnRef.current = false;
+        return;
+      }
+      if (reason === "no-speech") { if (wakeWordOnRef.current) { try { rec.start(); } catch {} } return; } // genuinely normal, not an error worth showing
+      setWakeError("Voice recognition stopped unexpectedly (" + reason + "). Trying again…");
+      if (wakeWordOnRef.current) { try { rec.start(); } catch {} }
+    };
     wakeRecognitionRef.current = rec;
-    rec.start();
+    try { rec.start(); } catch (e:any) { setWakeError("Couldn't start listening: "+(e?.message||"unknown error")); setWakeWordOn(false); wakeWordOnRef.current=false; }
   }, [effectiveWakePhrase]);
 
   const toggleWakeWord = () => {
@@ -458,7 +505,7 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
       if (askWithTools) {
         try {
           const reply = await Promise.race([
-            askWithTools(corePersonality + "\n\n" + ARCHITECTURE_BRIEFING, userText, history, jarvisTools,
+            askWithTools(corePersonality + "\n\n" + ARCHITECTURE_BRIEFING, userText, history, observeOnlyTools,
               (name) => setToolActivity(name)),
             new Promise<string>((_, reject) => setTimeout(() => reject(new Error("timeout")), 60000)),
           ]);
@@ -673,6 +720,18 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
             </button>
             <style>{"@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.55}}"}</style>
           </div>
+          {/* THE ACTUAL DIAGNOSTIC: shows exactly what the browser hears,
+              live, and any real error — the direct answer to "is he able
+              to listen to me at all." */}
+          {wakeWordOn && (
+            <div style={{ fontSize:10.5, color:C.faint, marginBottom:8, fontStyle:"italic" }}>
+              Hearing: {lastHeard ? "\u201c"+lastHeard+"\u201d" : "(nothing yet — say something to test the microphone)"}
+            </div>
+          )}
+          {wakeError && (
+            <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.3)", borderRadius:8,
+              padding:"8px 12px", marginBottom:10, fontSize:11.5, color:C.red }}>{wakeError}</div>
+          )}
           {loadingHistory && <div style={{ fontSize:11, color:C.faint, textAlign:"center", padding:10 }}>Loading your last conversation…</div>}
           {!loadingHistory && messages.length === 0 && (
             <div style={{ textAlign:"center", padding:"40px 20px", color:C.faint }}>
@@ -798,6 +857,11 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
 
       {view === "approvals" && (
         <div style={{ marginTop:14 }}>
+          {!EXECUTION_ENABLED && (
+            <div style={{ background:"rgba(245,158,11,0.08)", border:"1px solid "+C.amber+"55", borderRadius:8, padding:"10px 14px", marginBottom:14, fontSize:11.5, color:C.dim }}>
+              Execution is currently switched off entirely — JARVIS can only observe, investigate, and recommend right now. Nothing new can appear here until it's turned back on.
+            </div>
+          )}
           {pendingApprovals.length === 0 && (
             <div style={{ textAlign:"center", padding:"60px 20px", color:C.faint }}>
               <div style={{ fontSize:32, marginBottom:10, opacity:0.4 }}>✓</div>
