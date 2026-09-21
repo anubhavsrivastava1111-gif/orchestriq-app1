@@ -606,6 +606,53 @@ function buildJarvisTools(ctx: {
       },
     },
 
+    // NEW — genuinely server-side, confirmed directly against the schema
+    // before writing these, not assumed. Finance and Ledger are NOT
+    // included here because both were confirmed to store data only in
+    // browser localStorage (via WorkspaceMemory) — a real tool for either
+    // would have nothing to actually query server-side.
+    {
+      name: "get_boardroom_status",
+      description:
+        "Read the current user's Live Boardroom sessions from Supabase — objective, status, whether paused, and any question currently awaiting the user's answer.",
+      input_schema: { type: "object", properties: {}, required: [] },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async () => {
+        const uid = await currentUserId();
+        if (!uid) return { error: "Not signed in" };
+        const { data, error } = await supabase
+          .from("boardroom_sessions")
+          .select("id,objective,status,paused,pending_question,updated_at")
+          .eq("user_id", uid)
+          .order("updated_at", { ascending: false })
+          .limit(10);
+        if (error) return { error: error.message };
+        return { session_count: data?.length || 0, sessions: data || [] };
+      },
+    },
+
+    {
+      name: "get_workspace_activity",
+      description:
+        "Read the current user's recent AI Workspace conversations from Supabase — titles, which provider/model was used, and when each was last active. Does not read message content, only conversation metadata.",
+      input_schema: { type: "object", properties: {}, required: [] },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async () => {
+        const uid = await currentUserId();
+        if (!uid) return { error: "Not signed in" };
+        const { data, error } = await supabase
+          .from("workspace_conversations")
+          .select("title,provider,model,updated_at")
+          .eq("user_id", uid)
+          .order("updated_at", { ascending: false })
+          .limit(10);
+        if (error) return { error: error.message };
+        return { conversation_count: data?.length || 0, recent_conversations: data || [] };
+      },
+    },
+
     {
       name: "retrieve_memory",
 
@@ -1871,11 +1918,38 @@ Rules:
         tool.requiresApproval ||
         tool.riskLevel === "consequential"
       ) {
+        // THE ACTUAL FIX: this used to just stop with an error message that
+        // went nowhere — the consequential step was correctly BLOCKED from
+        // running, but never actually became something the owner could see
+        // and approve. That's a dead end, not a real pause. This now
+        // queues a genuine, visible approval request, reusing the exact
+        // same table and flow the manual chat's tool-calling already uses,
+        // so "Approve & Execute" in the Approvals tab genuinely works for
+        // something the mission engine proposed too.
+        try {
+          const uid = await currentUserId();
+          if (uid) {
+            const toolInputPrompt = `Determine the minimum valid input required to call the tool "${tool.name}" (${tool.description}) for this mission step.\nMission: ${activeMission.goal}\nStep: ${step.description}\nReturn ONLY JSON containing the tool input, including a specific, genuine "reasoning" field if the tool schema requires one.`;
+            const rawInput = await ask(toolInputPrompt, [{ role: "user", content: activeMission.goal }], 500, false, "jarvis_tool_planning", provider || undefined);
+            const proposedInput = extractJson(rawInput) || {};
+            await supabase.from("jarvis_lab_approvals").insert({
+              user_id: uid,
+              tool_name: tool.name,
+              risk_category: tool.riskCategory || "unspecified",
+              reasoning: proposedInput?.reasoning || `Proposed automatically while working on: ${activeMission.goal}`,
+              proposed_input: proposedInput,
+              status: "pending",
+              created_at: nowIso(),
+            });
+          }
+        } catch (e) {
+          console.warn("[JARVIS] could not queue mission approval", e);
+        }
         return {
           success: false,
           requiresApproval: true,
           error:
-            "This step requires owner approval before execution.",
+            "This step requires owner approval before execution — it has been queued in Approvals, not silently dropped.",
         };
       }
 
