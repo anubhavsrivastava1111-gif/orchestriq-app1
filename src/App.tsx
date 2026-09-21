@@ -1624,7 +1624,13 @@ async function callClaude(key,sys,msgs,maxT,enableSearch,modelOverride=""){
 // resolution pattern, with Claude's tool-use protocol layered on top.
 // Each tool carries its own handler, so JARVIS decides what to look up -
 // this is not a hand-curated snapshot handed to the model in advance.
-type JarvisTool = { name:string; description:string; input_schema:any; riskLevel:"read_only"|"consequential"; handler:(input:any)=>Promise<any> };
+// PHASE 3: riskLevel now has three tiers, and requiresApproval is explicit
+// rather than inferred - a tool's author states plainly whether it can run
+// on its own or must pause for a human decision, matching the tool/
+// permission architecture asked for (purpose, inputs, risk level, approval
+// requirement, and audit info, all declared per tool, not guessed at
+// call time).
+type JarvisTool = { name:string; description:string; input_schema:any; riskLevel:"read_only"|"low_risk"|"consequential"; requiresApproval:boolean; riskCategory?:string; handler:(input:any)=>Promise<any> };
 async function callClaudeWithTools(key:string, sys:string, userMsg:string, history:{role:string;content:string}[], tools:JarvisTool[], onToolCall?:(name:string,input:any)=>void):Promise<string>{
   const claudeTools=tools.map(t=>({name:t.name,description:t.description,input_schema:t.input_schema}));
   let messages:any[]=[...history.map(h=>({role:h.role,content:h.content})),{role:"user",content:userMsg}];
@@ -1647,14 +1653,39 @@ async function callClaudeWithTools(key:string, sys:string, userMsg:string, histo
       const tool=tools.find(t=>t.name===block.name);
       onToolCall?.(block.name,block.input);
       let resultContent:string; let resultForAudit:any; let errorForAudit:string|null=null;
-      try{
-        const result=tool?await tool.handler(block.input):{error:"Unknown tool: "+block.name};
-        resultContent=JSON.stringify(result);
-        resultForAudit=result;
-      }catch(e:any){
-        errorForAudit=e.message||"Tool execution failed";
-        resultContent=JSON.stringify({error:errorForAudit});
+
+      if(tool?.requiresApproval){
+        // THE ACTUAL PAUSE, PHASE 3: a consequential tool is never executed
+        // here. It is recorded as pending, with the model's own stated
+        // reasoning (part of its structured input, not invented after the
+        // fact) and enough state to resume correctly once a human decides -
+        // the tool name and exact input are preserved verbatim.
+        try{
+          const {data:{user}}=await supabase.auth.getUser();
+          if(!user)throw new Error("Not signed in");
+          const {error:insErr}=await supabase.from("jarvis_lab_approvals").insert({
+            user_id:user.id, tool_name:block.name, proposed_input:block.input||{},
+            reasoning:block.input?.reasoning||"(no reasoning provided)",
+            risk_category:tool.riskCategory||"unspecified",
+          });
+          if(insErr)throw insErr;
+          resultForAudit={queued:true,status:"pending_approval"};
+          resultContent=JSON.stringify({status:"pending_approval",message:"This action requires the owner's approval and has been queued. It has NOT been executed. Tell the user it is waiting for their review, not that it is done."});
+        }catch(e:any){
+          errorForAudit=e.message||"Could not queue for approval";
+          resultContent=JSON.stringify({error:errorForAudit});
+        }
+      }else{
+        try{
+          const result=tool?await tool.handler(block.input):{error:"Unknown tool: "+block.name};
+          resultContent=JSON.stringify(result);
+          resultForAudit=result;
+        }catch(e:any){
+          errorForAudit=e.message||"Tool execution failed";
+          resultContent=JSON.stringify({error:errorForAudit});
+        }
       }
+
       toolResults.push({type:"tool_result",tool_use_id:block.id,content:resultContent});
       // AUDITABILITY, REQUIREMENT #14: every tool call recorded regardless
       // of success or failure - what was asked, what came back, whether it
