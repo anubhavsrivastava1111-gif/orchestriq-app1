@@ -8,7 +8,7 @@ import {
 import { supabase } from "./lib/supabase";
 
 /* ============================================================================
- * JARVIS 3.0 — AUTONOMOUS INTELLIGENCE / ORCHESTRATION LAYER
+ * JARVIS 5.0 — PLATFORM INTELLIGENCE / CONTROLLED ORCHESTRATION LAYER
  *
  * Design:
  *
@@ -141,16 +141,27 @@ type MemoryItem = {
 
 
 type JarvisGateway = {
+  /** Read-only platform/repository capabilities. */
   getPlatformManifest?: () => Promise<any> | any;
-  getRepositorySnapshot?: (input?: any) => Promise<any> | any;
+  getRepositorySnapshot?: (input?: { path?: string; maxChars?: number; includeSource?: boolean }) => Promise<any> | any;
   searchRepository?: (input: { query: string; path?: string; maxResults?: number }) => Promise<any> | any;
+  readRepositoryFile?: (input: { path: string; maxChars?: number }) => Promise<any> | any;
   inspectModule?: (input: { module: string; detail?: string }) => Promise<any> | any;
   getModuleSnapshot?: (input?: { modules?: string[] }) => Promise<any> | any;
+  getModuleDependencies?: (input: { module?: string; path?: string }) => Promise<any> | any;
+  getDatabaseSchema?: (input?: { tables?: string[] }) => Promise<any> | any;
+  getRuntimeDiagnostics?: (input?: { limit?: number }) => Promise<any> | any;
+  getBuildStatus?: () => Promise<any> | any;
+  getGitStatus?: () => Promise<any> | any;
+  /** Testing is permitted only in a sandbox/non-production environment. */
+  runTests?: (input: { scope?: string; command?: string; mode?: "unit" | "integration" | "smoke" | "typecheck" | "lint" | "build" | "custom" }) => Promise<any> | any;
+  runSandboxCheck?: (input: { description: string; files?: string[]; command?: string }) => Promise<any> | any;
 };
 
 declare global {
   interface Window {
     __ORCHESTRIQ_JARVIS_GATEWAY__?: JarvisGateway;
+    __ORCHESTRIQ_JARVIS_GATEWAY_URL__?: string;
   }
 }
 type JarvisProps = {
@@ -187,13 +198,14 @@ type JarvisProps = {
    * inspection and separately controlled execution endpoints.
    */
   gateway?: JarvisGateway;
+  gatewayBaseUrl?: string;
 };
 
 /* ============================================================================
  * CONFIGURATION
  * ========================================================================== */
 
-const JARVIS_VERSION = "4.0.0";
+const JARVIS_VERSION = "5.0.0";
 
 const EXECUTION_POLICY = {
   allowReadOnly: true,
@@ -440,21 +452,207 @@ function retrieveMemory(query: string, limit = 8): MemoryItem[] {
 }
 
 /* ============================================================================
- * CONTROLLED PLATFORM GATEWAY
+ * CONTROLLED PLATFORM GATEWAY — V5
  *
- * JARVIS cannot magically inspect source code or modules from a browser
- * component. The host application must expose a read-only gateway. We accept
- * it explicitly through props or through the documented window bridge.
- * No gateway means JARVIS reports the missing capability instead of guessing.
+ * V5 adds a real browser-side source index for Vite builds. This means JARVIS
+ * can inspect the application's /src tree without pretending that a browser
+ * can read arbitrary files from disk. The host gateway remains authoritative
+ * for repository files outside /src, runtime diagnostics, database schema, and
+ * sandboxed test execution.
+ *
+ * IMPORTANT: source inspection is OWNER-ONLY. No source is sent anywhere by
+ * this layer unless the existing JARVIS model/tool path explicitly requests it.
  * ========================================================================== */
 
-function resolveGateway(explicit?: JarvisGateway): JarvisGateway | undefined {
-  if (explicit) return explicit;
-  try {
-    return window.__ORCHESTRIQ_JARVIS_GATEWAY__;
-  } catch {
-    return undefined;
+// Vite transforms these raw imports at build time. In non-Vite previews the
+// expression is guarded so JARVIS simply falls back to the host gateway.
+const EMBEDDED_SOURCE_GLOB: Record<string, () => Promise<string>> =
+  typeof import.meta !== "undefined" &&
+  Boolean((import.meta as any).env?.DEV) &&
+  typeof (import.meta as any).glob === "function"
+    ? ((import.meta as any).glob("/src/**/*.{ts,tsx,js,jsx,css,json}", {
+        query: "?raw",
+        import: "default",
+        eager: false,
+      }) as Record<string, () => Promise<string>>)
+    : {};
+
+const SOURCE_CACHE = new Map<string, string>();
+
+function normalizeRepoPath(path: string): string {
+  return String(path || "")
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "/")
+    .replace(/^src\//, "/src/");
+}
+
+async function readEmbeddedSource(path: string): Promise<string | null> {
+  const normalized = normalizeRepoPath(path);
+  if (SOURCE_CACHE.has(normalized)) return SOURCE_CACHE.get(normalized)!;
+  const loader = EMBEDDED_SOURCE_GLOB[normalized] || EMBEDDED_SOURCE_GLOB[normalized.replace(/^\//, "")];
+  if (!loader) return null;
+  const source = await loader();
+  SOURCE_CACHE.set(normalized, source);
+  return source;
+}
+
+function embeddedSourcePaths(): string[] {
+  return Object.keys(EMBEDDED_SOURCE_GLOB).map(normalizeRepoPath).sort();
+}
+
+function sourceImportPaths(source: string): string[] {
+  const out = new Set<string>();
+  const re = /(?:from\s+|import\s*\(\s*|require\(\s*)[\"']([^\"']+)[\"']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source))) out.add(m[1]);
+  return [...out];
+}
+
+function staticSourceAudit(files: Array<{ path: string; source: string }>) {
+  const findings: any[] = [];
+  for (const file of files) {
+    const lines = file.source.split(/\r?\n/);
+    if (lines.length > 1200) {
+      findings.push({ severity: "medium", type: "large_file", path: file.path, detail: `${lines.length} lines` });
+    }
+    lines.forEach((line, index) => {
+      if (/\bTODO\b|\bFIXME\b/i.test(line)) {
+        findings.push({ severity: "low", type: "unfinished_marker", path: file.path, line: index + 1, detail: line.trim().slice(0, 240) });
+      }
+      if (/console\.(log|error|warn)\s*\(/.test(line)) {
+        findings.push({ severity: "low", type: "console_statement", path: file.path, line: index + 1, detail: line.trim().slice(0, 240) });
+      }
+    });
   }
+  return findings.slice(0, 500);
+}
+
+function buildEmbeddedRepositoryGateway(): JarvisGateway {
+  return {
+    getPlatformManifest: async () => ({
+      provider: "embedded-vite-source-index",
+      source_root: "/src",
+      source_files: embeddedSourcePaths().length,
+      source_access: "read_only",
+      source_access_scope: "/src only",
+      runtime_access: false,
+      database_access: false,
+      test_execution: false,
+      note: "Host gateway is required for files outside /src and for runtime/database/test capabilities.",
+    }),
+    getRepositorySnapshot: async (input: any = {}) => {
+      const paths = embeddedSourcePaths();
+      const selected = input.path
+        ? paths.filter((x) => x.toLowerCase().includes(String(input.path).toLowerCase()))
+        : paths;
+      const maxChars = Math.min(60000, Math.max(1000, Number(input.maxChars) || 30000));
+      const includeSource = input.includeSource !== false;
+      const files: any[] = [];
+      let budget = maxChars;
+      for (const path of selected.slice(0, 200)) {
+        const source = await readEmbeddedSource(path);
+        if (source == null) continue;
+        const item: any = { path, size: source.length, lines: source.split(/\r?\n/).length };
+        if (includeSource && budget > 0) {
+          item.source = source.slice(0, budget);
+          budget -= item.source.length;
+        }
+        files.push(item);
+      }
+      return { source_root: "/src", total_files: paths.length, matched_files: selected.length, files, truncated: selected.length > files.length || budget <= 0 };
+    },
+    searchRepository: async (input: any) => {
+      const q = String(input?.query || "").trim().toLowerCase();
+      if (!q) return { results: [] };
+      const paths = embeddedSourcePaths().filter((x) => !input?.path || x.toLowerCase().includes(String(input.path).toLowerCase()));
+      const maxResults = Math.min(100, Math.max(1, Number(input?.maxResults) || 25));
+      const results: any[] = [];
+      for (const path of paths) {
+        const source = await readEmbeddedSource(path);
+        if (!source) continue;
+        const lower = source.toLowerCase();
+        const index = lower.indexOf(q);
+        if (index < 0) continue;
+        const start = Math.max(0, index - 350);
+        const end = Math.min(source.length, index + q.length + 650);
+        results.push({ path, match_count: lower.split(q).length - 1, excerpt: source.slice(start, end) });
+        if (results.length >= maxResults) break;
+      }
+      return { query: input.query, results, total_matches_returned: results.length };
+    },
+    readRepositoryFile: async (input: any) => {
+      const path = normalizeRepoPath(String(input?.path || ""));
+      const source = await readEmbeddedSource(path);
+      if (source == null) return { available: false, path, reason: "File is not in the embedded /src source index." };
+      const maxChars = Math.min(100000, Math.max(1000, Number(input?.maxChars) || 50000));
+      return { available: true, path, size: source.length, lines: source.split(/\r?\n/).length, source: source.slice(0, maxChars), truncated: source.length > maxChars };
+    },
+    inspectModule: async (input: any) => {
+      const needle = String(input?.module || "").toLowerCase();
+      const detail = String(input?.detail || "standard");
+      const candidates = embeddedSourcePaths().filter((p) => p.toLowerCase().includes(needle));
+      const files: any[] = [];
+      for (const path of candidates.slice(0, 20)) {
+        const source = await readEmbeddedSource(path);
+        if (!source) continue;
+        files.push({ path, size: source.length, lines: source.split(/\r?\n/).length, imports: sourceImportPaths(source).slice(0, 100), source: detail === "full" ? source.slice(0, 50000) : undefined });
+      }
+      return { module: input.module, matched_files: candidates.length, files };
+    },
+    getModuleSnapshot: async (input: any = {}) => {
+      const modules = Array.isArray(input.modules) && input.modules.length ? input.modules : ["App", "Jarvis", "Boardroom", "Workspace", "Cost", "Ledger"];
+      const snapshots: any[] = [];
+      for (const module of modules.slice(0, 50)) {
+        const needle = String(module).toLowerCase();
+        const candidates = embeddedSourcePaths().filter((p) => p.toLowerCase().includes(needle));
+        snapshots.push({ module, matched_files: candidates.slice(0, 20) });
+      }
+      return { snapshots };
+    },
+  };
+}
+
+const EMBEDDED_GATEWAY = buildEmbeddedRepositoryGateway();
+
+function buildHttpGateway(baseUrl: string): JarvisGateway {
+  const base = baseUrl.replace(/\/$/, "");
+  const request = async (action: string, body: any = {}) => {
+    const response = await fetch(`${base}?action=${encodeURIComponent(action)}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const text = await response.text();
+    let data: any;
+    try { data = JSON.parse(text); } catch { data = text; }
+    if (!response.ok) throw new Error(data?.error || `Gateway request failed (${response.status})`);
+    return data;
+  };
+  return {
+    getPlatformManifest: () => request("manifest"),
+    getRepositorySnapshot: (input) => request("tree", input || {}),
+    searchRepository: (input) => request("search", input),
+    readRepositoryFile: (input) => request("file", input),
+    inspectModule: (input) => request("module", input),
+    getGitStatus: () => request("git_status"),
+    getBuildStatus: () => request("build_status"),
+    runTests: (input) => request("tests", input),
+  };
+}
+
+function resolveGateway(explicit?: JarvisGateway, gatewayBaseUrl?: string): JarvisGateway | undefined {
+  let host: JarvisGateway | undefined;
+  let url: string | undefined = gatewayBaseUrl;
+  try {
+    host = explicit || window.__ORCHESTRIQ_JARVIS_GATEWAY__;
+    url = url || window.__ORCHESTRIQ_JARVIS_GATEWAY_URL__;
+  } catch {
+    host = explicit;
+  }
+  if (!host && url) host = buildHttpGateway(url);
+  if (!host) return EMBEDDED_GATEWAY;
+  return { ...EMBEDDED_GATEWAY, ...host };
 }
 
 async function callGateway<T>(
@@ -489,8 +687,9 @@ function buildJarvisTools(ctx: {
   ledgerEntries?: any[];
   isOwner?: boolean;
   gateway?: JarvisGateway;
+  gatewayBaseUrl?: string;
 }): ToolDefinition[] {
-  const gateway = resolveGateway(ctx.gateway);
+  const gateway = resolveGateway(ctx.gateway, ctx.gatewayBaseUrl);
 
   const tools: ToolDefinition[] = [
     {
@@ -519,9 +718,15 @@ function buildJarvisTools(ctx: {
             "Live Boardroom session metadata",
             "AI Workspace conversation metadata",
           ],
-          repository_access: Boolean(gateway?.getRepositorySnapshot || gateway?.searchRepository),
+          repository_access: Boolean(gateway?.getRepositorySnapshot || gateway?.searchRepository || gateway?.readRepositoryFile),
           module_inspection: Boolean(gateway?.inspectModule || gateway?.getModuleSnapshot),
-          write_authority: "OWNER_APPROVAL_REQUIRED",
+          source_tree_files: embeddedSourcePaths().length,
+          source_tree_scope: "/src read-only",
+          runtime_diagnostics: Boolean(gateway?.getRuntimeDiagnostics),
+          database_schema_access: Boolean(gateway?.getDatabaseSchema),
+          sandbox_testing: Boolean(gateway?.runTests || gateway?.runSandboxCheck),
+          code_write_authority: "OWNER_APPROVAL_REQUIRED",
+          deployment_authority: "OWNER_APPROVAL_REQUIRED",
           dangerous_operations: "BLOCKED",
         };
       },
@@ -541,6 +746,7 @@ function buildJarvisTools(ctx: {
       riskLevel: "read_only",
       requiresApproval: false,
       handler: async (input: any) => {
+        if (!ctx.isOwner) return { available: false, blocked: true, reason: "Repository access is owner-only." };
         return callGateway(
           gateway?.getRepositorySnapshot
             ? () => gateway.getRepositorySnapshot?.(input)
@@ -565,6 +771,7 @@ function buildJarvisTools(ctx: {
       riskLevel: "read_only",
       requiresApproval: false,
       handler: async (input: any) => {
+        if (!ctx.isOwner) return { available: false, blocked: true, reason: "Repository search is owner-only." };
         if (!gateway?.searchRepository) {
           return {
             available: false,
@@ -601,6 +808,7 @@ function buildJarvisTools(ctx: {
       riskLevel: "read_only",
       requiresApproval: false,
       handler: async (input: any) => {
+        if (!ctx.isOwner) return { available: false, blocked: true, reason: "Module source inspection is owner-only." };
         if (!gateway?.inspectModule) {
           return {
             available: false,
@@ -636,6 +844,7 @@ function buildJarvisTools(ctx: {
       riskLevel: "read_only",
       requiresApproval: false,
       handler: async (input: any) => {
+        if (!ctx.isOwner) return { available: false, blocked: true, reason: "Module snapshots are owner-only." };
         if (!gateway?.getModuleSnapshot) {
           return {
             available: false,
@@ -652,6 +861,91 @@ function buildJarvisTools(ctx: {
           return { available: false, error: error?.message || String(error) };
         }
       },
+    },
+    {
+      name: "read_source_file",
+      description: "Read the actual source of a connected OrchestrIQ source file. Owner-only and read-only.",
+      input_schema: { type: "object", properties: { path: { type: "string" }, maxChars: { type: "number" } }, required: ["path"] },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        if (!ctx.isOwner) return { available: false, blocked: true, reason: "Repository source access is owner-only." };
+        return callGateway(
+          gateway?.readRepositoryFile ? () => gateway.readRepositoryFile?.({ path: String(input.path || ""), maxChars: Math.min(100000, Number(input.maxChars) || 50000) }) : undefined,
+          "repository file access"
+        );
+      },
+    },
+    {
+      name: "run_repository_audit",
+      description: "Perform a broad read-only code audit across the connected /src tree: large files, TODO/FIXME markers, console statements, file inventory and basic structural signals.",
+      input_schema: { type: "object", properties: { maxFiles: { type: "number" } }, required: [] },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        if (!ctx.isOwner) return { available: false, blocked: true, reason: "Repository audit is owner-only." };
+        const paths = embeddedSourcePaths().slice(0, Math.min(300, Number(input?.maxFiles) || 200));
+        const files: Array<{ path: string; source: string }> = [];
+        for (const path of paths) {
+          const source = await readEmbeddedSource(path);
+          if (source != null) files.push({ path, source });
+        }
+        const findings = staticSourceAudit(files);
+        return { available: true, source_files_scanned: files.length, findings, finding_count: findings.length, top_files_by_size: files.map((f) => ({ path: f.path, bytes: f.source.length, lines: f.source.split(/\r?\n/).length })).sort((a,b) => b.bytes-a.bytes).slice(0,20) };
+      },
+    },
+    {
+      name: "get_runtime_diagnostics",
+      description: "Read current runtime/build diagnostics from the host gateway. Never claim runtime health without a real result.",
+      input_schema: { type: "object", properties: { limit: { type: "number" } }, required: [] },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        return callGateway(gateway?.getRuntimeDiagnostics ? () => gateway.getRuntimeDiagnostics?.({ limit: Math.min(200, Number(input?.limit) || 50) }) : undefined, "runtime diagnostics");
+      },
+    },
+    {
+      name: "get_database_schema",
+      description: "Read the connected database schema so JARVIS can reason about tables, relationships and data boundaries without guessing.",
+      input_schema: { type: "object", properties: { tables: { type: "array", items: { type: "string" } } }, required: [] },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        if (!ctx.isOwner) return { available: false, blocked: true, reason: "Database schema inspection is owner-only." };
+        return callGateway(gateway?.getDatabaseSchema ? () => gateway.getDatabaseSchema?.({ tables: Array.isArray(input?.tables) ? input.tables.map(String).slice(0,100) : undefined }) : undefined, "database schema access");
+      },
+    },
+    {
+      name: "run_tests",
+      description: "Run a test/typecheck/lint/build/smoke operation ONLY through the host's sandboxed test gateway. This must never target production or mutate production.",
+      input_schema: { type: "object", properties: { scope: { type: "string" }, mode: { type: "string", enum: ["unit","integration","smoke","typecheck","lint","build","custom"] }, command: { type: "string" } }, required: ["mode"] },
+      riskLevel: "low_risk",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        if (!ctx.isOwner) return { available: false, blocked: true, reason: "Testing controls are owner-only." };
+        if (!gateway?.runTests) return { available: false, capability: "sandboxed test runner", reason: "No sandboxed test runner is connected. JARVIS will not execute arbitrary commands in the browser." };
+        return gateway.runTests({ mode: input.mode, scope: input.scope ? String(input.scope) : undefined, command: input.command ? String(input.command) : undefined });
+      },
+    },
+    {
+      name: "run_sandbox_check",
+      description: "Run a narrowly scoped verification in a non-production sandbox. No production writes are permitted.",
+      input_schema: { type: "object", properties: { description: { type: "string" }, files: { type: "array", items: { type: "string" } }, command: { type: "string" } }, required: ["description"] },
+      riskLevel: "low_risk",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        if (!ctx.isOwner) return { available: false, blocked: true, reason: "Sandbox testing is owner-only." };
+        if (!gateway?.runSandboxCheck) return { available: false, capability: "sandbox verification", reason: "No sandbox verification gateway is connected." };
+        return gateway.runSandboxCheck({ description: String(input.description), files: Array.isArray(input.files) ? input.files.map(String).slice(0,50) : undefined, command: input.command ? String(input.command) : undefined });
+      },
+    },
+    {
+      name: "create_code_change_spec",
+      description: "Create a precise, approval-ready code change specification without changing any files. Include affected files, current behavior, proposed behavior, risk, tests and rollback.",
+      input_schema: { type: "object", properties: { title: { type: "string" }, affected_files: { type: "array", items: { type: "string" } }, current_behavior: { type: "string" }, proposed_behavior: { type: "string" }, risk: { type: "string" }, test_plan: { type: "string" }, rollback_plan: { type: "string" } }, required: ["title","current_behavior","proposed_behavior","risk","test_plan","rollback_plan"] },
+      riskLevel: "low_risk",
+      requiresApproval: false,
+      handler: async (input: any) => ({ recorded: true, status: "proposal_only", proposal: { id: uid("change_spec"), createdAt: nowIso(), ...input } }),
     },
     {
       name: "create_code_improvement_proposal",
@@ -679,7 +973,7 @@ function buildJarvisTools(ctx: {
           status: "proposal_only",
           execution: "blocked_until_owner_approval",
         };
-        const key = "orchestriq-jarvis-code-proposals-v4";
+        const key = "orchestriq-jarvis-code-proposals-v5";
         try {
           const existing = JSON.parse(localStorage.getItem(key) || "[]");
           localStorage.setItem(key, JSON.stringify([...existing, proposal].slice(-100)));
@@ -1295,6 +1589,12 @@ Never claim code execution unless a real execution tool returned a result.
 
 Never claim deployment unless a real deployment mechanism returned success.
 
+SOURCE / REPOSITORY ACCESS:
+When owner access is active, inspect the actual connected source index before diagnosing code. Use search_codebase and read_source_file rather than relying on the architecture briefing. The embedded source index is read-only. The host gateway is required for files outside /src and for runtime/database/test capabilities.
+
+TESTING:
+Never claim that code works merely because it looks correct. When a sandbox test gateway is available, test the relevant scope and report the exact result. If no test runner is connected, say that static inspection was performed but runtime verification was not. Never execute arbitrary shell commands directly from the browser.
+
 When a request requires capabilities that are unavailable, explicitly identify the missing capability.
 
 AUTONOMY:
@@ -1397,6 +1697,7 @@ export default function JarvisLab({
   availableProviders,
   ledgerEntries,
   gateway,
+  gatewayBaseUrl,
 }: JarvisProps) {
   const jarvisTools = useMemo(
     () =>
@@ -1404,8 +1705,9 @@ export default function JarvisLab({
         ledgerEntries,
         isOwner,
         gateway,
+        gatewayBaseUrl,
       }),
-    [ledgerEntries, isOwner, gateway]
+    [ledgerEntries, isOwner, gateway, gatewayBaseUrl]
   );
 
   const [view, setView] = useState<JarvisMode>("chat");
@@ -2987,7 +3289,8 @@ CONFIDENCE:
             decided_at: nowIso(),
           })
           .eq("id", approval.id)
-          .eq("user_id", uid);
+        .eq("user_id", uid)
+        .eq("status", "pending");
 
         remember({
           type: "decision",
@@ -3018,7 +3321,8 @@ CONFIDENCE:
             decided_at: nowIso(),
           })
           .eq("id", approval.id)
-          .eq("user_id", uid);
+        .eq("user_id", uid)
+        .eq("status", "pending");
 
         await loadApprovals();
 
@@ -3035,7 +3339,8 @@ CONFIDENCE:
             decided_at: nowIso(),
           })
           .eq("id", approval.id)
-          .eq("user_id", uid);
+        .eq("user_id", uid)
+        .eq("status", "pending");
 
         await loadApprovals();
 
@@ -3049,7 +3354,8 @@ CONFIDENCE:
           decided_at: nowIso(),
         })
         .eq("id", approval.id)
-          .eq("user_id", uid);
+        .eq("user_id", uid)
+        .eq("status", "pending");
 
       try {
         if (!tool.executeApproved) {
@@ -3070,7 +3376,8 @@ CONFIDENCE:
             executed_at: nowIso(),
           })
           .eq("id", approval.id)
-          .eq("user_id", uid);
+        .eq("user_id", uid)
+        .eq("status", "pending");
 
         remember({
           type: "success",
@@ -3092,7 +3399,8 @@ CONFIDENCE:
               "Execution failed.",
           })
           .eq("id", approval.id)
-          .eq("user_id", uid);
+        .eq("user_id", uid)
+        .eq("status", "pending");
 
         remember({
           type: "failure",
@@ -4922,7 +5230,7 @@ CONFIDENCE:
         </span>
 
         <span>
-          {resolveGateway(gateway) ? "Platform gateway connected" : "Platform gateway not connected"}
+          {resolveGateway(gateway, gatewayBaseUrl) ? "Platform intelligence gateway connected" : "Platform gateway not connected"}
         </span>
       </div>
     </div>
