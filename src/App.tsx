@@ -1616,6 +1616,62 @@ async function callClaude(key,sys,msgs,maxT,enableSearch,modelOverride=""){
   const usage={i:d.usage?.input_tokens||0,o:d.usage?.output_tokens||0,searches:d.usage?.server_tool_use?.web_search_requests||0};
   return {text,truncated:d.stop_reason==="max_tokens",usage};
 }
+
+// ADDITIVE, JARVIS PHASE 2 — a genuine tool-calling agent loop. Deliberately
+// separate from callClaude above, which every other module depends on and
+// which stays exactly as it was. This is new capability, not a rewrite of
+// existing infrastructure: same endpoint, same headers, same key
+// resolution pattern, with Claude's tool-use protocol layered on top.
+// Each tool carries its own handler, so JARVIS decides what to look up -
+// this is not a hand-curated snapshot handed to the model in advance.
+type JarvisTool = { name:string; description:string; input_schema:any; riskLevel:"read_only"|"consequential"; handler:(input:any)=>Promise<any> };
+async function callClaudeWithTools(key:string, sys:string, userMsg:string, history:{role:string;content:string}[], tools:JarvisTool[], onToolCall?:(name:string,input:any)=>void):Promise<string>{
+  const claudeTools=tools.map(t=>({name:t.name,description:t.description,input_schema:t.input_schema}));
+  let messages:any[]=[...history.map(h=>({role:h.role,content:h.content})),{role:"user",content:userMsg}];
+  const MAX_ITER=5; // a hard ceiling — Tier 1 only calls read-only tools, but an infinite loop is never acceptable regardless
+  for(let i=0;i<MAX_ITER;i++){
+    const body:any={model:MODELS.claude.model,max_tokens:1200,system:sys,messages,tools:claudeTools};
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body),signal:AbortSignal.timeout(45000)});
+    if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}throw new Error("Claude "+r.status+": "+(m||r.statusText));}
+    const d=await r.json();
+    if(d.stop_reason!=="tool_use"){
+      return (d.content?.filter((b:any)=>b.type==="text").map((b:any)=>b.text||"").join("\n"))||"";
+    }
+    // Genuine tool use: run every requested tool's real handler, feed the
+    // real result back, and let Claude decide the next step - including
+    // whether to call another tool before finally answering.
+    messages.push({role:"assistant",content:d.content});
+    const toolResults:any[]=[];
+    for(const block of d.content){
+      if(block.type!=="tool_use")continue;
+      const tool=tools.find(t=>t.name===block.name);
+      onToolCall?.(block.name,block.input);
+      let resultContent:string; let resultForAudit:any; let errorForAudit:string|null=null;
+      try{
+        const result=tool?await tool.handler(block.input):{error:"Unknown tool: "+block.name};
+        resultContent=JSON.stringify(result);
+        resultForAudit=result;
+      }catch(e:any){
+        errorForAudit=e.message||"Tool execution failed";
+        resultContent=JSON.stringify({error:errorForAudit});
+      }
+      toolResults.push({type:"tool_result",tool_use_id:block.id,content:resultContent});
+      // AUDITABILITY, REQUIREMENT #14: every tool call recorded regardless
+      // of success or failure - what was asked, what came back, whether it
+      // errored. Logging failure must never break the actual conversation,
+      // so this is fire-and-forget, not awaited into the critical path.
+      supabase.auth.getUser().then(({data:{user}})=>{
+        if(!user)return;
+        supabase.from("jarvis_lab_tool_calls").insert({
+          user_id:user.id, tool_name:block.name, risk_level:tool?.riskLevel||"unknown",
+          input:block.input||{}, output:errorForAudit?null:resultForAudit, error:errorForAudit,
+        }).then(()=>{},()=>{});
+      }).catch(()=>{});
+    }
+    messages.push({role:"user",content:toolResults});
+  }
+  return "I looked into this across several steps but couldn't reach a final answer within my safety limit. Try asking a more specific question.";
+}
 async function callOpenAI(key,sys,msgs,maxT){
   const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.openai.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}if(r.status===401)throw new Error("OpenAI: Invalid API key.");if(r.status===429)throw new Error("OpenAI: Quota exceeded. Add billing credits.");throw new Error("OpenAI "+r.status+": "+(m||r.statusText));}
@@ -4623,6 +4679,18 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     const r=await callAI(provider,k,sys,msgs,maxT||4000,!!enableSearch,model);
     return typeof r==="string"?r:(r?.text||"");
   },[keys,defP]);
+
+  // JARVIS PHASE 2 — exposes the new tool-calling loop to JarvisLab only.
+  // Tool-calling currently requires Claude specifically (its tool-use
+  // protocol is what callClaudeWithTools speaks) - an honest, named
+  // limitation rather than a silent one. If the owner has no Claude key,
+  // this throws a clear error JarvisLab can explain plainly, exactly per
+  // JARVIS's own instruction to name what's missing rather than fail quietly.
+  const askJarvisWithTools=useCallback(async(sys:string,userMsg:string,history:{role:string;content:string}[],tools:any[],onToolCall?:(name:string,input:any)=>void)=>{
+    const k=providerKey(keys,"claude");
+    if(!k)throw new Error("Tool-calling currently requires a Claude API key. Add one in Settings \u2192 API, or ask me something that doesn't need me to look anything up.");
+    return await callClaudeWithTools(k,sys,userMsg,history,tools,onToolCall);
+  },[keys]);
  
   // Only providers the user actually has a usable key for. A model they cannot
   // reach must never appear in the picker.
@@ -9479,7 +9547,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
   // experimental code can misbehave without ever taking JARVIS itself down.
   jarvisMode==="experimental"&&me.role==="super_admin"
     ? <ErrorBoundary fallback={<Jarvis ask={askDirect} isOwner={true} availableProviders={wsProviders}/>}>
-        <JarvisLab ask={askDirect} isOwner={true} availableProviders={wsProviders}/>
+        <JarvisLab ask={askDirect} askWithTools={askJarvisWithTools} isOwner={true} availableProviders={wsProviders}/>
       </ErrorBoundary>
     : <Jarvis ask={askDirect} isOwner={me.role==="super_admin"} availableProviders={wsProviders}/>
 )}
