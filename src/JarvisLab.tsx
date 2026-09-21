@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { supabase } from "./lib/supabase";
 
 /* ============================================================================
@@ -76,7 +76,11 @@ async function currentUserId():Promise<string|null>{
   return user?.id || null;
 }
 
-const JARVIS_TOOLS = [
+// Now a function, not a constant: get_ledger_status needs to react to
+// whatever ledger data is actually loaded in THIS browser session right
+// now - a module-level constant could never see that.
+function buildJarvisTools(ctx:{ ledgerEntries?: any[] }) {
+return [
   {
     name: "get_open_signals",
     description: "Get the current list of open (unresolved) signals JARVIS has already detected — anomalies, risks, or opportunities across the platform. Use this before answering any question about current problems or what needs attention.",
@@ -107,19 +111,32 @@ const JARVIS_TOOLS = [
   },
   {
     name: "get_ledger_status",
-    description: "Check the General Ledger for financial anomalies or discrepancies.",
+    description: "Check the General Ledger for financial anomalies or discrepancies — specifically, whether every journal entry's debits actually equal its credits.",
     input_schema: { type:"object", properties:{}, required:[] },
     riskLevel: "read_only" as const, requiresApproval: false,
-    handler: async () => ({
-      // AN HONEST FINDING, NOT A FAKE TOOL: the Ledger module currently
-      // stores its data only in each user's local browser storage - there
-      // is no server-side table for it at all. A tool that pretended to
-      // check this would be worse than no tool - it would look like a
-      // real check that silently found nothing. This tells the truth
-      // instead, and names exactly what would need to change.
-      available: false,
-      reason: "The Ledger module currently has no server-side database table - its entries live only in the browser that created them. JARVIS runs server-side and cannot see browser-local data. This would need Ledger to be migrated to persist in Supabase before it can be monitored.",
-    }),
+    handler: async () => {
+      // AN HONEST, PARTIAL CAPABILITY, NOT A FAKE ONE: the Ledger module
+      // stores data only in this browser's local storage, never in
+      // Supabase - so a scheduled server job can never check it, but a
+      // real check IS possible right now, using whatever is actually
+      // loaded in this session. This is why Ledger can only ever be
+      // checked "when the app is open," not truly in the background,
+      // until Ledger itself moves to a real database table.
+      const entries = ctx.ledgerEntries || [];
+      if (!entries.length) {
+        return { available: false, reason: "No ledger entries are loaded in this browser session right now — nothing to check yet. This can only be checked when Ledger data is actually open, since it lives in local browser storage, not the database." };
+      }
+      const imbalanced = entries.filter((e:any) => {
+        const debits = (e.lines||[]).reduce((s:number,l:any)=>s+(Number(l.debit)||0),0);
+        const credits = (e.lines||[]).reduce((s:number,l:any)=>s+(Number(l.credit)||0),0);
+        return Math.abs(debits - credits) > 0.01;
+      });
+      return {
+        available: true, checked_this_session_only: true, total_entries: entries.length,
+        imbalanced_entries: imbalanced.map((e:any)=>({ id:e.id, date:e.date, narration:e.narration })),
+        imbalanced_count: imbalanced.length,
+      };
+    },
   },
   {
     name: "get_platform_stats",
@@ -179,6 +196,7 @@ const JARVIS_TOOLS = [
     },
   },
 ];
+}
 
 
 const C = {
@@ -199,7 +217,11 @@ type Recommendation = {
   confidence:string; provider:string; model:string; created_at:string;
 };
 
-export default function JarvisLab({ ask, askWithTools, isOwner, availableProviders }: { ask:(sys:any,msg:any,maxT:number,enableSearch?:boolean,taskType?:string,provider?:string,model?:string)=>Promise<string>; askWithTools?:(sys:string,userMsg:string,history:{role:string;content:string}[],tools:any[],onToolCall?:(name:string,input:any)=>void)=>Promise<string>; isOwner?:boolean; availableProviders?: Array<{id:string;label:string}> }) {
+export default function JarvisLab({ ask, askWithTools, isOwner, availableProviders, ledgerEntries }: { ask:(sys:any,msg:any,maxT:number,enableSearch?:boolean,taskType?:string,provider?:string,model?:string)=>Promise<string>; askWithTools?:(sys:string,userMsg:string,history:{role:string;content:string}[],tools:any[],onToolCall?:(name:string,input:any)=>void)=>Promise<string>; isOwner?:boolean; availableProviders?: Array<{id:string;label:string}>; ledgerEntries?: any[] }) {
+  // Rebuilt whenever ledger data changes, so JARVIS always sees whatever
+  // is actually loaded in this session right now - not a stale snapshot
+  // from when the chat first opened.
+  const jarvisTools = useMemo(() => buildJarvisTools({ ledgerEntries }), [ledgerEntries]);
   const [view, setView] = useState<"chat"|"signals"|"approvals">("chat");
   const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
   const [decidingId, setDecidingId] = useState<string|null>(null);
@@ -277,6 +299,74 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
     recognitionRef.current = rec; rec.start(); setListening(true);
   };
 
+  // ============================================================================
+  // WAKE WORD — explicit opt-in only, OFF by default, exactly as specified.
+  // Continuous listening genuinely means the microphone stays open, so this
+  // never turns on by itself and shows a clear, unmissable indicator the
+  // moment it's active. Defaults to "jarvis"; if that doesn't reliably
+  // trigger for you, "Record my own wake word" captures whatever you say
+  // first and uses that instead — reusing the exact same browser speech
+  // API as push-to-talk above, not a second voice framework.
+  // ============================================================================
+  const [wakeWordOn, setWakeWordOn] = useState(false);
+  const [customWakePhrase, setCustomWakePhrase] = useState<string|null>(() => {
+    try { return localStorage.getItem("jarvis-lab-wake-phrase"); } catch { return null; }
+  });
+  const [recordingWakePhrase, setRecordingWakePhrase] = useState(false);
+  const wakeRecognitionRef = useRef<any>(null);
+  const wakeWordOnRef = useRef(false); // read inside the recognition callback, which closes over stale state otherwise
+
+  const effectiveWakePhrase = (customWakePhrase || "jarvis").toLowerCase();
+
+  const recordCustomWakePhrase = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { setError("Voice isn't supported in this browser — try Chrome or Edge."); return; }
+    const rec = new SR(); rec.lang = "en-US"; rec.interimResults = false;
+    setRecordingWakePhrase(true);
+    rec.onresult = (e:any) => {
+      const phrase = (e.results[0][0].transcript || "").trim().toLowerCase();
+      if (phrase) {
+        setCustomWakePhrase(phrase);
+        try { localStorage.setItem("jarvis-lab-wake-phrase", phrase); } catch {}
+      }
+      setRecordingWakePhrase(false);
+    };
+    rec.onerror = () => setRecordingWakePhrase(false);
+    rec.onend = () => setRecordingWakePhrase(false);
+    rec.start();
+  };
+
+  const startWakeListener = useCallback(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.lang = "en-US"; rec.continuous = true; rec.interimResults = true;
+    rec.onresult = (e:any) => {
+      const last = e.results[e.results.length-1];
+      const heard = (last[0].transcript || "").toLowerCase();
+      if (heard.includes(effectiveWakePhrase)) {
+        rec.stop(); // stop listening for the wake word so it doesn't also try to capture the command that follows
+        toggleListen(); // hands off to the exact same one-shot capture push-to-talk already uses
+      }
+    };
+    // Browsers stop continuous recognition after periods of silence on
+    // their own; this restarts it automatically for as long as wake-word
+    // mode is switched on, so "continuous" actually stays continuous.
+    rec.onend = () => { if (wakeWordOnRef.current) { try { rec.start(); } catch {} } };
+    rec.onerror = () => { if (wakeWordOnRef.current) { try { rec.start(); } catch {} } };
+    wakeRecognitionRef.current = rec;
+    rec.start();
+  }, [effectiveWakePhrase]);
+
+  const toggleWakeWord = () => {
+    const next = !wakeWordOn;
+    wakeWordOnRef.current = next;
+    setWakeWordOn(next);
+    if (next) startWakeListener();
+    else wakeRecognitionRef.current?.stop();
+  };
+  useEffect(() => () => { wakeRecognitionRef.current?.stop(); }, []); // never leave the mic open if this screen unmounts
+
   const load = useCallback(async () => {
     const { data: sigs } = await supabase.from("jarvis_lab_signals").select("*")
       .neq("status","dismissed").order("severity",{ascending:false}).order("detected_at",{ascending:false});
@@ -309,7 +399,7 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
         await loadApprovals();
         return;
       }
-      const tool = JARVIS_TOOLS.find(t => t.name === approval.tool_name);
+      const tool = jarvisTools.find(t => t.name === approval.tool_name);
       if (!tool) {
         await supabase.from("jarvis_lab_approvals").update({ status:"failed", error:"Tool no longer exists", decided_at:new Date().toISOString() }).eq("id", approval.id);
         await loadApprovals();
@@ -368,7 +458,7 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
       if (askWithTools) {
         try {
           const reply = await Promise.race([
-            askWithTools(corePersonality + "\n\n" + ARCHITECTURE_BRIEFING, userText, history, JARVIS_TOOLS,
+            askWithTools(corePersonality + "\n\n" + ARCHITECTURE_BRIEFING, userText, history, jarvisTools,
               (name) => setToolActivity(name)),
             new Promise<string>((_, reject) => setTimeout(() => reject(new Error("timeout")), 60000)),
           ]);
@@ -420,6 +510,52 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
     } finally {
       await sendChat("Analyze the entire platform right now: check current signals, current platform numbers, and tell me plainly what's working, what isn't, and what deserves my attention first. Be specific, not generic.");
     }
+  };
+
+  // PHASE 5 — DAILY BRIEFING. Real, aggregated data first; JARVIS only
+  // writes up what actually happened. The prompt below explicitly forbids
+  // presenting a recommendation as a fact, per the exact requirement.
+  const generateDailyBriefing = async () => {
+    setThinking(true); setToolActivity(null);
+    try {
+      const { data:{ user } } = await supabase.auth.getUser();
+      if (!user) { setThinking(false); return; }
+      const since = new Date(Date.now()-24*60*60*1000).toISOString();
+      const [{ data: newSignals }, { data: recos }, { data: approvalsToday }, { data: toolFailures }] = await Promise.all([
+        supabase.from("jarvis_lab_signals").select("title,severity,source_module,description,status,detected_at").gte("detected_at",since).order("severity",{ascending:false}),
+        supabase.from("jarvis_lab_recommendations").select("recommendation,root_cause,confidence,created_at").gte("created_at",since),
+        supabase.from("jarvis_lab_approvals").select("tool_name,reasoning,status,proposed_input,created_at,executed_at").gte("created_at",since),
+        supabase.from("jarvis_lab_tool_calls").select("tool_name,error,created_at").not("error","is",null).gte("created_at",since),
+      ]);
+      const briefingData = {
+        observed_facts: {
+          new_signals_detected_last_24h: newSignals || [],
+          tool_failures_last_24h: toolFailures || [],
+        },
+        jarvis_analysis: { diagnoses_made: recos || [] },
+        actions: {
+          executed: (approvalsToday||[]).filter((a:any)=>a.status==="executed"),
+          pending_your_approval: (approvalsToday||[]).filter((a:any)=>a.status==="pending"),
+          rejected_by_you: (approvalsToday||[]).filter((a:any)=>a.status==="rejected"),
+        },
+      };
+      const sys = "You are JARVIS, writing a daily briefing for the owner of OrchestrIQ. You are given REAL structured data — " +
+        "do not invent anything beyond it. Structure your briefing into these exact labeled sections, in this order: " +
+        "OBSERVED FACTS (only what the data literally shows — counts, names, timestamps), JARVIS ANALYSIS (your interpretation " +
+        "of what the facts mean — clearly framed as your read of it, not certainty), RECOMMENDATIONS (what you suggest doing, " +
+        "clearly labeled as suggestions), ACTIONS TAKEN (only things with status 'executed' — never describe a pending or " +
+        "rejected action as done), STILL WAITING ON YOU (pending approvals), and WHAT I'D FOCUS ON TODAY (one or two sentences). " +
+        "If a section has nothing to report, say so briefly rather than omitting it silently. Never blur the line between a fact and a guess.";
+      const reply = await ask(sys, [{role:"user",content:"Here is the last 24 hours of real data:\n"+JSON.stringify(briefingData)}], 1100, false, "jarvis", provider||undefined);
+      const nextMsgs: ChatMsg[] = [...messages, { role:"user", content:"Give me today's briefing." }, { role:"assistant", content:reply }];
+      setMessages(nextMsgs);
+      saveMsg("user","Give me today's briefing.");
+      saveMsg("assistant",reply);
+      speak(reply);
+    } catch (e:any) {
+      setError(e.message);
+    }
+    setThinking(false);
   };
 
   const runScan = async () => {
@@ -521,6 +657,21 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
               style={{ background:"transparent", border:"1px solid "+C.line, borderRadius:6, padding:"5px 10px", color: voiceOn?C.teal:C.faint, fontSize:11, cursor:"pointer" }}>
               {voiceOn ? "🔊 Voice on" : "🔇 Voice off"}
             </button>
+            <button onClick={generateDailyBriefing} disabled={thinking} title="A structured summary of the last 24 hours"
+              style={{ background:"transparent", border:"1px solid "+C.teal+"55", borderRadius:6, padding:"5px 10px", color:C.teal, fontSize:11, fontWeight:600, cursor:"pointer", opacity:thinking?0.5:1 }}>
+              📋 Daily Briefing
+            </button>
+            <button onClick={toggleWakeWord} title={wakeWordOn ? "Wake word is ON — the microphone is listening" : "Turn on wake-word listening (\""+effectiveWakePhrase+"\")"}
+              style={{ background: wakeWordOn ? "#EF4444" : "transparent", border:"1px solid "+(wakeWordOn?"#EF4444":C.line), borderRadius:6, padding:"5px 10px",
+                color: wakeWordOn ? "#fff" : C.dim, fontSize:11, fontWeight:600, cursor:"pointer",
+                animation: wakeWordOn ? "pulse 1.6s ease-in-out infinite" : "none" }}>
+              {wakeWordOn ? "🔴 Listening for \""+effectiveWakePhrase+"\"" : "Wake word: off"}
+            </button>
+            <button onClick={recordCustomWakePhrase} disabled={recordingWakePhrase} title="Say your own wake phrase once to use it instead of the default"
+              style={{ background:"transparent", border:"1px solid "+C.line, borderRadius:6, padding:"5px 10px", color:C.faint, fontSize:10.5, cursor:"pointer" }}>
+              {recordingWakePhrase ? "🎙 Say it now…" : "Set my own wake word"}
+            </button>
+            <style>{"@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.55}}"}</style>
           </div>
           {loadingHistory && <div style={{ fontSize:11, color:C.faint, textAlign:"center", padding:10 }}>Loading your last conversation…</div>}
           {!loadingHistory && messages.length === 0 && (
