@@ -81,11 +81,11 @@ const JARVIS_TOOLS = [
     name: "get_open_signals",
     description: "Get the current list of open (unresolved) signals JARVIS has already detected — anomalies, risks, or opportunities across the platform. Use this before answering any question about current problems or what needs attention.",
     input_schema: { type:"object", properties:{}, required:[] },
-    riskLevel: "read_only" as const,
+    riskLevel: "read_only" as const, requiresApproval: false,
     handler: async () => {
       const uid = await currentUserId();
       if (!uid) return { error: "Not signed in" };
-      const { data } = await supabase.from("jarvis_lab_signals").select("title,severity,source_module,description,detected_at")
+      const { data } = await supabase.from("jarvis_lab_signals").select("id,title,severity,source_module,description,detected_at")
         .eq("user_id", uid).not("status","in.(dismissed,resolved)").order("severity",{ascending:false}).limit(20);
       return { open_signal_count: data?.length || 0, signals: data || [] };
     },
@@ -94,7 +94,7 @@ const JARVIS_TOOLS = [
     name: "get_cost_anomalies",
     description: "Check Cost Architecture directly for resource price changes of 20% or more since the last recorded price. This queries live data, not just what's already been flagged as a signal — use it to actively investigate cost/margin questions, not just report past findings.",
     input_schema: { type:"object", properties:{}, required:[] },
-    riskLevel: "read_only" as const,
+    riskLevel: "read_only" as const, requiresApproval: false,
     handler: async () => {
       const uid = await currentUserId();
       if (!uid) return { error: "Not signed in" };
@@ -109,7 +109,7 @@ const JARVIS_TOOLS = [
     name: "get_ledger_status",
     description: "Check the General Ledger for financial anomalies or discrepancies.",
     input_schema: { type:"object", properties:{}, required:[] },
-    riskLevel: "read_only" as const,
+    riskLevel: "read_only" as const, requiresApproval: false,
     handler: async () => ({
       // AN HONEST FINDING, NOT A FAKE TOOL: the Ledger module currently
       // stores its data only in each user's local browser storage - there
@@ -125,13 +125,57 @@ const JARVIS_TOOLS = [
     name: "get_platform_stats",
     description: "Get real, current platform numbers: total users, users by plan, recent signups, and counts of open signals by severity and by module. Use this for any question about user counts, plan distribution, or overall platform state.",
     input_schema: { type:"object", properties:{}, required:[] },
-    riskLevel: "read_only" as const,
+    riskLevel: "read_only" as const, requiresApproval: false,
     handler: async () => {
       const uid = await currentUserId();
       if (!uid) return { error: "Not signed in" };
       const { data, error } = await supabase.rpc("jarvis_platform_snapshot", { p_user_id: uid });
       if (error) return { error: error.message };
       return data || {};
+    },
+  },
+  // ==========================================================================
+  // PHASE 3 — the first two ACTUAL execution-capable tools. Chosen
+  // deliberately for bounded, real risk, not wired to anything destructive
+  // (e.g. a full workspace reset) this early. Every consequential tool MUST
+  // request "reasoning" as a required input - Claude has to justify the
+  // action as part of calling it, not have a reason invented afterward.
+  // ==========================================================================
+  {
+    name: "dismiss_signal",
+    description: "Mark a signal as dismissed — for a genuine false positive, or one you and the user have already discussed and resolved. This is reversible (a dismissed signal can be found again by re-running detection) and touches nothing outside JARVIS's own signal list, so it executes immediately without approval.",
+    input_schema: { type:"object", properties:{ signal_id:{type:"string",description:"The id of the signal to dismiss, from get_open_signals"} }, required:["signal_id"] },
+    riskLevel: "low_risk" as const, requiresApproval: false,
+    handler: async (input:any) => {
+      const uid = await currentUserId();
+      if (!uid) return { error: "Not signed in" };
+      const { error } = await supabase.from("jarvis_lab_signals").update({ status:"dismissed" }).eq("id", input.signal_id).eq("user_id", uid);
+      if (error) return { error: error.message };
+      return { dismissed: true, signal_id: input.signal_id };
+    },
+  },
+  {
+    name: "propose_resource_price_update",
+    description: "Propose a new price for a Cost Architecture resource — for example, correcting a stale price you found during investigation. This touches real financial/cost data used in pricing decisions, so it does NOT execute immediately: it is queued for the owner's explicit approval, exactly like every other consequential action. You must give a specific, genuine reason.",
+    input_schema: { type:"object", properties:{
+      resource_id:{type:"string",description:"The resource's id"},
+      resource_name:{type:"string",description:"The resource's name, for the human reviewing this"},
+      new_price:{type:"number",description:"The proposed new price"},
+      reasoning:{type:"string",description:"Why this change is being proposed — specific, not generic"},
+    }, required:["resource_id","resource_name","new_price","reasoning"] },
+    riskLevel: "consequential" as const, requiresApproval: true, riskCategory: "financial",
+    // This handler only ever runs AFTER approval, at Approve-click time —
+    // never during the conversation itself. That is the entire point of
+    // requiresApproval: true in the loop that calls this.
+    handler: async (input:any) => {
+      const uid = await currentUserId();
+      if (!uid) return { error: "Not signed in" };
+      const { error } = await supabase.from("ca_price_history").insert({
+        user_id: uid, resource_id: input.resource_id, price: input.new_price,
+        effective_date: new Date().toISOString().slice(0,10), source: "jarvis_lab_approved",
+      });
+      if (error) return { error: error.message };
+      return { updated: true, resource_id: input.resource_id, new_price: input.new_price };
     },
   },
 ];
@@ -156,7 +200,9 @@ type Recommendation = {
 };
 
 export default function JarvisLab({ ask, askWithTools, isOwner, availableProviders }: { ask:(sys:any,msg:any,maxT:number,enableSearch?:boolean,taskType?:string,provider?:string,model?:string)=>Promise<string>; askWithTools?:(sys:string,userMsg:string,history:{role:string;content:string}[],tools:any[],onToolCall?:(name:string,input:any)=>void)=>Promise<string>; isOwner?:boolean; availableProviders?: Array<{id:string;label:string}> }) {
-  const [view, setView] = useState<"chat"|"signals">("chat");
+  const [view, setView] = useState<"chat"|"signals"|"approvals">("chat");
+  const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
+  const [decidingId, setDecidingId] = useState<string|null>(null);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [recos, setRecos] = useState<Record<string,Recommendation>>({});
   const [scanning, setScanning] = useState(false);
@@ -242,6 +288,48 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  const loadApprovals = useCallback(async () => {
+    const uid = await currentUserId();
+    if (!uid) return;
+    const { data } = await supabase.from("jarvis_lab_approvals").select("*")
+      .eq("user_id", uid).eq("status","pending").order("created_at",{ascending:false});
+    setPendingApprovals(data || []);
+  }, []);
+  useEffect(() => { loadApprovals(); }, [loadApprovals]);
+
+  // THE ACTUAL RESUME, PHASE 3: approving here is the only place any
+  // consequential tool's real handler is ever invoked. Rejecting never
+  // touches the handler at all — the action simply never happens, exactly
+  // as it should for something a human declined.
+  const decideApproval = async (approval:any, approve:boolean) => {
+    setDecidingId(approval.id);
+    try {
+      if (!approve) {
+        await supabase.from("jarvis_lab_approvals").update({ status:"rejected", decided_at:new Date().toISOString() }).eq("id", approval.id);
+        await loadApprovals();
+        return;
+      }
+      const tool = JARVIS_TOOLS.find(t => t.name === approval.tool_name);
+      if (!tool) {
+        await supabase.from("jarvis_lab_approvals").update({ status:"failed", error:"Tool no longer exists", decided_at:new Date().toISOString() }).eq("id", approval.id);
+        await loadApprovals();
+        return;
+      }
+      await supabase.from("jarvis_lab_approvals").update({ status:"approved", decided_at:new Date().toISOString() }).eq("id", approval.id);
+      try {
+        const result = await tool.handler(approval.proposed_input);
+        await supabase.from("jarvis_lab_approvals").update({ status:"executed", result, executed_at:new Date().toISOString() }).eq("id", approval.id);
+      } catch (e:any) {
+        // Approved does not silently become "did nothing" — a genuine
+        // execution failure after approval is recorded plainly, not hidden.
+        await supabase.from("jarvis_lab_approvals").update({ status:"failed", error:e.message||"Execution failed" }).eq("id", approval.id);
+      }
+      await loadApprovals();
+    } finally {
+      setDecidingId(null);
+    }
+  };
+
   const getSnapshot = async () => {
     try {
       const { data:{ user } } = await supabase.auth.getUser();
@@ -288,6 +376,7 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
           setMessages(m => [...m, { role:"assistant", content:reply }]);
           saveMsg("assistant", reply);
           speak(reply);
+          loadApprovals(); // a turn that just ran may have queued a new consequential action
           setThinking(false);
           return;
         } catch (toolErr:any) {
@@ -402,6 +491,10 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
           <button onClick={()=>setView("signals")} style={{ background: view==="signals"?C.teal:C.panel, color: view==="signals"?"#04070F":C.dim,
             border:"1px solid "+C.line, borderRadius:6, padding:"6px 12px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
             Signals{signals.length ? ` (${signals.length})` : ""}
+          </button>
+          <button onClick={()=>setView("approvals")} style={{ background: view==="approvals"?(pendingApprovals.length?C.amber:C.teal):C.panel, color: view==="approvals"?"#04070F":C.dim,
+            border:"1px solid "+(pendingApprovals.length?C.amber:C.line), borderRadius:6, padding:"6px 12px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+            Approvals{pendingApprovals.length ? ` (${pendingApprovals.length})` : ""}
           </button>
         </div>
       </div>
@@ -550,6 +643,44 @@ export default function JarvisLab({ ask, askWithTools, isOwner, availableProvide
             })}
           </div>
         </>
+      )}
+
+      {view === "approvals" && (
+        <div style={{ marginTop:14 }}>
+          {pendingApprovals.length === 0 && (
+            <div style={{ textAlign:"center", padding:"60px 20px", color:C.faint }}>
+              <div style={{ fontSize:32, marginBottom:10, opacity:0.4 }}>✓</div>
+              <div style={{ fontSize:13 }}>Nothing waiting on you.</div>
+              <div style={{ fontSize:11, marginTop:4 }}>Consequential actions JARVIS proposes — like a price correction — show up here for your decision before anything happens.</div>
+            </div>
+          )}
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            {pendingApprovals.map(a => (
+              <div key={a.id} style={{ background:C.panel, border:"1px solid "+C.amber+"55", borderRadius:10, padding:14 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                  <span style={{ fontSize:8.5, fontWeight:800, color:C.amber, textTransform:"uppercase", border:"1px solid "+C.amber+"55", borderRadius:4, padding:"1px 6px" }}>
+                    {a.risk_category}
+                  </span>
+                  <span style={{ fontSize:12.5, fontWeight:700, color:C.ink }}>{a.tool_name.replace(/_/g," ")}</span>
+                </div>
+                <div style={{ fontSize:11.5, color:C.dim, marginBottom:8 }}><b style={{color:C.ink}}>JARVIS's reasoning:</b> {a.reasoning}</div>
+                <div style={{ fontSize:10.5, color:C.faint, background:C.raised, borderRadius:6, padding:"6px 10px", marginBottom:10, fontFamily:"monospace" }}>
+                  {JSON.stringify(a.proposed_input)}
+                </div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={()=>decideApproval(a,true)} disabled={decidingId===a.id}
+                    style={{ background:C.teal, color:"#04070F", border:"none", borderRadius:6, padding:"6px 14px", fontSize:11, fontWeight:700, cursor:"pointer", opacity:decidingId===a.id?0.5:1 }}>
+                    {decidingId===a.id ? "Working…" : "Approve & Execute"}
+                  </button>
+                  <button onClick={()=>decideApproval(a,false)} disabled={decidingId===a.id}
+                    style={{ background:"transparent", border:"1px solid "+C.line, color:C.faint, borderRadius:6, padding:"6px 14px", fontSize:11, cursor:"pointer" }}>
+                    Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );
