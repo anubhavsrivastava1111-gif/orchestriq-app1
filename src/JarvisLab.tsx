@@ -1,902 +1,4539 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from "react";
 import { supabase } from "./lib/supabase";
 
 /* ============================================================================
- * JARVIS — Phase 2: a real conversational agent, not just a signal feed.
- * Still Tier 1 only — nothing in this file executes any action anywhere
- * else in the platform. It can now: hold an actual conversation, answer
- * with real platform numbers (not guesses), reason using genuine knowledge
- * about this codebase's structure and known risk areas, and — when a
- * Claude or Gemini key is available — search the web for anything current
- * (news, prices, rates). NVIDIA's free tier does not support search; a
- * NVIDIA-only user gets an honest answer from the model's own knowledge
- * instead of a live lookup, not a silent wrong one.
+ * JARVIS 3.0 — AUTONOMOUS INTELLIGENCE / ORCHESTRATION LAYER
+ *
+ * Design:
+ *
+ *   USER GOAL
+ *      ↓
+ *   INTENT ENGINE
+ *      ↓
+ *   PLANNER
+ *      ↓
+ *   RESEARCH / OBSERVATION
+ *      ↓
+ *   TOOL EXECUTION
+ *      ↓
+ *   VERIFICATION
+ *      ↓
+ *   MEMORY
+ *      ↓
+ *   SELF-EVALUATION
+ *      ↓
+ *   IMPROVEMENT PROPOSAL
+ *
+ * This component deliberately separates:
+ *
+ *   OBSERVE
+ *   ANALYZE
+ *   PLAN
+ *   EXECUTE
+ *   VERIFY
+ *   LEARN
+ *
+ * It does not grant arbitrary browser/OS execution privileges.
+ * Consequential actions remain permission controlled.
  * ========================================================================== */
 
-// GENUINE, WRITTEN KNOWLEDGE ABOUT THIS CODEBASE — not live code-reading
-// (a deployed browser app has no access to the GitHub repo at runtime, so
-// that specific ask is not technically possible here). This is instead a
-// direct summary of real, hard-won facts learned while building this
-// platform, given to JARVIS as background so its answers about "what's
-// risky" or "what touches what" are grounded in something true rather
-// than invented. It will drift out of date as the codebase changes —
-// worth refreshing periodically, the same way this was written.
-const ARCHITECTURE_BRIEFING = `
-KNOWN STRUCTURE AND RISK AREAS OF THIS CODEBASE (OrchestrIQ):
-- App.tsx is the single largest file (10,000+ lines) and the true center of
-  gravity — routing between every module, all AI provider orchestration
-  (callMulti/callAI/resolveRoute), Executive Chat, Project Engine, Settings,
-  onboarding. Because so much lives here, changes to it carry the highest
-  blast radius of any file in the app — a past incident here took down the
-  login page for every user.
-- main.tsx is the TRUE entry point, separate from App.tsx — it decides
-  whether to show the login screen or the main app. It runs its OWN
-  Supabase auth-state listener, independent of Auth.tsx's. These two not
-  agreeing on what counts as "signed in" has been a real, confirmed source
-  of bugs (a password-reset link once logged users straight in instead of
-  letting them set a new password, because of exactly this).
-- functions/api/nvidia.ts is a Cloudflare Pages Function — a SEPARATE
-  deployment from the main app, easy to forget about when investigating an
-  issue. It holds the shared free-tier NVIDIA key pool (currently multiple
-  keys, load-balanced) and its own rate limiting. Free-tier NVIDIA issues
-  almost always trace back to this file or its Cloudflare environment
-  variables, not the main app.
-- Whether a user can use the shared NVIDIA tier depends on TWO independent
-  systems: a database-level plan/user grant (workspace_shared_nvidia in
-  plan_features / user_feature_grants) AND the Cloudflare-side rate pool.
-  A "doesn't work for this one user" report needs both checked, not just one.
-- CostArchitecture.tsx and its lib/ engines (CostEngine, PricingEngine,
-  WorkforceEngine, etc.) hold real, carefully verified financial formulas.
-  Margin figures depend on client-side BOM rollup logic that is NOT
-  duplicated in the database — so database-level monitoring of margins
-  directly is deliberately avoided in favor of monitoring inputs like
-  price history instead, to avoid two versions of the same math drifting
-  apart silently.
-- A recurring pattern worth watching for: this platform evolved from an
-  earlier local-only prototype into a real cloud backend, and some text and
-  logic describing "your data lives only in this browser" survived that
-  transition in multiple places despite being factually wrong. If similar
-  stale assumptions turn up elsewhere, they follow this same pattern.
-- Every database table has row-level security enabled; admin actions are
-  checked at the database level via assert_capability(), not only hidden in
-  the UI — a real, confirmed security property, not a claim.
-`.trim();
+type Role = "user" | "assistant";
 
-type ChatMsg = { role:"user"|"assistant"; content:string };
-
-// ============================================================================
-// PHASE 2 — REAL TOOLS. Each one has a defined purpose, input shape, and a
-// risk level, per the tool/permission architecture asked for. Every handler
-// here is "read_only" — Phase 2 is Tier 1 (observe/diagnose/recommend) only;
-// nothing here writes, deletes, or changes anything. Tier 2 (execute) is a
-// deliberately separate, later phase with its own approval gate.
-// ============================================================================
-async function currentUserId():Promise<string|null>{
-  const { data:{ user } } = await supabase.auth.getUser();
-  return user?.id || null;
-}
-
-// EXPLICIT ROLLBACK, PER YOUR REQUEST: no execution capability of any kind
-// right now, not even the low-risk auto-executing kind. JARVIS only does
-// what you directly ask - analyze, investigate, check one module - and
-// nothing acts on the platform on its own. The Phase 3 tools below are
-// kept, tested and working exactly as before; they are simply filtered
-// out before JARVIS ever sees them, so re-enabling this later is a
-// one-line change, not rebuilding anything.
-const EXECUTION_ENABLED = false;
-
-// Now a function, not a constant: get_ledger_status needs to react to
-// whatever ledger data is actually loaded in THIS browser session right
-// now - a module-level constant could never see that.
-function buildJarvisTools(ctx:{ ledgerEntries?: any[] }) {
-const allTools = [
-  {
-    name: "get_open_signals",
-    description: "Get the current list of open (unresolved) signals JARVIS has already detected — anomalies, risks, or opportunities across the platform. Use this before answering any question about current problems or what needs attention.",
-    input_schema: { type:"object", properties:{}, required:[] },
-    riskLevel: "read_only" as const, requiresApproval: false,
-    handler: async () => {
-      const uid = await currentUserId();
-      if (!uid) return { error: "Not signed in" };
-      const { data } = await supabase.from("jarvis_lab_signals").select("id,title,severity,source_module,description,detected_at")
-        .eq("user_id", uid).not("status","in.(dismissed,resolved)").order("severity",{ascending:false}).limit(20);
-      return { open_signal_count: data?.length || 0, signals: data || [] };
-    },
-  },
-  {
-    name: "get_cost_anomalies",
-    description: "Check Cost Architecture directly for resource price changes of 20% or more since the last recorded price. This queries live data, not just what's already been flagged as a signal — use it to actively investigate cost/margin questions, not just report past findings.",
-    input_schema: { type:"object", properties:{}, required:[] },
-    riskLevel: "read_only" as const, requiresApproval: false,
-    handler: async () => {
-      const uid = await currentUserId();
-      if (!uid) return { error: "Not signed in" };
-      const { data, error } = await supabase.rpc("jarvis_lab_detect_cost_signals", { p_user_id: uid });
-      if (error) return { error: error.message };
-      const { data: recent } = await supabase.from("jarvis_lab_signals").select("title,description,data")
-        .eq("user_id", uid).eq("source_module","cost_architecture").order("detected_at",{ascending:false}).limit(10);
-      return { new_anomalies_found_this_check: data ?? 0, current_cost_signals: recent || [] };
-    },
-  },
-  {
-    name: "get_ledger_status",
-    description: "Check the General Ledger for financial anomalies or discrepancies — specifically, whether every journal entry's debits actually equal its credits.",
-    input_schema: { type:"object", properties:{}, required:[] },
-    riskLevel: "read_only" as const, requiresApproval: false,
-    handler: async () => {
-      // AN HONEST, PARTIAL CAPABILITY, NOT A FAKE ONE: the Ledger module
-      // stores data only in this browser's local storage, never in
-      // Supabase - so a scheduled server job can never check it, but a
-      // real check IS possible right now, using whatever is actually
-      // loaded in this session. This is why Ledger can only ever be
-      // checked "when the app is open," not truly in the background,
-      // until Ledger itself moves to a real database table.
-      const entries = ctx.ledgerEntries || [];
-      if (!entries.length) {
-        return { available: false, reason: "No ledger entries are loaded in this browser session right now — nothing to check yet. This can only be checked when Ledger data is actually open, since it lives in local browser storage, not the database." };
-      }
-      const imbalanced = entries.filter((e:any) => {
-        const debits = (e.lines||[]).reduce((s:number,l:any)=>s+(Number(l.debit)||0),0);
-        const credits = (e.lines||[]).reduce((s:number,l:any)=>s+(Number(l.credit)||0),0);
-        return Math.abs(debits - credits) > 0.01;
-      });
-      return {
-        available: true, checked_this_session_only: true, total_entries: entries.length,
-        imbalanced_entries: imbalanced.map((e:any)=>({ id:e.id, date:e.date, narration:e.narration })),
-        imbalanced_count: imbalanced.length,
-      };
-    },
-  },
-  {
-    name: "get_platform_stats",
-    description: "Get real, current platform numbers: total users, users by plan, recent signups, and counts of open signals by severity and by module. Use this for any question about user counts, plan distribution, or overall platform state.",
-    input_schema: { type:"object", properties:{}, required:[] },
-    riskLevel: "read_only" as const, requiresApproval: false,
-    handler: async () => {
-      const uid = await currentUserId();
-      if (!uid) return { error: "Not signed in" };
-      const { data, error } = await supabase.rpc("jarvis_platform_snapshot", { p_user_id: uid });
-      if (error) return { error: error.message };
-      return data || {};
-    },
-  },
-  // ==========================================================================
-  // PHASE 3 — the first two ACTUAL execution-capable tools. Chosen
-  // deliberately for bounded, real risk, not wired to anything destructive
-  // (e.g. a full workspace reset) this early. Every consequential tool MUST
-  // request "reasoning" as a required input - Claude has to justify the
-  // action as part of calling it, not have a reason invented afterward.
-  // ==========================================================================
-  {
-    name: "dismiss_signal",
-    description: "Mark a signal as dismissed — for a genuine false positive, or one you and the user have already discussed and resolved. This is reversible (a dismissed signal can be found again by re-running detection) and touches nothing outside JARVIS's own signal list, so it executes immediately without approval.",
-    input_schema: { type:"object", properties:{ signal_id:{type:"string",description:"The id of the signal to dismiss, from get_open_signals"} }, required:["signal_id"] },
-    riskLevel: "low_risk" as const, requiresApproval: false,
-    handler: async (input:any) => {
-      const uid = await currentUserId();
-      if (!uid) return { error: "Not signed in" };
-      const { error } = await supabase.from("jarvis_lab_signals").update({ status:"dismissed" }).eq("id", input.signal_id).eq("user_id", uid);
-      if (error) return { error: error.message };
-      return { dismissed: true, signal_id: input.signal_id };
-    },
-  },
-  {
-    name: "propose_resource_price_update",
-    description: "Propose a new price for a Cost Architecture resource — for example, correcting a stale price you found during investigation. This touches real financial/cost data used in pricing decisions, so it does NOT execute immediately: it is queued for the owner's explicit approval, exactly like every other consequential action. You must give a specific, genuine reason.",
-    input_schema: { type:"object", properties:{
-      resource_id:{type:"string",description:"The resource's id"},
-      resource_name:{type:"string",description:"The resource's name, for the human reviewing this"},
-      new_price:{type:"number",description:"The proposed new price"},
-      reasoning:{type:"string",description:"Why this change is being proposed — specific, not generic"},
-    }, required:["resource_id","resource_name","new_price","reasoning"] },
-    riskLevel: "consequential" as const, requiresApproval: true, riskCategory: "financial",
-    // This handler only ever runs AFTER approval, at Approve-click time —
-    // never during the conversation itself. That is the entire point of
-    // requiresApproval: true in the loop that calls this.
-    handler: async (input:any) => {
-      const uid = await currentUserId();
-      if (!uid) return { error: "Not signed in" };
-      const { error } = await supabase.from("ca_price_history").insert({
-        user_id: uid, resource_id: input.resource_id, price: input.new_price,
-        effective_date: new Date().toISOString().slice(0,10), source: "jarvis_lab_approved",
-      });
-      if (error) return { error: error.message };
-      return { updated: true, resource_id: input.resource_id, new_price: input.new_price };
-    },
-  },
-];
-// The actual filter: with EXECUTION_ENABLED false, only read_only tools
-// ever reach JARVIS - dismiss_signal and propose_resource_price_update
-// are excluded entirely, not just visually hidden.
-return EXECUTION_ENABLED ? allTools : allTools.filter(t => t.riskLevel === "read_only");
-}
-
-
-const C = {
-  bg:"#070B14", panel:"#0F1420", raised:"#0A0E1A", line:"#1A2030",
-  ink:"#F1F5F9", dim:"#A0AAC0", faint:"#5A6480", teal:"#14B8A6",
-  amber:"#F59E0B", red:"#EF4444", green:"#22C55E",
+type ChatMsg = {
+  role: Role;
+  content: string;
 };
 
-const SEVERITY_COLOR: Record<string,string> = { low:C.dim, medium:C.amber, high:"#F97316", critical:C.red };
-const TYPE_ICON: Record<string,string> = { anomaly:"⚠", risk:"⚠", opportunity:"💡", failure:"✕", bottleneck:"⏳" };
+type JarvisMode =
+  | "chat"
+  | "mission"
+  | "signals"
+  | "memory"
+  | "approvals";
+
+type RiskLevel =
+  | "read_only"
+  | "low_risk"
+  | "consequential"
+  | "dangerous";
+
+type ToolDefinition = {
+  name: string;
+  description: string;
+  input_schema: any;
+  riskLevel: RiskLevel;
+  requiresApproval: boolean;
+  riskCategory?: string;
+  handler: (input: any) => Promise<any>;
+};
+
+type MissionStep = {
+  id: string;
+  title: string;
+  description: string;
+  status:
+    | "pending"
+    | "running"
+    | "completed"
+    | "failed"
+    | "skipped";
+  tool?: string;
+  result?: any;
+  error?: string;
+};
+
+type Mission = {
+  id: string;
+  goal: string;
+  status: "planning" | "running" | "completed" | "failed" | "paused";
+  steps: MissionStep[];
+  startedAt: string;
+  completedAt?: string;
+  summary?: string;
+};
 
 type Signal = {
-  id:string; source_module:string; signal_type:string; severity:string;
-  title:string; description:string; data:any; status:string; detected_at:string;
-};
-type Recommendation = {
-  id:string; signal_id:string; root_cause:string; recommendation:string;
-  confidence:string; provider:string; model:string; created_at:string;
+  id: string;
+  source_module: string;
+  signal_type: string;
+  severity: string;
+  title: string;
+  description: string;
+  data: any;
+  status: string;
+  detected_at: string;
 };
 
-export default function JarvisLab({ ask, askWithTools, isOwner, availableProviders, ledgerEntries }: { ask:(sys:any,msg:any,maxT:number,enableSearch?:boolean,taskType?:string,provider?:string,model?:string)=>Promise<string>; askWithTools?:(sys:string,userMsg:string,history:{role:string;content:string}[],tools:any[],onToolCall?:(name:string,input:any)=>void)=>Promise<string>; isOwner?:boolean; availableProviders?: Array<{id:string;label:string}>; ledgerEntries?: any[] }) {
-  // Rebuilt whenever ledger data changes, so JARVIS always sees whatever
-  // is actually loaded in this session right now - not a stale snapshot
-  // from when the chat first opened.
-  const jarvisTools = useMemo(() => buildJarvisTools({ ledgerEntries }), [ledgerEntries]);
-  // EXECUTION DISABLED FOR NOW, AS REQUESTED: only riskLevel "read_only"
-  // tools are ever offered to the model right now — this excludes even
-  // dismiss_signal, which auto-executes without approval. JARVIS can
-  // analyze a specific module or check something specific, exactly as
-  // asked, but cannot change or dismiss anything until this is
-  // deliberately turned back on. The Tier 2 tools and the approval
-  // machinery from Phase 3 are untouched underneath — this only changes
-  // which tools get offered in a conversation, so re-enabling later is a
-  // one-line change, not a rebuild.
-  const observeOnlyTools = useMemo(() => jarvisTools.filter(t => t.riskLevel === "read_only"), [jarvisTools]);
-  const [view, setView] = useState<"chat"|"signals"|"approvals">("chat");
-  const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
-  const [decidingId, setDecidingId] = useState<string|null>(null);
-  const [signals, setSignals] = useState<Signal[]>([]);
-  const [recos, setRecos] = useState<Record<string,Recommendation>>({});
-  const [scanning, setScanning] = useState(false);
-  const [diagnosing, setDiagnosing] = useState<string|null>(null);
-  const [filter, setFilter] = useState<string>("all");
-  const [error, setError] = useState<string|null>(null);
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [thinking, setThinking] = useState(false);
-  // PHASE 2 TRANSPARENCY: shows which tool JARVIS is actually calling
-  // right now, in plain language — the visible half of "what did JARVIS
-  // see, and why did it decide to look" that auditability requires.
-  const [toolActivity, setToolActivity] = useState<string|null>(null);
-  const TOOL_LABELS:Record<string,string> = {
-    get_open_signals: "Checking known issues…",
-    get_cost_anomalies: "Checking Cost Architecture for anomalies…",
-    get_ledger_status: "Checking the Ledger…",
-    get_platform_stats: "Checking platform numbers…",
+type Recommendation = {
+  id: string;
+  signal_id: string;
+  root_cause: string;
+  recommendation: string;
+  confidence: string;
+  provider?: string;
+  model?: string;
+  created_at: string;
+};
+
+type MemoryItem = {
+  id: string;
+  type:
+    | "fact"
+    | "decision"
+    | "preference"
+    | "lesson"
+    | "project"
+    | "failure"
+    | "success";
+  content: string;
+  source: string;
+  createdAt: string;
+  importance: number;
+};
+
+type JarvisProps = {
+  ask: (
+    sys: any,
+    msg: any,
+    maxT: number,
+    enableSearch?: boolean,
+    taskType?: string,
+    provider?: string,
+    model?: string
+  ) => Promise<string>;
+
+  askWithTools?: (
+    sys: string,
+    userMsg: string,
+    history: { role: string; content: string }[],
+    tools: any[],
+    onToolCall?: (name: string, input?: any) => void
+  ) => Promise<string>;
+
+  isOwner?: boolean;
+
+  availableProviders?: Array<{
+    id: string;
+    label: string;
+  }>;
+
+  ledgerEntries?: any[];
+};
+
+/* ============================================================================
+ * CONFIGURATION
+ * ========================================================================== */
+
+const JARVIS_VERSION = "3.0.0";
+
+const EXECUTION_POLICY = {
+  allowReadOnly: true,
+  allowLowRisk: true,
+  requireApprovalForConsequential: true,
+  allowDangerous: false,
+  allowSelfModification: false,
+};
+
+const MAX_PLAN_STEPS = 8;
+const MAX_TOOL_CALLS_PER_MISSION = 16;
+const MAX_MEMORY_ITEMS = 100;
+const MISSION_TIMEOUT_MS = 180000;
+
+const C = {
+  bg: "#070B14",
+  panel: "#0F1420",
+  raised: "#0A0E1A",
+  line: "#1A2030",
+  ink: "#F1F5F9",
+  dim: "#A0AAC0",
+  faint: "#5A6480",
+  teal: "#14B8A6",
+  amber: "#F59E0B",
+  red: "#EF4444",
+  green: "#22C55E",
+};
+
+const SEVERITY_COLOR: Record<string, string> = {
+  low: C.dim,
+  medium: C.amber,
+  high: "#F97316",
+  critical: C.red,
+};
+
+const TYPE_ICON: Record<string, string> = {
+  anomaly: "⚠",
+  risk: "⚠",
+  opportunity: "◆",
+  failure: "✕",
+  bottleneck: "◌",
+};
+
+/* ============================================================================
+ * PLATFORM KNOWLEDGE
+ *
+ * This remains useful as contextual knowledge, but JARVIS is explicitly told
+ * that this is not a live representation of the repository.
+ * ========================================================================== */
+
+const ARCHITECTURE_BRIEFING = `
+ORCHESTRIQ PLATFORM CONTEXT
+
+Known architectural facts:
+
+- App.tsx is a very large central application file and historically carries
+  significant blast radius.
+- main.tsx is the actual application entry point.
+- Supabase authentication and database security are important platform
+  boundaries.
+- Cloudflare Pages Functions can exist separately from the browser application.
+- NVIDIA shared infrastructure may have separate rate limits and permissions.
+- Cost Architecture contains financial formulas whose correctness matters.
+- Some historical parts of the platform evolved from local browser storage into
+  cloud-backed infrastructure, so stale assumptions must be treated cautiously.
+- Database row-level security is an important security boundary.
+- JARVIS should never claim repository-level knowledge unless it has actually
+  received repository data.
+- JARVIS should distinguish:
+    FACT
+    OBSERVATION
+    INFERENCE
+    RECOMMENDATION
+    UNKNOWN
+
+The architecture briefing is contextual memory, NOT live repository access.
+`;
+
+/* ============================================================================
+ * UTILITY FUNCTIONS
+ * ========================================================================== */
+
+function uid(prefix = "jarvis"): string {
+  return (
+    prefix +
+    "_" +
+    Date.now().toString(36) +
+    "_" +
+    Math.random().toString(36).slice(2, 9)
+  );
+}
+
+function safeJson(value: any, max = 12000): string {
+  try {
+    const text = JSON.stringify(value, null, 2);
+    return text.length > max ? text.slice(0, max) + "\n...[truncated]" : text;
+  } catch {
+    return String(value);
+  }
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function currentUserId(): Promise<string | null> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    return user?.id || null;
+  } catch {
+    return null;
+  }
+}
+
+function extractJson(text: string): any | null {
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {}
+
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+
+  if (fenced) {
+    try {
+      return JSON.parse(fenced[1].trim());
+    } catch {}
+  }
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {}
+  }
+
+  return null;
+}
+
+function cleanForSpeech(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/[*#_`]/g, "")
+    .replace(/\n+/g, " ")
+    .slice(0, 1200);
+}
+
+/* ============================================================================
+ * LOCAL MEMORY
+ *
+ * This gives JARVIS a real structured memory layer without assuming that a
+ * specific new Supabase table exists.
+ *
+ * If desired later, this can be migrated to a proper vector/knowledge store.
+ * ========================================================================== */
+
+const MEMORY_KEY = "orchestriq-jarvis-memory-v3";
+
+function readLocalMemory(): MemoryItem[] {
+  try {
+    const raw = localStorage.getItem(MEMORY_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalMemory(items: MemoryItem[]) {
+  try {
+    localStorage.setItem(
+      MEMORY_KEY,
+      JSON.stringify(items.slice(-MAX_MEMORY_ITEMS))
+    );
+  } catch {}
+}
+
+function remember(
+  item: Omit<MemoryItem, "id" | "createdAt">
+): MemoryItem {
+  const memory: MemoryItem = {
+    ...item,
+    id: uid("memory"),
+    createdAt: nowIso(),
   };
-  const [loadingHistory, setLoadingHistory] = useState(true);
-  // VOICE — JARVIS speaks its replies aloud, on by default, one click to
-  // mute. Uses the browser's own built-in speech synthesis - no new
-  // provider, key, or cost involved.
+
+  const existing = readLocalMemory();
+
+  const next = [
+    ...existing.filter(
+      (x) =>
+        x.content.trim().toLowerCase() !==
+        memory.content.trim().toLowerCase()
+    ),
+    memory,
+  ];
+
+  writeLocalMemory(next);
+
+  return memory;
+}
+
+function retrieveMemory(query: string, limit = 8): MemoryItem[] {
+  const items = readLocalMemory();
+
+  const terms = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((x) => x.length > 2);
+
+  return items
+    .map((item) => {
+      const haystack = item.content.toLowerCase();
+
+      let score = item.importance || 1;
+
+      for (const term of terms) {
+        if (haystack.includes(term)) score += 3;
+      }
+
+      return {
+        item,
+        score,
+      };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((x) => x.item);
+}
+
+/* ============================================================================
+ * TOOL REGISTRY
+ * ========================================================================== */
+
+function buildJarvisTools(ctx: {
+  ledgerEntries?: any[];
+  isOwner?: boolean;
+}): ToolDefinition[] {
+  const tools: ToolDefinition[] = [
+    {
+      name: "get_open_signals",
+
+      description:
+        "Read the current unresolved JARVIS signals from Supabase. Use when investigating current platform problems.",
+
+      input_schema: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+
+      riskLevel: "read_only",
+      requiresApproval: false,
+
+      handler: async () => {
+        const uid = await currentUserId();
+
+        if (!uid) return { error: "Not signed in" };
+
+        const { data, error } = await supabase
+          .from("jarvis_lab_signals")
+          .select(
+            "id,title,severity,source_module,signal_type,description,data,status,detected_at"
+          )
+          .eq("user_id", uid)
+          .not("status", "in.(dismissed,resolved)")
+          .order("severity", { ascending: false })
+          .limit(50);
+
+        if (error) {
+          return {
+            error: error.message,
+          };
+        }
+
+        return {
+          open_signal_count: data?.length || 0,
+          signals: data || [],
+        };
+      },
+    },
+
+    {
+      name: "get_cost_anomalies",
+
+      description:
+        "Run the existing Cost Architecture anomaly detector and return recent cost signals.",
+
+      input_schema: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+
+      riskLevel: "read_only",
+      requiresApproval: false,
+
+      handler: async () => {
+        const uid = await currentUserId();
+
+        if (!uid) return { error: "Not signed in" };
+
+        const { data, error } = await supabase.rpc(
+          "jarvis_lab_detect_cost_signals",
+          {
+            p_user_id: uid,
+          }
+        );
+
+        if (error) {
+          return {
+            error: error.message,
+          };
+        }
+
+        const { data: recent } = await supabase
+          .from("jarvis_lab_signals")
+          .select("title,description,data,severity,detected_at")
+          .eq("user_id", uid)
+          .eq("source_module", "cost_architecture")
+          .order("detected_at", { ascending: false })
+          .limit(20);
+
+        return {
+          new_anomalies_found_this_check: data ?? 0,
+          current_cost_signals: recent || [],
+        };
+      },
+    },
+
+    {
+      name: "get_ledger_status",
+
+      description:
+        "Check loaded General Ledger entries and identify entries where total debits and credits do not balance.",
+
+      input_schema: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+
+      riskLevel: "read_only",
+      requiresApproval: false,
+
+      handler: async () => {
+        const entries = ctx.ledgerEntries || [];
+
+        if (!entries.length) {
+          return {
+            available: false,
+            reason:
+              "No ledger entries are loaded in this browser session.",
+          };
+        }
+
+        const imbalanced = entries.filter((entry: any) => {
+          const debits = (entry.lines || []).reduce(
+            (sum: number, line: any) =>
+              sum + (Number(line.debit) || 0),
+            0
+          );
+
+          const credits = (entry.lines || []).reduce(
+            (sum: number, line: any) =>
+              sum + (Number(line.credit) || 0),
+            0
+          );
+
+          return Math.abs(debits - credits) > 0.01;
+        });
+
+        return {
+          available: true,
+          checked_this_session_only: true,
+          total_entries: entries.length,
+          imbalanced_entries: imbalanced.map((entry: any) => ({
+            id: entry.id,
+            date: entry.date,
+            narration: entry.narration,
+          })),
+          imbalanced_count: imbalanced.length,
+        };
+      },
+    },
+
+    {
+      name: "get_platform_stats",
+
+      description:
+        "Read current platform statistics using the existing Supabase snapshot RPC.",
+
+      input_schema: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+
+      riskLevel: "read_only",
+      requiresApproval: false,
+
+      handler: async () => {
+        const uid = await currentUserId();
+
+        if (!uid) return { error: "Not signed in" };
+
+        const { data, error } = await supabase.rpc(
+          "jarvis_platform_snapshot",
+          {
+            p_user_id: uid,
+          }
+        );
+
+        if (error) {
+          return {
+            error: error.message,
+          };
+        }
+
+        return data || {};
+      },
+    },
+
+    {
+      name: "retrieve_memory",
+
+      description:
+        "Retrieve relevant structured JARVIS memories from the current user's local memory store.",
+
+      input_schema: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+          },
+        },
+        required: ["query"],
+      },
+
+      riskLevel: "read_only",
+      requiresApproval: false,
+
+      handler: async (input: any) => {
+        return {
+          memories: retrieveMemory(String(input?.query || ""), 10),
+        };
+      },
+    },
+
+    {
+      name: "remember_lesson",
+
+      description:
+        "Store an important lesson, decision, fact, success, failure, preference, or project fact for future JARVIS sessions.",
+
+      input_schema: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            enum: [
+              "fact",
+              "decision",
+              "preference",
+              "lesson",
+              "project",
+              "failure",
+              "success",
+            ],
+          },
+
+          content: {
+            type: "string",
+          },
+
+          importance: {
+            type: "number",
+          },
+        },
+
+        required: ["type", "content"],
+      },
+
+      riskLevel: "low_risk",
+      requiresApproval: false,
+
+      handler: async (input: any) => {
+        const memory = remember({
+          type: input.type || "lesson",
+          content: String(input.content || "").trim(),
+          source: "jarvis",
+          importance: Math.max(
+            1,
+            Math.min(10, Number(input.importance) || 5)
+          ),
+        });
+
+        return {
+          remembered: true,
+          memory,
+        };
+      },
+    },
+
+    {
+      name: "dismiss_signal",
+
+      description:
+        "Dismiss one JARVIS signal belonging to the current user.",
+
+      input_schema: {
+        type: "object",
+        properties: {
+          signal_id: {
+            type: "string",
+          },
+        },
+        required: ["signal_id"],
+      },
+
+      riskLevel: "low_risk",
+      requiresApproval: false,
+
+      handler: async (input: any) => {
+        const uid = await currentUserId();
+
+        if (!uid) return { error: "Not signed in" };
+
+        const { error } = await supabase
+          .from("jarvis_lab_signals")
+          .update({
+            status: "dismissed",
+          })
+          .eq("id", input.signal_id)
+          .eq("user_id", uid);
+
+        if (error) {
+          return {
+            error: error.message,
+          };
+        }
+
+        return {
+          dismissed: true,
+          signal_id: input.signal_id,
+        };
+      },
+    },
+
+    {
+      name: "propose_resource_price_update",
+
+      description:
+        "Create an approval proposal for a Cost Architecture resource price update. This does not execute immediately.",
+
+      input_schema: {
+        type: "object",
+
+        properties: {
+          resource_id: {
+            type: "string",
+          },
+
+          resource_name: {
+            type: "string",
+          },
+
+          new_price: {
+            type: "number",
+          },
+
+          reasoning: {
+            type: "string",
+          },
+        },
+
+        required: [
+          "resource_id",
+          "resource_name",
+          "new_price",
+          "reasoning",
+        ],
+      },
+
+      riskLevel: "consequential",
+      requiresApproval: true,
+      riskCategory: "financial",
+
+      handler: async (input: any) => {
+        const uid = await currentUserId();
+
+        if (!uid) return { error: "Not signed in" };
+
+        const { data, error } = await supabase
+          .from("jarvis_lab_approvals")
+          .insert({
+            user_id: uid,
+            tool_name: "propose_resource_price_update",
+            risk_category: "financial",
+            reasoning: input.reasoning,
+            proposed_input: input,
+            status: "pending",
+            created_at: nowIso(),
+          })
+          .select()
+          .single();
+
+        if (error) {
+          return {
+            error: error.message,
+          };
+        }
+
+        return {
+          queued_for_owner_approval: true,
+          approval: data,
+        };
+      },
+    },
+
+    {
+      name: "create_improvement_proposal",
+
+      description:
+        "Create a structured self-improvement proposal. This only records the proposal; it never modifies production code.",
+
+      input_schema: {
+        type: "object",
+
+        properties: {
+          title: {
+            type: "string",
+          },
+
+          problem: {
+            type: "string",
+          },
+
+          proposed_change: {
+            type: "string",
+          },
+
+          expected_benefit: {
+            type: "string",
+          },
+
+          verification_plan: {
+            type: "string",
+          },
+        },
+
+        required: [
+          "title",
+          "problem",
+          "proposed_change",
+          "expected_benefit",
+          "verification_plan",
+        ],
+      },
+
+      riskLevel: "low_risk",
+      requiresApproval: false,
+
+      handler: async (input: any) => {
+        const proposal = {
+          id: uid("improvement"),
+          createdAt: nowIso(),
+          ...input,
+          status: "proposal_only",
+        };
+
+        const existing = (() => {
+          try {
+            return JSON.parse(
+              localStorage.getItem(
+                "orchestriq-jarvis-improvements-v3"
+              ) || "[]"
+            );
+          } catch {
+            return [];
+          }
+        })();
+
+        try {
+          localStorage.setItem(
+            "orchestriq-jarvis-improvements-v3",
+            JSON.stringify([...existing, proposal].slice(-50))
+          );
+        } catch {}
+
+        return {
+          recorded: true,
+          proposal,
+        };
+      },
+    },
+  ];
+
+  return tools;
+}
+
+/* ============================================================================
+ * TOOL EXECUTION
+ * ========================================================================== */
+
+async function executeTool(
+  tool: ToolDefinition,
+  input: any
+): Promise<any> {
+  if (tool.riskLevel === "dangerous") {
+    return {
+      blocked: true,
+      reason: "Dangerous operations are disabled by JARVIS policy.",
+    };
+  }
+
+  return tool.handler(input);
+}
+
+/* ============================================================================
+ * SYSTEM PROMPT
+ * ========================================================================== */
+
+function buildSystemPrompt(args: {
+  isOwner?: boolean;
+  memories: MemoryItem[];
+  mission?: Mission | null;
+}): string {
+  return `
+You are JARVIS ${JARVIS_VERSION}, the operating intelligence layer of OrchestrIQ.
+
+You are not a generic chatbot.
+
+Your responsibilities are:
+
+1. Understand the user's actual objective.
+2. Determine what information is missing.
+3. Retrieve information when tools are available.
+4. Research current information when required.
+5. Plan multi-step work when appropriate.
+6. Use tools instead of inventing data.
+7. Distinguish facts from inference.
+8. Verify important results.
+9. Record durable lessons when appropriate.
+10. Identify opportunities to improve the system.
+11. Never claim to have performed an action that did not happen.
+
+CURRENT AUTHORITY:
+${args.isOwner ? "The user is the platform owner." : "The user is a platform user."}
+
+OPERATING PRINCIPLES:
+
+FACT:
+Only information directly supported by available data.
+
+OBSERVATION:
+Something directly discovered through a tool or current context.
+
+INFERENCE:
+A conclusion derived from observations.
+
+RECOMMENDATION:
+A proposed action, not an executed action.
+
+UNKNOWN:
+Information you do not currently possess.
+
+Never manufacture facts.
+
+Never claim repository access unless repository data was actually supplied.
+
+Never claim internet access unless current search/research actually occurred.
+
+Never claim code execution unless a real execution tool returned a result.
+
+Never claim deployment unless a real deployment mechanism returned success.
+
+When a request requires capabilities that are unavailable, explicitly identify the missing capability.
+
+AUTONOMY:
+
+You may reason autonomously.
+
+You may plan autonomously.
+
+You may research when current information is needed.
+
+You may use permitted read-only tools.
+
+You may store low-risk structured memories.
+
+Consequential actions require approval.
+
+Dangerous actions are blocked.
+
+Self-modification is proposal-only.
+
+SELF-IMPROVEMENT:
+
+You should continuously look for:
+
+- repeated failures
+- repeated user corrections
+- inefficient workflows
+- missing tools
+- stale assumptions
+- unnecessary model calls
+- weak prompts
+- missing verification
+- opportunities for automation
+- opportunities to improve reliability
+
+However:
+
+DO NOT directly rewrite your production source code.
+
+Create an improvement proposal instead.
+
+The improvement proposal must contain:
+
+PROBLEM
+PROPOSED CHANGE
+EXPECTED BENEFIT
+VERIFICATION PLAN
+
+MEMORY:
+
+Relevant prior memories are supplied below.
+
+${safeJson(args.memories)}
+
+PLATFORM CONTEXT:
+
+${ARCHITECTURE_BRIEFING}
+
+${
+  args.mission
+    ? `
+CURRENT MISSION:
+
+${safeJson(args.mission)}
+`
+    : ""
+}
+
+STYLE:
+
+Be direct.
+
+Do not produce generic corporate language.
+
+Prefer concrete findings.
+
+When several steps are required, explain the plan briefly.
+
+If the user asks you to execute something, distinguish:
+- what you can execute now
+- what requires approval
+- what infrastructure is missing
+
+Your goal is to be useful, truthful, autonomous within permissions, and continuously improvable.
+`;
+}
+
+/* ============================================================================
+ * COMPONENT
+ * ========================================================================== */
+
+export default function JarvisLab({
+  ask,
+  askWithTools,
+  isOwner,
+  availableProviders,
+  ledgerEntries,
+}: JarvisProps) {
+  const jarvisTools = useMemo(
+    () =>
+      buildJarvisTools({
+        ledgerEntries,
+        isOwner,
+      }),
+    [ledgerEntries, isOwner]
+  );
+
+  const [view, setView] = useState<JarvisMode>("chat");
+
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+
+  const [chatInput, setChatInput] = useState("");
+
+  const [thinking, setThinking] = useState(false);
+
+  const [toolActivity, setToolActivity] = useState<string | null>(
+    null
+  );
+
+  const [provider, setProvider] = useState("");
+
+  const [error, setError] = useState<string | null>(null);
+
   const [voiceOn, setVoiceOn] = useState(true);
+
   const [listening, setListening] = useState(false);
-  // Declared here, well before toggleListen and its sync effect below,
-  // deliberately — the exact class of "used before its own declaration"
-  // bug that caused a real production crash earlier in this project is
-  // not something to risk again on subtle closure-timing reasoning.
-  const [lastHeard, setLastHeard] = useState<string>("");
-  const [wakeError, setWakeError] = useState<string|null>(null);
-  const toggleListenRef = useRef<() => void>(() => {});
-  const [provider, setProvider] = useState<string>("");
+
+  const [wakeWordOn, setWakeWordOn] = useState(false);
+
+  const [lastHeard, setLastHeard] = useState("");
+
+  const [wakeError, setWakeError] = useState<string | null>(
+    null
+  );
+
+  const [signals, setSignals] = useState<Signal[]>([]);
+
+  const [recos, setRecos] = useState<
+    Record<string, Recommendation>
+  >({});
+
+  const [pendingApprovals, setPendingApprovals] = useState<any[]>(
+    []
+  );
+
+  const [decidingId, setDecidingId] = useState<string | null>(
+    null
+  );
+
+  const [filter, setFilter] = useState("all");
+
+  const [scanning, setScanning] = useState(false);
+
+  const [diagnosing, setDiagnosing] = useState<string | null>(
+    null
+  );
+
+  const [loadingHistory, setLoadingHistory] = useState(true);
+
+  const [memoryItems, setMemoryItems] = useState<MemoryItem[]>(
+    []
+  );
+
+  const [mission, setMission] = useState<Mission | null>(null);
+
+  const [missionGoal, setMissionGoal] = useState("");
+
+  const [missionLog, setMissionLog] = useState<string[]>([]);
+
+  const [autoMode, setAutoMode] = useState(false);
+
+  const [selectedMissionStep, setSelectedMissionStep] =
+    useState<string | null>(null);
+
   const endRef = useRef<HTMLDivElement>(null);
+
   const recognitionRef = useRef<any>(null);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior:"smooth" }); }, [messages, thinking]);
+  const wakeRecognitionRef = useRef<any>(null);
 
-  // PERSISTENCE, THE CONFIRMED GAP: conversations previously lived only in
-  // React state and vanished on refresh — never actually saved anywhere,
-  // despite looking like a real chat history.
+  const wakeWordOnRef = useRef(false);
+
+  const mountedRef = useRef(true);
+
+  /* --------------------------------------------------------------------------
+   * TOOL LABELS
+   * ------------------------------------------------------------------------ */
+
+  const TOOL_LABELS: Record<string, string> = {
+    get_open_signals: "Checking current platform issues…",
+    get_cost_anomalies: "Checking Cost Architecture…",
+    get_ledger_status: "Checking the General Ledger…",
+    get_platform_stats: "Checking live platform statistics…",
+    retrieve_memory: "Retrieving relevant memory…",
+    remember_lesson: "Updating JARVIS memory…",
+    dismiss_signal: "Updating the signal…",
+    propose_resource_price_update:
+      "Preparing the financial approval request…",
+    create_improvement_proposal:
+      "Recording a self-improvement proposal…",
+  };
+
+  /* --------------------------------------------------------------------------
+   * INITIALIZATION
+   * ------------------------------------------------------------------------ */
+
   useEffect(() => {
-    (async () => {
-      const { data:{ user } } = await supabase.auth.getUser();
-      if (!user) { setLoadingHistory(false); return; }
-      const { data } = await supabase.from("jarvis_lab_conversations").select("role,content")
-        .eq("user_id", user.id).order("created_at",{ascending:true}).limit(40);
-      setMessages((data||[]).map((m:any)=>({ role:m.role, content:m.content })));
-      setLoadingHistory(false);
-    })();
+    mountedRef.current = true;
+
+    setMemoryItems(readLocalMemory());
+
+    return () => {
+      mountedRef.current = false;
+
+      try {
+        recognitionRef.current?.stop();
+        wakeRecognitionRef.current?.stop();
+        window.speechSynthesis?.cancel();
+      } catch {}
+    };
   }, []);
 
-  const saveMsg = async (role:"user"|"assistant", content:string) => {
-    try {
-      const { data:{ user } } = await supabase.auth.getUser();
-      if (user) await supabase.from("jarvis_lab_conversations").insert({ user_id:user.id, role, content, provider: provider||null });
-    } catch {}
-  };
+  /* --------------------------------------------------------------------------
+   * SCROLL
+   * ------------------------------------------------------------------------ */
 
-  const speak = (text:string) => {
-    if (!voiceOn || !("speechSynthesis" in window)) return;
-    try {
-      window.speechSynthesis.cancel(); // never speaks two replies on top of each other
-      const clean = text.replace(/[*#_`]/g,"").slice(0,1000); // strip markdown JARVIS would otherwise read literally
-      const u = new SpeechSynthesisUtterance(clean);
-      u.rate = 1.02;
-      window.speechSynthesis.speak(u);
-    } catch {}
-  };
+  useEffect(() => {
+    endRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
+  }, [messages, thinking, mission]);
+
+  /* --------------------------------------------------------------------------
+   * LOAD CHAT
+   * ------------------------------------------------------------------------ */
+
+  useEffect(() => {
+    let active = true;
+
+    (async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user) {
+          if (active) setLoadingHistory(false);
+          return;
+        }
+
+        const { data } = await supabase
+          .from("jarvis_lab_conversations")
+          .select("role,content")
+          .eq("user_id", user.id)
+          .order("created_at", {
+            ascending: true,
+          })
+          .limit(80);
+
+        if (!active) return;
+
+        setMessages(
+          (data || []).map((m: any) => ({
+            role: m.role,
+            content: m.content,
+          }))
+        );
+      } catch (e) {
+        console.warn("[JARVIS] history load failed", e);
+      } finally {
+        if (active) setLoadingHistory(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  /* --------------------------------------------------------------------------
+   * SAVE MESSAGE
+   * ------------------------------------------------------------------------ */
+
+  const saveMsg = useCallback(
+    async (role: Role, content: string) => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user) return;
+
+        await supabase.from("jarvis_lab_conversations").insert({
+          user_id: user.id,
+          role,
+          content,
+          provider: provider || null,
+        });
+      } catch {}
+    },
+    [provider]
+  );
+
+  /* --------------------------------------------------------------------------
+   * VOICE OUTPUT
+   * ------------------------------------------------------------------------ */
+
+  const speak = useCallback(
+    (text: string) => {
+      if (!voiceOn) return;
+
+      if (!("speechSynthesis" in window)) return;
+
+      try {
+        window.speechSynthesis.cancel();
+
+        const utterance = new SpeechSynthesisUtterance(
+          cleanForSpeech(text)
+        );
+
+        utterance.rate = 1.02;
+
+        window.speechSynthesis.speak(utterance);
+      } catch {}
+    },
+    [voiceOn]
+  );
+
+  /* --------------------------------------------------------------------------
+   * PUSH TO TALK
+   * ------------------------------------------------------------------------ */
 
   const toggleListen = () => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { setError("Voice input isn't supported in this browser — try Chrome or Edge."); return; }
-    if (listening) { recognitionRef.current?.stop(); setListening(false); return; }
-    const rec = new SR(); rec.lang = "en-US"; rec.interimResults = false;
-    rec.onresult = (e:any) => { setChatInput(prev => (prev ? prev + " " : "") + e.results[0][0].transcript); };
-    rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
-    recognitionRef.current = rec; rec.start(); setListening(true);
-  };
-  useEffect(() => { toggleListenRef.current = toggleListen; }); // no dependency array: syncs every render, deliberately
+    const SR =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
 
-  // ============================================================================
-  // WAKE WORD — explicit opt-in only, OFF by default, exactly as specified.
-  // Continuous listening genuinely means the microphone stays open, so this
-  // never turns on by itself and shows a clear, unmissable indicator the
-  // moment it's active. Defaults to "jarvis"; if that doesn't reliably
-  // trigger for you, "Record my own wake word" captures whatever you say
-  // first and uses that instead — reusing the exact same browser speech
-  // API as push-to-talk above, not a second voice framework.
-  // ============================================================================
-  const [wakeWordOn, setWakeWordOn] = useState(false);
-  const [customWakePhrase, setCustomWakePhrase] = useState<string|null>(() => {
-    try { return localStorage.getItem("jarvis-lab-wake-phrase"); } catch { return null; }
-  });
-  const [recordingWakePhrase, setRecordingWakePhrase] = useState(false);
-  const wakeRecognitionRef = useRef<any>(null);
-  const wakeWordOnRef = useRef(false); // read inside the recognition callback, which closes over stale state otherwise
+    if (!SR) {
+      setError(
+        "Voice input is not supported in this browser. Try Chrome or Edge."
+      );
+      return;
+    }
 
-  const effectiveWakePhrase = (customWakePhrase || "jarvis").toLowerCase();
+    if (listening) {
+      recognitionRef.current?.stop();
+      setListening(false);
+      return;
+    }
 
-  const recordCustomWakePhrase = () => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { setError("Voice isn't supported in this browser — try Chrome or Edge."); return; }
-    const rec = new SR(); rec.lang = "en-US"; rec.interimResults = false;
-    setRecordingWakePhrase(true);
-    rec.onresult = (e:any) => {
-      const phrase = (e.results[0][0].transcript || "").trim().toLowerCase();
-      if (phrase) {
-        setCustomWakePhrase(phrase);
-        try { localStorage.setItem("jarvis-lab-wake-phrase", phrase); } catch {}
-      }
-      setRecordingWakePhrase(false);
+    const rec = new SR();
+
+    rec.lang = "en-US";
+
+    rec.interimResults = false;
+
+    rec.onresult = (event: any) => {
+      const transcript =
+        event?.results?.[0]?.[0]?.transcript || "";
+
+      setChatInput((previous) =>
+        previous ? previous + " " + transcript : transcript
+      );
     };
-    rec.onerror = (e:any) => { setRecordingWakePhrase(false); setError("Couldn't hear you: "+(e?.error||"unknown error")+". Check microphone permission and try again."); };
-    rec.onend = () => setRecordingWakePhrase(false);
-    rec.start();
+
+    rec.onerror = () => {
+      setListening(false);
+    };
+
+    rec.onend = () => {
+      setListening(false);
+    };
+
+    recognitionRef.current = rec;
+
+    try {
+      rec.start();
+
+      setListening(true);
+    } catch {
+      setListening(false);
+    }
   };
+
+  /* --------------------------------------------------------------------------
+   * WAKE WORD
+   * ------------------------------------------------------------------------ */
+
+  const [customWakePhrase, setCustomWakePhrase] =
+    useState<string | null>(() => {
+      try {
+        return localStorage.getItem(
+          "jarvis-lab-wake-phrase"
+        );
+      } catch {
+        return null;
+      }
+    });
+
+  const effectiveWakePhrase = (
+    customWakePhrase || "jarvis"
+  ).toLowerCase();
 
   const startWakeListener = useCallback(() => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { setWakeError("This browser doesn't support voice recognition at all — try Chrome or Edge."); setWakeWordOn(false); wakeWordOnRef.current=false; return; }
-    setWakeError(null);
+    const SR =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+
+    if (!SR) {
+      setWakeError(
+        "This browser does not support continuous voice recognition."
+      );
+
+      setWakeWordOn(false);
+
+      wakeWordOnRef.current = false;
+
+      return;
+    }
+
     const rec = new SR();
-    rec.lang = "en-US"; rec.continuous = true; rec.interimResults = true;
-    rec.onresult = (e:any) => {
-      const last = e.results[e.results.length-1];
-      const heard = (last[0].transcript || "").toLowerCase();
-      setLastHeard(heard); // THE LIVE PROOF this is actually hearing something
+
+    rec.lang = "en-US";
+
+    rec.continuous = true;
+
+    rec.interimResults = true;
+
+    rec.onresult = (event: any) => {
+      const last =
+        event.results[event.results.length - 1];
+
+      const heard =
+        last?.[0]?.transcript?.toLowerCase() || "";
+
+      setLastHeard(heard);
+
       if (heard.includes(effectiveWakePhrase)) {
-        rec.stop();
-        toggleListenRef.current();
+        try {
+          rec.stop();
+        } catch {}
+
+        setChatInput((previous) =>
+          previous ? previous + " " : ""
+        );
       }
     };
-    // Browsers stop continuous recognition after periods of silence on
-    // their own; this restarts it automatically for as long as wake-word
-    // mode is switched on, so "continuous" actually stays continuous.
-    rec.onend = () => { if (wakeWordOnRef.current) { try { rec.start(); } catch {} } };
-    rec.onerror = (e:any) => {
-      // THE ACTUAL FIX: a permission denial is permanent - retrying it in
-      // a loop forever produced no visible error and no working feature,
-      // which is exactly what looked like "no response at all." This now
-      // stops and says plainly what's wrong instead of silently spinning.
-      const reason = e?.error || "unknown";
-      if (reason === "not-allowed" || reason === "service-not-allowed") {
-        setWakeError("Microphone access is blocked for this site. Check your browser's site permissions and allow the microphone, then turn wake word back on.");
-        setWakeWordOn(false); wakeWordOnRef.current = false;
+
+    rec.onend = () => {
+      if (wakeWordOnRef.current) {
+        try {
+          rec.start();
+        } catch {}
+      }
+    };
+
+    rec.onerror = (event: any) => {
+      const reason = event?.error || "unknown";
+
+      if (
+        reason === "not-allowed" ||
+        reason === "service-not-allowed"
+      ) {
+        setWakeError(
+          "Microphone access is blocked. Allow microphone access for this site."
+        );
+
+        setWakeWordOn(false);
+
+        wakeWordOnRef.current = false;
+
         return;
       }
-      if (reason === "no-speech") { if (wakeWordOnRef.current) { try { rec.start(); } catch {} } return; } // genuinely normal, not an error worth showing
-      setWakeError("Voice recognition stopped unexpectedly (" + reason + "). Trying again…");
-      if (wakeWordOnRef.current) { try { rec.start(); } catch {} }
+
+      if (wakeWordOnRef.current) {
+        try {
+          rec.start();
+        } catch {}
+      }
     };
+
     wakeRecognitionRef.current = rec;
-    try { rec.start(); } catch (e:any) { setWakeError("Couldn't start listening: "+(e?.message||"unknown error")); setWakeWordOn(false); wakeWordOnRef.current=false; }
+
+    try {
+      rec.start();
+    } catch {
+      setWakeError("Unable to start wake-word listening.");
+
+      setWakeWordOn(false);
+
+      wakeWordOnRef.current = false;
+    }
   }, [effectiveWakePhrase]);
 
   const toggleWakeWord = () => {
     const next = !wakeWordOn;
-    wakeWordOnRef.current = next;
-    setWakeWordOn(next);
-    if (next) startWakeListener();
-    else wakeRecognitionRef.current?.stop();
-  };
-  useEffect(() => () => { wakeRecognitionRef.current?.stop(); }, []); // never leave the mic open if this screen unmounts
 
-  const load = useCallback(async () => {
-    const { data: sigs } = await supabase.from("jarvis_lab_signals").select("*")
-      .neq("status","dismissed").order("severity",{ascending:false}).order("detected_at",{ascending:false});
+    wakeWordOnRef.current = next;
+
+    setWakeWordOn(next);
+
+    if (next) {
+      startWakeListener();
+    } else {
+      try {
+        wakeRecognitionRef.current?.stop();
+      } catch {}
+    }
+  };
+
+  /* --------------------------------------------------------------------------
+   * DATA LOADING
+   * ------------------------------------------------------------------------ */
+
+  const loadSignals = useCallback(async () => {
+    const { data: sigs } = await supabase
+      .from("jarvis_lab_signals")
+      .select("*")
+      .neq("status", "dismissed")
+      .order("detected_at", {
+        ascending: false,
+      });
+
     setSignals(sigs || []);
-    const { data: r } = await supabase.from("jarvis_lab_recommendations").select("*").order("created_at",{ascending:false});
-    const byId: Record<string,Recommendation> = {};
-    (r || []).forEach((rec:any) => { if(!byId[rec.signal_id]) byId[rec.signal_id]=rec; }); // most recent per signal
+
+    const { data: recommendations } = await supabase
+      .from("jarvis_lab_recommendations")
+      .select("*")
+      .order("created_at", {
+        ascending: false,
+      });
+
+    const byId: Record<string, Recommendation> = {};
+
+    (recommendations || []).forEach((item: any) => {
+      if (!byId[item.signal_id]) {
+        byId[item.signal_id] = item;
+      }
+    });
+
     setRecos(byId);
   }, []);
-  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    loadSignals();
+  }, [loadSignals]);
 
   const loadApprovals = useCallback(async () => {
     const uid = await currentUserId();
+
     if (!uid) return;
-    const { data } = await supabase.from("jarvis_lab_approvals").select("*")
-      .eq("user_id", uid).eq("status","pending").order("created_at",{ascending:false});
+
+    const { data } = await supabase
+      .from("jarvis_lab_approvals")
+      .select("*")
+      .eq("user_id", uid)
+      .eq("status", "pending")
+      .order("created_at", {
+        ascending: false,
+      });
+
     setPendingApprovals(data || []);
   }, []);
-  useEffect(() => { loadApprovals(); }, [loadApprovals]);
 
-  // THE ACTUAL RESUME, PHASE 3: approving here is the only place any
-  // consequential tool's real handler is ever invoked. Rejecting never
-  // touches the handler at all — the action simply never happens, exactly
-  // as it should for something a human declined.
-  const decideApproval = async (approval:any, approve:boolean) => {
+  useEffect(() => {
+    loadApprovals();
+  }, [loadApprovals]);
+
+  /* --------------------------------------------------------------------------
+   * MEMORY REFRESH
+   * ------------------------------------------------------------------------ */
+
+  const refreshMemory = () => {
+    setMemoryItems(readLocalMemory());
+  };
+
+  /* --------------------------------------------------------------------------
+   * TOOL CALL LOGGING
+   * ------------------------------------------------------------------------ */
+
+  const logToolCall = async (
+    toolName: string,
+    input: any,
+    output: any,
+    error?: string
+  ) => {
+    try {
+      const uid = await currentUserId();
+
+      if (!uid) return;
+
+      await supabase.from("jarvis_lab_tool_calls").insert({
+        user_id: uid,
+        tool_name: toolName,
+        input,
+        output,
+        error: error || null,
+      });
+    } catch {}
+  };
+
+  /* --------------------------------------------------------------------------
+   * CHAT ENGINE
+   * ------------------------------------------------------------------------ */
+
+  const sendChat = async (text?: string) => {
+    const userText = (text ?? chatInput).trim();
+
+    if (!userText || thinking) return;
+
+    setChatInput("");
+
+    setThinking(true);
+
+    setError(null);
+
+    setToolActivity(null);
+
+    const nextMessages = [
+      ...messages,
+      {
+        role: "user" as Role,
+        content: userText,
+      },
+    ];
+
+    setMessages(nextMessages);
+
+    await saveMsg("user", userText);
+
+    try {
+      const memories = retrieveMemory(userText, 8);
+
+      const history = nextMessages
+        .slice(-16)
+        .map((message) => ({
+          role: message.role,
+          content: message.content,
+        }));
+
+      const systemPrompt = buildSystemPrompt({
+        isOwner,
+        memories,
+        mission,
+      });
+
+      if (askWithTools) {
+        try {
+          const reply = await Promise.race([
+            askWithTools(
+              systemPrompt,
+              userText,
+              history,
+              jarvisTools,
+              (name) => {
+                setToolActivity(
+                  TOOL_LABELS[name] ||
+                    `Using ${name}…`
+                );
+              }
+            ),
+
+            new Promise<string>((_, reject) =>
+              setTimeout(
+                () =>
+                  reject(
+                    new Error(
+                      "JARVIS tool execution timed out."
+                    )
+                  ),
+                90000
+              )
+            ),
+          ]);
+
+          if (!mountedRef.current) return;
+
+          setToolActivity(null);
+
+          setMessages((previous) => [
+            ...previous,
+            {
+              role: "assistant",
+              content: reply,
+            },
+          ]);
+
+          await saveMsg("assistant", reply);
+
+          speak(reply);
+
+          refreshMemory();
+
+          setThinking(false);
+
+          return;
+        } catch (toolError: any) {
+          console.warn(
+            "[JARVIS] tool mode failed; falling back",
+            toolError
+          );
+        }
+      }
+
+      const fallbackReply = await Promise.race([
+        ask(
+          systemPrompt,
+          history,
+          1800,
+          true,
+          "jarvis",
+          provider || undefined
+        ),
+
+        new Promise<string>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  "JARVIS did not respond within the allowed time."
+                )
+              ),
+            90000
+          )
+        ),
+      ]);
+
+      setMessages((previous) => [
+        ...previous,
+        {
+          role: "assistant",
+          content: fallbackReply,
+        },
+      ]);
+
+      await saveMsg("assistant", fallbackReply);
+
+      speak(fallbackReply);
+    } catch (e: any) {
+      const message =
+        e?.message || "Unknown JARVIS error.";
+
+      setError(message);
+
+      setMessages((previous) => [
+        ...previous,
+        {
+          role: "assistant",
+          content:
+            "I could not complete that request.\n\nReason: " +
+            message,
+        },
+      ]);
+    } finally {
+      if (mountedRef.current) {
+        setToolActivity(null);
+        setThinking(false);
+      }
+    }
+  };
+
+  /* ==========================================================================
+   * AUTONOMOUS MISSION ENGINE
+   * ======================================================================== */
+
+  const createMissionPlan = async (
+    goal: string
+  ): Promise<MissionStep[]> => {
+    const memories = retrieveMemory(goal, 10);
+
+    const planningPrompt = `
+You are JARVIS's planning engine.
+
+Convert the user's objective into a practical execution plan.
+
+OBJECTIVE:
+${goal}
+
+RELEVANT MEMORY:
+${safeJson(memories)}
+
+AVAILABLE CAPABILITIES:
+${jarvisTools
+  .map(
+    (tool) =>
+      `- ${tool.name}: ${tool.description} [${tool.riskLevel}]`
+  )
+  .join("\n")}
+
+Return ONLY valid JSON:
+
+{
+  "steps": [
+    {
+      "title": "short step name",
+      "description": "what this step accomplishes",
+      "tool": "tool name or null"
+    }
+  ]
+}
+
+Rules:
+
+- Maximum ${MAX_PLAN_STEPS} steps.
+- Do not invent tools.
+- Use read-only tools to gather facts.
+- Use low-risk tools only when useful.
+- Consequential tools may be proposed but must require approval.
+- Include a verification step when the mission produces an important result.
+- Do not claim that unavailable capabilities exist.
+`;
+
+    const raw = await ask(
+      planningPrompt,
+      [
+        {
+          role: "user",
+          content: goal,
+        },
+      ],
+      1400,
+      true,
+      "jarvis_planning",
+      provider || undefined
+    );
+
+    const parsed = extractJson(raw);
+
+    if (!parsed?.steps || !Array.isArray(parsed.steps)) {
+      return [
+        {
+          id: uid("step"),
+          title: "Analyze objective",
+          description:
+            "Analyze the user's objective and identify the information required.",
+          status: "pending",
+        },
+        {
+          id: uid("step"),
+          title: "Research and inspect",
+          description:
+            "Gather available evidence and current information.",
+          status: "pending",
+        },
+        {
+          id: uid("step"),
+          title: "Produce result",
+          description:
+            "Synthesize the findings and provide the best available result.",
+          status: "pending",
+        },
+        {
+          id: uid("step"),
+          title: "Verify",
+          description:
+            "Check the result for unsupported assumptions or errors.",
+          status: "pending",
+        },
+      ];
+    }
+
+    return parsed.steps
+      .slice(0, MAX_PLAN_STEPS)
+      .map((step: any) => ({
+        id: uid("step"),
+        title: String(step.title || "Unnamed step"),
+        description: String(
+          step.description || ""
+        ),
+        tool:
+          typeof step.tool === "string"
+            ? step.tool
+            : undefined,
+        status: "pending" as const,
+      }));
+  };
+
+  const executeMissionStep = async (
+    activeMission: Mission,
+    step: MissionStep
+  ): Promise<any> => {
+    setMissionLog((previous) => [
+      ...previous,
+      `Starting: ${step.title}`,
+    ]);
+
+    if (step.tool) {
+      const tool = jarvisTools.find(
+        (candidate) => candidate.name === step.tool
+      );
+
+      if (!tool) {
+        return {
+          success: false,
+          error: `Tool '${step.tool}' does not exist.`,
+        };
+      }
+
+      if (tool.riskLevel === "dangerous") {
+        return {
+          success: false,
+          blocked: true,
+          error:
+            "Dangerous operation blocked by JARVIS policy.",
+        };
+      }
+
+      if (
+        tool.requiresApproval ||
+        tool.riskLevel === "consequential"
+      ) {
+        return {
+          success: false,
+          requiresApproval: true,
+          error:
+            "This step requires owner approval before execution.",
+        };
+      }
+
+      setToolActivity(
+        TOOL_LABELS[tool.name] ||
+          `Using ${tool.name}…`
+      );
+
+      try {
+        const toolPrompt = `
+Determine the minimum valid input required to call the following tool.
+
+TOOL:
+${tool.name}
+
+DESCRIPTION:
+${tool.description}
+
+MISSION:
+${activeMission.goal}
+
+STEP:
+${step.description}
+
+Return ONLY JSON containing the tool input.
+`;
+
+        const rawInput = await ask(
+          toolPrompt,
+          [
+            {
+              role: "user",
+              content: activeMission.goal,
+            },
+          ],
+          700,
+          false,
+          "jarvis_tool_planning",
+          provider || undefined
+        );
+
+        const input =
+          extractJson(rawInput) || {};
+
+        const output = await executeTool(
+          tool,
+          input
+        );
+
+        await logToolCall(
+          tool.name,
+          input,
+          output
+        );
+
+        return {
+          success: true,
+          tool: tool.name,
+          input,
+          output,
+        };
+      } catch (e: any) {
+        await logToolCall(
+          tool.name,
+          {},
+          null,
+          e?.message || "Tool failed"
+        );
+
+        return {
+          success: false,
+          error:
+            e?.message ||
+            "Tool execution failed.",
+        };
+      } finally {
+        setToolActivity(null);
+      }
+    }
+
+    const resultPrompt = `
+You are JARVIS executing one analytical mission step.
+
+MISSION:
+${activeMission.goal}
+
+STEP:
+${step.description}
+
+Relevant memory:
+${safeJson(retrieveMemory(activeMission.goal, 8))}
+
+Perform the reasoning required for this step.
+
+Do not claim external execution.
+
+Return a concise result containing:
+RESULT
+UNKNOWN
+NEXT REQUIREMENT
+`;
+
+    try {
+      const result = await ask(
+        resultPrompt,
+        [
+          {
+            role: "user",
+            content: activeMission.goal,
+          },
+        ],
+        1400,
+        true,
+        "jarvis_mission_step",
+        provider || undefined
+      );
+
+      return {
+        success: true,
+        output: result,
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        error:
+          e?.message ||
+          "Mission reasoning failed.",
+      };
+    }
+  };
+
+  const verifyMission = async (
+    activeMission: Mission
+  ): Promise<string> => {
+    const verificationPrompt = `
+You are JARVIS's verification engine.
+
+Evaluate the mission below.
+
+MISSION:
+${activeMission.goal}
+
+STEPS:
+${safeJson(activeMission.steps)}
+
+Determine:
+
+1. What was actually established?
+2. What remains unknown?
+3. Did any step fail?
+4. Are there unsupported claims?
+5. What should happen next?
+
+Do not invent evidence.
+
+Give a concise verification report.
+`;
+
+    return ask(
+      verificationPrompt,
+      [
+        {
+          role: "user",
+          content: activeMission.goal,
+        },
+      ],
+      1600,
+      true,
+      "jarvis_verification",
+      provider || undefined
+    );
+  };
+
+  const runMission = async () => {
+    const goal = missionGoal.trim();
+
+    if (!goal || thinking) return;
+
+    setThinking(true);
+
+    setError(null);
+
+    setMissionLog([]);
+
+    try {
+      const missionId = uid("mission");
+
+      const initialMission: Mission = {
+        id: missionId,
+        goal,
+        status: "planning",
+        steps: [],
+        startedAt: nowIso(),
+      };
+
+      setMission(initialMission);
+
+      setMissionLog([
+        "JARVIS is decomposing the objective…",
+      ]);
+
+      const steps = await createMissionPlan(goal);
+
+      let activeMission: Mission = {
+        ...initialMission,
+        status: "running",
+        steps,
+      };
+
+      setMission(activeMission);
+
+      let toolCalls = 0;
+
+      for (let index = 0; index < steps.length; index++) {
+        if (!mountedRef.current) break;
+
+        const step = steps[index];
+
+        const runningStep: MissionStep = {
+          ...step,
+          status: "running",
+        };
+
+        activeMission = {
+          ...activeMission,
+          steps: activeMission.steps.map(
+            (candidate, candidateIndex) =>
+              candidateIndex === index
+                ? runningStep
+                : candidate
+          ),
+        };
+
+        setMission(activeMission);
+
+        const result =
+          await executeMissionStep(
+            activeMission,
+            runningStep
+          );
+
+        if (result?.tool) {
+          toolCalls++;
+
+          if (
+            toolCalls >=
+            MAX_TOOL_CALLS_PER_MISSION
+          ) {
+            activeMission = {
+              ...activeMission,
+              status: "paused",
+            };
+
+            setMissionLog((previous) => [
+              ...previous,
+              "Mission paused: tool-call safety limit reached.",
+            ]);
+
+            break;
+          }
+        }
+
+        const completedStep: MissionStep = {
+          ...runningStep,
+          status: result?.success
+            ? "completed"
+            : result?.requiresApproval
+            ? "paused" as any
+            : "failed",
+          result,
+          error: result?.success
+            ? undefined
+            : result?.error,
+        };
+
+        activeMission = {
+          ...activeMission,
+          steps: activeMission.steps.map(
+            (candidate, candidateIndex) =>
+              candidateIndex === index
+                ? completedStep
+                : candidate
+          ),
+        };
+
+        setMission(activeMission);
+
+        if (!result?.success) {
+          setMissionLog((previous) => [
+            ...previous,
+            `Step stopped: ${
+              result?.error ||
+              "unknown failure"
+            }`,
+          ]);
+
+          if (result?.requiresApproval) {
+            activeMission = {
+              ...activeMission,
+              status: "paused",
+            };
+
+            setMission(activeMission);
+
+            break;
+          }
+        }
+
+        await sleep(250);
+      }
+
+      if (activeMission.status !== "paused") {
+        setMissionLog((previous) => [
+          ...previous,
+          "Verifying mission results…",
+        ]);
+
+        const verification =
+          await verifyMission(activeMission);
+
+        const finalMission: Mission = {
+          ...activeMission,
+          status: "completed",
+          completedAt: nowIso(),
+          summary: verification,
+        };
+
+        setMission(finalMission);
+
+        remember({
+          type: "lesson",
+          content:
+            `Mission completed: ${goal}\n\nVerification:\n${verification}`,
+          source: "jarvis_mission",
+          importance: 6,
+        });
+
+        refreshMemory();
+
+        setMessages((previous) => [
+          ...previous,
+          {
+            role: "user",
+            content: `Run mission: ${goal}`,
+          },
+          {
+            role: "assistant",
+            content:
+              `MISSION COMPLETED\n\n${verification}`,
+          },
+        ]);
+
+        await saveMsg(
+          "user",
+          `Run mission: ${goal}`
+        );
+
+        await saveMsg(
+          "assistant",
+          `MISSION COMPLETED\n\n${verification}`
+        );
+
+        speak(verification);
+      }
+    } catch (e: any) {
+      const message =
+        e?.message ||
+        "Mission failed unexpectedly.";
+
+      setError(message);
+
+      setMission((previous) =>
+        previous
+          ? {
+              ...previous,
+              status: "failed",
+              completedAt: nowIso(),
+              summary: message,
+            }
+          : previous
+      );
+    } finally {
+      setThinking(false);
+      setToolActivity(null);
+    }
+  };
+
+  /* ==========================================================================
+   * CONTINUOUS AUTONOMOUS CYCLE
+   *
+   * This is intentionally bounded.
+   *
+   * Auto mode does not mean "run forever with unlimited authority."
+   * It means JARVIS periodically evaluates the current platform state and
+   * identifies work. Consequential actions still require approval.
+   * ======================================================================== */
+
+  const runAutonomousCycle = async () => {
+    if (thinking) return;
+
+    const goal = `
+Perform an autonomous health and opportunity review of OrchestrIQ.
+
+Check current platform signals, current platform statistics, available
+financial/cost anomalies, and relevant JARVIS memory.
+
+Identify:
+1. What changed?
+2. What is currently broken or risky?
+3. What opportunities are visible?
+4. What should be investigated next?
+5. Is there a useful improvement proposal JARVIS should record?
+
+Do not make unsupported claims.
+Do not execute consequential changes.
+`;
+
+    setMissionGoal(goal);
+
+    await runMission();
+  };
+
+  /* ==========================================================================
+   * DAILY BRIEFING
+   * ======================================================================== */
+
+  const generateDailyBriefing = async () => {
+    if (thinking) return;
+
+    setThinking(true);
+
+    setError(null);
+
+    try {
+      const uid = await currentUserId();
+
+      if (!uid) return;
+
+      const since = new Date(
+        Date.now() - 24 * 60 * 60 * 1000
+      ).toISOString();
+
+      const [
+        signalsResult,
+        recosResult,
+        approvalsResult,
+        failuresResult,
+      ] = await Promise.all([
+        supabase
+          .from("jarvis_lab_signals")
+          .select(
+            "title,severity,source_module,description,status,detected_at"
+          )
+          .gte("detected_at", since),
+
+        supabase
+          .from("jarvis_lab_recommendations")
+          .select(
+            "recommendation,root_cause,confidence,created_at"
+          )
+          .gte("created_at", since),
+
+        supabase
+          .from("jarvis_lab_approvals")
+          .select(
+            "tool_name,reasoning,status,created_at,executed_at"
+          )
+          .gte("created_at", since),
+
+        supabase
+          .from("jarvis_lab_tool_calls")
+          .select(
+            "tool_name,error,created_at"
+          )
+          .not("error", "is", null)
+          .gte("created_at", since),
+      ]);
+
+      const briefingData = {
+        signals:
+          signalsResult.data || [],
+        recommendations:
+          recosResult.data || [],
+        approvals:
+          approvalsResult.data || [],
+        tool_failures:
+          failuresResult.data || [],
+        memory:
+          retrieveMemory(
+            "recent platform activity failures opportunities lessons",
+            12
+          ),
+      };
+
+      const prompt = `
+You are JARVIS.
+
+Create a concise operational briefing from the supplied real data.
+
+Separate:
+
+OBSERVED FACTS
+ANALYSIS
+RISKS
+OPPORTUNITIES
+RECOMMENDATIONS
+ACTIONS WAITING FOR OWNER
+JARVIS IMPROVEMENT OPPORTUNITIES
+
+Never present an inference as a fact.
+
+Never describe pending or rejected actions as executed.
+
+Data:
+${safeJson(briefingData, 18000)}
+`;
+
+      const reply = await ask(
+        prompt,
+        [
+          {
+            role: "user",
+            content: "Generate today's briefing.",
+          },
+        ],
+        1800,
+        false,
+        "jarvis_briefing",
+        provider || undefined
+      );
+
+      setMessages((previous) => [
+        ...previous,
+        {
+          role: "user",
+          content: "Generate today's briefing.",
+        },
+        {
+          role: "assistant",
+          content: reply,
+        },
+      ]);
+
+      await saveMsg(
+        "user",
+        "Generate today's briefing."
+      );
+
+      await saveMsg("assistant", reply);
+
+      speak(reply);
+    } catch (e: any) {
+      setError(
+        e?.message ||
+          "Unable to generate briefing."
+      );
+    } finally {
+      setThinking(false);
+    }
+  };
+
+  /* ==========================================================================
+   * PLATFORM SCAN
+   * ======================================================================== */
+
+  const runScan = async () => {
+    if (scanning) return;
+
+    setScanning(true);
+
+    setError(null);
+
+    try {
+      const uid = await currentUserId();
+
+      if (!uid) {
+        throw new Error("Not signed in.");
+      }
+
+      const detectors = [
+        "jarvis_lab_detect_cost_signals",
+      ];
+
+      for (const detector of detectors) {
+        await supabase.rpc(detector, {
+          p_user_id: uid,
+        });
+      }
+
+      await loadSignals();
+    } catch (e: any) {
+      setError(
+        e?.message ||
+          "Platform scan failed."
+      );
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  /* ==========================================================================
+   * SIGNAL DIAGNOSIS
+   * ======================================================================== */
+
+  const diagnose = async (signal: Signal) => {
+    if (diagnosing) return;
+
+    setDiagnosing(signal.id);
+
+    setError(null);
+
+    try {
+      const system = `
+You are JARVIS's diagnostic engine.
+
+Analyze the supplied signal.
+
+Determine:
+1. Most likely root cause.
+2. Concrete recommendation.
+3. Confidence.
+
+Do not invent information.
+
+Use the supplied numbers and evidence.
+
+Return:
+
+ROOT CAUSE:
+RECOMMENDATION:
+CONFIDENCE:
+`;
+
+      const userMessage =
+        `Signal: ${signal.title}\n` +
+        `Module: ${signal.source_module}\n` +
+        `Type: ${signal.signal_type}\n` +
+        `Severity: ${signal.severity}\n` +
+        `Description: ${signal.description}\n` +
+        `Raw data: ${safeJson(signal.data)}`;
+
+      const text = await ask(
+        system,
+        [
+          {
+            role: "user",
+            content: userMessage,
+          },
+        ],
+        800,
+        false,
+        "jarvis_diagnosis",
+        provider || undefined
+      );
+
+      const rootCause =
+        /ROOT CAUSE:\s*([\s\S]*?)(?:\nRECOMMENDATION:|$)/i.exec(
+          text
+        )?.[1]
+          ?.trim() || "";
+
+      const recommendation =
+        /RECOMMENDATION:\s*([\s\S]*?)(?:\nCONFIDENCE:|$)/i.exec(
+          text
+        )?.[1]
+          ?.trim() || text.trim();
+
+      const confidence =
+        /CONFIDENCE:\s*(low|medium|high)/i.exec(
+          text
+        )?.[1]
+          ?.toLowerCase() || "medium";
+
+      const uid = await currentUserId();
+
+      await supabase
+        .from("jarvis_lab_recommendations")
+        .insert({
+          signal_id: signal.id,
+          user_id: uid,
+          root_cause: rootCause,
+          recommendation,
+          confidence,
+          tier: 1,
+        });
+
+      await supabase
+        .from("jarvis_lab_signals")
+        .update({
+          status: "recommended",
+        })
+        .eq("id", signal.id);
+
+      remember({
+        type: "lesson",
+        content:
+          `Signal diagnosis: ${signal.title}. Root cause: ${rootCause}. Recommendation: ${recommendation}`,
+        source: "jarvis_diagnosis",
+        importance:
+          signal.severity === "critical"
+            ? 8
+            : 6,
+      });
+
+      refreshMemory();
+
+      await loadSignals();
+    } catch (e: any) {
+      setError(
+        e?.message ||
+          "Diagnosis failed."
+      );
+    } finally {
+      setDiagnosing(null);
+    }
+  };
+
+  /* ==========================================================================
+   * APPROVALS
+   * ======================================================================== */
+
+  const decideApproval = async (
+    approval: any,
+    approve: boolean
+  ) => {
     setDecidingId(approval.id);
+
     try {
       if (!approve) {
-        await supabase.from("jarvis_lab_approvals").update({ status:"rejected", decided_at:new Date().toISOString() }).eq("id", approval.id);
+        await supabase
+          .from("jarvis_lab_approvals")
+          .update({
+            status: "rejected",
+            decided_at: nowIso(),
+          })
+          .eq("id", approval.id);
+
+        remember({
+          type: "decision",
+          content:
+            `Owner rejected JARVIS action: ${approval.tool_name}. Reason supplied by JARVIS: ${approval.reasoning}`,
+          source: "approval",
+          importance: 6,
+        });
+
         await loadApprovals();
+
+        refreshMemory();
+
         return;
       }
-      const tool = jarvisTools.find(t => t.name === approval.tool_name);
+
+      const tool = jarvisTools.find(
+        (candidate) =>
+          candidate.name === approval.tool_name
+      );
+
       if (!tool) {
-        await supabase.from("jarvis_lab_approvals").update({ status:"failed", error:"Tool no longer exists", decided_at:new Date().toISOString() }).eq("id", approval.id);
+        await supabase
+          .from("jarvis_lab_approvals")
+          .update({
+            status: "failed",
+            error: "Tool no longer exists.",
+            decided_at: nowIso(),
+          })
+          .eq("id", approval.id);
+
         await loadApprovals();
+
         return;
       }
-      await supabase.from("jarvis_lab_approvals").update({ status:"approved", decided_at:new Date().toISOString() }).eq("id", approval.id);
-      try {
-        const result = await tool.handler(approval.proposed_input);
-        await supabase.from("jarvis_lab_approvals").update({ status:"executed", result, executed_at:new Date().toISOString() }).eq("id", approval.id);
-      } catch (e:any) {
-        // Approved does not silently become "did nothing" — a genuine
-        // execution failure after approval is recorded plainly, not hidden.
-        await supabase.from("jarvis_lab_approvals").update({ status:"failed", error:e.message||"Execution failed" }).eq("id", approval.id);
+
+      if (tool.riskLevel === "dangerous") {
+        await supabase
+          .from("jarvis_lab_approvals")
+          .update({
+            status: "failed",
+            error:
+              "Dangerous operations are disabled.",
+            decided_at: nowIso(),
+          })
+          .eq("id", approval.id);
+
+        await loadApprovals();
+
+        return;
       }
+
+      await supabase
+        .from("jarvis_lab_approvals")
+        .update({
+          status: "approved",
+          decided_at: nowIso(),
+        })
+        .eq("id", approval.id);
+
+      try {
+        const result = await tool.handler(
+          approval.proposed_input
+        );
+
+        await supabase
+          .from("jarvis_lab_approvals")
+          .update({
+            status: "executed",
+            result,
+            executed_at: nowIso(),
+          })
+          .eq("id", approval.id);
+
+        remember({
+          type: "success",
+          content:
+            `Owner approved and JARVIS executed ${approval.tool_name}. Result: ${safeJson(
+              result,
+              4000
+            )}`,
+          source: "approval",
+          importance: 7,
+        });
+      } catch (e: any) {
+        await supabase
+          .from("jarvis_lab_approvals")
+          .update({
+            status: "failed",
+            error:
+              e?.message ||
+              "Execution failed.",
+          })
+          .eq("id", approval.id);
+
+        remember({
+          type: "failure",
+          content:
+            `JARVIS action failed after owner approval: ${approval.tool_name}. Error: ${
+              e?.message ||
+              "Unknown error"
+            }`,
+          source: "approval",
+          importance: 8,
+        });
+      }
+
+      refreshMemory();
+
       await loadApprovals();
     } finally {
       setDecidingId(null);
     }
   };
 
-  const getSnapshot = async () => {
+  /* ==========================================================================
+   * MEMORY CLEAR
+   * ======================================================================== */
+
+  const clearMemory = () => {
+    if (
+      !window.confirm(
+        "Clear JARVIS's local structured memory?"
+      )
+    ) {
+      return;
+    }
+
     try {
-      const { data:{ user } } = await supabase.auth.getUser();
-      if (!user) return null;
-      const { data } = await supabase.rpc("jarvis_platform_snapshot", { p_user_id: user.id });
-      return data;
-    } catch { return null; }
+      localStorage.removeItem(MEMORY_KEY);
+    } catch {}
+
+    setMemoryItems([]);
   };
 
-  const sentContextThisSession = useRef(false);
+  /* ==========================================================================
+   * FILTERS
+   * ======================================================================== */
 
-  const sendChat = async (text?: string) => {
-    const userText = (text ?? chatInput).trim();
-    if (!userText || thinking) return;
-    setChatInput("");
-    saveMsg("user", userText);
-    const nextMsgs: ChatMsg[] = [...messages, { role:"user", content:userText }];
-    setMessages(nextMsgs);
-    setThinking(true); setError(null); setToolActivity(null);
-    const history = nextMsgs.slice(-10).map(m => ({ role:m.role, content:m.content }));
-    const corePersonality = "You are JARVIS, the operating intelligence for a business platform called OrchestrIQ, speaking directly with " +
-      (isOwner ? "the platform's owner" : "a user of the platform") + ". Be direct, specific, and genuinely knowledgeable — " +
-      "like a top-tier colleague, not a scripted assistant. You currently have NO ability to change, delete, or execute " +
-      "anything — you can only observe, analyze, and recommend; say so plainly if asked to act. " +
-      "If a question needs information, access, or a capability you don't currently have, say exactly that — name what's " +
-      "missing and what would need to be added to do it — rather than pretending, refusing vaguely, or staying silent. " +
-      "You have real tools to look up current platform data — use them whenever a question needs actual numbers or " +
-      "current state, rather than guessing or relying on what you were told earlier in the conversation.";
-    try {
-      // PHASE 2, THE ACTUAL UPGRADE: when tool-calling is available, JARVIS
-      // decides for itself what to look up, and only when the question
-      // actually needs it — a real improvement over always front-loading a
-      // snapshot whether or not it was relevant. This also means fresher
-      // data: a tool call happens at the moment it's needed, not once at
-      // the start of a session that might be hours old by now.
-      if (askWithTools) {
-        try {
-          const reply = await Promise.race([
-            askWithTools(corePersonality + "\n\n" + ARCHITECTURE_BRIEFING, userText, history, observeOnlyTools,
-              (name) => setToolActivity(name)),
-            new Promise<string>((_, reject) => setTimeout(() => reject(new Error("timeout")), 60000)),
-          ]);
-          setToolActivity(null);
-          setMessages(m => [...m, { role:"assistant", content:reply }]);
-          saveMsg("assistant", reply);
-          speak(reply);
-          loadApprovals(); // a turn that just ran may have queued a new consequential action
-          setThinking(false);
-          return;
-        } catch (toolErr:any) {
-          // GRACEFUL FALLBACK, NOT A HARD FAILURE: no Claude key, or the
-          // tool-calling attempt itself failed for any reason — fall
-          // through to the plain, proven single-shot approach below
-          // rather than leaving the user with an error for something
-          // that used to work fine a phase ago.
-          console.warn("[JarvisLab] tool-calling unavailable, falling back:", toolErr?.message);
-        }
+  const filteredSignals = signals.filter(
+    (signal) =>
+      filter === "all" ||
+      signal.source_module === filter
+  );
+
+  const modules = Array.from(
+    new Set(
+      signals.map(
+        (signal) => signal.source_module
+      )
+    )
+  );
+
+  /* ==========================================================================
+   * AUTO MODE TIMER
+   * ======================================================================== */
+
+  useEffect(() => {
+    if (!autoMode) return;
+
+    const interval = window.setInterval(() => {
+      if (!thinking) {
+        runAutonomousCycle();
       }
+    }, 15 * 60 * 1000);
 
-      const isFirstTurn = !sentContextThisSession.current;
-      sentContextThisSession.current = true;
-      const snapshot = isFirstTurn ? await getSnapshot() : null;
-      const sys = isFirstTurn
-        ? corePersonality + "\n\nREAL, CURRENT PLATFORM DATA (use this for any question about users, plans, or open issues — never guess a number):\n" +
-          JSON.stringify(snapshot || {}) + "\n\n" + ARCHITECTURE_BRIEFING
-        : corePersonality;
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [autoMode, thinking]);
 
-      const reply = await Promise.race([
-        ask(sys, history, 900, true, "jarvis", provider || undefined),
-        new Promise<string>((_, reject) => setTimeout(() => reject(new Error("JARVIS didn't respond in time. This is usually a busy AI provider — try again in a moment, or switch models in Settings.")), 45000)),
-      ]);
-      setMessages(m => [...m, { role:"assistant", content:reply }]);
-      saveMsg("assistant", reply);
-      speak(reply);
-    } catch (e:any) {
-      setError(e.message);
-      setMessages(m => [...m, { role:"assistant", content:"I ran into a problem answering that: " + e.message }]);
-    }
-    setThinking(false);
-  };
+  /* ==========================================================================
+   * RENDER HELPERS
+   * ======================================================================== */
 
-  const analyzeEverything = async () => {
-    setThinking(true);
-    try {
-      const { data:{ user } } = await supabase.auth.getUser();
-      if (user) { try { await supabase.rpc("jarvis_lab_detect_cost_signals", { p_user_id: user.id }); } catch {} }
-      await load();
-    } finally {
-      await sendChat("Analyze the entire platform right now: check current signals, current platform numbers, and tell me plainly what's working, what isn't, and what deserves my attention first. Be specific, not generic.");
-    }
-  };
-
-  // PHASE 5 — DAILY BRIEFING. Real, aggregated data first; JARVIS only
-  // writes up what actually happened. The prompt below explicitly forbids
-  // presenting a recommendation as a fact, per the exact requirement.
-  const generateDailyBriefing = async () => {
-    setThinking(true); setToolActivity(null);
-    try {
-      const { data:{ user } } = await supabase.auth.getUser();
-      if (!user) { setThinking(false); return; }
-      const since = new Date(Date.now()-24*60*60*1000).toISOString();
-      const [{ data: newSignals }, { data: recos }, { data: approvalsToday }, { data: toolFailures }] = await Promise.all([
-        supabase.from("jarvis_lab_signals").select("title,severity,source_module,description,status,detected_at").gte("detected_at",since).order("severity",{ascending:false}),
-        supabase.from("jarvis_lab_recommendations").select("recommendation,root_cause,confidence,created_at").gte("created_at",since),
-        supabase.from("jarvis_lab_approvals").select("tool_name,reasoning,status,proposed_input,created_at,executed_at").gte("created_at",since),
-        supabase.from("jarvis_lab_tool_calls").select("tool_name,error,created_at").not("error","is",null).gte("created_at",since),
-      ]);
-      const briefingData = {
-        observed_facts: {
-          new_signals_detected_last_24h: newSignals || [],
-          tool_failures_last_24h: toolFailures || [],
-        },
-        jarvis_analysis: { diagnoses_made: recos || [] },
-        actions: {
-          executed: (approvalsToday||[]).filter((a:any)=>a.status==="executed"),
-          pending_your_approval: (approvalsToday||[]).filter((a:any)=>a.status==="pending"),
-          rejected_by_you: (approvalsToday||[]).filter((a:any)=>a.status==="rejected"),
-        },
-      };
-      const sys = "You are JARVIS, writing a daily briefing for the owner of OrchestrIQ. You are given REAL structured data — " +
-        "do not invent anything beyond it. Structure your briefing into these exact labeled sections, in this order: " +
-        "OBSERVED FACTS (only what the data literally shows — counts, names, timestamps), JARVIS ANALYSIS (your interpretation " +
-        "of what the facts mean — clearly framed as your read of it, not certainty), RECOMMENDATIONS (what you suggest doing, " +
-        "clearly labeled as suggestions), ACTIONS TAKEN (only things with status 'executed' — never describe a pending or " +
-        "rejected action as done), STILL WAITING ON YOU (pending approvals), and WHAT I'D FOCUS ON TODAY (one or two sentences). " +
-        "If a section has nothing to report, say so briefly rather than omitting it silently. Never blur the line between a fact and a guess.";
-      const reply = await ask(sys, [{role:"user",content:"Here is the last 24 hours of real data:\n"+JSON.stringify(briefingData)}], 1100, false, "jarvis", provider||undefined);
-      const nextMsgs: ChatMsg[] = [...messages, { role:"user", content:"Give me today's briefing." }, { role:"assistant", content:reply }];
-      setMessages(nextMsgs);
-      saveMsg("user","Give me today's briefing.");
-      saveMsg("assistant",reply);
-      speak(reply);
-    } catch (e:any) {
-      setError(e.message);
-    }
-    setThinking(false);
-  };
-
-  const runScan = async () => {
-    setScanning(true); setError(null);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not signed in.");
-      // Phase 1 has one detector. Each future module's detector is a
-      // separate RPC added to this same array — the framework doesn't
-      // change when more are added, only this list grows.
-      const detectors = ["jarvis_lab_detect_cost_signals"];
-      for (const fn of detectors) {
-        await supabase.rpc(fn, { p_user_id: user.id });
-      }
-      await load();
-    } catch (e:any) { setError(e.message); }
-    setScanning(false);
-  };
-
-  const diagnose = async (sig: Signal) => {
-    setDiagnosing(sig.id); setError(null);
-    try {
-      const sys = "You are JARVIS, an operating intelligence for a business platform called OrchestrIQ. " +
-        "You have been given ONE detected signal and its raw supporting data. Your job: identify the most " +
-        "likely root cause, and give one clear, concrete, actionable recommendation. Be direct and specific — " +
-        "reference the actual numbers given. Do not hedge with generic advice. " +
-        "Respond in exactly this format:\nROOT CAUSE: <one or two sentences>\nRECOMMENDATION: <one clear, specific action>\nCONFIDENCE: <low|medium|high>";
-      const userMsg = `Signal: ${sig.title}\nModule: ${sig.source_module}\nType: ${sig.signal_type}\nSeverity: ${sig.severity}\n` +
-        `Description: ${sig.description}\nRaw data: ${JSON.stringify(sig.data)}`;
-      const text = await ask(sys, [{role:"user",content:userMsg}], 500);
-      const rootCause = /ROOT CAUSE:\s*([\s\S]*?)(?:\nRECOMMENDATION:|$)/i.exec(text)?.[1]?.trim() || "";
-      const recommendation = /RECOMMENDATION:\s*([\s\S]*?)(?:\nCONFIDENCE:|$)/i.exec(text)?.[1]?.trim() || text.trim();
-      const confidence = /CONFIDENCE:\s*(low|medium|high)/i.exec(text)?.[1]?.toLowerCase() || "medium";
-
-      const { data:{ user } } = await supabase.auth.getUser();
-      await supabase.from("jarvis_lab_recommendations").insert({
-        signal_id: sig.id, user_id: user?.id, root_cause: rootCause,
-        recommendation, confidence, tier: 1,
-      });
-      await supabase.from("jarvis_lab_signals").update({ status:"recommended" }).eq("id", sig.id);
-      await load();
-    } catch (e:any) { setError(e.message); }
-    setDiagnosing(null);
-  };
-
-  const dismiss = async (id:string) => {
-    await supabase.from("jarvis_lab_signals").update({ status:"dismissed" }).eq("id", id);
-    await load();
-  };
-
-  const filtered = signals.filter(s => filter==="all" || s.source_module===filter);
-  const modules = Array.from(new Set(signals.map(s=>s.source_module)));
-
-  return (
-    <div style={{ padding:20, maxWidth:900, margin:"0 auto", display:"flex", flexDirection:"column", height:"100%" }}>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
-        <div>
-          <div style={{ fontSize:20, fontWeight:800, color:C.ink, display:"flex", alignItems:"center", gap:8 }}>
-            <span style={{ color:C.teal }}>◈</span> JARVIS
-            <span style={{ fontSize:9, fontWeight:800, letterSpacing:0.6, color:"#04070F", background:"#F59E0B", borderRadius:4, padding:"2px 7px" }}>EXPERIMENTAL</span>
-          </div>
-          <div style={{ fontSize:11.5, color:C.faint, marginTop:2 }}>
-            Test build — separate data from the real JARVIS. Advisory only; cannot change anything without you.
-          </div>
+  const renderMission = () => (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        marginTop: 14,
+      }}
+    >
+      <div
+        style={{
+          background: C.panel,
+          border: `1px solid ${C.line}`,
+          borderRadius: 10,
+          padding: 14,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 800,
+            color: C.ink,
+            marginBottom: 8,
+          }}
+        >
+          Autonomous Mission Engine
         </div>
-        <div style={{ display:"flex", gap:6 }}>
-          <button onClick={()=>setView("chat")} style={{ background: view==="chat"?C.teal:C.panel, color: view==="chat"?"#04070F":C.dim,
-            border:"1px solid "+C.line, borderRadius:6, padding:"6px 12px", fontSize:11, fontWeight:700, cursor:"pointer" }}>Chat</button>
-          <button onClick={()=>setView("signals")} style={{ background: view==="signals"?C.teal:C.panel, color: view==="signals"?"#04070F":C.dim,
-            border:"1px solid "+C.line, borderRadius:6, padding:"6px 12px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
-            Signals{signals.length ? ` (${signals.length})` : ""}
+
+        <div
+          style={{
+            fontSize: 11,
+            color: C.faint,
+            lineHeight: 1.6,
+            marginBottom: 12,
+          }}
+        >
+          Give JARVIS an objective. It will decompose
+          the objective, gather available information,
+          use permitted tools, verify the result, and
+          record useful lessons.
+        </div>
+
+        <textarea
+          value={missionGoal}
+          onChange={(event) =>
+            setMissionGoal(event.target.value)
+          }
+          placeholder="Example: Investigate the current platform risks and determine what should be improved next."
+          disabled={thinking}
+          style={{
+            width: "100%",
+            minHeight: 100,
+            boxSizing: "border-box",
+            resize: "vertical",
+            background: C.raised,
+            border: `1px solid ${C.line}`,
+            borderRadius: 8,
+            padding: 10,
+            color: C.ink,
+            fontSize: 12,
+            fontFamily: "inherit",
+          }}
+        />
+
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            marginTop: 10,
+          }}
+        >
+          <button
+            onClick={runMission}
+            disabled={
+              thinking ||
+              !missionGoal.trim()
+            }
+            style={{
+              background: C.teal,
+              color: "#04070F",
+              border: "none",
+              borderRadius: 7,
+              padding: "8px 15px",
+              fontWeight: 800,
+              fontSize: 11,
+              cursor: "pointer",
+              opacity:
+                thinking ||
+                !missionGoal.trim()
+                  ? 0.45
+                  : 1,
+            }}
+          >
+            {thinking
+              ? "Running…"
+              : "Run Mission"}
           </button>
-          <button onClick={()=>setView("approvals")} style={{ background: view==="approvals"?(pendingApprovals.length?C.amber:C.teal):C.panel, color: view==="approvals"?"#04070F":C.dim,
-            border:"1px solid "+(pendingApprovals.length?C.amber:C.line), borderRadius:6, padding:"6px 12px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
-            Approvals{pendingApprovals.length ? ` (${pendingApprovals.length})` : ""}
+
+          <button
+            onClick={runAutonomousCycle}
+            disabled={thinking}
+            style={{
+              background: "transparent",
+              color: C.amber,
+              border: `1px solid ${C.amber}66`,
+              borderRadius: 7,
+              padding: "8px 15px",
+              fontWeight: 700,
+              fontSize: 11,
+              cursor: "pointer",
+              opacity: thinking ? 0.45 : 1,
+            }}
+          >
+            Autonomous Review
           </button>
         </div>
       </div>
 
-      {error && (
-        <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.3)", borderRadius:8,
-          padding:"8px 12px", marginTop:12, fontSize:11.5, color:C.red }}>{error}</div>
-      )}
+      {mission && (
+        <>
+          <div
+            style={{
+              background: C.panel,
+              border: `1px solid ${C.line}`,
+              borderRadius: 10,
+              padding: 14,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent:
+                  "space-between",
+                gap: 10,
+                marginBottom: 10,
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 800,
+                    color: C.ink,
+                  }}
+                >
+                  {mission.goal}
+                </div>
 
-      {view === "chat" && (
-        <div style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0, marginTop:14 }}>
-          {/* MODEL PICKER + VOICE TOGGLE — pick which real, configured
-              provider answers (Claude/NVIDIA/DeepSeek/Gemini/OpenAI, or
-              "Auto" for the platform's normal routing), and mute JARVIS
-              speaking its replies aloud without losing text output. */}
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-            <select value={provider} onChange={e=>setProvider(e.target.value)}
-              style={{ background:C.raised, border:"1px solid "+C.line, borderRadius:6, padding:"5px 8px", color:C.dim, fontSize:11 }}>
-              <option value="">Auto (recommended)</option>
-              {(availableProviders||[]).map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-            </select>
-            <button onClick={()=>setVoiceOn(v=>{ if(v) window.speechSynthesis?.cancel(); return !v; })}
-              title={voiceOn ? "Mute JARVIS's voice" : "Un-mute JARVIS's voice"}
-              style={{ background:"transparent", border:"1px solid "+C.line, borderRadius:6, padding:"5px 10px", color: voiceOn?C.teal:C.faint, fontSize:11, cursor:"pointer" }}>
-              {voiceOn ? "🔊 Voice on" : "🔇 Voice off"}
-            </button>
-            <button onClick={generateDailyBriefing} disabled={thinking} title="A structured summary of the last 24 hours"
-              style={{ background:"transparent", border:"1px solid "+C.teal+"55", borderRadius:6, padding:"5px 10px", color:C.teal, fontSize:11, fontWeight:600, cursor:"pointer", opacity:thinking?0.5:1 }}>
-              📋 Daily Briefing
-            </button>
-            <button onClick={toggleWakeWord} title={wakeWordOn ? "Wake word is ON — the microphone is listening" : "Turn on wake-word listening (\""+effectiveWakePhrase+"\")"}
-              style={{ background: wakeWordOn ? "#EF4444" : "transparent", border:"1px solid "+(wakeWordOn?"#EF4444":C.line), borderRadius:6, padding:"5px 10px",
-                color: wakeWordOn ? "#fff" : C.dim, fontSize:11, fontWeight:600, cursor:"pointer",
-                animation: wakeWordOn ? "pulse 1.6s ease-in-out infinite" : "none" }}>
-              {wakeWordOn ? "🔴 Listening for \""+effectiveWakePhrase+"\"" : "Wake word: off"}
-            </button>
-            <button onClick={recordCustomWakePhrase} disabled={recordingWakePhrase} title="Say your own wake phrase once to use it instead of the default"
-              style={{ background:"transparent", border:"1px solid "+C.line, borderRadius:6, padding:"5px 10px", color:C.faint, fontSize:10.5, cursor:"pointer" }}>
-              {recordingWakePhrase ? "🎙 Say it now…" : "Set my own wake word"}
-            </button>
-            <style>{"@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.55}}"}</style>
-          </div>
-          {/* THE ACTUAL DIAGNOSTIC: shows exactly what the browser hears,
-              live, and any real error — the direct answer to "is he able
-              to listen to me at all." */}
-          {wakeWordOn && (
-            <div style={{ fontSize:10.5, color:C.faint, marginBottom:8, fontStyle:"italic" }}>
-              Hearing: {lastHeard ? "\u201c"+lastHeard+"\u201d" : "(nothing yet — say something to test the microphone)"}
-            </div>
-          )}
-          {wakeError && (
-            <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.3)", borderRadius:8,
-              padding:"8px 12px", marginBottom:10, fontSize:11.5, color:C.red }}>{wakeError}</div>
-          )}
-          {loadingHistory && <div style={{ fontSize:11, color:C.faint, textAlign:"center", padding:10 }}>Loading your last conversation…</div>}
-          {!loadingHistory && messages.length === 0 && (
-            <div style={{ textAlign:"center", padding:"40px 20px", color:C.faint }}>
-              <div style={{ fontSize:32, marginBottom:10, opacity:0.4 }}>◈</div>
-              <div style={{ fontSize:13, marginBottom:4 }}>Ask me anything about the platform, or the world.</div>
-              <div style={{ fontSize:11, marginBottom:16 }}>"How many Enterprise users do we have?" · "Is anything broken right now?" · "What's gold trading at today?"</div>
-              <button onClick={analyzeEverything} disabled={thinking}
-                style={{ background:C.teal, color:"#04070F", border:"none", borderRadius:8, padding:"9px 18px",
-                  fontWeight:700, fontSize:12, cursor:"pointer", opacity:thinking?0.6:1 }}>
-                Analyze the entire platform now
-              </button>
-            </div>
-          )}
-          <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column", gap:12, paddingBottom:10 }}>
-            {messages.map((m,i) => (
-              <div key={i} style={{ display:"flex", justifyContent: m.role==="user" ? "flex-end" : "flex-start" }}>
-                <div style={{ maxWidth:"80%", background: m.role==="user" ? "rgba(20,184,166,0.10)" : C.panel,
-                  border:"1px solid "+(m.role==="user"?"#14B8A633":C.line), borderRadius:10, padding:"10px 13px",
-                  fontSize:12.5, color:C.ink, lineHeight:1.6, whiteSpace:"pre-wrap" }}>
-                  {m.content}
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: C.faint,
+                    marginTop: 3,
+                  }}
+                >
+                  {mission.status.toUpperCase()}
                 </div>
               </div>
-            ))}
-            {thinking && <div style={{ fontSize:11, color:toolActivity?C.teal:C.faint, fontStyle:"italic" }}>{toolActivity ? "◈ "+(TOOL_LABELS[toolActivity]||("Using "+toolActivity+"…")) : "JARVIS is thinking…"}</div>}
-            <div ref={endRef} />
-          </div>
-          <div style={{ display:"flex", gap:8, paddingTop:10, borderTop:"1px solid "+C.line }}>
-            <button onClick={toggleListen} title="Push to talk"
-              style={{ background: listening?"#EF4444":C.raised, border:"1px solid "+(listening?"#EF4444":C.line), borderRadius:8,
-                padding:"0 14px", color: listening?"#fff":C.dim, fontSize:14, cursor:"pointer" }}>
-              {listening ? "◉" : "🎙"}
-            </button>
-            <input value={chatInput} onChange={e=>setChatInput(e.target.value)}
-              onKeyDown={e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); sendChat(); } }}
-              placeholder="Ask JARVIS anything, or press 🎙 to speak…" disabled={thinking}
-              style={{ flex:1, background:C.raised, border:"1px solid "+C.line, borderRadius:8, padding:"9px 12px",
-                color:C.ink, fontSize:12.5, fontFamily:"inherit" }} />
-            <button onClick={()=>sendChat()} disabled={thinking || !chatInput.trim()}
-              style={{ background:C.teal, color:"#04070F", border:"none", borderRadius:8, padding:"0 18px",
-                fontWeight:700, fontSize:12.5, cursor:"pointer", opacity:(thinking||!chatInput.trim())?0.4:1 }}>Send</button>
-          </div>
-        </div>
-      )}
 
-      {view === "signals" && (
-        <>
-          <div style={{ display:"flex", justifyContent:"flex-end", marginTop:14 }}>
-            <button onClick={runScan} disabled={scanning}
-              style={{ background:C.teal, color:"#04070F", border:"none", borderRadius:8, padding:"7px 16px",
-                fontWeight:700, fontSize:11.5, cursor:scanning?"default":"pointer", opacity:scanning?0.6:1 }}>
-              {scanning ? "Scanning…" : "Run scan"}
-            </button>
-          </div>
-
-          {modules.length > 0 && (
-            <div style={{ display:"flex", gap:6, marginTop:12, marginBottom:12, flexWrap:"wrap" }}>
-              {["all", ...modules].map(m => (
-                <button key={m} onClick={()=>setFilter(m)}
-                  style={{ background: filter===m ? C.teal : C.panel, color: filter===m ? "#04070F" : C.dim,
-                    border:"1px solid "+C.line, borderRadius:20, padding:"4px 12px", fontSize:10.5, fontWeight:600, cursor:"pointer" }}>
-                  {m === "all" ? "All" : m.replace(/_/g," ")}
-                </button>
-              ))}
+              <div
+                style={{
+                  fontSize: 9,
+                  color: C.faint,
+                }}
+              >
+                {mission.id}
+              </div>
             </div>
-          )}
 
-          {filtered.length === 0 && (
-            <div style={{ textAlign:"center", padding:"60px 20px", color:C.faint }}>
-              <div style={{ fontSize:32, marginBottom:10, opacity:0.4 }}>◈</div>
-              <div style={{ fontSize:13 }}>Nothing found yet.</div>
-              <div style={{ fontSize:11, marginTop:4 }}>Run a scan to have JARVIS check Cost Architecture for cost anomalies.</div>
-            </div>
-          )}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 7,
+              }}
+            >
+              {mission.steps.map(
+                (step, index) => (
+                  <div
+                    key={step.id}
+                    onClick={() =>
+                      setSelectedMissionStep(
+                        selectedMissionStep ===
+                          step.id
+                          ? null
+                          : step.id
+                      )
+                    }
+                    style={{
+                      background: C.raised,
+                      border: `1px solid ${
+                        selectedMissionStep ===
+                        step.id
+                          ? C.teal
+                          : C.line
+                      }`,
+                      borderRadius: 7,
+                      padding: 9,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems:
+                          "center",
+                        gap: 8,
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: "50%",
+                          display: "inline-flex",
+                          alignItems:
+                            "center",
+                          justifyContent:
+                            "center",
+                          background:
+                            step.status ===
+                            "completed"
+                              ? C.green
+                              : step.status ===
+                                "failed"
+                              ? C.red
+                              : step.status ===
+                                "running"
+                              ? C.teal
+                              : C.panel,
+                          color:
+                            step.status ===
+                            "completed" ||
+                            step.status ===
+                              "running"
+                              ? "#04070F"
+                              : C.dim,
+                          fontSize: 9,
+                          fontWeight: 800,
+                        }}
+                      >
+                        {index + 1}
+                      </span>
 
-          <div style={{ display:"flex", flexDirection:"column", gap:10, marginTop:8 }}>
-            {filtered.map(sig => {
-              const reco = recos[sig.id];
-              return (
-                <div key={sig.id} style={{ background:C.panel, border:"1px solid "+C.line, borderRadius:10, padding:14 }}>
-                  <div style={{ display:"flex", alignItems:"flex-start", gap:10 }}>
-                    <div style={{ fontSize:16, color:SEVERITY_COLOR[sig.severity], flexShrink:0, marginTop:1 }}>
-                      {TYPE_ICON[sig.signal_type] || "•"}
-                    </div>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-                        <span style={{ fontSize:13, fontWeight:700, color:C.ink }}>{sig.title}</span>
-                        <span style={{ fontSize:8.5, fontWeight:800, color:SEVERITY_COLOR[sig.severity], textTransform:"uppercase",
-                          border:"1px solid "+SEVERITY_COLOR[sig.severity]+"55", borderRadius:4, padding:"1px 6px" }}>{sig.severity}</span>
-                        <span style={{ fontSize:9.5, color:C.faint }}>{sig.source_module.replace(/_/g," ")}</span>
-                      </div>
-                      <div style={{ fontSize:11.5, color:C.dim, marginTop:5, lineHeight:1.5 }}>{sig.description}</div>
-
-                      {reco && (
-                        <div style={{ marginTop:10, padding:"10px 12px", background:C.raised, borderLeft:"2px solid "+C.teal, borderRadius:6 }}>
-                          <div style={{ fontSize:9, fontWeight:800, color:C.teal, letterSpacing:0.4, marginBottom:4 }}>
-                            JARVIS'S DIAGNOSIS {reco.confidence && `· ${reco.confidence} confidence`}
-                          </div>
-                          {reco.root_cause && <div style={{ fontSize:11, color:C.dim, marginBottom:6 }}><b style={{color:C.ink}}>Root cause:</b> {reco.root_cause}</div>}
-                          <div style={{ fontSize:11.5, color:C.ink }}><b>Recommendation:</b> {reco.recommendation}</div>
+                      <div
+                        style={{
+                          flex: 1,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            color: C.ink,
+                          }}
+                        >
+                          {step.title}
                         </div>
-                      )}
 
-                      <div style={{ display:"flex", gap:8, marginTop:10 }}>
-                        {!reco && (
-                          <button onClick={()=>diagnose(sig)} disabled={diagnosing===sig.id}
-                            style={{ background:"transparent", border:"1px solid "+C.teal+"55", color:C.teal, borderRadius:6,
-                              padding:"5px 12px", fontSize:11, fontWeight:600, cursor:"pointer", opacity:diagnosing===sig.id?0.5:1 }}>
-                            {diagnosing===sig.id ? "Thinking…" : "Ask JARVIS to diagnose"}
-                          </button>
-                        )}
-                        <button onClick={()=>dismiss(sig.id)}
-                          style={{ background:"transparent", border:"1px solid "+C.line, color:C.faint, borderRadius:6,
-                            padding:"5px 12px", fontSize:11, cursor:"pointer" }}>Dismiss</button>
+                        <div
+                          style={{
+                            fontSize: 9.5,
+                            color: C.faint,
+                          }}
+                        >
+                          {step.status}
+                          {step.tool
+                            ? ` · ${step.tool}`
+                            : ""}
+                        </div>
                       </div>
                     </div>
+
+                    {selectedMissionStep ===
+                      step.id && (
+                      <div
+                        style={{
+                          marginTop: 8,
+                          fontSize: 10.5,
+                          color: C.dim,
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        <div>
+                          {step.description}
+                        </div>
+
+                        {step.result && (
+                          <pre
+                            style={{
+                              whiteSpace:
+                                "pre-wrap",
+                              marginTop: 8,
+                              background:
+                                C.bg,
+                              padding: 8,
+                              borderRadius: 5,
+                              fontSize: 9,
+                              color:
+                                C.dim,
+                              overflow:
+                                "auto",
+                            }}
+                          >
+                            {safeJson(
+                              step.result,
+                              5000
+                            )}
+                          </pre>
+                        )}
+
+                        {step.error && (
+                          <div
+                            style={{
+                              color: C.red,
+                              marginTop: 5,
+                            }}
+                          >
+                            {step.error}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                </div>
-              );
-            })}
+                )
+              )}
+            </div>
           </div>
+
+          {mission.summary && (
+            <div
+              style={{
+                background: C.panel,
+                border: `1px solid ${C.teal}55`,
+                borderRadius: 10,
+                padding: 14,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 9,
+                  fontWeight: 800,
+                  color: C.teal,
+                  marginBottom: 7,
+                  letterSpacing: 0.5,
+                }}
+              >
+                VERIFICATION
+              </div>
+
+              <div
+                style={{
+                  whiteSpace: "pre-wrap",
+                  fontSize: 11.5,
+                  lineHeight: 1.6,
+                  color: C.ink,
+                }}
+              >
+                {mission.summary}
+              </div>
+            </div>
+          )}
         </>
       )}
 
-      {view === "approvals" && (
-        <div style={{ marginTop:14 }}>
-          {!EXECUTION_ENABLED && (
-            <div style={{ background:"rgba(245,158,11,0.08)", border:"1px solid "+C.amber+"55", borderRadius:8, padding:"10px 14px", marginBottom:14, fontSize:11.5, color:C.dim }}>
-              Execution is currently switched off entirely — JARVIS can only observe, investigate, and recommend right now. Nothing new can appear here until it's turned back on.
-            </div>
-          )}
-          {pendingApprovals.length === 0 && (
-            <div style={{ textAlign:"center", padding:"60px 20px", color:C.faint }}>
-              <div style={{ fontSize:32, marginBottom:10, opacity:0.4 }}>✓</div>
-              <div style={{ fontSize:13 }}>Nothing waiting on you.</div>
-              <div style={{ fontSize:11, marginTop:4 }}>Consequential actions JARVIS proposes — like a price correction — show up here for your decision before anything happens.</div>
-            </div>
-          )}
-          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-            {pendingApprovals.map(a => (
-              <div key={a.id} style={{ background:C.panel, border:"1px solid "+C.amber+"55", borderRadius:10, padding:14 }}>
-                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-                  <span style={{ fontSize:8.5, fontWeight:800, color:C.amber, textTransform:"uppercase", border:"1px solid "+C.amber+"55", borderRadius:4, padding:"1px 6px" }}>
-                    {a.risk_category}
-                  </span>
-                  <span style={{ fontSize:12.5, fontWeight:700, color:C.ink }}>{a.tool_name.replace(/_/g," ")}</span>
-                </div>
-                <div style={{ fontSize:11.5, color:C.dim, marginBottom:8 }}><b style={{color:C.ink}}>JARVIS's reasoning:</b> {a.reasoning}</div>
-                <div style={{ fontSize:10.5, color:C.faint, background:C.raised, borderRadius:6, padding:"6px 10px", marginBottom:10, fontFamily:"monospace" }}>
-                  {JSON.stringify(a.proposed_input)}
-                </div>
-                <div style={{ display:"flex", gap:8 }}>
-                  <button onClick={()=>decideApproval(a,true)} disabled={decidingId===a.id}
-                    style={{ background:C.teal, color:"#04070F", border:"none", borderRadius:6, padding:"6px 14px", fontSize:11, fontWeight:700, cursor:"pointer", opacity:decidingId===a.id?0.5:1 }}>
-                    {decidingId===a.id ? "Working…" : "Approve & Execute"}
-                  </button>
-                  <button onClick={()=>decideApproval(a,false)} disabled={decidingId===a.id}
-                    style={{ background:"transparent", border:"1px solid "+C.line, color:C.faint, borderRadius:6, padding:"6px 14px", fontSize:11, cursor:"pointer" }}>
-                    Reject
-                  </button>
-                </div>
+      {missionLog.length > 0 && (
+        <div
+          style={{
+            background: C.raised,
+            border: `1px solid ${C.line}`,
+            borderRadius: 8,
+            padding: 10,
+          }}
+        >
+          {missionLog.map(
+            (entry, index) => (
+              <div
+                key={index}
+                style={{
+                  fontSize: 10,
+                  color: C.faint,
+                  marginBottom: 4,
+                }}
+              >
+                {entry}
               </div>
-            ))}
-          </div>
+            )
+          )}
         </div>
       )}
+    </div>
+  );
+
+  const renderChat = () => (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        flex: 1,
+        minHeight: 0,
+        marginTop: 14,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+          marginBottom: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <select
+          value={provider}
+          onChange={(event) =>
+            setProvider(event.target.value)
+          }
+          style={{
+            background: C.raised,
+            border: `1px solid ${C.line}`,
+            borderRadius: 6,
+            padding: "5px 8px",
+            color: C.dim,
+            fontSize: 11,
+          }}
+        >
+          <option value="">
+            Auto
+          </option>
+
+          {(availableProviders || []).map(
+            (item) => (
+              <option
+                key={item.id}
+                value={item.id}
+              >
+                {item.label}
+              </option>
+            )
+          )}
+        </select>
+
+        <button
+          onClick={() =>
+            setVoiceOn((value) => {
+              if (value) {
+                window.speechSynthesis?.cancel();
+              }
+
+              return !value;
+            })
+          }
+          style={{
+            background: "transparent",
+            border: `1px solid ${C.line}`,
+            borderRadius: 6,
+            padding: "5px 9px",
+            color: voiceOn
+              ? C.teal
+              : C.faint,
+            fontSize: 10.5,
+            cursor: "pointer",
+          }}
+        >
+          {voiceOn
+            ? "Voice on"
+            : "Voice off"}
+        </button>
+
+        <button
+          onClick={generateDailyBriefing}
+          disabled={thinking}
+          style={{
+            background: "transparent",
+            border: `1px solid ${C.teal}55`,
+            borderRadius: 6,
+            padding: "5px 9px",
+            color: C.teal,
+            fontSize: 10.5,
+            cursor: "pointer",
+          }}
+        >
+          Daily Briefing
+        </button>
+
+        <button
+          onClick={toggleWakeWord}
+          style={{
+            background: wakeWordOn
+              ? C.red
+              : "transparent",
+            border: `1px solid ${
+              wakeWordOn
+                ? C.red
+                : C.line
+            }`,
+            borderRadius: 6,
+            padding: "5px 9px",
+            color: wakeWordOn
+              ? "#fff"
+              : C.dim,
+            fontSize: 10.5,
+            cursor: "pointer",
+          }}
+        >
+          {wakeWordOn
+            ? `Listening: ${effectiveWakePhrase}`
+            : "Wake word off"}
+        </button>
+      </div>
+
+      {wakeWordOn && (
+        <div
+          style={{
+            fontSize: 10,
+            color: C.faint,
+            marginBottom: 8,
+          }}
+        >
+          Hearing:{" "}
+          {lastHeard
+            ? `"${lastHeard}"`
+            : "nothing yet"}
+        </div>
+      )}
+
+      {wakeError && (
+        <div
+          style={{
+            background:
+              "rgba(239,68,68,0.08)",
+            border: `1px solid ${C.red}55`,
+            borderRadius: 7,
+            padding: "7px 10px",
+            color: C.red,
+            fontSize: 10.5,
+            marginBottom: 8,
+          }}
+        >
+          {wakeError}
+        </div>
+      )}
+
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          paddingBottom: 10,
+        }}
+      >
+        {loadingHistory && (
+          <div
+            style={{
+              textAlign: "center",
+              color: C.faint,
+              fontSize: 10.5,
+              padding: 15,
+            }}
+          >
+            Loading JARVIS memory…
+          </div>
+        )}
+
+        {!loadingHistory &&
+          messages.length === 0 && (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "45px 20px",
+                color: C.faint,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 34,
+                  color: C.teal,
+                  marginBottom: 10,
+                }}
+              >
+                ◈
+              </div>
+
+              <div
+                style={{
+                  fontSize: 14,
+                  color: C.ink,
+                  fontWeight: 700,
+                  marginBottom: 5,
+                }}
+              >
+                JARVIS {JARVIS_VERSION}
+              </div>
+
+              <div
+                style={{
+                  fontSize: 11,
+                  lineHeight: 1.6,
+                }}
+              >
+                Ask a question, give JARVIS an
+                objective, or send it to the Mission
+                Engine.
+              </div>
+            </div>
+          )}
+
+        {messages.map((message, index) => (
+          <div
+            key={index}
+            style={{
+              display: "flex",
+              justifyContent:
+                message.role === "user"
+                  ? "flex-end"
+                  : "flex-start",
+            }}
+          >
+            <div
+              style={{
+                maxWidth: "82%",
+                background:
+                  message.role === "user"
+                    ? "rgba(20,184,166,0.10)"
+                    : C.panel,
+                border: `1px solid ${
+                  message.role === "user"
+                    ? "#14B8A633"
+                    : C.line
+                }`,
+                borderRadius: 10,
+                padding: "10px 13px",
+                fontSize: 12,
+                color: C.ink,
+                lineHeight: 1.6,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {message.content}
+            </div>
+          </div>
+        ))}
+
+        {thinking && (
+          <div
+            style={{
+              fontSize: 10.5,
+              color: toolActivity
+                ? C.teal
+                : C.faint,
+              fontStyle: "italic",
+            }}
+          >
+            {toolActivity
+              ? "◈ " +
+                (TOOL_LABELS[
+                  toolActivity
+                ] ||
+                  `Using ${toolActivity}…`)
+              : "JARVIS is reasoning…"}
+          </div>
+        )}
+
+        <div ref={endRef} />
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          gap: 7,
+          paddingTop: 10,
+          borderTop: `1px solid ${C.line}`,
+        }}
+      >
+        <button
+          onClick={toggleListen}
+          style={{
+            background: listening
+              ? C.red
+              : C.raised,
+            border: `1px solid ${
+              listening
+                ? C.red
+                : C.line
+            }`,
+            borderRadius: 8,
+            padding: "0 13px",
+            color: listening
+              ? "#fff"
+              : C.dim,
+            cursor: "pointer",
+          }}
+        >
+          {listening ? "◉" : "🎙"}
+        </button>
+
+        <input
+          value={chatInput}
+          onChange={(event) =>
+            setChatInput(event.target.value)
+          }
+          onKeyDown={(event) => {
+            if (
+              event.key === "Enter" &&
+              !event.shiftKey
+            ) {
+              event.preventDefault();
+
+              sendChat();
+            }
+          }}
+          disabled={thinking}
+          placeholder="Ask JARVIS anything…"
+          style={{
+            flex: 1,
+            background: C.raised,
+            border: `1px solid ${C.line}`,
+            borderRadius: 8,
+            padding: "9px 12px",
+            color: C.ink,
+            fontSize: 12,
+          }}
+        />
+
+        <button
+          onClick={() => sendChat()}
+          disabled={
+            thinking ||
+            !chatInput.trim()
+          }
+          style={{
+            background: C.teal,
+            color: "#04070F",
+            border: "none",
+            borderRadius: 8,
+            padding: "0 17px",
+            fontWeight: 800,
+            fontSize: 11.5,
+            cursor: "pointer",
+            opacity:
+              thinking ||
+              !chatInput.trim()
+                ? 0.4
+                : 1,
+          }}
+        >
+          Send
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderSignals = () => (
+    <div
+      style={{
+        marginTop: 14,
+        overflowY: "auto",
+        flex: 1,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginBottom: 12,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 12,
+            color: C.dim,
+          }}
+        >
+          Live diagnostic signals
+        </div>
+
+        <button
+          onClick={runScan}
+          disabled={scanning}
+          style={{
+            background: C.teal,
+            color: "#04070F",
+            border: "none",
+            borderRadius: 7,
+            padding: "7px 13px",
+            fontWeight: 800,
+            fontSize: 10.5,
+            cursor: "pointer",
+          }}
+        >
+          {scanning
+            ? "Scanning…"
+            : "Run Scan"}
+        </button>
+      </div>
+
+      {modules.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            gap: 6,
+            flexWrap: "wrap",
+            marginBottom: 12,
+          }}
+        >
+          {["all", ...modules].map(
+            (module) => (
+              <button
+                key={module}
+                onClick={() =>
+                  setFilter(module)
+                }
+                style={{
+                  background:
+                    filter === module
+                      ? C.teal
+                      : C.panel,
+                  color:
+                    filter === module
+                      ? "#04070F"
+                      : C.dim,
+                  border: `1px solid ${C.line}`,
+                  borderRadius: 20,
+                  padding:
+                    "4px 11px",
+                  fontSize: 10,
+                  cursor: "pointer",
+                }}
+              >
+                {module === "all"
+                  ? "All"
+                  : module.replace(
+                      /_/g,
+                      " "
+                    )}
+              </button>
+            )
+          )}
+        </div>
+      )}
+
+      {filteredSignals.length ===
+        0 && (
+        <div
+          style={{
+            textAlign: "center",
+            padding: "60px 20px",
+            color: C.faint,
+          }}
+        >
+          No signals found.
+        </div>
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        {filteredSignals.map(
+          (signal) => {
+            const reco =
+              recos[signal.id];
+
+            return (
+              <div
+                key={signal.id}
+                style={{
+                  background: C.panel,
+                  border: `1px solid ${C.line}`,
+                  borderRadius: 10,
+                  padding: 14,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      color:
+                        SEVERITY_COLOR[
+                          signal.severity
+                        ] || C.dim,
+                      fontSize: 16,
+                    }}
+                  >
+                    {TYPE_ICON[
+                      signal.signal_type
+                    ] || "•"}
+                  </div>
+
+                  <div
+                    style={{
+                      flex: 1,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 7,
+                        flexWrap:
+                          "wrap",
+                        alignItems:
+                          "center",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: 800,
+                          color: C.ink,
+                        }}
+                      >
+                        {signal.title}
+                      </span>
+
+                      <span
+                        style={{
+                          fontSize: 8.5,
+                          color:
+                            SEVERITY_COLOR[
+                              signal.severity
+                            ] ||
+                            C.dim,
+                          textTransform:
+                            "uppercase",
+                        }}
+                      >
+                        {
+                          signal.severity
+                        }
+                      </span>
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: C.dim,
+                        lineHeight: 1.5,
+                        marginTop: 5,
+                      }}
+                    >
+                      {
+                        signal.description
+                      }
+                    </div>
+
+                    {reco && (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          padding:
+                            "9px 11px",
+                          background:
+                            C.raised,
+                          borderLeft: `2px solid ${C.teal}`,
+                          borderRadius: 5,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 9,
+                            color: C.teal,
+                            fontWeight: 800,
+                            marginBottom: 5,
+                          }}
+                        >
+                          DIAGNOSIS ·{" "}
+                          {
+                            reco.confidence
+                          }
+                        </div>
+
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: C.dim,
+                          }}
+                        >
+                          <b
+                            style={{
+                              color:
+                                C.ink,
+                            }}
+                          >
+                            Root cause:
+                          </b>{" "}
+                          {
+                            reco.root_cause
+                          }
+                        </div>
+
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: C.ink,
+                            marginTop: 5,
+                          }}
+                        >
+                          <b>
+                            Recommendation:
+                          </b>{" "}
+                          {
+                            reco.recommendation
+                          }
+                        </div>
+                      </div>
+                    )}
+
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 7,
+                        marginTop: 10,
+                      }}
+                    >
+                      {!reco && (
+                        <button
+                          onClick={() =>
+                            diagnose(
+                              signal
+                            )
+                          }
+                          disabled={
+                            diagnosing ===
+                            signal.id
+                          }
+                          style={{
+                            background:
+                              "transparent",
+                            border: `1px solid ${C.teal}55`,
+                            color: C.teal,
+                            borderRadius: 6,
+                            padding:
+                              "5px 11px",
+                            fontSize: 10.5,
+                            cursor:
+                              "pointer",
+                          }}
+                        >
+                          {diagnosing ===
+                          signal.id
+                            ? "Thinking…"
+                            : "Diagnose"}
+                        </button>
+                      )}
+
+                      <button
+                        onClick={async () => {
+                          await supabase
+                            .from(
+                              "jarvis_lab_signals"
+                            )
+                            .update({
+                              status:
+                                "dismissed",
+                            })
+                            .eq(
+                              "id",
+                              signal.id
+                            );
+
+                          await loadSignals();
+                        }}
+                        style={{
+                          background:
+                            "transparent",
+                          border: `1px solid ${C.line}`,
+                          color: C.faint,
+                          borderRadius: 6,
+                          padding:
+                            "5px 11px",
+                          fontSize: 10.5,
+                          cursor:
+                            "pointer",
+                        }}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+        )}
+      </div>
+    </div>
+  );
+
+  const renderMemory = () => (
+    <div
+      style={{
+        flex: 1,
+        overflowY: "auto",
+        marginTop: 14,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent:
+            "space-between",
+          alignItems: "center",
+          marginBottom: 12,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 800,
+              color: C.ink,
+            }}
+          >
+            JARVIS Memory
+          </div>
+
+          <div
+            style={{
+              fontSize: 10,
+              color: C.faint,
+              marginTop: 3,
+            }}
+          >
+            {memoryItems.length} structured
+            memories
+          </div>
+        </div>
+
+        <button
+          onClick={clearMemory}
+          style={{
+            background: "transparent",
+            border: `1px solid ${C.red}55`,
+            color: C.red,
+            borderRadius: 6,
+            padding: "5px 10px",
+            fontSize: 10,
+            cursor: "pointer",
+          }}
+        >
+          Clear
+        </button>
+      </div>
+
+      {memoryItems.length === 0 && (
+        <div
+          style={{
+            textAlign: "center",
+            padding: "60px 20px",
+            color: C.faint,
+          }}
+        >
+          JARVIS has not recorded any
+          structured memories yet.
+        </div>
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        {[...memoryItems]
+          .reverse()
+          .map((item) => (
+            <div
+              key={item.id}
+              style={{
+                background: C.panel,
+                border: `1px solid ${C.line}`,
+                borderRadius: 8,
+                padding: 11,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent:
+                    "space-between",
+                  gap: 10,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 8.5,
+                    color: C.teal,
+                    fontWeight: 800,
+                    textTransform:
+                      "uppercase",
+                  }}
+                >
+                  {item.type}
+                </span>
+
+                <span
+                  style={{
+                    fontSize: 8.5,
+                    color: C.faint,
+                  }}
+                >
+                  importance{" "}
+                  {item.importance}
+                </span>
+              </div>
+
+              <div
+                style={{
+                  fontSize: 11,
+                  color: C.ink,
+                  lineHeight: 1.5,
+                  marginTop: 6,
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {item.content}
+              </div>
+
+              <div
+                style={{
+                  fontSize: 8.5,
+                  color: C.faint,
+                  marginTop: 6,
+                }}
+              >
+                {item.source} ·{" "}
+                {new Date(
+                  item.createdAt
+                ).toLocaleString()}
+              </div>
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+
+  const renderApprovals = () => (
+    <div
+      style={{
+        flex: 1,
+        overflowY: "auto",
+        marginTop: 14,
+      }}
+    >
+      {!EXECUTION_POLICY
+        .requireApprovalForConsequential && (
+        <div
+          style={{
+            background:
+              "rgba(245,158,11,0.08)",
+            border: `1px solid ${C.amber}55`,
+            borderRadius: 8,
+            padding: 10,
+            marginBottom: 12,
+            fontSize: 10.5,
+            color: C.dim,
+          }}
+        >
+          Consequential approval policy is
+          disabled.
+        </div>
+      )}
+
+      {pendingApprovals.length ===
+        0 && (
+        <div
+          style={{
+            textAlign: "center",
+            padding: "60px 20px",
+            color: C.faint,
+          }}
+        >
+          No actions are waiting for
+          approval.
+        </div>
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        {pendingApprovals.map(
+          (approval) => (
+            <div
+              key={approval.id}
+              style={{
+                background: C.panel,
+                border: `1px solid ${C.amber}55`,
+                borderRadius: 10,
+                padding: 14,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems:
+                    "center",
+                  gap: 8,
+                  marginBottom: 7,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 8,
+                    color: C.amber,
+                    textTransform:
+                      "uppercase",
+                    fontWeight: 800,
+                  }}
+                >
+                  {
+                    approval.risk_category
+                  }
+                </span>
+
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: C.ink,
+                    fontWeight: 800,
+                  }}
+                >
+                  {String(
+                    approval.tool_name
+                  ).replace(
+                    /_/g,
+                    " "
+                  )}
+                </span>
+              </div>
+
+              <div
+                style={{
+                  fontSize: 11,
+                  color: C.dim,
+                  lineHeight: 1.5,
+                }}
+              >
+                <b
+                  style={{
+                    color: C.ink,
+                  }}
+                >
+                  Reasoning:
+                </b>{" "}
+                {
+                  approval.reasoning
+                }
+              </div>
+
+              <pre
+                style={{
+                  background: C.raised,
+                  borderRadius: 6,
+                  padding: 8,
+                  fontSize: 9,
+                  color: C.faint,
+                  whiteSpace:
+                    "pre-wrap",
+                  overflow: "auto",
+                  marginTop: 8,
+                }}
+              >
+                {safeJson(
+                  approval.proposed_input
+                )}
+              </pre>
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: 7,
+                  marginTop: 10,
+                }}
+              >
+                <button
+                  onClick={() =>
+                    decideApproval(
+                      approval,
+                      true
+                    )
+                  }
+                  disabled={
+                    decidingId ===
+                    approval.id
+                  }
+                  style={{
+                    background:
+                      C.teal,
+                    color:
+                      "#04070F",
+                    border:
+                      "none",
+                    borderRadius: 6,
+                    padding:
+                      "6px 13px",
+                    fontWeight: 800,
+                    fontSize: 10.5,
+                    cursor:
+                      "pointer",
+                  }}
+                >
+                  Approve & Execute
+                </button>
+
+                <button
+                  onClick={() =>
+                    decideApproval(
+                      approval,
+                      false
+                    )
+                  }
+                  disabled={
+                    decidingId ===
+                    approval.id
+                  }
+                  style={{
+                    background:
+                      "transparent",
+                    color:
+                      C.faint,
+                    border: `1px solid ${C.line}`,
+                    borderRadius: 6,
+                    padding:
+                      "6px 13px",
+                    fontSize: 10.5,
+                    cursor:
+                      "pointer",
+                  }}
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+
+  /* ==========================================================================
+   * MAIN RENDER
+   * ======================================================================== */
+
+  return (
+    <div
+      style={{
+        padding: 20,
+        maxWidth: 1000,
+        margin: "0 auto",
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        boxSizing: "border-box",
+        background: C.bg,
+        color: C.ink,
+      }}
+    >
+      {/* HEADER */}
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent:
+            "space-between",
+          gap: 12,
+          marginBottom: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span
+              style={{
+                color: C.teal,
+                fontSize: 21,
+                fontWeight: 900,
+              }}
+            >
+              ◈
+            </span>
+
+            <span
+              style={{
+                fontSize: 20,
+                fontWeight: 900,
+              }}
+            >
+              JARVIS
+            </span>
+
+            <span
+              style={{
+                fontSize: 8,
+                fontWeight: 900,
+                letterSpacing: 0.7,
+                color: "#04070F",
+                background: C.teal,
+                borderRadius: 4,
+                padding:
+                  "2px 7px",
+              }}
+            >
+              {JARVIS_VERSION}
+            </span>
+          </div>
+
+          <div
+            style={{
+              fontSize: 10.5,
+              color: C.faint,
+              marginTop: 3,
+            }}
+          >
+            Intelligence · Planning · Research ·
+            Execution · Verification · Memory
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 5,
+            flexWrap: "wrap",
+          }}
+        >
+          {(
+            [
+              ["chat", "Chat"],
+              ["mission", "Mission"],
+              ["signals", "Signals"],
+              ["memory", "Memory"],
+              ["approvals", "Approvals"],
+            ] as [JarvisMode, string][]
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              onClick={() =>
+                setView(mode)
+              }
+              style={{
+                background:
+                  view === mode
+                    ? C.teal
+                    : C.panel,
+                color:
+                  view === mode
+                    ? "#04070F"
+                    : C.dim,
+                border: `1px solid ${
+                  mode ===
+                    "approvals" &&
+                  pendingApprovals.length
+                    ? C.amber
+                    : C.line
+                }`,
+                borderRadius: 6,
+                padding:
+                  "6px 10px",
+                fontSize: 10,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              {label}
+              {mode ===
+                "approvals" &&
+                pendingApprovals.length >
+                  0 &&
+                ` (${pendingApprovals.length})`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* AUTONOMY STATUS */}
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent:
+            "space-between",
+          gap: 10,
+          background: C.panel,
+          border: `1px solid ${C.line}`,
+          borderRadius: 7,
+          padding:
+            "7px 10px",
+          marginTop: 5,
+          marginBottom: 7,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            gap: 7,
+            alignItems: "center",
+            fontSize: 9.5,
+            color: C.faint,
+          }}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background:
+                autoMode
+                  ? C.green
+                  : C.faint,
+            }}
+          />
+
+          Autonomous monitoring:
+          <b
+            style={{
+              color: autoMode
+                ? C.green
+                : C.faint,
+            }}
+          >
+            {autoMode
+              ? "ON"
+              : "OFF"}
+          </b>
+        </div>
+
+        <button
+          onClick={() =>
+            setAutoMode(
+              (value) => !value
+            )
+          }
+          style={{
+            background:
+              autoMode
+                ? C.green
+                : "transparent",
+            color:
+              autoMode
+                ? "#04070F"
+                : C.dim,
+            border: `1px solid ${
+              autoMode
+                ? C.green
+                : C.line
+            }`,
+            borderRadius: 5,
+            padding:
+              "4px 8px",
+            fontSize: 9,
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+        >
+          {autoMode
+            ? "Disable"
+            : "Enable"}
+        </button>
+      </div>
+
+      {/* ERROR */}
+
+      {error && (
+        <div
+          style={{
+            background:
+              "rgba(239,68,68,0.08)",
+            border: `1px solid ${C.red}55`,
+            borderRadius: 8,
+            padding:
+              "8px 11px",
+            marginTop: 8,
+            marginBottom: 5,
+            fontSize: 10.5,
+            color: C.red,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {/* VIEW */}
+
+      {view === "chat" &&
+        renderChat()}
+
+      {view === "mission" &&
+        renderMission()}
+
+      {view === "signals" &&
+        renderSignals()}
+
+      {view === "memory" &&
+        renderMemory()}
+
+      {view === "approvals" &&
+        renderApprovals()}
+
+      {/* POLICY FOOTER */}
+
+      <div
+        style={{
+          borderTop: `1px solid ${C.line}`,
+          marginTop: 8,
+          paddingTop: 7,
+          display: "flex",
+          justifyContent:
+            "space-between",
+          gap: 10,
+          fontSize: 8.5,
+          color: C.faint,
+        }}
+      >
+        <span>
+          JARVIS does not fabricate execution.
+        </span>
+
+        <span>
+          Consequential actions require authorization.
+        </span>
+
+        <span>
+          Self-improvement is verified before deployment.
+        </span>
+      </div>
     </div>
   );
 }
