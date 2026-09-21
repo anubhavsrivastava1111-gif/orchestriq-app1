@@ -1,4 +1,4 @@
-import {
+
   useState,
   useEffect,
   useCallback,
@@ -71,6 +71,7 @@ type ToolDefinition = {
   requiresApproval: boolean;
   riskCategory?: string;
   handler: (input: any) => Promise<any>;
+  executeApproved?: (input: any) => Promise<any>;
 };
 
 type MissionStep = {
@@ -82,7 +83,8 @@ type MissionStep = {
     | "running"
     | "completed"
     | "failed"
-    | "skipped";
+    | "skipped"
+    | "paused";
   tool?: string;
   result?: any;
   error?: string;
@@ -137,6 +139,20 @@ type MemoryItem = {
   importance: number;
 };
 
+
+type JarvisGateway = {
+  getPlatformManifest?: () => Promise<any> | any;
+  getRepositorySnapshot?: (input?: any) => Promise<any> | any;
+  searchRepository?: (input: { query: string; path?: string; maxResults?: number }) => Promise<any> | any;
+  inspectModule?: (input: { module: string; detail?: string }) => Promise<any> | any;
+  getModuleSnapshot?: (input?: { modules?: string[] }) => Promise<any> | any;
+};
+
+declare global {
+  interface Window {
+    __ORCHESTRIQ_JARVIS_GATEWAY__?: JarvisGateway;
+  }
+}
 type JarvisProps = {
   ask: (
     sys: any,
@@ -164,18 +180,26 @@ type JarvisProps = {
   }>;
 
   ledgerEntries?: any[];
+
+  /**
+   * Optional host-provided gateway. This is the secure bridge between JARVIS
+   * and the rest of OrchestrIQ. It may expose read-only repository/module
+   * inspection and separately controlled execution endpoints.
+   */
+  gateway?: JarvisGateway;
 };
 
 /* ============================================================================
  * CONFIGURATION
  * ========================================================================== */
 
-const JARVIS_VERSION = "3.0.0";
+const JARVIS_VERSION = "4.0.0";
 
 const EXECUTION_POLICY = {
   allowReadOnly: true,
   allowLowRisk: true,
   requireApprovalForConsequential: true,
+  requireOwnerApprovalForAllExternalWrites: true,
   allowDangerous: false,
   allowSelfModification: false,
 };
@@ -247,6 +271,8 @@ Known architectural facts:
     UNKNOWN
 
 The architecture briefing is contextual memory, NOT live repository access.
+
+For live repository/module access, use the controlled JarvisGateway tools. If those tools report unavailable, say exactly what capability is missing. Never infer access from the fact that the JARVIS UI is embedded in the application.
 `;
 
 /* ============================================================================
@@ -414,14 +440,253 @@ function retrieveMemory(query: string, limit = 8): MemoryItem[] {
 }
 
 /* ============================================================================
+ * CONTROLLED PLATFORM GATEWAY
+ *
+ * JARVIS cannot magically inspect source code or modules from a browser
+ * component. The host application must expose a read-only gateway. We accept
+ * it explicitly through props or through the documented window bridge.
+ * No gateway means JARVIS reports the missing capability instead of guessing.
+ * ========================================================================== */
+
+function resolveGateway(explicit?: JarvisGateway): JarvisGateway | undefined {
+  if (explicit) return explicit;
+  try {
+    return window.__ORCHESTRIQ_JARVIS_GATEWAY__;
+  } catch {
+    return undefined;
+  }
+}
+
+async function callGateway<T>(
+  fn: (() => Promise<T> | T) | undefined,
+  missing: string
+): Promise<any> {
+  if (!fn) {
+    return {
+      available: false,
+      capability: missing,
+      reason: `JARVIS does not have the ${missing} gateway connected in this session.`,
+      requiredIntegration: `Expose the ${missing} capability through JarvisGateway.`,
+    };
+  }
+  try {
+    const data = await fn();
+    return { available: true, data };
+  } catch (error: any) {
+    return {
+      available: false,
+      capability: missing,
+      error: error?.message || String(error),
+    };
+  }
+}
+
+/* ============================================================================
  * TOOL REGISTRY
  * ========================================================================== */
 
 function buildJarvisTools(ctx: {
   ledgerEntries?: any[];
   isOwner?: boolean;
+  gateway?: JarvisGateway;
 }): ToolDefinition[] {
+  const gateway = resolveGateway(ctx.gateway);
+
   const tools: ToolDefinition[] = [
+    {
+      name: "get_platform_access",
+      description:
+        "Determine exactly what live OrchestrIQ platform, module, repository, and execution capabilities are connected to JARVIS in this session. Use this before claiming access.",
+      input_schema: { type: "object", properties: {}, required: [] },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async () => {
+        const manifest = await callGateway(
+          gateway?.getPlatformManifest,
+          "platform manifest"
+        );
+        return {
+          session_authenticated: Boolean(await currentUserId()),
+          gateway_connected: Boolean(gateway),
+          gateway_manifest: manifest,
+          built_in_capabilities: [
+            "JARVIS conversation history",
+            "JARVIS structured memory",
+            "JARVIS signals",
+            "Cost Architecture signal detector",
+            "platform statistics snapshot",
+            "loaded General Ledger session data",
+            "Live Boardroom session metadata",
+            "AI Workspace conversation metadata",
+          ],
+          repository_access: Boolean(gateway?.getRepositorySnapshot || gateway?.searchRepository),
+          module_inspection: Boolean(gateway?.inspectModule || gateway?.getModuleSnapshot),
+          write_authority: "OWNER_APPROVAL_REQUIRED",
+          dangerous_operations: "BLOCKED",
+        };
+      },
+    },
+    {
+      name: "get_repository_snapshot",
+      description:
+        "Read a repository-wide snapshot supplied by the OrchestrIQ host gateway. This is observational only and never edits code.",
+      input_schema: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          maxChars: { type: "number" },
+        },
+        required: [],
+      },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        return callGateway(
+          gateway?.getRepositorySnapshot
+            ? () => gateway.getRepositorySnapshot?.(input)
+            : undefined,
+          "repository access"
+        );
+      },
+    },
+    {
+      name: "search_codebase",
+      description:
+        "Search the connected OrchestrIQ repository for files, symbols, components, APIs, database calls, configuration, or other code. Read-only.",
+      input_schema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          path: { type: "string" },
+          maxResults: { type: "number" },
+        },
+        required: ["query"],
+      },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        if (!gateway?.searchRepository) {
+          return {
+            available: false,
+            capability: "repository search",
+            reason: "No repository search gateway is connected.",
+          };
+        }
+        try {
+          return {
+            available: true,
+            data: await gateway.searchRepository({
+              query: String(input?.query || ""),
+              path: input?.path ? String(input.path) : undefined,
+              maxResults: Math.min(100, Math.max(1, Number(input?.maxResults) || 25)),
+            }),
+          };
+        } catch (error: any) {
+          return { available: false, error: error?.message || String(error) };
+        }
+      },
+    },
+    {
+      name: "inspect_module",
+      description:
+        "Inspect a named OrchestrIQ module through the connected host gateway. Use this when the owner asks what a module does, what is broken, or what data/code it currently exposes.",
+      input_schema: {
+        type: "object",
+        properties: {
+          module: { type: "string" },
+          detail: { type: "string" },
+        },
+        required: ["module"],
+      },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        if (!gateway?.inspectModule) {
+          return {
+            available: false,
+            capability: "module inspection",
+            requested_module: input?.module,
+            reason: "No module inspection gateway is connected.",
+          };
+        }
+        try {
+          return {
+            available: true,
+            data: await gateway.inspectModule({
+              module: String(input?.module || ""),
+              detail: input?.detail ? String(input.detail) : undefined,
+            }),
+          };
+        } catch (error: any) {
+          return { available: false, error: error?.message || String(error) };
+        }
+      },
+    },
+    {
+      name: "get_module_snapshot",
+      description:
+        "Read current snapshots for one or more OrchestrIQ modules through the host gateway. Read-only.",
+      input_schema: {
+        type: "object",
+        properties: {
+          modules: { type: "array", items: { type: "string" } },
+        },
+        required: [],
+      },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        if (!gateway?.getModuleSnapshot) {
+          return {
+            available: false,
+            capability: "module snapshot",
+            reason: "No module snapshot gateway is connected.",
+          };
+        }
+        try {
+          const modules = Array.isArray(input?.modules)
+            ? input.modules.map(String).slice(0, 50)
+            : undefined;
+          return { available: true, data: await gateway.getModuleSnapshot({ modules }) };
+        } catch (error: any) {
+          return { available: false, error: error?.message || String(error) };
+        }
+      },
+    },
+    {
+      name: "create_code_improvement_proposal",
+      description:
+        "Record a proposed code or architecture improvement. This NEVER edits, commits, deploys, or overwrites production code.",
+      input_schema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          files: { type: "array", items: { type: "string" } },
+          problem: { type: "string" },
+          proposed_change: { type: "string" },
+          expected_benefit: { type: "string" },
+          verification_plan: { type: "string" },
+        },
+        required: ["title", "problem", "proposed_change", "expected_benefit", "verification_plan"],
+      },
+      riskLevel: "low_risk",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        const proposal = {
+          id: uid("code_proposal"),
+          createdAt: nowIso(),
+          ...input,
+          status: "proposal_only",
+          execution: "blocked_until_owner_approval",
+        };
+        const key = "orchestriq-jarvis-code-proposals-v4";
+        try {
+          const existing = JSON.parse(localStorage.getItem(key) || "[]");
+          localStorage.setItem(key, JSON.stringify([...existing, proposal].slice(-100)));
+        } catch {}
+        return { recorded: true, proposal };
+      },
+    },
     {
       name: "get_open_signals",
 
@@ -818,6 +1083,7 @@ function buildJarvisTools(ctx: {
       requiresApproval: true,
       riskCategory: "financial",
 
+      // Conversation/mission phase: create a pending approval only.
       handler: async (input: any) => {
         const uid = await currentUserId();
 
@@ -846,6 +1112,25 @@ function buildJarvisTools(ctx: {
         return {
           queued_for_owner_approval: true,
           approval: data,
+        };
+      },
+
+      // Execution phase: ONLY called from the owner approval handler.
+      executeApproved: async (input: any) => {
+        const uid = await currentUserId();
+        if (!uid) return { error: "Not signed in" };
+        const { error } = await supabase.from("ca_price_history").insert({
+          user_id: uid,
+          resource_id: input.resource_id,
+          price: input.new_price,
+          effective_date: new Date().toISOString().slice(0, 10),
+          source: "jarvis_lab_approved",
+        });
+        if (error) return { error: error.message };
+        return {
+          updated: true,
+          resource_id: input.resource_id,
+          new_price: input.new_price,
         };
       },
     },
@@ -946,6 +1231,9 @@ async function executeTool(
     };
   }
 
+  // A consequential tool's normal handler is a proposal/approval request.
+  // It is never the real write path. Real writes are reachable only through
+  // executeApproved(), called after an owner approval record is verified.
   return tool.handler(input);
 }
 
@@ -1021,9 +1309,13 @@ You may use permitted read-only tools.
 
 You may store low-risk structured memories.
 
-Consequential actions require approval.
+Consequential actions require explicit owner approval.
+
+Any external write, configuration change, code change, deployment, financial action, data mutation, or permission change requires explicit owner approval.
 
 Dangerous actions are blocked.
+
+The owner approval is an authority boundary, not a conversational preference. Never bypass it by using another tool, another provider, a mission loop, or a self-improvement mechanism.
 
 Self-modification is proposal-only.
 
@@ -1104,14 +1396,16 @@ export default function JarvisLab({
   isOwner,
   availableProviders,
   ledgerEntries,
+  gateway,
 }: JarvisProps) {
   const jarvisTools = useMemo(
     () =>
       buildJarvisTools({
         ledgerEntries,
         isOwner,
+        gateway,
       }),
-    [ledgerEntries, isOwner]
+    [ledgerEntries, isOwner, gateway]
   );
 
   const [view, setView] = useState<JarvisMode>("chat");
@@ -2123,8 +2417,8 @@ Give a concise verification report.
     );
   };
 
-  const runMission = async () => {
-    const goal = missionGoal.trim();
+  const runMission = async (goalOverride?: string) => {
+    const goal = (goalOverride ?? missionGoal).trim();
 
     if (!goal || thinking) return;
 
@@ -2369,7 +2663,7 @@ Do not execute consequential changes.
 
     setMissionGoal(goal);
 
-    await runMission();
+    await runMission(goal);
   };
 
   /* ==========================================================================
@@ -2675,9 +2969,16 @@ CONFIDENCE:
     approval: any,
     approve: boolean
   ) => {
+    if (!isOwner) {
+      setError("Only the platform owner can approve or reject JARVIS actions.");
+      return;
+    }
+
     setDecidingId(approval.id);
 
     try {
+      const uid = await currentUserId();
+      if (!uid) throw new Error("Owner session is not authenticated.");
       if (!approve) {
         await supabase
           .from("jarvis_lab_approvals")
@@ -2685,7 +2986,8 @@ CONFIDENCE:
             status: "rejected",
             decided_at: nowIso(),
           })
-          .eq("id", approval.id);
+          .eq("id", approval.id)
+          .eq("user_id", uid);
 
         remember({
           type: "decision",
@@ -2715,7 +3017,8 @@ CONFIDENCE:
             error: "Tool no longer exists.",
             decided_at: nowIso(),
           })
-          .eq("id", approval.id);
+          .eq("id", approval.id)
+          .eq("user_id", uid);
 
         await loadApprovals();
 
@@ -2731,7 +3034,8 @@ CONFIDENCE:
               "Dangerous operations are disabled.",
             decided_at: nowIso(),
           })
-          .eq("id", approval.id);
+          .eq("id", approval.id)
+          .eq("user_id", uid);
 
         await loadApprovals();
 
@@ -2744,10 +3048,17 @@ CONFIDENCE:
           status: "approved",
           decided_at: nowIso(),
         })
-        .eq("id", approval.id);
+        .eq("id", approval.id)
+          .eq("user_id", uid);
 
       try {
-        const result = await tool.handler(
+        if (!tool.executeApproved) {
+          throw new Error(
+            "This action has no owner-approved execution handler. It remains blocked."
+          );
+        }
+
+        const result = await tool.executeApproved(
           approval.proposed_input
         );
 
@@ -2758,7 +3069,8 @@ CONFIDENCE:
             result,
             executed_at: nowIso(),
           })
-          .eq("id", approval.id);
+          .eq("id", approval.id)
+          .eq("user_id", uid);
 
         remember({
           type: "success",
@@ -2779,7 +3091,8 @@ CONFIDENCE:
               e?.message ||
               "Execution failed.",
           })
-          .eq("id", approval.id);
+          .eq("id", approval.id)
+          .eq("user_id", uid);
 
         remember({
           type: "failure",
@@ -2831,13 +3144,13 @@ CONFIDENCE:
       signal.source_module === filter
   );
 
-  const modules = Array.from(
+  const modules: string[] = Array.from(
     new Set(
       signals.map(
         (signal) => signal.source_module
       )
     )
-  );
+  ) as string[];
 
   /* ==========================================================================
    * AUTO MODE TIMER
@@ -4605,7 +4918,11 @@ CONFIDENCE:
         </span>
 
         <span>
-          Self-improvement is verified before deployment.
+          Self-improvement is proposal-only.
+        </span>
+
+        <span>
+          {resolveGateway(gateway) ? "Platform gateway connected" : "Platform gateway not connected"}
         </span>
       </div>
     </div>
