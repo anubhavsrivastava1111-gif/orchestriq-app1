@@ -64,6 +64,79 @@ KNOWN STRUCTURE AND RISK AREAS OF THIS CODEBASE (OrchestrIQ):
 
 type ChatMsg = { role:"user"|"assistant"; content:string };
 
+// ============================================================================
+// PHASE 2 — REAL TOOLS. Each one has a defined purpose, input shape, and a
+// risk level, per the tool/permission architecture asked for. Every handler
+// here is "read_only" — Phase 2 is Tier 1 (observe/diagnose/recommend) only;
+// nothing here writes, deletes, or changes anything. Tier 2 (execute) is a
+// deliberately separate, later phase with its own approval gate.
+// ============================================================================
+async function currentUserId():Promise<string|null>{
+  const { data:{ user } } = await supabase.auth.getUser();
+  return user?.id || null;
+}
+
+const JARVIS_TOOLS = [
+  {
+    name: "get_open_signals",
+    description: "Get the current list of open (unresolved) signals JARVIS has already detected — anomalies, risks, or opportunities across the platform. Use this before answering any question about current problems or what needs attention.",
+    input_schema: { type:"object", properties:{}, required:[] },
+    riskLevel: "read_only" as const,
+    handler: async () => {
+      const uid = await currentUserId();
+      if (!uid) return { error: "Not signed in" };
+      const { data } = await supabase.from("jarvis_lab_signals").select("title,severity,source_module,description,detected_at")
+        .eq("user_id", uid).not("status","in.(dismissed,resolved)").order("severity",{ascending:false}).limit(20);
+      return { open_signal_count: data?.length || 0, signals: data || [] };
+    },
+  },
+  {
+    name: "get_cost_anomalies",
+    description: "Check Cost Architecture directly for resource price changes of 20% or more since the last recorded price. This queries live data, not just what's already been flagged as a signal — use it to actively investigate cost/margin questions, not just report past findings.",
+    input_schema: { type:"object", properties:{}, required:[] },
+    riskLevel: "read_only" as const,
+    handler: async () => {
+      const uid = await currentUserId();
+      if (!uid) return { error: "Not signed in" };
+      const { data, error } = await supabase.rpc("jarvis_lab_detect_cost_signals", { p_user_id: uid });
+      if (error) return { error: error.message };
+      const { data: recent } = await supabase.from("jarvis_lab_signals").select("title,description,data")
+        .eq("user_id", uid).eq("source_module","cost_architecture").order("detected_at",{ascending:false}).limit(10);
+      return { new_anomalies_found_this_check: data ?? 0, current_cost_signals: recent || [] };
+    },
+  },
+  {
+    name: "get_ledger_status",
+    description: "Check the General Ledger for financial anomalies or discrepancies.",
+    input_schema: { type:"object", properties:{}, required:[] },
+    riskLevel: "read_only" as const,
+    handler: async () => ({
+      // AN HONEST FINDING, NOT A FAKE TOOL: the Ledger module currently
+      // stores its data only in each user's local browser storage - there
+      // is no server-side table for it at all. A tool that pretended to
+      // check this would be worse than no tool - it would look like a
+      // real check that silently found nothing. This tells the truth
+      // instead, and names exactly what would need to change.
+      available: false,
+      reason: "The Ledger module currently has no server-side database table - its entries live only in the browser that created them. JARVIS runs server-side and cannot see browser-local data. This would need Ledger to be migrated to persist in Supabase before it can be monitored.",
+    }),
+  },
+  {
+    name: "get_platform_stats",
+    description: "Get real, current platform numbers: total users, users by plan, recent signups, and counts of open signals by severity and by module. Use this for any question about user counts, plan distribution, or overall platform state.",
+    input_schema: { type:"object", properties:{}, required:[] },
+    riskLevel: "read_only" as const,
+    handler: async () => {
+      const uid = await currentUserId();
+      if (!uid) return { error: "Not signed in" };
+      const { data, error } = await supabase.rpc("jarvis_platform_snapshot", { p_user_id: uid });
+      if (error) return { error: error.message };
+      return data || {};
+    },
+  },
+];
+
+
 const C = {
   bg:"#070B14", panel:"#0F1420", raised:"#0A0E1A", line:"#1A2030",
   ink:"#F1F5F9", dim:"#A0AAC0", faint:"#5A6480", teal:"#14B8A6",
@@ -82,7 +155,7 @@ type Recommendation = {
   confidence:string; provider:string; model:string; created_at:string;
 };
 
-export default function JarvisLab({ ask, isOwner, availableProviders }: { ask:(sys:any,msg:any,maxT:number,enableSearch?:boolean,taskType?:string,provider?:string,model?:string)=>Promise<string>; isOwner?:boolean; availableProviders?: Array<{id:string;label:string}> }) {
+export default function JarvisLab({ ask, askWithTools, isOwner, availableProviders }: { ask:(sys:any,msg:any,maxT:number,enableSearch?:boolean,taskType?:string,provider?:string,model?:string)=>Promise<string>; askWithTools?:(sys:string,userMsg:string,history:{role:string;content:string}[],tools:any[],onToolCall?:(name:string,input:any)=>void)=>Promise<string>; isOwner?:boolean; availableProviders?: Array<{id:string;label:string}> }) {
   const [view, setView] = useState<"chat"|"signals">("chat");
   const [signals, setSignals] = useState<Signal[]>([]);
   const [recos, setRecos] = useState<Record<string,Recommendation>>({});
@@ -93,6 +166,16 @@ export default function JarvisLab({ ask, isOwner, availableProviders }: { ask:(s
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [thinking, setThinking] = useState(false);
+  // PHASE 2 TRANSPARENCY: shows which tool JARVIS is actually calling
+  // right now, in plain language — the visible half of "what did JARVIS
+  // see, and why did it decide to look" that auditability requires.
+  const [toolActivity, setToolActivity] = useState<string|null>(null);
+  const TOOL_LABELS:Record<string,string> = {
+    get_open_signals: "Checking known issues…",
+    get_cost_anomalies: "Checking Cost Architecture for anomalies…",
+    get_ledger_status: "Checking the Ledger…",
+    get_platform_stats: "Checking platform numbers…",
+  };
   const [loadingHistory, setLoadingHistory] = useState(true);
   // VOICE — JARVIS speaks its replies aloud, on by default, one click to
   // mute. Uses the browser's own built-in speech synthesis - no new
@@ -177,35 +260,54 @@ export default function JarvisLab({ ask, isOwner, availableProviders }: { ask:(s
     saveMsg("user", userText);
     const nextMsgs: ChatMsg[] = [...messages, { role:"user", content:userText }];
     setMessages(nextMsgs);
-    setThinking(true); setError(null);
+    setThinking(true); setError(null); setToolActivity(null);
+    const history = nextMsgs.slice(-10).map(m => ({ role:m.role, content:m.content }));
+    const corePersonality = "You are JARVIS, the operating intelligence for a business platform called OrchestrIQ, speaking directly with " +
+      (isOwner ? "the platform's owner" : "a user of the platform") + ". Be direct, specific, and genuinely knowledgeable — " +
+      "like a top-tier colleague, not a scripted assistant. You currently have NO ability to change, delete, or execute " +
+      "anything — you can only observe, analyze, and recommend; say so plainly if asked to act. " +
+      "If a question needs information, access, or a capability you don't currently have, say exactly that — name what's " +
+      "missing and what would need to be added to do it — rather than pretending, refusing vaguely, or staying silent. " +
+      "You have real tools to look up current platform data — use them whenever a question needs actual numbers or " +
+      "current state, rather than guessing or relying on what you were told earlier in the conversation.";
     try {
-      // TOKEN EFFICIENCY, FIXED PROPERLY: with conversations now persisted
-      // across sessions, messages.length is no longer a safe way to tell
-      // "is this genuinely the first turn" — loaded history would make it
-      // look like every session is a continuation, so the platform
-      // snapshot would never refresh again after the very first day. This
-      // tracks it per browser session instead, so it's still sent once
-      // when you open JARVIS today, even if yesterday's conversation loaded in.
+      // PHASE 2, THE ACTUAL UPGRADE: when tool-calling is available, JARVIS
+      // decides for itself what to look up, and only when the question
+      // actually needs it — a real improvement over always front-loading a
+      // snapshot whether or not it was relevant. This also means fresher
+      // data: a tool call happens at the moment it's needed, not once at
+      // the start of a session that might be hours old by now.
+      if (askWithTools) {
+        try {
+          const reply = await Promise.race([
+            askWithTools(corePersonality + "\n\n" + ARCHITECTURE_BRIEFING, userText, history, JARVIS_TOOLS,
+              (name) => setToolActivity(name)),
+            new Promise<string>((_, reject) => setTimeout(() => reject(new Error("timeout")), 60000)),
+          ]);
+          setToolActivity(null);
+          setMessages(m => [...m, { role:"assistant", content:reply }]);
+          saveMsg("assistant", reply);
+          speak(reply);
+          setThinking(false);
+          return;
+        } catch (toolErr:any) {
+          // GRACEFUL FALLBACK, NOT A HARD FAILURE: no Claude key, or the
+          // tool-calling attempt itself failed for any reason — fall
+          // through to the plain, proven single-shot approach below
+          // rather than leaving the user with an error for something
+          // that used to work fine a phase ago.
+          console.warn("[JarvisLab] tool-calling unavailable, falling back:", toolErr?.message);
+        }
+      }
+
       const isFirstTurn = !sentContextThisSession.current;
       sentContextThisSession.current = true;
       const snapshot = isFirstTurn ? await getSnapshot() : null;
-
-      const corePersonality = "You are JARVIS, the operating intelligence for a business platform called OrchestrIQ, speaking directly with " +
-        (isOwner ? "the platform's owner" : "a user of the platform") + ". Be direct, specific, and genuinely knowledgeable — " +
-        "like a top-tier colleague, not a scripted assistant. You currently have NO ability to change, delete, or execute " +
-        "anything — you can only observe, analyze, and recommend; say so plainly if asked to act. " +
-        "If a question needs information, access, or a capability you don't currently have, say exactly that — name what's " +
-        "missing and what would need to be added to do it — rather than pretending, refusing vaguely, or staying silent.";
-
       const sys = isFirstTurn
         ? corePersonality + "\n\nREAL, CURRENT PLATFORM DATA (use this for any question about users, plans, or open issues — never guess a number):\n" +
           JSON.stringify(snapshot || {}) + "\n\n" + ARCHITECTURE_BRIEFING
-        : corePersonality; // later turns rely on the conversation history below for continuity, not a resent briefing
+        : corePersonality;
 
-      const history = nextMsgs.slice(-10).map(m => ({ role:m.role, content:m.content }));
-      // A DEFENSIVE TIMEOUT: if a reply never comes back for any reason,
-      // this turns silence into a clear message within a bounded wait,
-      // rather than a chat that just looks frozen with no explanation.
       const reply = await Promise.race([
         ask(sys, history, 900, true, "jarvis", provider || undefined),
         new Promise<string>((_, reject) => setTimeout(() => reject(new Error("JARVIS didn't respond in time. This is usually a busy AI provider — try again in a moment, or switch models in Settings.")), 45000)),
@@ -350,7 +452,7 @@ export default function JarvisLab({ ask, isOwner, availableProviders }: { ask:(s
                 </div>
               </div>
             ))}
-            {thinking && <div style={{ fontSize:11, color:C.faint, fontStyle:"italic" }}>JARVIS is thinking…</div>}
+            {thinking && <div style={{ fontSize:11, color:toolActivity?C.teal:C.faint, fontStyle:"italic" }}>{toolActivity ? "◈ "+(TOOL_LABELS[toolActivity]||("Using "+toolActivity+"…")) : "JARVIS is thinking…"}</div>}
             <div ref={endRef} />
           </div>
           <div style={{ display:"flex", gap:8, paddingTop:10, borderTop:"1px solid "+C.line }}>
