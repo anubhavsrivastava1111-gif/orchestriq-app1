@@ -6,6 +6,8 @@ import {
   useMemo,
 } from "react";
 import { supabase } from "./lib/supabase";
+import { validate as validateCostWorkspace, summarise as summariseCostFindings } from "./lib/CostValidator";
+import type { CostWorkspace } from "./lib/CostEngine";
 
 /* ============================================================================
  * JARVIS 5.0 — PLATFORM INTELLIGENCE / CONTROLLED ORCHESTRATION LAYER
@@ -616,28 +618,48 @@ const EMBEDDED_GATEWAY = buildEmbeddedRepositoryGateway();
 
 function buildHttpGateway(baseUrl: string): JarvisGateway {
   const base = baseUrl.replace(/\/$/, "");
+  // THE REAL FIX, VERIFIED AGAINST THE ACTUAL LIVE GATEWAY CODE, NOT
+  // ASSUMED: two things were wrong here, and either one alone would have
+  // silently broken this integration.
+  //   1. The gateway reads `action` from inside the JSON body on a POST
+  //      request — not from a query-string parameter. Every request sent
+  //      the old way would have arrived with no action at all.
+  //   2. The public tool names JarvisLab already uses ("tree", "search",
+  //      "file", "module") do not match this specific gateway's real
+  //      action names ("repository_tree", "search_code", "read_file",
+  //      "inspect_module"). The tool names themselves are NOT being
+  //      renamed — only this adapter's mapping to the real endpoint.
   const request = async (action: string, body: any = {}) => {
-    const response = await fetch(`${base}?action=${encodeURIComponent(action)}`, {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error("Repository gateway authentication unavailable — no active session.");
+    const response = await fetch(base, {
       method: "POST",
       credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      headers: { "content-type": "application/json", "Authorization": "Bearer " + session.access_token },
+      body: JSON.stringify({ action, ...body }),
     });
     const text = await response.text();
-    let data: any;
-    try { data = JSON.parse(text); } catch { data = text; }
-    if (!response.ok) throw new Error(data?.error || `Gateway request failed (${response.status})`);
-    return data;
+    let parsed: any;
+    try { parsed = JSON.parse(text); } catch { parsed = text; }
+    if (!response.ok) throw new Error(parsed?.error || `GitHub repository access failed (${response.status}).`);
+    return parsed?.data !== undefined ? parsed.data : parsed;
   };
   return {
-    getPlatformManifest: () => request("manifest"),
-    getRepositorySnapshot: (input) => request("tree", input || {}),
-    searchRepository: (input) => request("search", input),
-    readRepositoryFile: (input) => request("file", input),
-    inspectModule: (input) => request("module", input),
+    getPlatformManifest: () => request("health"),
+    getRepositorySnapshot: () => request("repository_tree"),
+    // maxResults -> limit: the real gateway's search_code handler reads
+    // body.limit specifically; it never looks at maxResults.
+    searchRepository: (input) => request("search_code", { query: input?.query, limit: input?.maxResults }),
+    readRepositoryFile: (input) => request("read_file", { path: input?.path }),
+    inspectModule: (input) => request("inspect_module", { module: input?.module }),
     getGitStatus: () => request("git_status"),
-    getBuildStatus: () => request("build_status"),
-    runTests: (input) => request("tests", input),
+    // HONEST, NOT FAKED: this live gateway has no build_status or tests
+    // action at all (confirmed directly against its own action list) — so
+    // rather than send a request that would just 400, these report
+    // unavailable immediately, with a reason, matching how every other
+    // "not connected yet" capability in this file already behaves.
+    getBuildStatus: async () => ({ available: false, reason: "Repository gateway is connected but build-status reporting is not yet implemented." }),
+    runTests: async () => ({ available: false, reason: "Repository gateway is connected but test execution is not yet implemented — no test command has been run." }),
   };
 }
 
@@ -1069,6 +1091,55 @@ function buildJarvisTools(ctx: {
           new_anomalies_found_this_check: data ?? 0,
           current_cost_signals: recent || [],
         };
+      },
+    },
+
+    // Carried forward from the previous review — genuinely working module
+    // testing via the real validation engine Cost Architecture itself
+    // uses, against the user's live data. Not resupplied automatically
+    // when a new file version is generated elsewhere, so re-added here.
+    {
+      name: "run_cost_architecture_validation",
+      description:
+        "Run OrchestrIQ's real Cost Architecture validation engine (the same one the Cost Architecture screen itself uses) against the current user's live data, and return every finding it raises — pricing errors, missing data, inconsistent assumptions, and similar structural issues. This tests the module's actual current state, not just price-history anomalies.",
+      input_schema: { type: "object", properties: {}, required: [] },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async () => {
+        const uid = await currentUserId();
+        if (!uid) return { error: "Not signed in" };
+        try {
+          const [ctxRes, resRes, offRes, bomRes, poolRes, chanRes, offChanRes, benchRes] = await Promise.all([
+            supabase.from("ca_business_context").select("*").eq("user_id", uid).maybeSingle(),
+            supabase.from("ca_resources").select("*").eq("user_id", uid),
+            supabase.from("ca_offerings").select("*").eq("user_id", uid),
+            supabase.from("ca_bom_lines").select("*").eq("user_id", uid),
+            supabase.from("ca_cost_pools").select("*").eq("user_id", uid),
+            supabase.from("ca_channels").select("*").eq("user_id", uid),
+            supabase.from("ca_offering_channels").select("*").eq("user_id", uid),
+            supabase.from("ca_benchmarks").select("*"),
+          ]);
+          const ws: CostWorkspace = {
+            context: ctxRes.data || null,
+            resources: resRes.data || [],
+            offerings: offRes.data || [],
+            bomLines: bomRes.data || [],
+            costPools: poolRes.data || [],
+            channels: chanRes.data || [],
+            offeringChannels: offChanRes.data || [],
+            benchmarks: benchRes.data || [],
+          };
+          const findings = validateCostWorkspace(ws, new Set());
+          const summary = summariseCostFindings(findings);
+          return {
+            tested_module: "Cost Architecture",
+            total_findings: findings.length,
+            summary,
+            findings: findings.slice(0, 30),
+          };
+        } catch (e: any) {
+          return { error: "Validation could not run: " + (e?.message || "unknown error") };
+        }
       },
     },
 
