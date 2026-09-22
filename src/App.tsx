@@ -9578,7 +9578,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
   // experimental code can misbehave without ever taking JARVIS itself down.
   jarvisMode==="experimental"&&me.role==="super_admin"
     ? <ErrorBoundary fallback={<Jarvis ask={askDirect} isOwner={true} availableProviders={wsProviders}/>}>
-        <JarvisLab ask={askDirect} askWithTools={askJarvisWithTools} isOwner={true} availableProviders={wsProviders} ledgerEntries={ledgerEntries}/>
+        <JarvisLab ask={askDirect} askWithTools={askJarvisWithTools} isOwner={true} availableProviders={wsProviders} ledgerEntries={ledgerEntries} gatewayBaseUrl="/api/jarvis"/>
       </ErrorBoundary>
     : <Jarvis ask={askDirect} isOwner={me.role==="super_admin"} availableProviders={wsProviders}/>
 )}
