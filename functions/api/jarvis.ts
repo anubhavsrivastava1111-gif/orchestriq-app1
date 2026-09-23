@@ -45,6 +45,7 @@ interface Env {
   // Existing Supabase configuration
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
+  SUPABASE_SERVICE_ROLE_KEY?: string;
 
   // GitHub configuration
   GITHUB_TOKEN: string;
@@ -164,21 +165,22 @@ const SENSITIVE_PATH_PATTERNS = [
 
 function corsHeaders(request: Request, env: Env): Headers {
   const origin = request.headers.get("Origin");
-
-  const allowedOrigin =
-    env.ALLOWED_ORIGIN ||
-    origin ||
-    "*";
-
-  return new Headers({
-    "Access-Control-Allow-Origin": allowedOrigin,
-    "Access-Control-Allow-Headers":
-      "Authorization, Content-Type, X-Requested-With",
+  const headers = new Headers({
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Requested-With",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
-    "Content-Type": "application/json; charset=utf-8"
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store"
   });
+
+  // Same-origin requests need no CORS permission. If cross-origin access is
+  // explicitly configured, allow only that exact origin — never wildcard.
+  if (origin && env.ALLOWED_ORIGIN && origin === env.ALLOWED_ORIGIN) {
+    headers.set("Access-Control-Allow-Origin", origin);
+  }
+
+  return headers;
 }
 
 function json(
@@ -396,10 +398,15 @@ async function getUserContext(
       `&id=eq.${encodeURIComponent(userId)}` +
       `&limit=1`;
 
+    const profileApiKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY;
+    const profileAuthorization = env.SUPABASE_SERVICE_ROLE_KEY
+      ? `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`
+      : `Bearer ${token}`;
+
     const profileResponse = await fetch(profileUrl, {
       headers: {
-        apikey: env.SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${token}`
+        apikey: profileApiKey,
+        Authorization: profileAuthorization
       }
     });
 
@@ -939,10 +946,18 @@ async function handleRequest(
   const env: Env = context.env;
 
   try {
-    /*
-     * Authenticate EVERY request.
-     */
-    const user = await getUserContext(request, env);
+    /* Authenticate every request. */
+    let user: UserContext;
+    try {
+      user = await getUserContext(request, env);
+    } catch (authError: any) {
+      return json(request, env, {
+        ok: false,
+        action: "authentication",
+        timestamp: now(),
+        error: authError?.message || "Authentication failed"
+      }, 401);
+    }
 
     /*
      * JARVIS is currently restricted to the owner.
