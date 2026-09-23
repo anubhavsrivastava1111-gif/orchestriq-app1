@@ -2497,7 +2497,6 @@ async function callMulti(keys,defP,sys,msgs,maxT=3500,enableSearch=false,taskTyp
       const s=(m||"").toLowerCase();
       if(s.includes("invalid api key")||s.includes("sign in")||s.includes("no api key"))return false;
       return s.includes("daily limit")||s.includes("daily free-tier limit")||s.includes("limit reached")
-        ||(active==="nvidia"&&/\b403\b/.test(s))
         ||s.includes("timeout")||s.includes("did not respond")||s.includes("did not finish")
         ||s.includes("network")||s.includes("failed to fetch")||s.includes("temporarily unavailable")
         ||s.includes("infrastructure error")||s.includes("empty answer")
@@ -4712,103 +4711,17 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     return typeof r==="string"?r:(r?.text||"");
   },[keys,defP]);
 
-  // JARVIS TOOL LOOP — provider-neutral.
-  // JARVIS must not depend on a user's Claude key just to inspect the repository.
-  // The existing provider router is used for reasoning calls, so configured
-  // providers can participate through the normal fallback chain.
-  // Consequential tools are queued for owner approval and never executed silently.
-  const askJarvisWithTools=useCallback(async(
-    sys:string,
-    userMsg:string,
-    history:{role:string;content:string}[],
-    tools:any[],
-    onToolCall?:(name:string,input:any)=>void
-  )=>{
-    const MAX_ITER=6;
-    let messages:any[]=[...history.map(h=>({role:h.role,content:h.content})),{role:"user",content:userMsg}];
-
-    const parseToolDecision=(raw:string):any|null=>{
-      if(!raw)return null;
-      const cleaned=String(raw).replace(/```(?:json)?/gi,"").replace(/```/g,"").trim();
-      try{const parsed=JSON.parse(cleaned);if(parsed&&typeof parsed==="object")return parsed;}catch{}
-      const start=cleaned.indexOf("{");
-      const end=cleaned.lastIndexOf("}");
-      if(start>=0&&end>start){try{return JSON.parse(cleaned.slice(start,end+1));}catch{}}
-      return null;
-    };
-
-    const toolContract=`
-JARVIS TOOL PROTOCOL — INTERNAL
-Return ONLY one JSON object. No markdown or commentary.
-Tool call: {"type":"tool","name":"EXACT_TOOL_NAME","input":{}}
-Final answer: {"type":"final","answer":"your answer"}
-Never invent a tool. Never claim a tool ran unless its result is supplied.
-Consequential tools are never executed automatically; they are queued for owner approval.
-
-AVAILABLE TOOLS:
-${tools.map((t:any)=>`- ${t.name}: ${t.description} [${t.riskLevel}; approval=${t.requiresApproval}]`).join("\n")}
-`;
-
-    for(let i=0;i<MAX_ITER;i++){
-      const routed=await callMulti(
-        keys,defP,sys+"\n\n"+toolContract,messages,1600,false,"jarvis_tool"
-      );
-      const raw=String(routed.primary||"").trim();
-      const decision=parseToolDecision(raw);
-
-      if(!decision || decision.type==="final" || !decision.type){
-        return decision?.answer ? String(decision.answer) : raw;
-      }
-      if(decision.type!=="tool" || !decision.name)return raw;
-
-      const tool=tools.find((candidate:any)=>candidate.name===String(decision.name));
-      if(!tool){
-        messages.push({role:"assistant",content:raw});
-        messages.push({role:"user",content:`TOOL RESULT: ${JSON.stringify({error:`Unknown tool: ${decision.name}`})}`});
-        continue;
-      }
-
-      const input=decision.input&&typeof decision.input==="object"?decision.input:{};
-      onToolCall?.(tool.name,input);
-      let result:any;
-      let auditError:string|null=null;
-
-      if(tool.riskLevel==="dangerous" || tool.riskLevel==="consequential" || tool.requiresApproval){
-        try{
-          const {data:{user}}=await supabase.auth.getUser();
-          if(!user)throw new Error("Not signed in");
-          const {error:insertError}=await supabase.from("jarvis_lab_approvals").insert({
-            user_id:user.id,tool_name:tool.name,proposed_input:input,
-            reasoning:input?.reasoning||`Owner approval required for: ${tool.name}`,
-            risk_category:tool.riskCategory||"consequential",status:"pending",created_at:new Date().toISOString(),
-          });
-          if(insertError)throw insertError;
-          result={status:"pending_approval",message:"Queued for owner approval. NOT executed."};
-        }catch(e:any){
-          auditError=e?.message||"Could not queue approval";
-          result={error:auditError};
-        }
-      }else{
-        try{result=await tool.handler(input);}catch(e:any){
-          auditError=e?.message||"Tool execution failed";
-          result={error:auditError};
-        }
-      }
-
-      try{
-        const {data:{user}}=await supabase.auth.getUser();
-        if(user)await supabase.from("jarvis_lab_tool_calls").insert({
-          user_id:user.id,tool_name:tool.name,risk_level:tool.riskLevel,input,
-          output:auditError?null:result,error:auditError,
-        });
-      }catch{}
-
-      messages.push({role:"assistant",content:raw});
-      messages.push({role:"user",content:`TOOL RESULT FOR ${tool.name}:\n${JSON.stringify(result)}`});
-    }
-
-    return "JARVIS reached its safety limit before producing a final answer. Ask me to continue the investigation.";
-  },[keys,defP]);
+  // JARVIS PHASE 2 — exposes the new tool-calling loop to JarvisLab only.
+  // Tool-calling currently requires Claude specifically (its tool-use
+  // protocol is what callClaudeWithTools speaks) - an honest, named
+  // limitation rather than a silent one. If the owner has no Claude key,
+  // this throws a clear error JarvisLab can explain plainly, exactly per
+  // JARVIS's own instruction to name what's missing rather than fail quietly.
+  const askJarvisWithTools=useCallback(async(sys:string,userMsg:string,history:{role:string;content:string}[],tools:any[],onToolCall?:(name:string,input:any)=>void)=>{
+    const k=providerKey(keys,"claude");
+    if(!k)throw new Error("Tool-calling currently requires a Claude API key. Add one in Settings \u2192 API, or ask me something that doesn't need me to look anything up.");
+    return await callClaudeWithTools(k,sys,userMsg,history,tools,onToolCall);
+  },[keys]);
  
   // Only providers the user actually has a usable key for. A model they cannot
   // reach must never appear in the picker.
