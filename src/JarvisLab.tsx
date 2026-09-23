@@ -726,9 +726,14 @@ function buildJarvisTools(ctx: {
           gateway?.getPlatformManifest,
           "platform manifest"
         );
+        const hostGatewayConnected = Boolean(
+          ctx.gateway ||
+          ctx.gatewayBaseUrl ||
+          (typeof window !== "undefined" && window.__ORCHESTRIQ_JARVIS_GATEWAY_URL__)
+        );
         return {
           session_authenticated: Boolean(await currentUserId()),
-          gateway_connected: Boolean(gateway),
+          gateway_connected: hostGatewayConnected,
           gateway_manifest: manifest,
           built_in_capabilities: [
             "JARVIS conversation history",
@@ -740,7 +745,11 @@ function buildJarvisTools(ctx: {
             "Live Boardroom session metadata",
             "AI Workspace conversation metadata",
           ],
-          repository_access: Boolean(gateway?.getRepositorySnapshot || gateway?.searchRepository || gateway?.readRepositoryFile),
+          repository_access: hostGatewayConnected && Boolean(
+            gateway?.getRepositorySnapshot ||
+            gateway?.searchRepository ||
+            gateway?.readRepositoryFile
+          ),
           module_inspection: Boolean(gateway?.inspectModule || gateway?.getModuleSnapshot),
           source_tree_files: embeddedSourcePaths().length,
           source_tree_scope: "/src read-only",
