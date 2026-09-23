@@ -362,7 +362,20 @@ export async function proposeDecision(
     "\n\nFULL TRANSCRIPT:\n" + transcript.slice(-9000);
   const raw = await ask(sys, [{ role:"user", content:user }], 1000, false, "boardroom_decide", provider, model);
   const s = raw.indexOf("{"), e = raw.lastIndexOf("}");
-  return JSON.parse(raw.slice(s, e+1));
+  // THE ACTUAL BUG: this used to assume the model always returns valid
+  // JSON and threw uncaught if it didn't (a truncated reply, a provider
+  // hiccup, or the model adding prose around the JSON). The caller had no
+  // try/catch either, so that exception silently killed the entire
+  // synthesis step - no message, no error, nothing. Reported as "synthesis
+  // is not happening," and that is exactly what this was.
+  if (s < 0 || e <= s) {
+    throw new Error("The synthesis model did not return a usable decision (empty or malformed response). This is usually a temporary provider issue — try again, or switch models in Settings.");
+  }
+  try {
+    return JSON.parse(raw.slice(s, e+1));
+  } catch {
+    throw new Error("The synthesis model's response could not be read as a decision record. This is usually a temporary provider issue — try again, or switch models in Settings.");
+  }
 }
 
 // ── PERSISTENCE HELPERS ──────────────────────────────────────────────────────
