@@ -412,9 +412,23 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
           }
           if (route.research_needed.length) {
             setActivity(a=>[...a, "Researching: " + route.research_needed[0]]);
-            const r = await runResearch(route.research_needed[0]);
-            await BE.postMessage(sessionId, "system", null,
-              "Additional research \u2014 " + route.research_needed[0] + ": " + r.text.slice(0,600), { kind:"evidence" });
+            // THE ACTUAL BUG: this call sat outside any catch — the outer
+            // try around this whole loop only has a finally, no catch — so
+            // a failure here (a provider hiccup, a search-service error)
+            // propagated completely unhandled. Depending on how this
+            // function was invoked, that could mean total silence: no
+            // error, no message, the discussion simply stops. Reported as
+            // "research is not happening," which is exactly what this was.
+            try {
+              const r = await runResearch(route.research_needed[0]);
+              await BE.postMessage(sessionId, "system", null,
+                "Additional research \u2014 " + route.research_needed[0] + ": " + r.text.slice(0,600), { kind:"evidence" });
+            } catch (e:any) {
+              const msg = String(e?.message || e).slice(0, 200);
+              showToast?.("Research step failed: " + msg, "error");
+              await BE.postMessage(sessionId, "system", null,
+                "⚠ Could not complete research on \u201c" + route.research_needed[0] + "\u201d: " + msg, { kind:"text" });
+            }
             setActivity([]);
             continue;
           }
@@ -490,6 +504,15 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
         }
         if (forcedBreak) { sameDisagreementCount = 0; lastSpeakerPair = ""; }
       }
+    } catch (e:any) {
+      // A GENUINE SAFETY NET, NOT JUST BELT-AND-BRACES: this loop previously
+      // had no catch at all, only a finally — anything not already handled
+      // by an inner try (a database error, an unexpected exception) would
+      // propagate completely unhandled. Whatever this catches, the user
+      // sees something rather than the discussion just stopping.
+      const msg = String(e?.message || e).slice(0, 250);
+      showToast?.("The boardroom round stopped unexpectedly: " + msg, "error");
+      try { await BE.postMessage(sessionId, "system", null, "⚠ This round stopped unexpectedly: " + msg, { kind:"text" }); } catch {}
     } finally {
       runningRef.current = false; setActivity([]);
       if (queuedRef.current) { queuedRef.current = false; runRound(sessionId, roleIds); }
@@ -498,13 +521,25 @@ export default function LiveBoardroom({ ask, AR, buildIdentity, routerProviderMo
 
 
   const proposeDecisionNow = async (sessionId:string, roleIds:string[]) => {
-    const { data: mRows } = await supabase.from("boardroom_messages").select("*").eq("session_id", sessionId).order("created_at");
-    const { data: sRow } = await supabase.from("boardroom_sessions").select("decision_state").eq("id", sessionId).single();
-    const decision = await BE.proposeDecision(ask, rp, rm, objective || session?.objective || "",
-      transcriptOf((mRows as any)||[]), sRow?.decision_state || {});
-    await BE.mergeDecisionState(sessionId, { final_decision: decision });
-    await BE.postMessage(sessionId, "system", null, "The board has reached a proposed decision.", { kind:"decision_proposal" });
-    await BE.setStatus(sessionId, "decision_proposed");
+    try {
+      const { data: mRows } = await supabase.from("boardroom_messages").select("*").eq("session_id", sessionId).order("created_at");
+      const { data: sRow } = await supabase.from("boardroom_sessions").select("decision_state").eq("id", sessionId).single();
+      const decision = await BE.proposeDecision(ask, rp, rm, objective || session?.objective || "",
+        transcriptOf((mRows as any)||[]), sRow?.decision_state || {});
+      await BE.mergeDecisionState(sessionId, { final_decision: decision });
+      await BE.postMessage(sessionId, "system", null, "The board has reached a proposed decision.", { kind:"decision_proposal" });
+      await BE.setStatus(sessionId, "decision_proposed");
+    } catch (e:any) {
+      // THE ACTUAL FIX: this previously had no error handling at all, so a
+      // failed synthesis call just vanished — no message, no status
+      // change, nothing for the user to see. Now it's both visible
+      // immediately (a toast) and preserved in the transcript, and the
+      // session status is NOT changed, so it's clear the board is still
+      // waiting rather than looking like it silently finished.
+      const msg = String(e?.message || e).slice(0, 300);
+      showToast?.("Synthesis failed: " + msg, "error");
+      try { await BE.postMessage(sessionId, "system", null, "⚠ Synthesis failed: " + msg, { kind:"text" }); } catch {}
+    }
   };
 
   // ── P0-3/4/5/8: USER PARTICIPATES LIVE, AND CAN ANSWER OR SKIP A QUESTION ──
