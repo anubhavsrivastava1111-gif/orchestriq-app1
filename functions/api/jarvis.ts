@@ -364,13 +364,78 @@ async function verifySupabaseJwt(
     throw new Error("JWT signing key not found");
   }
 
+  /*
+   * Supabase supports asymmetric JWT signing with both RSA (RS256) and
+   * elliptic-curve P-256 (ES256). Do not hard-code RSA here: the JWKS key
+   * selected by `kid` is authoritative for the verification algorithm.
+   *
+   * Security rule: the JWT header algorithm, the JWK algorithm, and the
+   * JWK key type must agree. We never silently substitute one algorithm
+   * for another.
+   */
+  const headerAlg = typeof header.alg === "string" ? header.alg : "";
+  const keyAlg = typeof keyData.alg === "string" ? keyData.alg : "";
+  const keyType = typeof keyData.kty === "string" ? keyData.kty : "";
+
+  if (!headerAlg) {
+    throw new Error("JWT header does not contain an algorithm");
+  }
+
+  if (keyAlg && keyAlg !== headerAlg) {
+    throw new Error(
+      `JWT/JWK algorithm mismatch: token=${headerAlg}, key=${keyAlg}`
+    );
+  }
+
+  let importAlgorithm: RsaHashedImportParams | EcKeyImportParams;
+  let verifyAlgorithm: RsaPssParams | EcdsaParams | AlgorithmIdentifier;
+
+  switch (headerAlg) {
+    case "RS256": {
+      if (keyType !== "RSA") {
+        throw new Error(
+          `JWT/JWK key-type mismatch: RS256 requires RSA, received ${keyType || "unknown"}`
+        );
+      }
+
+      importAlgorithm = {
+        name: "RSASSA-PKCS1-v1_5",
+        hash: "SHA-256"
+      };
+      verifyAlgorithm = {
+        name: "RSASSA-PKCS1-v1_5"
+      };
+      break;
+    }
+
+    case "ES256": {
+      if (keyType !== "EC" || keyData.crv !== "P-256") {
+        throw new Error(
+          `JWT/JWK key mismatch: ES256 requires EC/P-256, received ${keyType || "unknown"}/${keyData.crv || "unknown"}`
+        );
+      }
+
+      importAlgorithm = {
+        name: "ECDSA",
+        namedCurve: "P-256"
+      };
+      verifyAlgorithm = {
+        name: "ECDSA",
+        hash: "SHA-256"
+      };
+      break;
+    }
+
+    default:
+      throw new Error(
+        `Unsupported Supabase JWT algorithm: ${headerAlg}. Supported algorithms are RS256 and ES256.`
+      );
+  }
+
   const cryptoKey = await crypto.subtle.importKey(
     "jwk",
     keyData,
-    {
-      name: "RSASSA-PKCS1-v1_5",
-      hash: "SHA-256"
-    },
+    importAlgorithm,
     false,
     ["verify"]
   );
@@ -382,9 +447,7 @@ async function verifySupabaseJwt(
   const signature = base64UrlDecode(parts[2]);
 
   const valid = await crypto.subtle.verify(
-    {
-      name: "RSASSA-PKCS1-v1_5"
-    },
+    verifyAlgorithm,
     cryptoKey,
     signature,
     data
