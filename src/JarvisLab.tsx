@@ -1175,11 +1175,27 @@ function buildJarvisTools(ctx: {
       requiresApproval: false,
       handler: async (input: any) => {
         if (!ctx.isOwner) return { available: false, blocked: true, reason: "Repository audit is owner-only." };
-        const paths = embeddedSourcePaths().slice(0, Math.min(300, Number(input?.maxFiles) || 200));
+        // THE ACTUAL FIX: this previously read from the dev-only embedded
+        // source mechanism (import.meta.glob, gated behind Vite's DEV
+        // flag) - confirmed empty by design in every production build.
+        // That is the entire reason source_files_scanned was always 0; it
+        // had nothing to do with the owner check. This now uses the same
+        // real gateway every other repository tool already uses.
+        if (!gateway?.getRepositorySnapshot || !gateway?.readRepositoryFile) {
+          return { available: false, reason: "No repository gateway is connected — repository audit cannot run without it." };
+        }
+        const snapshot = await gateway.getRepositorySnapshot();
+        const allPaths: string[] = (snapshot?.files || snapshot?.data?.files || [])
+          .map((f: any) => f?.path).filter((p: string) => /\.(ts|tsx|js|jsx)$/.test(p || ""));
+        const maxFiles = Math.min(300, Number(input?.maxFiles) || 200);
+        const paths = allPaths.slice(0, maxFiles);
         const files: Array<{ path: string; source: string }> = [];
         for (const path of paths) {
-          const source = await readEmbeddedSource(path);
-          if (source != null) files.push({ path, source });
+          try {
+            const result = await gateway.readRepositoryFile({ path });
+            const source: string = result?.content || result?.data?.content || "";
+            if (source) files.push({ path, source });
+          } catch { /* one unreadable file must not abort the whole audit */ }
         }
         const findings = staticSourceAudit(files);
         return { available: true, source_files_scanned: files.length, findings, finding_count: findings.length, top_files_by_size: files.map((f) => ({ path: f.path, bytes: f.source.length, lines: f.source.split(/\r?\n/).length })).sort((a,b) => b.bytes-a.bytes).slice(0,20) };
