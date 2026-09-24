@@ -43,8 +43,12 @@
 
 interface Env {
   // Existing Supabase configuration
-  SUPABASE_URL: string;
-  SUPABASE_ANON_KEY: string;
+  SUPABASE_URL?: string;
+  SUPABASE_ANON_KEY?: string;
+  // Compatibility: some Cloudflare deployments expose the existing app
+  // Supabase variables with the VITE_ prefix. Server-side code may use either.
+  VITE_SUPABASE_URL?: string;
+  VITE_SUPABASE_ANON_KEY?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
 
   // GitHub configuration
@@ -101,7 +105,7 @@ interface GitHubSearchItem {
 }
 
 interface GatewayRequest {
-  action: string;
+  action?: string;
   path?: string;
   query?: string;
   module?: string;
@@ -205,6 +209,42 @@ function now(): string {
   return new Date().toISOString();
 }
 
+/* -------------------------------------------------------------------------- */
+/* ENVIRONMENT RESOLUTION                                                     */
+/* -------------------------------------------------------------------------- */
+
+function supabaseUrl(env: Env): string {
+  const value = env.SUPABASE_URL || env.VITE_SUPABASE_URL;
+  if (!value || typeof value !== "string") {
+    throw new Error(
+      "JARVIS gateway configuration error: SUPABASE_URL (or VITE_SUPABASE_URL) is not configured."
+    );
+  }
+  return value.replace(/\/$/, "");
+}
+
+function supabaseAnonKey(env: Env): string {
+  const value = env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY;
+  if (!value || typeof value !== "string") {
+    throw new Error(
+      "JARVIS gateway configuration error: SUPABASE_ANON_KEY (or VITE_SUPABASE_ANON_KEY) is not configured."
+    );
+  }
+  return value;
+}
+
+function githubConfig(env: Env): { token: string; owner: string; repo: string } {
+  const token = env.GITHUB_TOKEN;
+  const owner = env.GITHUB_OWNER;
+  const repo = env.GITHUB_REPO;
+  if (!token || !owner || !repo) {
+    throw new Error(
+      "JARVIS gateway configuration error: GITHUB_TOKEN, GITHUB_OWNER, and GITHUB_REPO must all be configured."
+    );
+  }
+  return { token, owner, repo };
+}
+
 function clampLimit(value: unknown, fallback = 25): number {
   const n = Number(value);
 
@@ -276,7 +316,7 @@ function decodeJwtPayload(token: string): Record<string, unknown> {
 
 async function getSupabaseJWKS(env: Env): Promise<any> {
   const response = await fetch(
-    `${env.SUPABASE_URL.replace(/\/$/, "")}/auth/v1/.well-known/jwks.json`
+    `${supabaseUrl(env)}/auth/v1/.well-known/jwks.json`
   );
 
   if (!response.ok) {
@@ -392,13 +432,13 @@ async function getUserContext(
    */
   try {
     const profileUrl =
-      `${env.SUPABASE_URL.replace(/\/$/, "")}` +
+      `${supabaseUrl(env)}` +
       `/rest/v1/profiles` +
       `?select=role,email` +
       `&id=eq.${encodeURIComponent(userId)}` +
       `&limit=1`;
 
-    const profileApiKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY;
+    const profileApiKey = env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey(env);
     const profileAuthorization = env.SUPABASE_SERVICE_ROLE_KEY
       ? `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`
       : `Bearer ${token}`;
@@ -444,19 +484,21 @@ async function getUserContext(
 /* -------------------------------------------------------------------------- */
 
 function githubHeaders(env: Env): HeadersInit {
+  const { token } = githubConfig(env);
   return {
     Accept: "application/vnd.github+json",
-    Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+    Authorization: `Bearer ${token}`,
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "OrchestrIQ-JARVIS"
   };
 }
 
 function githubBase(env: Env): string {
+  const { owner, repo } = githubConfig(env);
   return (
     `https://api.github.com/repos/` +
-    `${encodeURIComponent(env.GITHUB_OWNER)}/` +
-    `${encodeURIComponent(env.GITHUB_REPO)}`
+    `${encodeURIComponent(owner)}/` +
+    `${encodeURIComponent(repo)}`
   );
 }
 
@@ -511,26 +553,27 @@ async function repositoryInfo(
   env: Env,
   branch?: string
 ) {
+  const { owner, repo } = githubConfig(env);
   const ref = githubRef(env, branch);
 
   const [repository, branchData] = await Promise.all([
     githubRequest(
       env,
-      `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(
-        env.GITHUB_REPO
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+        repo
       )}`
     ),
     githubRequest(
       env,
-      `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(
-        env.GITHUB_REPO
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+        repo
       )}/branches/${encodeURIComponent(ref)}`
     )
   ]);
 
   return {
-    owner: env.GITHUB_OWNER,
-    repository: env.GITHUB_REPO,
+    owner: owner,
+    repository: repo,
     branch: ref,
     private: repository.private,
     defaultBranch: repository.default_branch,
@@ -553,12 +596,13 @@ async function repositoryTree(
   env: Env,
   branch?: string
 ) {
+  const { owner, repo } = githubConfig(env);
   const ref = githubRef(env, branch);
 
   const branchData = await githubRequest(
     env,
-    `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(
-      env.GITHUB_REPO
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+      repo
     )}/branches/${encodeURIComponent(ref)}`
   );
 
@@ -570,8 +614,8 @@ async function repositoryTree(
 
   const tree = (await githubRequest(
     env,
-    `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(
-      env.GITHUB_REPO
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+      repo
     )}/git/trees/${encodeURIComponent(sha)}?recursive=1`
   )) as GitHubTreeResponse;
 
@@ -597,6 +641,7 @@ async function readFile(
   path: string,
   branch?: string
 ) {
+  const { owner, repo } = githubConfig(env);
   const normalized = normalizePath(path);
 
   if (!normalized) {
@@ -611,8 +656,8 @@ async function readFile(
 
   const result = await githubRequest(
     env,
-    `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/` +
-      `${encodeURIComponent(env.GITHUB_REPO)}/contents/` +
+    `/repos/${encodeURIComponent(owner)}/` +
+      `${encodeURIComponent(repo)}/contents/` +
       `${normalized}?ref=${encodeURIComponent(ref)}`
   );
 
@@ -653,6 +698,7 @@ async function searchCode(
   query: string,
   limit = 25
 ) {
+  const { owner, repo } = githubConfig(env);
   const cleanQuery = query?.trim();
 
   if (!cleanQuery) {
@@ -663,7 +709,7 @@ async function searchCode(
 
   const q =
     `${cleanQuery} ` +
-    `repo:${env.GITHUB_OWNER}/${env.GITHUB_REPO}`;
+    `repo:${owner}/${repo}`;
 
   const result = await githubRequest(
     env,
@@ -810,25 +856,26 @@ async function gitStatus(
   env: Env,
   branch?: string
 ) {
+  const { owner, repo } = githubConfig(env);
   const ref = githubRef(env, branch);
 
   const [repository, branchData, commits] =
     await Promise.all([
       githubRequest(
         env,
-        `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/` +
-          `${encodeURIComponent(env.GITHUB_REPO)}`
+        `/repos/${encodeURIComponent(owner)}/` +
+          `${encodeURIComponent(repo)}`
       ),
       githubRequest(
         env,
-        `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/` +
-          `${encodeURIComponent(env.GITHUB_REPO)}/branches/` +
+        `/repos/${encodeURIComponent(owner)}/` +
+          `${encodeURIComponent(repo)}/branches/` +
           `${encodeURIComponent(ref)}`
       ),
       githubRequest(
         env,
-        `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/` +
-          `${encodeURIComponent(env.GITHUB_REPO)}/commits` +
+        `/repos/${encodeURIComponent(owner)}/` +
+          `${encodeURIComponent(repo)}/commits` +
           `?sha=${encodeURIComponent(ref)}&per_page=10`
       )
     ]);
