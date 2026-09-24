@@ -932,6 +932,14 @@ function buildJarvisTools(ctx: {
           ctx.gatewayBaseUrl ||
           (typeof window !== "undefined" && window.__ORCHESTRIQ_JARVIS_GATEWAY_URL__)
         );
+        // THE ACTUAL FIX: repository_access/module_inspection/source_tree_files
+        // previously reported true (or a dev-only local count) purely from
+        // whether the CLIENT gateway object has these methods defined — which
+        // is always true regardless of whether the SERVER actually authorizes
+        // them. manifest above already made a real, authenticated call; its
+        // own success/failure is the only truthful signal for what this
+        // session can actually do, not the mere shape of the client object.
+        const verifiedAuthorized = manifest.available === true;
         return {
           session_authenticated: Boolean(await currentUserId()),
           gateway_connected: hostGatewayConnected,
@@ -946,14 +954,20 @@ function buildJarvisTools(ctx: {
             "Live Boardroom session metadata",
             "AI Workspace conversation metadata",
           ],
-          repository_access: hostGatewayConnected && Boolean(
+          repository_access: hostGatewayConnected && verifiedAuthorized && Boolean(
             gateway?.getRepositorySnapshot ||
             gateway?.searchRepository ||
             gateway?.readRepositoryFile
           ),
-          module_inspection: Boolean(gateway?.inspectModule || gateway?.getModuleSnapshot),
-          source_tree_files: embeddedSourcePaths().length,
-          source_tree_scope: "/src read-only",
+          module_inspection: verifiedAuthorized && Boolean(gateway?.inspectModule || gateway?.getModuleSnapshot),
+          // THE ACTUAL FIX: this called embeddedSourcePaths() - the same
+          // dev-only, production-empty mechanism already found and fixed in
+          // run_repository_audit - reporting a count with no connection to
+          // whether the real gateway is authorized or returning anything at
+          // all. This is honest about what it doesn't know rather than
+          // reporting a number derived from the wrong source.
+          source_tree_files: verifiedAuthorized ? "See get_repository_snapshot for the real, current count." : 0,
+          source_tree_scope: "/src, read-only, via the repository gateway",
           runtime_diagnostics: Boolean(gateway?.getRuntimeDiagnostics),
           database_schema_access: Boolean(gateway?.getDatabaseSchema),
           sandbox_testing: Boolean(gateway?.runTests || gateway?.runSandboxCheck),
