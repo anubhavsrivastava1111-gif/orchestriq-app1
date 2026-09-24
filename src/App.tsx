@@ -4484,7 +4484,8 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
         // the proven implementation, not the one being tested, is the
         // entire point of this mechanism.
         try{
-          const {data:mode}=await supabase.rpc("get_jarvis_mode");
+          const {data:mode,error:jarvisModeError}=await supabase.rpc("get_jarvis_mode");
+          console.log("[JARVIS MODE]", { data: mode, error: jarvisModeError });
           if(mode==="experimental")setJarvisMode("experimental");
         }catch(e){console.warn("[OIQ] jarvis mode check failed, staying on stable:",e);}
         // If this call fails for any reason we keep the default of unlimited.
