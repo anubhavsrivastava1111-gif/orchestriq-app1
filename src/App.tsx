@@ -1634,7 +1634,7 @@ type JarvisTool = { name:string; description:string; input_schema:any; riskLevel
 async function callClaudeWithTools(key:string, sys:string, userMsg:string, history:{role:string;content:string}[], tools:JarvisTool[], onToolCall?:(name:string,input:any)=>void):Promise<string>{
   const claudeTools=tools.map(t=>({name:t.name,description:t.description,input_schema:t.input_schema}));
   let messages:any[]=[...history.map(h=>({role:h.role,content:h.content})),{role:"user",content:userMsg}];
-  const MAX_ITER=5; // a hard ceiling — Tier 1 only calls read-only tools, but an infinite loop is never acceptable regardless
+  const MAX_ITER=12; // bounded multi-step tool loop: enough for real investigations while still preventing runaway execution
   for(let i=0;i<MAX_ITER;i++){
     const body:any={model:MODELS.claude.model,max_tokens:1200,system:sys,messages,tools:claudeTools};
     const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body),signal:AbortSignal.timeout(45000)});
@@ -4724,7 +4724,7 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
     tools:any[],
     onToolCall?:(name:string,input:any)=>void
   )=>{
-    const MAX_ITER=6;
+    const MAX_ITER=12; // bounded provider-neutral JARVIS tool loop; consequential tools remain approval-gated
     let messages:any[]=[...history.map(h=>({role:h.role,content:h.content})),{role:"user",content:userMsg}];
 
     const parseToolDecision=(raw:string):any|null=>{
