@@ -522,14 +522,34 @@ async function getUserContext(
         if (!email && profiles[0]?.email) {
           email = profiles[0].email;
         }
+      } else {
+        // DIAGNOSTIC ADDED: the request succeeded but returned zero rows —
+        // this is the exact shape of a userId that doesn't match any row,
+        // not a permissions failure. Logged server-side only; no token or
+        // key value is ever included.
+        console.error("[JARVIS AUTH] profile lookup returned 0 rows for userId:", userId);
       }
+    } else {
+      // DIAGNOSTIC ADDED: this is the actual gap. A non-ok response here
+      // was previously indistinguishable from "user is not owner" — it
+      // silently fell through to role=undefined either way. This reveals
+      // the real status and body so the true cause is visible in
+      // Cloudflare's function logs, without ever logging the key/token used.
+      const bodyText = await profileResponse.text().catch(() => "");
+      console.error("[JARVIS AUTH] profile lookup failed:", profileResponse.status, bodyText.slice(0, 300));
     }
-  } catch {
+  } catch (e: any) {
     /*
      * JWT identity remains valid even if profile lookup fails.
      *
      * We deliberately DO NOT assume owner status when profile lookup fails.
      */
+    // DIAGNOSTIC ADDED: this catch previously swallowed everything with no
+    // trace at all — including a thrown "SUPABASE_ANON_KEY is not
+    // configured" error from the helper functions above, which would look
+    // identical to "user is genuinely not the owner" with zero way to tell
+    // them apart. This makes that distinction visible.
+    console.error("[JARVIS AUTH] profile lookup threw:", e?.message || String(e));
   }
 
   const isOwner = role === "super_admin";
