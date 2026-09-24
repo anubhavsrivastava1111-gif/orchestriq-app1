@@ -214,12 +214,15 @@ function now(): string {
 /* -------------------------------------------------------------------------- */
 
 function supabaseUrl(env: Env): string {
-  const value = env.SUPABASE_URL || env.VITE_SUPABASE_URL;
-  if (!value || typeof value !== "string") {
-    throw new Error(
-      "JARVIS gateway configuration error: SUPABASE_URL (or VITE_SUPABASE_URL) is not configured."
-    );
-  }
+  // THE ACTUAL FIX: this previously threw if SUPABASE_URL/VITE_SUPABASE_URL
+  // were missing, and that throw was silently swallowed by the caller's
+  // try/catch — indistinguishable from "this user genuinely isn't the
+  // owner." functions/api/nvidia.ts hit this exact class of failure before
+  // (see its own comment history) and fixed it by falling back to the
+  // project URL directly, since it is not a secret — it is already
+  // hardcoded in src/lib/supabase.ts and shipped to every visitor's
+  // browser. Same fix, same reasoning, applied here.
+  const value = env.SUPABASE_URL || env.VITE_SUPABASE_URL || "https://wfpqesnttzarfdfsghzw.supabase.co";
   return value.replace(/\/$/, "");
 }
 
@@ -553,6 +556,12 @@ async function getUserContext(
   }
 
   const isOwner = role === "super_admin";
+
+  // DIAGNOSTIC ADDED: one summary line per request covering exactly what
+  // was asked for — that a user ID was present, what role was actually
+  // resolved (or that none was), and the final owner determination — with
+  // no token, key, or secret value anywhere in it.
+  console.error("[JARVIS AUTH] result:", { userIdPresent: Boolean(userId), resolvedRole: role || "(none resolved)", isOwner });
 
   return {
     userId,
@@ -1096,6 +1105,10 @@ async function handleRequest(
      * to ordinary application users.
      */
     if (!user.isOwner) {
+      // DIAGNOSTIC ADDED: makes it explicit in the logs that THIS gate is
+      // what rejected the request, rather than leaving it to be inferred
+      // from the response the caller saw.
+      console.error("[JARVIS AUTH] rejected at top-level owner gate for userId:", user.userId, "resolvedRole:", user.role || "(none)");
       return json(
         request,
         env,
