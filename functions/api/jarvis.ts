@@ -502,8 +502,22 @@ async function getUserContext(
   /*
    * Query the authenticated user's own profile through Supabase.
    *
-   * We deliberately use the user's JWT rather than a service-role key.
-   * This keeps the gateway from requiring a service-role credential.
+   * We use the caller's own JWT, never a service-role key, for this
+   * lookup — matching functions/api/nvidia.ts, the only other place in
+   * this codebase that performs this exact kind of role check, and one
+   * confirmed working in production. The RLS policy on profiles already
+   * permits a user to read their own row via their own token, so a
+   * service-role credential was never actually required here.
+   *
+   * THE FIX: this previously preferred SUPABASE_SERVICE_ROLE_KEY when
+   * present, contradicting this very comment, and that path was
+   * confirmed returning HTTP 403 in live testing — most likely because
+   * the configured key itself is invalid, stale, or from a different
+   * project; a value I cannot inspect from here since it's a secret.
+   * Removing the dependency on it entirely, rather than debugging a
+   * credential neither of us can safely read the value of, is the
+   * smaller and safer fix — it also removes an unnecessarily powerful
+   * credential this lookup never needed in the first place.
    */
   try {
     const profileUrl =
@@ -513,10 +527,8 @@ async function getUserContext(
       `&id=eq.${encodeURIComponent(userId)}` +
       `&limit=1`;
 
-    const profileApiKey = env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey(env);
-    const profileAuthorization = env.SUPABASE_SERVICE_ROLE_KEY
-      ? `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`
-      : `Bearer ${token}`;
+    const profileApiKey = supabaseAnonKey(env);
+    const profileAuthorization = `Bearer ${token}`;
 
     const profileResponse = await fetch(profileUrl, {
       headers: {
@@ -1143,7 +1155,11 @@ async function handleRequest(
             resolvedRole: user.role || "(none resolved — profile lookup did not return a role)",
             supabaseUrlConfigured: Boolean(env.SUPABASE_URL || env.VITE_SUPABASE_URL),
             supabaseAnonKeyConfigured: Boolean(env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY),
-            usingServiceRoleForLookup: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
+            // Renamed from usingServiceRoleForLookup: this key is no
+            // longer used for the profile lookup at all (see the fix
+            // above) — this now only reports whether it happens to be
+            // configured, which is no longer relevant to this path.
+            serviceRoleKeyConfiguredButUnused: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
             lookupOutcome: user.lookupOutcome,
           },
         },
