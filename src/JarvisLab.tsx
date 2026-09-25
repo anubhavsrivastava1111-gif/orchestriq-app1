@@ -1192,36 +1192,68 @@ function buildJarvisTools(ctx: {
     },
     {
       name: "run_repository_audit",
-      description: "Perform a broad read-only code audit across the connected /src tree: large files, TODO/FIXME markers, console statements, file inventory and basic structural signals.",
-      input_schema: { type: "object", properties: { maxFiles: { type: "number" } }, required: [] },
+      description: "Perform a broad read-only code audit across the connected repository: large files, TODO/FIXME markers, console statements, file inventory and basic structural signals. May return a PARTIAL result on a very large repository — if so, call again with the returned resume_from_offset to continue from where it left off.",
+      input_schema: { type: "object", properties: { maxFiles: { type: "number" }, offset: { type: "number" } }, required: [] },
       riskLevel: "read_only",
       requiresApproval: false,
       handler: async (input: any) => {
         if (!ctx.isOwner) return { available: false, blocked: true, reason: "Repository audit is owner-only." };
-        // THE ACTUAL FIX: this previously read from the dev-only embedded
-        // source mechanism (import.meta.glob, gated behind Vite's DEV
-        // flag) - confirmed empty by design in every production build.
-        // That is the entire reason source_files_scanned was always 0; it
-        // had nothing to do with the owner check. This now uses the same
-        // real gateway every other repository tool already uses.
         if (!gateway?.getRepositorySnapshot || !gateway?.readRepositoryFile) {
           return { available: false, reason: "No repository gateway is connected — repository audit cannot run without it." };
         }
         const snapshot = await gateway.getRepositorySnapshot();
         const allPaths: string[] = (snapshot?.tree || snapshot?.data?.tree || [])
           .map((f: any) => f?.path).filter((p: string) => /\.(ts|tsx|js|jsx)$/.test(p || ""));
+
+        // TIMEOUT/ORCHESTRATION FIX: the audit previously read every file
+        // one at a time, sequentially — up to 200 individual network round
+        // trips inside a single tool call, a real risk of exceeding the
+        // 90-second timeout that wraps the whole conversational turn.
+        // Every other confirmed-working repository tool makes exactly one
+        // gateway call; this one could make up to 201. Nothing about
+        // registration or exposure was ever the issue here — this is
+        // purely about how long one invocation can safely take.
+        const offset = Math.max(0, Number(input?.offset) || 0);
         const maxFiles = Math.min(300, Number(input?.maxFiles) || 200);
-        const paths = allPaths.slice(0, maxFiles);
+        const totalAvailable = allPaths.length;
+        const targetPaths = allPaths.slice(offset, offset + maxFiles);
+
+        const BATCH_SIZE = 8; // bounded concurrency — fast, without looking like a burst to GitHub/Cloudflare/the gateway
+        const TIME_BUDGET_MS = 50000; // well under the 90s outer timeout, leaving real margin for the model calls that bracket this one
+        const startedAt = Date.now();
+
         const files: Array<{ path: string; source: string }> = [];
-        for (const path of paths) {
-          try {
-            const result = await gateway.readRepositoryFile({ path });
-            const source: string = result?.content || result?.data?.content || "";
-            if (source) files.push({ path, source });
-          } catch { /* one unreadable file must not abort the whole audit */ }
+        let filesAttempted = 0;
+        let stoppedEarlyOnTime = false;
+
+        for (let i = 0; i < targetPaths.length; i += BATCH_SIZE) {
+          if (Date.now() - startedAt > TIME_BUDGET_MS) { stoppedEarlyOnTime = true; break; }
+          const batch = targetPaths.slice(i, i + BATCH_SIZE);
+          filesAttempted += batch.length;
+          const results = await Promise.all(batch.map(async (path) => {
+            try {
+              const result = await gateway.readRepositoryFile!({ path });
+              const source: string = result?.content || result?.data?.content || "";
+              return source ? { path, source } : null;
+            } catch { return null; } // one unreadable file must not abort the whole audit
+          }));
+          for (const r of results) if (r) files.push(r);
         }
+
         const findings = staticSourceAudit(files);
-        return { available: true, source_files_scanned: files.length, findings, finding_count: findings.length, top_files_by_size: files.map((f) => ({ path: f.path, bytes: f.source.length, lines: f.source.split(/\r?\n/).length })).sort((a,b) => b.bytes-a.bytes).slice(0,20) };
+        const nextOffset = offset + filesAttempted;
+        const isComplete = !stoppedEarlyOnTime && nextOffset >= totalAvailable;
+
+        return {
+          available: true,
+          completion_status: isComplete ? "COMPLETE" : "PARTIAL",
+          source_files_scanned: files.length,
+          total_files_available: totalAvailable,
+          files_remaining: Math.max(0, totalAvailable - nextOffset),
+          resume_from_offset: isComplete ? null : nextOffset,
+          findings, finding_count: findings.length,
+          top_files_by_size: files.map((f) => ({ path: f.path, bytes: f.source.length, lines: f.source.split(/\r?\n/).length })).sort((a,b) => b.bytes-a.bytes).slice(0,20),
+        };
       },
     },
     {
