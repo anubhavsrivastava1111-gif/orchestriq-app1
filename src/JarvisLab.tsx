@@ -842,7 +842,16 @@ function buildHttpGateway(baseUrl: string): JarvisGateway {
     const text = await response.text();
     let parsed: any;
     try { parsed = JSON.parse(text); } catch { parsed = text; }
-    if (!response.ok) throw new Error(parsed?.error || `GitHub repository access failed (${response.status}).`);
+    if (!response.ok) {
+      // THE ACTUAL FIX: this previously discarded everything except the
+      // error string, so the gateway's own diagnostic detail (whether a
+      // role was resolved, whether config values were present) never
+      // reached anyone who could actually see it - not the console, not
+      // the person testing this. It's appended into the message itself so
+      // it surfaces wherever this error is ever displayed or logged.
+      const diag = parsed?.diagnostic ? " | diagnostic: " + JSON.stringify(parsed.diagnostic) : "";
+      throw new Error((parsed?.error || `GitHub repository access failed (${response.status}).`) + diag);
+    }
     return parsed?.data !== undefined ? parsed.data : parsed;
   };
   return {
