@@ -66,6 +66,7 @@ interface UserContext {
   email?: string;
   role?: string;
   isOwner: boolean;
+  lookupOutcome: string;
 }
 
 interface GitHubFile {
@@ -485,6 +486,14 @@ async function getUserContext(
 
   let role: string | undefined;
   let email: string | undefined;
+  // DIAGNOSTIC ADDED: the three failure branches below (zero rows, an
+  // HTTP error, a thrown exception) previously all collapsed into the same
+  // final "(none resolved)" with no way to tell which one actually fired —
+  // and with every upstream fact now confirmed correct (the profile row
+  // exists, role is exactly "super_admin" as plain text, and
+  // auth.users.id === profiles.id for this account), that distinction is
+  // the one remaining unknown. This captures it explicitly.
+  let lookupOutcome: string = "not_attempted";
 
   if (typeof payload.email === "string") {
     email = payload.email;
@@ -521,11 +530,13 @@ async function getUserContext(
 
       if (Array.isArray(profiles) && profiles.length > 0) {
         role = profiles[0]?.role;
+        lookupOutcome = role ? "success_role_found" : "success_row_found_role_field_empty";
 
         if (!email && profiles[0]?.email) {
           email = profiles[0].email;
         }
       } else {
+        lookupOutcome = "http_ok_but_zero_rows";
         // DIAGNOSTIC ADDED: the request succeeded but returned zero rows —
         // this is the exact shape of a userId that doesn't match any row,
         // not a permissions failure. Logged server-side only; no token or
@@ -533,15 +544,17 @@ async function getUserContext(
         console.error("[JARVIS AUTH] profile lookup returned 0 rows for userId:", userId);
       }
     } else {
+      const bodyText = await profileResponse.text().catch(() => "");
+      lookupOutcome = `http_error_${profileResponse.status}`;
       // DIAGNOSTIC ADDED: this is the actual gap. A non-ok response here
       // was previously indistinguishable from "user is not owner" — it
       // silently fell through to role=undefined either way. This reveals
       // the real status and body so the true cause is visible in
       // Cloudflare's function logs, without ever logging the key/token used.
-      const bodyText = await profileResponse.text().catch(() => "");
       console.error("[JARVIS AUTH] profile lookup failed:", profileResponse.status, bodyText.slice(0, 300));
     }
   } catch (e: any) {
+    lookupOutcome = "threw_exception";
     /*
      * JWT identity remains valid even if profile lookup fails.
      *
@@ -561,13 +574,14 @@ async function getUserContext(
   // was asked for — that a user ID was present, what role was actually
   // resolved (or that none was), and the final owner determination — with
   // no token, key, or secret value anywhere in it.
-  console.error("[JARVIS AUTH] result:", { userIdPresent: Boolean(userId), resolvedRole: role || "(none resolved)", isOwner });
+  console.error("[JARVIS AUTH] result:", { userIdPresent: Boolean(userId), resolvedRole: role || "(none resolved)", lookupOutcome, isOwner });
 
   return {
     userId,
     email,
     role,
-    isOwner
+    isOwner,
+    lookupOutcome
   };
 }
 
@@ -1130,6 +1144,7 @@ async function handleRequest(
             supabaseUrlConfigured: Boolean(env.SUPABASE_URL || env.VITE_SUPABASE_URL),
             supabaseAnonKeyConfigured: Boolean(env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY),
             usingServiceRoleForLookup: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
+            lookupOutcome: user.lookupOutcome,
           },
         },
         403
