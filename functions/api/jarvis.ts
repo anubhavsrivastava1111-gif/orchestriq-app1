@@ -1117,7 +1117,20 @@ async function handleRequest(
           action: "authorization",
           timestamp: now(),
           error:
-            "JARVIS repository intelligence is restricted to the system owner."
+            "JARVIS repository intelligence is restricted to the system owner.",
+          // DIAGNOSTIC ADDED: the next live test reveals the real cause
+          // directly in its own response, without needing separate access
+          // to Cloudflare's function logs. Every field here is genuinely
+          // safe to return - a boolean, a role name (never a secret), and
+          // whether two non-secret config values resolved to *something*
+          // (never their actual values).
+          diagnostic: {
+            userIdPresent: Boolean(user.userId),
+            resolvedRole: user.role || "(none resolved — profile lookup did not return a role)",
+            supabaseUrlConfigured: Boolean(env.SUPABASE_URL || env.VITE_SUPABASE_URL),
+            supabaseAnonKeyConfigured: Boolean(env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY),
+            usingServiceRoleForLookup: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
+          },
         },
         403
       );
