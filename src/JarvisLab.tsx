@@ -1208,7 +1208,7 @@ function buildJarvisTools(ctx: {
           return { available: false, reason: "No repository gateway is connected — repository audit cannot run without it." };
         }
         const snapshot = await gateway.getRepositorySnapshot();
-        const allPaths: string[] = (snapshot?.files || snapshot?.data?.files || [])
+        const allPaths: string[] = (snapshot?.tree || snapshot?.data?.tree || [])
           .map((f: any) => f?.path).filter((p: string) => /\.(ts|tsx|js|jsx)$/.test(p || ""));
         const maxFiles = Math.min(300, Number(input?.maxFiles) || 200);
         const paths = allPaths.slice(0, maxFiles);
