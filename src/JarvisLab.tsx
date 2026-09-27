@@ -626,8 +626,33 @@ function remember(
   return memory;
 }
 
-function retrieveMemory(query: string, limit = 8): MemoryItem[] {
-  const items = readLocalMemory();
+// AUTOMATIC RECALL, PART 9: this previously scored only localStorage
+// items - jarvis_owner_corrections (durable, Supabase-backed, survives
+// logout and other devices) was a completely separate system the model
+// had to explicitly decide to query via recall_corrections. That is
+// "PRESENT BUT NOT WIRED," not automatic recall. This now merges both
+// sources through the same relevance scoring, so a relevant correction
+// surfaces in every prompt without depending on the model remembering to
+// ask for it.
+async function retrieveMemory(query: string, limit = 8): Promise<MemoryItem[]> {
+  const localItems = readLocalMemory();
+
+  let correctionItems: MemoryItem[] = [];
+  try {
+    const uidv = await currentUserId();
+    if (uidv) {
+      const { data } = await supabase.from("jarvis_owner_corrections")
+        .select("id,category,correction,context,created_at").eq("user_id", uidv)
+        .order("created_at", { ascending: false }).limit(100);
+      correctionItems = (data || []).map((c: any) => ({
+        id: c.id, type: "lesson" as const, content: `[${c.category}] ${c.correction}${c.context ? " (context: " + c.context + ")" : ""}`,
+        source: "owner_correction", importance: 8, // corrections outrank ordinary memory by default — the owner explicitly stated these
+        createdAt: c.created_at,
+      }));
+    }
+  } catch { /* durable recall failing must never block the conversation itself */ }
+
+  const items = [...localItems, ...correctionItems];
 
   const terms = query
     .toLowerCase()
@@ -1690,7 +1715,7 @@ function buildJarvisTools(ctx: {
 
       handler: async (input: any) => {
         return {
-          memories: retrieveMemory(String(input?.query || ""), 10),
+          memories: await retrieveMemory(String(input?.query || ""), 10),
         };
       },
     },
@@ -2743,7 +2768,7 @@ export default function JarvisLab({
     await saveMsg("user", userText);
 
     try {
-      const memories = retrieveMemory(userText, 8);
+      const memories = await retrieveMemory(userText, 8);
 
       const history = nextMessages
         .slice(-16)
@@ -2880,7 +2905,7 @@ export default function JarvisLab({
   const createMissionPlan = async (
     goal: string
   ): Promise<MissionStep[]> => {
-    const memories = retrieveMemory(goal, 10);
+    const memories = await retrieveMemory(goal, 10);
 
     const planningPrompt = `
 You are JARVIS's planning engine.
@@ -3135,6 +3160,7 @@ Return ONLY JSON containing the tool input.
       }
     }
 
+    const relevantMemoryForStep = await retrieveMemory(activeMission.goal, 8);
     const resultPrompt = `
 You are JARVIS executing one analytical mission step.
 
@@ -3145,7 +3171,7 @@ STEP:
 ${step.description}
 
 Relevant memory:
-${safeJson(retrieveMemory(activeMission.goal, 8))}
+${safeJson(relevantMemoryForStep)}
 
 Perform the reasoning required for this step.
 
@@ -3533,6 +3559,10 @@ Do not execute consequential changes.
           .gte("created_at", since),
       ]);
 
+      const relevantMemoryForBriefing = await retrieveMemory(
+        "recent platform activity failures opportunities lessons",
+        12
+      );
       const briefingData = {
         signals:
           signalsResult.data || [],
@@ -3543,10 +3573,7 @@ Do not execute consequential changes.
         tool_failures:
           failuresResult.data || [],
         memory:
-          retrieveMemory(
-            "recent platform activity failures opportunities lessons",
-            12
-          ),
+          relevantMemoryForBriefing,
       };
 
       const prompt = `
