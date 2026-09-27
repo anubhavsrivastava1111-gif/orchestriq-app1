@@ -1385,11 +1385,44 @@ function buildJarvisTools(ctx: {
       handler: async (input: any) => {
         const uidv = await currentUserId();
         if (!uidv) return { error: "Not signed in" };
+
+        // CONFLICT DETECTION, PART 13: deterministic, not AI-guessed —
+        // never silently pick a winner between two stored rules. Checks
+        // existing corrections in the SAME category for meaningful
+        // overlapping distinctive words while the actual text differs,
+        // and if found, reports both to the caller rather than choosing.
+        // This is a real signal to review, not a definitive judgment —
+        // described that way so it's never mistaken for one.
+        const STOPWORDS = new Set(["this","that","with","from","have","should","would","could","when","what","which","using","rather","than","always","never"]);
+        const distinctiveWords = (s: string) => new Set(s.toLowerCase().split(/\W+/).filter(w => w.length > 3 && !STOPWORDS.has(w)));
+        const newWords = distinctiveWords(input.correction);
+
+        const { data: existing } = await supabase.from("jarvis_owner_corrections")
+          .select("id,correction,context,created_at").eq("user_id", uidv).eq("category", input.category);
+
+        const possibleConflicts = (existing || []).filter((e: any) => {
+          if (e.correction.trim().toLowerCase() === String(input.correction).trim().toLowerCase()) return false; // identical, not a conflict
+          const existingWords = distinctiveWords(e.correction);
+          let overlap = 0;
+          for (const w of newWords) if (existingWords.has(w)) overlap++;
+          return overlap >= 2; // shares at least 2 distinctive words but says something different
+        });
+
         const { error } = await supabase.from("jarvis_owner_corrections").insert({
           user_id: uidv, category: input.category, correction: input.correction, context: input.context || null,
         });
         if (error) return { error: error.message };
-        return { remembered: true, category: input.category };
+
+        if (possibleConflicts.length > 0) {
+          return {
+            remembered: true, category: input.category,
+            conflict_detected: true,
+            message: "This was stored, but it may conflict with an existing rule in the same category. Do not silently prefer one — tell the owner and ask which should control.",
+            existing_rules: possibleConflicts.map((c: any) => ({ correction: c.correction, context: c.context, stored_at: c.created_at })),
+            new_rule: input.correction,
+          };
+        }
+        return { remembered: true, category: input.category, conflict_detected: false };
       },
     },
     {
@@ -1412,6 +1445,78 @@ function buildJarvisTools(ctx: {
         const query = String(input?.query || "").toLowerCase();
         const filtered = query ? (data || []).filter((c: any) => c.correction.toLowerCase().includes(query) || (c.context || "").toLowerCase().includes(query)) : (data || []);
         return { count: filtered.length, corrections: filtered };
+      },
+    },
+    {
+      name: "propose_file_replacement",
+      description: "Store a COMPLETE proposed replacement file for the owner to review, as a safe draft — this never touches the real repository (JARVIS has no write access to it anywhere in this system). The owner must copy the approved content into the actual file themselves. Always generate the full file content, never a fragment or a 'change lines X-Y' instruction.",
+      input_schema: {
+        type: "object",
+        properties: {
+          original_path: { type: "string" },
+          proposed_content: { type: "string" },
+          reason: { type: "string" },
+          problem_addressed: { type: "string" },
+          dependencies_affected: { type: "string" },
+          expected_behavior: { type: "string" },
+          testing_instructions: { type: "string" },
+          rollback_approach: { type: "string" },
+        },
+        required: ["original_path", "proposed_content", "reason"],
+      },
+      riskLevel: "low_risk",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        if (!ctx.isOwner) return { available: false, blocked: true, reason: "File proposals are owner-only." };
+        const uidv = await currentUserId();
+        if (!uidv) return { error: "Not signed in" };
+        const { data, error } = await supabase.from("jarvis_file_proposals").insert({
+          user_id: uidv, original_path: input.original_path, proposed_content: input.proposed_content,
+          reason: input.reason, problem_addressed: input.problem_addressed || null,
+          dependencies_affected: input.dependencies_affected || null, expected_behavior: input.expected_behavior || null,
+          testing_instructions: input.testing_instructions || null, rollback_approach: input.rollback_approach || null,
+        }).select("id").single();
+        if (error) return { error: error.message };
+        return {
+          proposed: true, proposal_id: data.id, original_path: input.original_path,
+          note: "This is a stored draft only. The real file is completely unchanged. The owner must manually apply this content to actually update the repository.",
+        };
+      },
+    },
+    {
+      name: "diagnose_tool_failure",
+      description: "Systematically diagnose why a specific JARVIS tool failed or behaved unexpectedly — checks registration, gateway capability, and known failure classes, rather than blindly retrying the same call.",
+      input_schema: { type: "object", properties: { tool_name: { type: "string" } }, required: ["tool_name"] },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        const targetName = String(input?.tool_name || "");
+        const isRegistered = tools.some((t) => t.name === targetName);
+        const gatewayCapabilityMap: Record<string, boolean> = {
+          get_repository_snapshot: Boolean(gateway?.getRepositorySnapshot),
+          read_source_file: Boolean(gateway?.readRepositoryFile),
+          search_codebase: Boolean(gateway?.searchRepository),
+          inspect_module: Boolean(gateway?.inspectModule || gateway?.getModuleSnapshot),
+          run_repository_audit: Boolean(gateway?.getRepositorySnapshot && gateway?.readRepositoryFile),
+          get_system_map: Boolean(gateway?.getRepositorySnapshot),
+        };
+        const relevantGatewayMethod = targetName in gatewayCapabilityMap ? gatewayCapabilityMap[targetName] : null;
+        return {
+          checked_tool: targetName,
+          FACT_is_registered_in_tool_array: isRegistered,
+          FACT_gateway_connected: Boolean(gateway),
+          FACT_required_gateway_method_present: relevantGatewayMethod,
+          INFERENCE: !isRegistered
+            ? "This tool name does not exist in the current tool array — either a typo, or it was genuinely never registered."
+            : relevantGatewayMethod === false
+              ? "The tool is registered, but the specific gateway method it depends on is not present in this session — most likely gatewayBaseUrl isn't connected, or the resolved gateway is the embedded fallback rather than a real host."
+              : "The tool is registered and its known gateway dependency is present. If it still failed, the cause is more likely a transient network issue, a timeout, or a malformed response — not a registration or exposure problem.",
+          RECOMMENDATION: !isRegistered
+            ? "Verify the exact tool name being requested matches one in the registry exactly."
+            : relevantGatewayMethod === false
+              ? "Confirm gatewayBaseUrl is set and the owner's session is authenticated; retry once that's confirmed."
+              : "Retry once. If it fails identically a second time, report the exact error text rather than retrying further.",
+        };
       },
     },
     {
