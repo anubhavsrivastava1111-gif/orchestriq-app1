@@ -410,7 +410,7 @@ async function scanRepository(gateway: JarvisGateway | undefined) {
   }
   const snapshot = await gateway.getRepositorySnapshot();
   const files: Array<{ path: string; sha?: string; size?: number }> =
-    (snapshot?.files || snapshot?.data?.files || []).filter((f: any) => f?.path);
+    (snapshot?.tree || snapshot?.data?.tree || []).filter((f: any) => f?.path);
   if (!files.length) {
     return { available: false as const, reason: "Repository gateway responded but returned no files — treat as UNKNOWN, not empty." };
   }
@@ -1341,6 +1341,52 @@ function buildJarvisTools(ctx: {
           localStorage.setItem(key, JSON.stringify([...existing, proposal].slice(-100)));
         } catch {}
         return { recorded: true, proposal };
+      },
+    },
+    {
+      name: "remember_correction",
+      description: "Record something the owner explicitly corrected or taught you, as durable, structured memory — a business rule, a technical lesson, a preference, a workflow, or a project decision. Only use this for something the owner actually stated, never for something you inferred yourself.",
+      input_schema: {
+        type: "object",
+        properties: {
+          category: { type: "string", enum: ["business_rule","technical_lesson","preference","workflow","project_decision"] },
+          correction: { type: "string" },
+          context: { type: "string" },
+        },
+        required: ["category", "correction"],
+      },
+      riskLevel: "low_risk",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        const uidv = await currentUserId();
+        if (!uidv) return { error: "Not signed in" };
+        const { error } = await supabase.from("jarvis_owner_corrections").insert({
+          user_id: uidv, category: input.category, correction: input.correction, context: input.context || null,
+        });
+        if (error) return { error: error.message };
+        return { remembered: true, category: input.category };
+      },
+    },
+    {
+      name: "recall_corrections",
+      description: "Retrieve previously recorded owner corrections — business rules, technical lessons, preferences, workflows, or project decisions. Call this before answering anything where a past correction might apply, rather than assuming your default reasoning is still correct.",
+      input_schema: {
+        type: "object",
+        properties: { category: { type: "string" }, query: { type: "string" } },
+        required: [],
+      },
+      riskLevel: "read_only",
+      requiresApproval: false,
+      handler: async (input: any) => {
+        const uidv = await currentUserId();
+        if (!uidv) return { error: "Not signed in" };
+        let q = supabase.from("jarvis_owner_corrections").select("category,correction,context,created_at").eq("user_id", uidv);
+        if (input?.category) q = q.eq("category", input.category);
+        const { data, error } = await q.order("created_at", { ascending: false }).limit(50);
+        if (error) return { error: error.message };
+        const query = String(input?.query || "").toLowerCase();
+        const filtered = query ? (data || []).filter((c: any) => c.correction.toLowerCase().includes(query) || (c.context || "").toLowerCase().includes(query)) : (data || []);
+        return { count: filtered.length, corrections: filtered };
       },
     },
     {
@@ -3810,15 +3856,24 @@ CONFIDENCE:
         return;
       }
 
-      await supabase
-        .from("jarvis_lab_approvals")
-        .update({
-          status: "approved",
-          decided_at: nowIso(),
-        })
-        .eq("id", approval.id)
-        .eq("user_id", uid)
-        .eq("status", "pending");
+      // OWNER SECRET / UNIQUE CODE, PART 4: this previously set status to
+      // 'approved' directly from the browser — no verification of any kind,
+      // exactly the "authorization enforced only in the frontend" failure
+      // this mission explicitly calls out. The status transition now only
+      // ever happens inside jarvis_verify_owner_secret itself, atomically,
+      // after a real bcrypt comparison server-side. If no secret has been
+      // configured yet, this fails safely rather than silently approving.
+      const secret = window.prompt("Enter your JARVIS owner authorization code to approve this action:");
+      if (!secret) { setDecidingId(null); return; }
+      const { data: verifyResult, error: verifyError } = await supabase.rpc("jarvis_verify_owner_secret", {
+        p_approval_id: approval.id, p_secret: secret,
+      });
+      if (verifyError || !verifyResult?.verified) {
+        setError(verifyResult?.reason || verifyError?.message || "Authorization failed.");
+        await loadApprovals();
+        setDecidingId(null);
+        return;
+      }
 
       try {
         if (!tool.executeApproved) {
