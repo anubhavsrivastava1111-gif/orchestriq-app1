@@ -554,7 +554,21 @@ function providerKey(keys:any,id:string):string{
   if(id==="groq"&&EFF_GROQ?.trim())return EFF_GROQ.trim();
   if(id==="claude"&&EFF_CLAUDE?.trim())return EFF_CLAUDE.trim();
   if(id==="fal"&&EFF_FAL?.trim())return EFF_FAL.trim();
-  if(id==="nvidia")return "nvidia"; // free tier, no key required
+  if(id==="nvidia"){
+    // THE NEW RULE: the shared 5-key pool is reserved for people who
+    // genuinely have no other option — not available to someone who has
+    // their own Claude/Gemini/OpenAI/Groq/fal key configured AND switched
+    // on. A key that's present but explicitly turned off does not count
+    // against them, since "switched off all the others" was named as an
+    // acceptable alternative to never having added one at all.
+    const otherProviderIds=["claude","gemini","openai","groq","fal","deepseek","kimi"];
+    const hasAnotherActiveKey=otherProviderIds.some(pid=>{
+      if(isProviderOff(pid))return false; // explicitly switched off — does not block shared NVIDIA
+      return !!(keys?.[pid]||"").trim();
+    });
+    if(hasAnotherActiveKey)return ""; // this user has a real alternative — do not silently use the shared pool for them
+    return "nvidia"; // free tier, no key required — genuinely no other option configured
+  }
   return "";
 }
 function providerEnabled(keys:any,id:string):boolean{
@@ -818,6 +832,31 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
       grounded:false,provider:"none"
     };
   }
+  // THE REQUESTED PROMPT-TRANSFORMATION STEP: the raw strategic question
+  // typed into AI Boardroom is rarely itself a good search query — it's
+  // written for a human executive, not a search engine or a research
+  // model. This converts it into a precise, focused research brief FIRST,
+  // using the same confirmed-working provider chain as everything else in
+  // this function (no new dependency), and shows that brief to the user
+  // before any searching starts, so they can see exactly what's actually
+  // being researched. Kept deliberately short and cheap — one small call,
+  // not another multi-step research pass of its own.
+  let effectiveQuestion=question;
+  try{
+    const refinementPrompt="You turn a business question into a precise research brief. "+
+      "Given the raw question below, rewrite it as 2-4 specific, researchable sub-questions "+
+      "covering the concrete facts, figures, or comparisons actually needed to answer it. "+
+      "Do not answer the question. Do not add commentary. Output only the rewritten brief.";
+    const rf=await callSearchWithFailover(routes,refinementPrompt,
+      [{role:"user",content:"RAW QUESTION:\n"+question}],500,false,
+      ()=>{});
+    const refinedText=stripPreamble((rf?.out&&typeof rf.out==="object"&&"text" in rf.out)?rf.out.text:String(rf?.out||""));
+    if(refinedText&&refinedText.trim().length>10){
+      effectiveQuestion=refinedText.trim();
+      try{showToast&&showToast("Research brief: "+effectiveQuestion.slice(0,220)+(effectiveQuestion.length>220?"…":""),"info");}catch{}
+    }
+  }catch{ /* refinement failing must never block research itself — fall back to the raw question */ }
+
   try{showToast&&showToast("Research Desk running deep multi-angle search via "+routes.map(r=>r.provider).join(" → ")+"… this can take up to 2-3 minutes.","info");}catch{}
   let usedProvider=route.provider;
   const useExternalSearch=hasExternalSearch(SEARCH_CHAIN,keys);
@@ -837,7 +876,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   const ACTIVE_ANGLES=pickAngleSet(question);
   for(const angle of ACTIVE_ANGLES){
     try{
-      let anglePrompt=researchDeskPrompt(co,compData,question)+
+      let anglePrompt=researchDeskPrompt(co,compData,effectiveQuestion)+
         "\n\nFOCUS THIS PASS ENTIRELY ON: "+angle.label+
         ".\nReturn 4-6 bullets, each following the OUTPUT CONTRACT exactly. Do not cover other angles.";
       // RETRIEVAL FIRST: when a search key is configured, the APP searches and
@@ -857,7 +896,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
         }catch{}
       }
       if(useExternalSearch){
-        const qs=buildAngleQueries(question,angle.id,co);
+        const qs=buildAngleQueries(effectiveQuestion,angle.id,co);
         const found:any[]=[];const seenUrls=new Set<string>();
         // Social and user-upload sites are never acceptable evidence for a capital
         // decision. A previous brief cited an Instagram reel about a tea stall, and
@@ -4440,7 +4479,15 @@ const [wfPauseMsg,setWfPauseMsg]=useState("");
   const showToast=useCallback((msg,type="info")=>{
     const id=Date.now()+Math.random();
     setToasts(prev=>[...prev.slice(-4),{id,msg:String(msg),type}]);
-    setTimeout(()=>setToasts(prev=>prev.filter(t=>t.id!==id)),7000);
+    // THE ACTUAL FIX: error and warning toasts carry the one piece of
+    // information a user needs to file an accurate report (the exact
+    // provider/model error) — auto-dismissing them after 7 seconds meant
+    // anyone not staring at the screen the instant it appeared never saw
+    // it. Those two types now stay until the person clicks the × on them;
+    // success/info remain auto-dismissing since nothing is lost if missed.
+    if(type!=="error"&&type!=="warning"){
+      setTimeout(()=>setToasts(prev=>prev.filter(t=>t.id!==id)),7000);
+    }
   },[]);
 
   // Load persisted data
