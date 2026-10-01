@@ -344,13 +344,29 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   // later can never accidentally happen against a different key than the
   // one that was actually rate-checked just now.
   let activeNvidiaKey: string;
+  // Which pool slot (1-5) the first attempt uses. 0 = the caller's own key.
+  let activeSlot = 0;
+  // Every configured pool key WITH its real slot number, so an error can say
+  // "slot 3 was rejected" - which tells the owner exactly which Cloudflare
+  // variable (NVIDIA_API_KEY_3) to replace.
+  const poolSlots: { key: string; index: number }[] = [
+    { key: env.NVIDIA_API_KEY || "", index: 1 },
+    { key: env.NVIDIA_API_KEY_2 || "", index: 2 },
+    { key: env.NVIDIA_API_KEY_3 || "", index: 3 },
+    { key: env.NVIDIA_API_KEY_4 || "", index: 4 },
+    { key: env.NVIDIA_API_KEY_5 || "", index: 5 },
+  ].filter(k => k.key && k.key.trim().length > 0);
   if (userKey) {
     activeNvidiaKey = userKey;
   } else if (superAdmin) {
-    // The owner is exempt from the rate check itself, but still needs an
-    // actual key to call NVIDIA with - the first configured one is fine,
-    // since this path never contends with the shared-tier bucket at all.
-    activeNvidiaKey = poolKeys[0];
+    // THE BUG THAT MADE ADDING 4 MORE KEYS CHANGE NOTHING FOR THE OWNER:
+    // this used to be poolKeys[0] - so every owner request went to key #1
+    // only, forever. If key #1 is the one NVIDIA rejects, the owner saw the
+    // identical 403 on every call no matter how many keys existed. The owner
+    // now starts at a random slot like everyone else (still exempt from the
+    // rate bucket), and the retry loop below covers the rest.
+    const s = poolSlots[Math.floor(Math.random() * poolSlots.length)];
+    activeNvidiaKey = s.key; activeSlot = s.index;
   } else {
     const globalCap = parseInt(env.NVIDIA_GLOBAL_PER_MINUTE || "28", 10);
     const picked = await pickNvidiaKey(env, globalCap);
@@ -358,7 +374,7 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
       return json({ error: "A lot of people are using the free NVIDIA tier right now. Please try again in a few seconds — this clears every minute. Add your own free key in Settings for guaranteed instant access." },
         429, { ...cors.headers, "x-oiq-quota": "global" });
     }
-    activeNvidiaKey = picked.key;
+    activeNvidiaKey = picked.key; activeSlot = picked.index;
   }
 
   // THE ROLLING WINDOW YOU ASKED FOR, REPLACING THE OLD "RESETS AT
@@ -464,12 +480,27 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   };
 
   try {
-    const upstream = await fetch(NVIDIA_ENDPOINT, {
-      method: "POST",
-      // The caller's own key when they brought one; otherwise the shared
-      // free-tier key, exactly as before.
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + activeNvidiaKey },
-      body: JSON.stringify(payload),
+    // KEY FAILOVER ON AUTHORIZATION ERRORS. Previously one 401/403 from NVIDIA
+    // ended the request, even with four other working keys configured. Now a
+    // rejected SHARED key is skipped and the next slot is tried, once each.
+    // A 401/403 comes back in well under a second, so trying all five stays
+    // far inside Cloudflare's time limit. The caller's OWN key is never
+    // silently swapped for the shared pool - they get a clear message instead.
+    const attemptOrder: { key: string; index: number }[] = userKey
+      ? [{ key: userKey, index: 0 }]
+      : (() => {
+          const startPos = Math.max(0, poolSlots.findIndex(p => p.index === activeSlot));
+          return poolSlots.map((_, i) => poolSlots[(startPos + i) % poolSlots.length]);
+        })();
+    const rejectedSlots: string[] = [];
+    let upstream: Response | null = null;
+    let text = "";
+    const loopStart = Date.now();
+    for (const attempt of attemptOrder) {
+      upstream = await fetch(NVIDIA_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + attempt.key },
+        body: JSON.stringify(payload),
       // WAS 120000. THIS IS WHY YOU SAW RAW HTML INSTEAD OF AN ERROR MESSAGE.
       // Cloudflare kills a Worker subrequest at about 90 seconds, and the edge
       // returns 524 at 100. Waiting 120 meant Cloudflare ALWAYS won the race:
@@ -480,15 +511,31 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
       // never alive long enough to do so.
       // 75 seconds leaves headroom to build and return a real JSON error.
       signal: AbortSignal.timeout(75000),
-    });
-    const text = await upstream.text();
+      });
+      text = await upstream.text();
+      const authRejected = upstream.status === 401 || upstream.status === 403;
+      if (!authRejected) break;
+      rejectedSlots.push(attempt.index === 0 ? "your own key" : "shared key #" + attempt.index);
+      // Stop trying if an earlier attempt was slow - never risk Cloudflare's ~90s kill.
+      if (Date.now() - loopStart > 20000) break;
+    }
+    if (!upstream) return json({ error: "NVIDIA proxy: no key was available to try." }, 503, obs);
+    (obs as any)["x-oiq-rejected"] = rejectedSlots.join(",") || "none";
 
     if (!upstream.ok) {
       let reason = text.slice(0, 300);
-      try { reason = JSON.parse(text)?.error?.message || reason; } catch { /* keep raw */ }
+      try { reason = JSON.parse(text)?.error?.message || JSON.parse(text)?.detail || reason; } catch { /* keep raw */ }
       if (upstream.status === 402) return json({ error: "NVIDIA free credits are exhausted for this key." }, 402, obs);
       if (upstream.status === 429) return json({ error: "NVIDIA rate limit reached (about 40 requests per minute on the free tier)." }, 429, obs);
-      return json({ error: "NVIDIA " + upstream.status + ": " + reason }, upstream.status, obs);
+      if (upstream.status === 401 || upstream.status === 403) {
+        // A REPORTABLE REASON, not a raw code. Names the model and exactly
+        // which keys were rejected - never the key values themselves.
+        const who = userKey
+          ? "Your own NVIDIA key (saved in Settings) was rejected. Generate a fresh key at build.nvidia.com and paste it again, or clear it to use the shared free tier."
+          : "Every shared key tried was rejected: " + rejectedSlots.join(", ") + ". Owner action: open build.nvidia.com with the account behind each listed key, generate a new key, and replace the matching Cloudflare variable (key #1 = NVIDIA_API_KEY, #2 = NVIDIA_API_KEY_2, and so on), then redeploy.";
+        return json({ error: "NVIDIA refused authorization (HTTP " + upstream.status + ") for model \"" + requested + "\". " + who + " NVIDIA said: " + reason }, upstream.status, obs);
+      }
+      return json({ error: "NVIDIA " + upstream.status + " for model \"" + requested + "\": " + reason }, upstream.status, obs);
     }
 
     try {
