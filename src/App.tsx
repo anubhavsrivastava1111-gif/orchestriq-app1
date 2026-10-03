@@ -26,7 +26,7 @@ import { ENGINE_ENABLED, runPipeline, classifyDomain, classifyIntent, selectFram
 import { buildScaffoldPrompt, buildViabilityPrompt, inferArchetype } from "./lib/BusinessScaffold";
 import { scanSuppliedInputs, buildIntakePrompt, buildRegisterInjection, INTAKE_FAILED_NOTICE } from "./lib/IntakeRegister";
 import { runSearch, formatResultsForPrompt, RETRIEVED_RESULTS_RULES, hasExternalSearch, SEARCH_PROVIDERS, estimateSearchCost } from "./lib/SearchProviders";
-import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney } from "./lib/ModelRouting";
+import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney, COST_CHAIN } from "./lib/ModelRouting";
 import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
 import { detectDocumentRequest, buildDocumentBrief, buildSynthesisOverride, suggestedFormats, CONSULTING_STANDARD } from "./lib/DocumentLibrary";
 import { NVIDIA_DEFAULT_MODEL, nvidiaModelOptions, nvidiaShouldReason, nvidiaTokenBudget } from "./lib/NvidiaModels";
@@ -595,14 +595,29 @@ function enabledKeys(keys:any):Record<string,string>{
   return out;
 }
  
+// PROVIDER ORDER FOR A STAGE: the provider chosen for this stage in Settings
+// (Economy / Balanced / Premium / Custom) leads, then every other enabled TEXT
+// provider cheapest-first (COST_CHAIN from lib/ModelRouting). Premium models are
+// reached only after the economical ones fail. Image providers are never included.
+function costOrderedProviders(keys:any,stage:string):Array<{provider:string;key:string}>{
+  const ek=enabledKeys(keys); const out:Array<{provider:string;key:string}>=[];
+  const pref=stageRoute(keys,stage);
+  if(pref&&ek[pref.provider])out.push({provider:pref.provider,key:ek[pref.provider]});
+  for(const p of COST_CHAIN){ if(ek[p]&&!out.some(r=>r.provider===p))out.push({provider:p,key:ek[p]}); }
+  return out;
+}
+
 function resolveSearchProviders(keys){
   const out:Array<{provider:string;key:string}>=[];
   // Gated: a provider switched off in Settings is never used for research.
   // This exact line is why a disabled Claude key was still running your searches.
-  const claudeKey=providerKey(keys,"claude");
-  if(claudeKey)out.push({provider:"claude",key:claudeKey});
+  // Both can search the web natively. Gemini first: it is far cheaper, and
+  // Claude remains the fallback. (Was Claude first, so research ran on the
+  // most expensive model whenever a Claude key existed.)
   const geminiKey=providerKey(keys,"gemini");
   if(geminiKey)out.push({provider:"gemini",key:geminiKey});
+  const claudeKey=providerKey(keys,"claude");
+  if(claudeKey)out.push({provider:"claude",key:claudeKey});
   return out;
 }
 // Kept for any caller that still wants a single preferred provider.
@@ -799,27 +814,16 @@ function synthesisPrompt(co,question,sections){
 
 async function runResearchDesk(ask,co,compData,question,showToast,keys){
   let routes=resolveSearchProviders(keys);
-  // When an external search service (Serper/Tavily/Brave/DataForSEO) is configured,
-  // the app does the searching itself — so the reasoning model no longer needs its
-  // own web access. ANY enabled LLM can structure the retrieved results. Previously
-  // this returned "Research Desk OFFLINE" even with a valid Serper key, purely
-  // because Claude and Gemini were switched off. Cheapest capable model first.
-  if(!routes.length&&hasExternalSearch(SEARCH_CHAIN,keys)){
-    const ek=enabledKeys(keys);
-    // Your chosen extraction model leads; the rest remain as failover.
-    const pref=stageRoute(keys,"research_extract");
-    if(pref)routes.push({provider:pref.provider,key:pref.key});
-    // NVIDIA WAS MISSING FROM THIS LIST. That single omission is why you saw
-    // "Research Desk OFFLINE - no Claude or Gemini key" while running NVIDIA
-    // with a perfectly good Serper key configured.
-    //
-    // The logic above is already right: when an external search service does
-    // the searching, ANY model can read the results. NVIDIA reads them as well
-    // as any other. It was simply never named here, so the list came out empty
-    // and the code concluded there was no way to do research at all.
-    ["nvidia","deepseek","kimi","groq","openai","gemini","claude"].forEach(p=>{
-      if(ek[p]&&!routes.some(r=>r.provider===p))routes.push({provider:p,key:ek[p]});
-    });
+  // When an external search service (Serper/Tavily/Brave/DataForSEO) is
+  // configured, the app does the searching itself and the model only READS the
+  // results - so any text model can do it. THE FIX: this used to apply only when
+  // there was NO Claude or Gemini key. With one present, research ran on
+  // [claude, gemini] only - DeepSeek was never used and Claude read everything.
+  // Now, whenever Serper (or similar) is available, the research_extract stage
+  // choice leads (DeepSeek by default) and the rest follow cheapest-first.
+  if(hasExternalSearch(SEARCH_CHAIN,keys)){
+    const ordered=costOrderedProviders(keys,"research_extract");
+    if(ordered.length)routes=ordered;
   }
   const route=routes[0];
   if(!route){
@@ -5438,7 +5442,12 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           // Build list of providers to try this cycle
           // Gated: the debate failover chain now skips switched-off providers.
           const brKeys=enabledKeys(keys);
-          const allProviders=Object.keys(brKeys);
+          // THE FIX: this was Object.keys(brKeys), i.e. AI_PROVIDER_IDS order -
+          // nvidia, claude, openai, gemini, groq, deepseek. Every executive tried
+          // Claude then OpenAI before ever reaching DeepSeek, and the image
+          // providers (fal, stability) were in the list too. Now: the provider
+          // chosen for the "executive" stage in Settings, then cheapest-first.
+          const allProviders=costOrderedProviders(keys,"executive").map(r=>r.provider);
           // If this list is empty, no request is ever sent and every executive
           // reports "did not produce an answer" for a reason that has nothing to
           // do with the provider. Say what is actually wrong instead.
