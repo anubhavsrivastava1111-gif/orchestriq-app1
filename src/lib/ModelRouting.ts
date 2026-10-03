@@ -13,6 +13,8 @@
 // file cannot change behaviour until something imports it.
 // ─────────────────────────────────────────────────────────────────────────────
 
+
+
 import { PROVIDER_PRICING, resolvePricingKey } from "../TokenAnalytics";
 
 export type StageId =
@@ -78,6 +80,14 @@ export const PRESETS: Record<string, { label: string; note: string; stages: Stag
 
 export const DEFAULT_PROFILE: StageProfile = PRESETS.balanced.stages;
 
+/** TEXT providers, cheapest capable first. The single source of truth for
+ *  fallback order - used by stage resolution here AND by the Boardroom and
+ *  Research Desk, so every module degrades in price the same way. Premium
+ *  models (OpenAI, Claude) are only reached after the economical ones fail.
+ *  Image providers (fal, stability) are deliberately absent: they must never
+ *  be asked to answer a text question. */
+export const COST_CHAIN = ["deepseek", "gemini", "groq", "kimi", "openai", "claude", "nvidia"];
+
 /**
  * Picks the provider for a stage, falling back down a sensible chain when the
  * chosen one is unavailable or switched off. Never returns a disabled provider.
@@ -91,8 +101,7 @@ export function resolveStageProvider(
   if (wanted && isEnabled(wanted)) return wanted;
   // Cheapest capable first, so an unavailable premium choice degrades in price,
   // not into an unexpectedly expensive provider.
-  const chain = ["deepseek", "gemini", "groq", "kimi", "openai", "claude", "nvidia"];
-  for (const p of chain) if (isEnabled(p)) return p;
+  for (const p of COST_CHAIN) if (isEnabled(p)) return p;
   return "";
 }
 
@@ -156,4 +165,3 @@ export function fmtMoney(usd: number, currency: string, symbol: string, fxToLoca
   if (v >= 1000) return symbol + Math.round(v).toLocaleString("en-IN");
   return symbol + v.toFixed(v < 10 ? 2 : 0);
 }
-
