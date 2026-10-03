@@ -5667,6 +5667,21 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     // and say plainly when it does not cover the new question.
     const rs:any=(brCur as any).researchState?normalizeResearchState((brCur as any).researchState):null;
     const briefText=String((brCur as any).researchBrief||rs?.researchBrief||"");
+    // GATE A VISIBILITY: tells the user, on screen, whether this follow-up is
+    // building on the saved investigation - so tests A2/A3/A4 can be verified
+    // without opening developer tools. Shows the session it belongs to, so a
+    // follow-up landing on the wrong session would be visible immediately.
+    try{
+      if(rs){
+        showToast("Continuing saved investigation"+((brCur as any).sessionId?" #"+String((brCur as any).sessionId).slice(-5):"")+": "
+          +String(rs.objective||rs.originalQuestion||"").slice(0,90)+" \u2014 "+rs.decisions.length+" prior decision(s), "
+          +rs.followUps.length+" earlier follow-up(s), research "+(rs.grounded?"grounded":"UNGROUNDED")+". Original research is not being re-run.","info");
+      }else if(briefText){
+        showToast("This session has a research brief but no structured Research State (saved before the upgrade). Follow-up will use the brief only.","warning");
+      }else{
+        showToast("No saved research for this session \u2014 executives will answer without a research base.","warning");
+      }
+    }catch{}
     const researchStateBlock=(briefText||rs)
       ?"\n\nRESEARCH STATE FOR THIS INVESTIGATION (already established - build on it, do not restart):\n"
         +(rs?.originalQuestion?"Original question: "+rs.originalQuestion+"\n":"")
