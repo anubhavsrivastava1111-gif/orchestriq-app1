@@ -1031,6 +1031,14 @@ export default function BoardroomView(props: BoardroomViewProps) {
                         stages: [{ question: s.q, debate: s.debate || [], synthesis: s.synthesis || "",
                                    decisionStatus: s.decisionStatus || "", completedAt: s.ts || Date.now() }] }
                     : { q: s.q, debate: [], synthesis: "", drilldown: {}, researchBrief: s.researchBrief || "" };
+              // PHASE 14: restore the Research State, grounding, intake register and
+              // session id too. Previously only the brief text came back, so a
+              // reopened session's follow-ups ran with no Research State, and its
+              // follow-up stages were written into whichever session was newest.
+              restored.researchState = s.researchState || null;
+              restored.grounded = s.grounded ?? false;
+              restored.intakeRegister = s.intakeRegister || "";
+              restored.sessionId = s.id;
               setBrCur(restored); setBrQ(s.q);
               setBrAg(s.agents || brAg); sv("cos-br-live", restored);
               setBrShowHistory(false);
