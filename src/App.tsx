@@ -1254,6 +1254,32 @@ const AR=DEPTS.flatMap(d=>d.roles.map(r=>({...r,dc:d.c,dl:d.l})));
 // Both new executives are added here so they appear in the Boardroom picker
 // alongside the rest. They are ordinary participants: they debate, they are
 // challenged, and they challenge others.
+// PHASE 14: ONE definition of the Research State shape. Every save and every
+// restore passes through this, so no code path can silently drop a field.
+// Fields not yet populated stay empty - never filled with invented content.
+function normalizeResearchState(rs:any,fb:any={}):any{
+  const r=rs||{}; const d=r.decomposition||fb.decomposition||null;
+  const arr=(x:any)=>Array.isArray(x)?x:[];
+  return {
+    objective:r.objective||d?.objective||"",
+    originalQuestion:r.originalQuestion||r.question||fb.question||"",
+    assumptions:arr(r.assumptions).length?r.assumptions:arr(d?.assumptions),
+    dimensions:arr(r.dimensions).length?r.dimensions:arr(d?.dimensions),
+    researchQuestions:arr(r.researchQuestions).length?r.researchQuestions:arr(d?.research_questions),
+    adjacentOpportunityQuestions:arr(r.adjacentOpportunityQuestions).length?r.adjacentOpportunityQuestions:arr(d?.adjacent_opportunity_questions),
+    decomposition:d,
+    researchBrief:r.researchBrief??fb.researchBrief??"",
+    evidence:arr(r.evidence), findings:arr(r.findings), opportunities:arr(r.opportunities),
+    hypotheses:arr(r.hypotheses), risks:arr(r.risks), contradictions:arr(r.contradictions),
+    unresolvedQuestions:arr(r.unresolvedQuestions), decisions:arr(r.decisions), followUps:arr(r.followUps),
+    investigationDirection:r.investigationDirection||"",
+    provider:r.provider||fb.provider||"",
+    grounded:r.grounded??fb.grounded??false,
+    createdAt:r.createdAt||new Date().toISOString(),
+    updatedAt:new Date().toISOString(),
+  };
+}
+
 // PHASE 18: the user can address any executive by name in a follow-up.
 // Deterministic word-boundary matching - "trade-offs" does not summon the
 // Trade Officer, "CHRO" does not match "CRO". Tested against 8 phrasings.
@@ -1262,7 +1288,7 @@ const EXEC_ALIASES:Record<string,string[]>={
   cfo:["cfos?","chief financial","finance head"], cto:["ctos?","chief technology","chief technical"],
   cmo:["cmos?","chief marketing"], chro:["chros?","chief human","chief people","hr head"],
   clo:["clos?","chief legal","legal counsel","general counsel"], cso:["cso","chief strategy","strategy officer"],
-  coach:["career coach"], trade:["trade officer"], cro:["cro","chief risk","risk officer"],
+  coach:["career coach","career growth"], trade:["trade officer"], cro:["cro","chief risk","risk officer"],
 };
 function detectAddressedExecs(text:string):string[]{
   const t=String(text||"").toLowerCase(); const out:string[]=[];
@@ -1271,6 +1297,36 @@ function detectAddressedExecs(text:string):string[]{
   }
   return out;
 }
+// PHASE 19 fallback router: used only when the AI routing call is unavailable.
+// Multi-signal scoring over BOARD executives; selects a primary plus genuinely
+// implicated secondaries (score >= half the top score), capped at 4.
+const ROUTING_SIGNALS:Record<string,string[]>={
+  cfo:["afford","cost","costs","margin","margins","profit","profitable","cash","funding","capital","roi","budget","economics","valuation","payback","revenue","price","pricing","financial","invest","investment","breakeven","loan"],
+  coo:["operate","operational","operationally","execute","execution","capacity","supply","logistics","process","vendor","vendors","procurement","delivery","throughput","workflow","scale up","on time"],
+  cto:["technology","tech","automate","automated","automation","software","system","systems","platform","ai","data","digital","integrate","integration","app","tool","tools"],
+  clo:["legal","legally","law","laws","regulation","regulations","regulatory","compliance","compliant","licence","license","permit","permits","contract","contracts","liability","lawsuit","sue","expose us"],
+  cro:["risk","risks","risky","fail","failure","go wrong","downside","worst case","threat","threats","exposure","stress test","what could","vulnerable","controls","control failure"],
+  ceo:["strategically","direction","vision","should we","pursue","priority","priorities","go ahead","commit"],
+  cso:["strategy","strategic","strategically","competitive","compete","competitor","competitors","market entry","positioning","direction","long term","long-term","alternative","alternatives","differentiate"],
+  chro:["employee","employees","staff","hire","hiring","talent","team","people","workforce","salary","salaries","culture","headcount","layoff","layoffs"],
+  cmo:["customer","customers","demand","marketing","brand","sell","selling","acquisition","segment","segments","channel","channels","positioning","price cut"],
+  trade:["international","internationally","export","exports","import","imports","abroad","overseas","global","globally","cross-border","foreign","tariff","tariffs","customs"],
+  coach:["career","burnout","promotion","my manager","job offer"],
+  chairman:["governance","board","shareholders","shareholder","oversight","fiduciary"],
+};
+function scoreFollowUpRoute(question:string,boardIds:string[]):{ids:string[],scores:Record<string,number>}{
+  const t=" "+String(question||"").toLowerCase().replace(/[^a-z0-9\s'-]/g," ")+" ";
+  const scores:Record<string,number>={};
+  for(const id of boardIds){
+    const sig=ROUTING_SIGNALS[id]; if(!sig)continue;
+    scores[id]=sig.filter(w=>t.includes(" "+w+" ")).length;
+  }
+  const ranked=Object.entries(scores).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+  if(!ranked.length)return {ids:[],scores};
+  const top=ranked[0][1];
+  return {ids:ranked.filter(([,v])=>v>=Math.max(1,top*0.5)).slice(0,4).map(([k])=>k),scores};
+}
+
 const CS=AR.filter(r=>["chairman","ceo","cfo","cto","coo","cmo","chro","clo","cso","coach","trade","cro"].includes(r.id));
 
 const EP={
@@ -5234,12 +5290,15 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     brCallBudget.current=BR_MAX_CALLS;
     setBrRun(true);setError(null);
     setUsageFeature("AI Boardroom","🏛️");
-    setBrCur({q:brQ,researchBrief:"",format:"threaded",stages:[]});
+    const brSessionId=Date.now();
+    setBrCur({q:brQ,researchBrief:"",format:"threaded",stages:[],sessionId:brSessionId});
     const agents=brAg.map(id=>AR.find(r=>r.id===id)).filter(Boolean);
     const res=[];
     const synCur=CURRENCIES.find(c=>c.code===co.currency)||CURRENCIES[0];
     let researchBrief="";
     let brGrounded=false;
+    let brResearchState:any=null;   // PHASE 14: carried locally so later rebuilds cannot drop it
+    let brIntakeRegister="";
     const domain=classifyDomain(brQ);
     // Intent was hardcoded to "decide", so a boardroom asked to ANALYSE or PLAN
     // still received decision frameworks. classifyIntent reads the actual question.
@@ -5305,7 +5364,8 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         const brIntakeRaw=await ask(brIntakeSys,[{role:"user",content:"Produce the evidence register now."}],5200);
         const brRegister=(brIntakeRaw&&typeof brIntakeRaw==="object"&&"text" in brIntakeRaw)?brIntakeRaw.text:String(brIntakeRaw||"");
         brRegisterBlock=buildRegisterInjection(brRegister);
-        setBrCur(prev=>({...prev,intakeRegister:String(brRegister||"").trim()}));
+        brIntakeRegister=String(brRegister||"").trim();
+        setBrCur(prev=>({...prev,intakeRegister:brIntakeRegister}));
       }
     }catch(e){
       console.warn("[OIQ] phase 0 intake:",e);
@@ -5324,9 +5384,9 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         brGrounded=rdBR.grounded;
         // PHASE 14: a structured Research State, kept with the session - not just
         // the brief text. Follow-ups read this instead of starting from zero.
-        setBrCur(prev=>({...prev,researchBrief,grounded:rdBR.grounded,
-          researchState:{question:brQ,decomposition:(rdBR as any).decomposition||null,
-            grounded:rdBR.grounded,provider:rdBR.provider,createdAt:new Date().toISOString(),followUps:[]}}));
+        brResearchState=normalizeResearchState({question:brQ,decomposition:(rdBR as any).decomposition||null,
+          researchBrief,grounded:rdBR.grounded,provider:rdBR.provider});
+        setBrCur(prev=>({...prev,researchBrief,grounded:rdBR.grounded,researchState:brResearchState}));
         setBrResearching(false);
       }
       const researchContext=(brGrounded
@@ -5484,7 +5544,8 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         const runningStage={stageNumber:1,type:"original",question:brQ,
           executiveIds:brAg,debate:[...res],synthesis:"",
           decisionStatus:null,completedAt:null,frozen:false};
-        const updatedCur={q:brQ,researchBrief,format:"threaded",stages:[runningStage]};
+        const updatedCur={q:brQ,researchBrief,format:"threaded",stages:[runningStage],sessionId:brSessionId,
+          grounded:brGrounded,intakeRegister:brIntakeRegister,researchState:brResearchState};
         setBrCur(updatedCur);
         sv("cos-br-live",updatedCur);
       }
@@ -5529,9 +5590,15 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         const stage1={stageNumber:1,type:"original",question:brQ,
           executiveIds:brAg,debate:res,synthesis:syn,
           decisionStatus,completedAt:new Date().toISOString(),frozen:true};
-        const finalSession={id:Date.now(),q:brQ,agents:brAg,
-          format:"threaded",stages:[stage1],researchBrief,ts:new Date().toISOString()};
-        const finalCur={q:brQ,researchBrief,format:"threaded",stages:[stage1]};
+        // PHASE 14/29: the decision is recorded in the Research State itself.
+        const finalResearchState=normalizeResearchState({...(brResearchState||{question:brQ,researchBrief,grounded:brGrounded}),
+          decisions:[...((brResearchState&&brResearchState.decisions)||[]),
+            {stage:1,question:brQ,status:decisionStatus,recommendation:(()=>{try{return extractRecommendationSnippet(syn);}catch{return "";}})(),at:new Date().toISOString()}]});
+        const finalSession={id:brSessionId,q:brQ,agents:brAg,
+          format:"threaded",stages:[stage1],researchBrief,ts:new Date().toISOString(),
+          grounded:brGrounded,intakeRegister:brIntakeRegister,researchState:finalResearchState};
+        const finalCur={q:brQ,researchBrief,format:"threaded",stages:[stage1],sessionId:brSessionId,
+          grounded:brGrounded,intakeRegister:brIntakeRegister,researchState:finalResearchState};
         setBrCur(finalCur);
         try{sv("cos-br-live",finalCur);}catch{}
         // (usage is now logged centrally inside callAI, with the real provider)
@@ -5557,22 +5624,61 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     // PHASE 18: if the user names executives ("Ask the CFO", "Chairman, ..."),
     // only those answer. Otherwise the previous behaviour is unchanged.
     const addressedIds=detectAddressedExecs(brFollowUp).filter(id=>AR.some(r=>r.id===id));
-    const agents=(addressedIds.length?addressedIds:prevExecIds).map(id=>AR.find(r=>r.id===id)).filter(Boolean);
+    // PHASE 19 - INTELLIGENT ROUTING. Priority: executives the user names ->
+    // executives chosen manually in the UI -> intelligent routing -> previous
+    // stage. Routing first asks the AI, giving it the question AND the Research
+    // State (objective, dimensions, prior decisions), so it routes on context,
+    // not keywords. Only if that call fails does a multi-signal scorer decide.
+    const boardIds=CS.map((r:any)=>r.id);
+    let routedIds:string[]=[]; let routeReason="";
+    if(!addressedIds.length&&!followUpExecIds.length){
+      try{
+        const rsR:any=(brCur as any).researchState||null;
+        const routerSys="You route a follow-up question in a boardroom to the executives who should answer it. "+
+          "Choose the ONE executive with primary responsibility, plus only those with a genuine secondary implication (most questions need 1-2, never more than 4). "+
+          "Do not include an executive just to be thorough. Return ONLY JSON: {\"primary\":\"id\",\"secondary\":[\"id\"],\"reason\":\"one sentence\"}.\n"+
+          "EXECUTIVES (id: remit):\n"+CS.map((r:any)=>r.id+": "+r.t+" - "+r.d).join("\n")+
+          (rsR?"\nINVESTIGATION CONTEXT: objective: "+(rsR.objective||rsR.originalQuestion||"")+"; dimensions: "+(rsR.dimensions||[]).join(", ")+
+            ((rsR.decisions||[]).length?"; prior decisions: "+rsR.decisions.map((d:any)=>d.status).join(", "):""):"");
+        const rr=await askFull(routerSys,[{role:"user",content:"FOLLOW-UP QUESTION: "+brFollowUp}],700);
+        const txt=String((rr as any)?.primary||"");
+        const a=txt.indexOf("{"),b=txt.lastIndexOf("}");
+        if(a>=0&&b>a){
+          const j=JSON.parse(txt.slice(a,b+1));
+          routedIds=[j.primary,...(Array.isArray(j.secondary)?j.secondary:[])].map((x:any)=>String(x||"").trim().toLowerCase())
+            .filter((x:string,i:number,arr:string[])=>boardIds.includes(x)&&arr.indexOf(x)===i).slice(0,4);
+          routeReason=String(j.reason||"").slice(0,160);
+        }
+      }catch{ routedIds=[]; }
+      if(!routedIds.length){
+        routedIds=scoreFollowUpRoute(brFollowUp,boardIds).ids;
+        if(routedIds.length)routeReason="matched on the question's subject (AI routing unavailable)";
+      }
+    }
+    const chosenIds=addressedIds.length?addressedIds:followUpExecIds.length?followUpExecIds:routedIds.length?routedIds:prevExecIds;
+    const agents=chosenIds.map((id:string)=>AR.find(r=>r.id===id)).filter(Boolean);
     if(addressedIds.length){try{showToast("Routing this question to: "+agents.map((a:any)=>a.t).join(", "),"info");}catch{}}
+    else if(routedIds.length&&!followUpExecIds.length){try{showToast("Answering: "+agents.map((a:any)=>a.t).join(", ")+(routeReason?" \u2014 "+routeReason:""),"info");}catch{}}
 
     // PHASE 14/15/26: THE GAP THIS FIXES - follow-ups previously received the
     // prior debate text but NOT the Research Brief, so every follow-up silently
     // lost the evidence and executives answered from memory. The stored
     // Research State is now passed in, so they answer from existing evidence
     // and say plainly when it does not cover the new question.
-    const rs:any=(brCur as any).researchState||null;
-    const rsDecomp=rs?.decomposition;
-    const researchStateBlock=((brCur as any).researchBrief||rsDecomp)
+    const rs:any=(brCur as any).researchState?normalizeResearchState((brCur as any).researchState):null;
+    const briefText=String((brCur as any).researchBrief||rs?.researchBrief||"");
+    const researchStateBlock=(briefText||rs)
       ?"\n\nRESEARCH STATE FOR THIS INVESTIGATION (already established - build on it, do not restart):\n"
-        +(rsDecomp?.objective?"Underlying objective: "+rsDecomp.objective+"\n":"")
-        +(rsDecomp?.assumptions?.length?"Assumptions in the original question: "+rsDecomp.assumptions.join("; ")+"\n":"")
-        +(rsDecomp?.dimensions?.length?"Problem dimensions: "+rsDecomp.dimensions.join("; ")+"\n":"")
-        +((brCur as any).researchBrief?"Research Brief "+((brCur as any).grounded?"(grounded in sources)":"(UNGROUNDED - no verifiable sources)")+":\n"+String((brCur as any).researchBrief).slice(0,12000)+"\n":"")
+        +(rs?.originalQuestion?"Original question: "+rs.originalQuestion+"\n":"")
+        +(rs?.objective?"Underlying objective: "+rs.objective+"\n":"")
+        +(rs?.assumptions?.length?"Assumptions in the original question: "+rs.assumptions.join("; ")+"\n":"")
+        +(rs?.dimensions?.length?"Problem dimensions: "+rs.dimensions.join("; ")+"\n":"")
+        +(rs?.adjacentOpportunityQuestions?.length?"Adjacent opportunities examined: "+rs.adjacentOpportunityQuestions.join("; ")+"\n":"")
+        +(rs?.opportunities?.length?"Opportunities identified so far: "+JSON.stringify(rs.opportunities).slice(0,2500)+"\n":"")
+        +(rs?.unresolvedQuestions?.length?"Unresolved questions: "+rs.unresolvedQuestions.join("; ")+"\n":"")
+        +(rs?.decisions?.length?"Prior decisions: "+rs.decisions.map((d:any)=>"[stage "+d.stage+"] "+d.question+" -> "+(d.status||"")+(d.recommendation?" ("+String(d.recommendation).slice(0,200)+")":"")).join(" | ")+"\n":"")
+        +(rs?.followUps?.length?"Earlier follow-ups: "+rs.followUps.map((f:any)=>f.question).join(" | ")+"\n":"")
+        +(briefText?"Research Brief "+(((brCur as any).grounded??rs?.grounded)?"(grounded in sources)":"(UNGROUNDED - no verifiable sources)")+":\n"+briefText.slice(0,12000)+"\n":"")
         +"If this evidence does not cover the follow-up question, say exactly what evidence is missing instead of filling the gap from memory."
       :"";
     // PHASES 21-24, 43, 44: challenge protocol for follow-ups.
@@ -5642,7 +5748,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           stageNumber:prevStages.length+1,
           type:"followup",
           question:brFollowUp,
-          executiveIds:prevExecIds,
+          executiveIds:agents.map((a:any)=>a.id),
           aiSuggestions:followUpSuggestions,
           debate:followUpResponses,
           synthesis:stageSyn,
@@ -5652,14 +5758,25 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         };
         try{saveDecisionRecord({id:Date.now(),ts:new Date().toISOString(),question:brFollowUp,executives:prevExecIds,status:newStage.decisionStatus,recommendation:extractRecommendationSnippet(stageSyn)});}catch{}
         const updatedStages=[...prevStages,newStage];
-        const updatedCur={...brCur,stages:updatedStages};
+        const priorRS=(brCur as any).researchState;
+        const updatedRS=priorRS?normalizeResearchState({...priorRS,
+          followUps:[...(priorRS.followUps||[]),{question:brFollowUp,executives:agents.map((a:any)=>a.id),at:new Date().toISOString()}],
+          decisions:[...(priorRS.decisions||[]),{stage:updatedStages.length,question:brFollowUp,status:newStage.decisionStatus,
+            recommendation:(()=>{try{return extractRecommendationSnippet(stageSyn);}catch{return "";}})(),at:new Date().toISOString()}]}):priorRS;
+        const updatedCur={...brCur,stages:updatedStages,researchState:updatedRS};
         setBrCur(updatedCur);
         sv("cos-br-live",updatedCur);
         // Update most recent archive entry with new stage
         setBrSessions(prev=>{
           if(!prev.length)return prev;
           const updated=[...prev];
-          updated[0]={...updated[0],stages:updatedStages};
+          // WAS updated[0] - the most recent session - even when an OLDER
+          // session had been reopened, so its follow-up was written into a
+          // different session. Now matched by id; [0] only for legacy sessions.
+          const sid=(brCur as any).sessionId;
+          const idx=sid?updated.findIndex((x:any)=>x.id===sid):0;
+          if(idx<0)return prev;
+          updated[idx]={...updated[idx],stages:updatedStages,researchState:updatedRS};
           sv("cos-br",updated);
           return updated;
         });
