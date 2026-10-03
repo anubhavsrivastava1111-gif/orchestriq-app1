@@ -26,7 +26,7 @@ import { ENGINE_ENABLED, runPipeline, classifyDomain, classifyIntent, selectFram
 import { buildScaffoldPrompt, buildViabilityPrompt, inferArchetype } from "./lib/BusinessScaffold";
 import { scanSuppliedInputs, buildIntakePrompt, buildRegisterInjection, INTAKE_FAILED_NOTICE } from "./lib/IntakeRegister";
 import { runSearch, formatResultsForPrompt, RETRIEVED_RESULTS_RULES, hasExternalSearch, SEARCH_PROVIDERS, estimateSearchCost } from "./lib/SearchProviders";
-import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney, COST_CHAIN } from "./lib/ModelRouting";
+import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney } from "./lib/ModelRouting";
 import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
 import { detectDocumentRequest, buildDocumentBrief, buildSynthesisOverride, suggestedFormats, CONSULTING_STANDARD } from "./lib/DocumentLibrary";
 import { NVIDIA_DEFAULT_MODEL, nvidiaModelOptions, nvidiaShouldReason, nvidiaTokenBudget } from "./lib/NvidiaModels";
@@ -599,6 +599,10 @@ function enabledKeys(keys:any):Record<string,string>{
 // (Economy / Balanced / Premium / Custom) leads, then every other enabled TEXT
 // provider cheapest-first (COST_CHAIN from lib/ModelRouting). Premium models are
 // reached only after the economical ones fail. Image providers are never included.
+// Defined here (not imported) so App.tsx builds on its own: importing it made
+// a single-file deploy fail with MISSING_EXPORT when ModelRouting.ts was not
+// updated alongside it. Same order as the fallback chain in lib/ModelRouting.
+const COST_CHAIN=["deepseek","gemini","groq","kimi","openai","claude","nvidia"];
 function costOrderedProviders(keys:any,stage:string):Array<{provider:string;key:string}>{
   const ek=enabledKeys(keys); const out:Array<{provider:string;key:string}>=[];
   const pref=stageRoute(keys,stage);
