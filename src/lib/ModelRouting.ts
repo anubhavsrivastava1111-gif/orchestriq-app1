@@ -88,6 +88,27 @@ export const DEFAULT_PROFILE: StageProfile = PRESETS.balanced.stages;
  *  be asked to answer a text question. */
 export const COST_CHAIN = ["deepseek", "gemini", "groq", "kimi", "openai", "claude", "nvidia"];
 
+/** Providers that bill at premium rates. */
+export const PREMIUM_PROVIDERS = ["openai", "claude"];
+
+/** THE ONE ROUTING RULE. The providers a stage may use, in order: the stage's
+ *  configured provider first, then COST_CHAIN. Premium providers are allowed
+ *  ONLY when the stage's own configured provider is premium - so Economy never
+ *  escalates to OpenAI/Claude, Balanced uses Claude only for the stage it is
+ *  configured on (Chairman), and Premium uses it where configured. An empty
+ *  result means "stop and tell the user", never "quietly pay more". */
+export function stageProviderChain(
+  stage: StageId,
+  profile: StageProfile | null | undefined,
+  isEnabled: (id: string) => boolean,
+): string[] {
+  const wanted = (profile || DEFAULT_PROFILE)[stage];
+  const allowPremium = PREMIUM_PROVIDERS.includes(wanted);
+  return [wanted, ...COST_CHAIN]
+    .filter((p, i, a) => p && a.indexOf(p) === i)
+    .filter((p) => (allowPremium || !PREMIUM_PROVIDERS.includes(p)) && isEnabled(p));
+}
+
 /**
  * Picks the provider for a stage, falling back down a sensible chain when the
  * chosen one is unavailable or switched off. Never returns a disabled provider.
@@ -97,12 +118,10 @@ export function resolveStageProvider(
   profile: StageProfile | null | undefined,
   isEnabled: (id: string) => boolean,
 ): string {
-  const wanted = (profile || DEFAULT_PROFILE)[stage];
-  if (wanted && isEnabled(wanted)) return wanted;
-  // Cheapest capable first, so an unavailable premium choice degrades in price,
-  // not into an unexpectedly expensive provider.
-  for (const p of COST_CHAIN) if (isEnabled(p)) return p;
-  return "";
+  // Same rule as everything else: was "configured provider, else cheapest of
+  // ALL providers" - which returned Claude in Economy when DeepSeek and Gemini
+  // were off. Now an economical stage never resolves to a premium provider.
+  return stageProviderChain(stage, profile, isEnabled)[0] || "";
 }
 
 /** Model string upgrade for stages that benefit from it, within the same provider. */
