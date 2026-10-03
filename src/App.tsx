@@ -932,7 +932,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
       }
       if(!angleSearchUsed&&libBlock)anglePrompt+=libBlock;
       const fo=await callSearchWithFailover(routes,anglePrompt,[{role:"user",content:"Research this angle now."}],5200,!angleSearchUsed,
-        (prov,msg)=>{try{showToast&&showToast("Research Desk: "+prov+" failed ("+msg.slice(0,60)+") — trying next provider…","warning");}catch{}});
+        (prov,msg)=>{try{showToast&&showToast("Research Desk: "+prov+" failed ("+msg.slice(0,600)+") — trying next provider…","warning");}catch{}});
       const raw=fo.out; usedProvider=fo.provider;
       const text=(raw&&typeof raw==="object"&&"text" in raw)?raw.text:String(raw||"");
       if(raw&&typeof raw==="object"&&(raw as any).truncated)anyTruncated=true;
@@ -5304,6 +5304,10 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           msg.toLowerCase().includes("maximum")||
           msg.toLowerCase().includes("413");
         let cyclesDone=0;
+        // The real reason the last provider failed. Previously discarded, so
+        // the user only ever saw a generic "at limit" message.
+        let lastProvErr="";
+        let sawRetryableErr=false;
         // SECURITY H-2: retries were bounded per executive but NOT globally.
         // 9 executives x 3 cycles x N providers x 2 continuations is an
         // unbounded-in-practice spend from a single click. One ceiling for the
@@ -5359,16 +5363,28 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
               cycleSuccess=true;
               break;
             }catch(provErr:any){
+              lastProvErr=prov+": "+String(provErr?.message||provErr);
               if(isContextOrRateErr(provErr.message)){
+                sawRetryableErr=true;
                 markProviderExhausted(prov);
                 continue; // try next provider
               }
-              // Non-rate error — record and stop trying this provider
+              // Non-rate error — previously swallowed silently. Now recorded
+              // above, so the user sees the actual cause.
               continue;
             }
           }
           if(cycleSuccess||cancelRef.current.br)break;
-          // All providers exhausted this cycle — wait 65s then reset and retry
+          // THE FAKE COUNTDOWN BUG: this used to wait 65 seconds, three times,
+          // for EVERY failure - including permanent ones like a rejected key
+          // (403) or a retired model (404), which no amount of waiting fixes.
+          // It showed "all providers at limit" even when nothing was rate
+          // limited. Waiting now only happens when a genuine rate/limit error
+          // was actually seen; otherwise it stops at once with the real cause.
+          if(!sawRetryableErr){
+            try{showToast(ag.t+" could not answer. Real cause: "+(lastProvErr||"no provider available")+" (Report this message to the administrator.)","error");}catch{}
+            break;
+          }
           if(cyclesDone<3){
             await waitWithCountdown(65,(s)=>{
               setBrPh(ag.ic+" "+ag.t+" — all providers at limit. Resuming in "+s+"s… (Cancel to stop)");
@@ -5382,7 +5398,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         // every retry produced nothing, say so plainly on the card itself.
         if(!gotResponse||String(agText||"").trim().length<40){
           agText=(String(agText||"").trim().length>=40?"[Response incomplete — API limit reached]\n\n"+agText
-            :"\u26a0 **"+ag.t+" did not produce an answer.**\n\nEvery configured provider either failed or returned an empty response for this executive. This is usually a rate limit or an oversized prompt.\n\nWhat to try: reduce the number of executives, switch off the Research Desk for this run, or add a second provider key in Settings. This executive contributed nothing to the synthesis below.");
+            :"\u26a0 **"+ag.t+" did not produce an answer.**\n\nEvery configured provider either failed or returned an empty response for this executive."+(lastProvErr?"\n\n**Actual error:** "+lastProvErr.slice(0,500):"")+"\n\nWhat to try: reduce the number of executives, switch off the Research Desk for this run, or add a second provider key in Settings. This executive contributed nothing to the synthesis below.");
           agTruncated=false;
           gotResponse=true;
           showToast(ag.t+" paused — API limit. Adding a second provider key in Settings prevents this.","warning");
