@@ -63,6 +63,11 @@ interface Env {
   NVIDIA_API_KEY_3?: string;
   NVIDIA_API_KEY_4?: string;
   NVIDIA_API_KEY_5?: string;
+  // SERVER-SIDE FALLBACK PROVIDER. Optional. When set, the shared free tier
+  // keeps working even when NVIDIA rejects every pool key (account-level 403).
+  // Free key at console.groq.com/keys. Never sent to the browser.
+  GROQ_API_KEY?: string;
+  GROQ_FALLBACK_MODEL?: string; // default openai/gpt-oss-120b (llama-3.3-70b-versatile was retired 16 Aug 2026)
   SUPABASE_URL?: string;
   VITE_SUPABASE_ANON_KEY?: string;
   ALLOWED_ORIGIN?: string;
@@ -522,6 +527,43 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
     if (!upstream) return json({ error: "NVIDIA proxy: no key was available to try." }, 503, obs);
     (obs as any)["x-oiq-rejected"] = rejectedSlots.join(",") || "none";
 
+    // ── SECOND, INDEPENDENT PROVIDER ─────────────────────────────────────────
+    // Every module (AI Boardroom, Chat, Workspace, Live Boardroom, Project
+    // Engine, Research Desk) reaches NVIDIA through this one function. So when
+    // NVIDIA blocks the pool, everything fails together. This is the single
+    // point where one fallback protects all of them at once. It runs only for
+    // the shared tier (never replaces a user's own key), and only for failures
+    // that waiting will not fix: rejected auth, missing/retired model, or an
+    // NVIDIA server error.
+    const nvFailedPermanently = !upstream.ok && [401, 403, 404, 410, 500, 502, 503].includes(upstream.status);
+    if (nvFailedPermanently && !userKey && env.GROQ_API_KEY) {
+      const groqModel = (env.GROQ_FALLBACK_MODEL || "openai/gpt-oss-120b").trim();
+      try {
+        const g = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer " + env.GROQ_API_KEY },
+          body: JSON.stringify({ model: groqModel, max_tokens: Math.min(budget, 8000), temperature: 0.4, messages: payload.messages }),
+          signal: AbortSignal.timeout(45000),
+        });
+        const gText = await g.text();
+        let gContent = "";
+        try { gContent = JSON.parse(gText)?.choices?.[0]?.message?.content || ""; } catch {}
+        if (g.ok && String(gContent).trim()) {
+          return new Response(gText, { status: 200, headers: { "Content-Type": "application/json", ...obs,
+            "x-oiq-provider": "groq-fallback", "x-oiq-fallback-model": groqModel,
+            "x-oiq-nvidia-status": String(upstream.status) } });
+        }
+        let gReason = gText.slice(0, 200);
+        try { gReason = JSON.parse(gText)?.error?.message || gReason; } catch {}
+        (obs as any)["x-oiq-fallback-error"] = ("Groq " + g.status + ": " + gReason).slice(0, 200);
+      } catch (ge: any) {
+        (obs as any)["x-oiq-fallback-error"] = ("Groq unreachable: " + String(ge?.message || ge)).slice(0, 200);
+      }
+    }
+    const fallbackNote = (obs as any)["x-oiq-fallback-error"]
+      ? " Backup provider also failed: " + (obs as any)["x-oiq-fallback-error"] + "."
+      : (!userKey && !env.GROQ_API_KEY ? " (Owner: no backup provider is configured — add GROQ_API_KEY in Cloudflare so this never blocks users again.)" : "");
+
     if (!upstream.ok) {
       let reason = text.slice(0, 300);
       try { reason = JSON.parse(text)?.error?.message || JSON.parse(text)?.detail || reason; } catch { /* keep raw */ }
@@ -533,9 +575,9 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
         const who = userKey
           ? "Your own NVIDIA key (saved in Settings) was rejected. Generate a fresh key at build.nvidia.com and paste it again, or clear it to use the shared free tier."
           : "Every shared key tried was rejected: " + rejectedSlots.join(", ") + ". Owner action: open build.nvidia.com with the account behind each listed key, generate a new key, and replace the matching Cloudflare variable (key #1 = NVIDIA_API_KEY, #2 = NVIDIA_API_KEY_2, and so on), then redeploy.";
-        return json({ error: "NVIDIA refused authorization (HTTP " + upstream.status + ") for model \"" + requested + "\". " + who + " NVIDIA said: " + reason }, upstream.status, obs);
+        return json({ error: "NVIDIA refused authorization (HTTP " + upstream.status + ") for model \"" + requested + "\". " + who + " NVIDIA said: " + reason + "." + fallbackNote }, upstream.status, obs);
       }
-      return json({ error: "NVIDIA " + upstream.status + " for model \"" + requested + "\": " + reason }, upstream.status, obs);
+      return json({ error: "NVIDIA " + upstream.status + " for model \"" + requested + "\": " + reason + "." + fallbackNote }, upstream.status, obs);
     }
 
     try {
