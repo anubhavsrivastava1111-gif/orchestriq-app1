@@ -841,21 +841,47 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   // before any searching starts, so they can see exactly what's actually
   // being researched. Kept deliberately short and cheap — one small call,
   // not another multi-step research pass of its own.
-  let effectiveQuestion=question;
+  // ── PROBLEM DECOMPOSITION (Opportunity Intelligence, phases 4/9/10) ──────
+  // One small call that turns the raw question into structured intelligence:
+  // the real objective, the assumptions hidden in the question, the dimensions
+  // of the problem, the research questions, and questions about ADJACENT
+  // opportunities the user did not ask about. Search gets a short keyword
+  // focus (queries only keep 8 words); the research model gets the full
+  // decomposition. Any failure falls back to the raw question - research is
+  // never blocked by this step.
+  let effectiveQuestion=question;   // used for the research instruction
+  let searchQuestion=question;      // used to build search-engine queries
+  let decomposition:any=null;
   try{
-    const refinementPrompt="You turn a business question into a precise research brief. "+
-      "Given the raw question below, rewrite it as 2-4 specific, researchable sub-questions "+
-      "covering the concrete facts, figures, or comparisons actually needed to answer it. "+
-      "Do not answer the question. Do not add commentary. Output only the rewritten brief.";
-    const rf=await callSearchWithFailover(routes,refinementPrompt,
-      [{role:"user",content:"RAW QUESTION:\n"+question}],500,false,
-      ()=>{});
-    const refinedText=stripPreamble((rf?.out&&typeof rf.out==="object"&&"text" in rf.out)?rf.out.text:String(rf?.out||""));
-    if(refinedText&&refinedText.trim().length>10){
-      effectiveQuestion=refinedText.trim();
-      try{showToast&&showToast("Research brief: "+effectiveQuestion.slice(0,220)+(effectiveQuestion.length>220?"…":""),"info");}catch{}
+    const decompPrompt="You are the problem-decomposition stage of a business research system. "+
+      "Do NOT answer the question. Return ONLY one JSON object, no markdown, with these keys:\n"+
+      "objective: the underlying business objective in one sentence;\n"+
+      "assumptions: array of assumptions hidden in how the question is framed;\n"+
+      "dimensions: array of 4-10 problem dimensions that actually matter here (adapt to the problem - do not use a fixed checklist);\n"+
+      "research_questions: array of 3-6 specific, researchable questions needed to answer it;\n"+
+      "adjacent_opportunity_questions: array of 2-4 questions about adjacent areas of the value chain or ecosystem where value may be created or lost that the user did NOT ask about. If none are plausible, return an empty array - never invent novelty;\n"+
+      "search_focus: a 4-8 word keyword phrase for a web search engine.";
+    const rf=await callSearchWithFailover(routes,decompPrompt,
+      [{role:"user",content:"RAW QUESTION:\n"+question}],900,false,()=>{});
+    const raw=stripPreamble((rf?.out&&typeof rf.out==="object"&&"text" in rf.out)?rf.out.text:String(rf?.out||""));
+    const a=raw.indexOf("{"),b=raw.lastIndexOf("}");
+    if(a>=0&&b>a){
+      const d=JSON.parse(raw.slice(a,b+1));
+      const arr=(x:any)=>Array.isArray(x)?x.map((v:any)=>String(v)).filter((v:string)=>v.trim()).slice(0,10):[];
+      decomposition={objective:String(d.objective||"").trim(),assumptions:arr(d.assumptions),dimensions:arr(d.dimensions),
+        research_questions:arr(d.research_questions),adjacent_opportunity_questions:arr(d.adjacent_opportunity_questions),
+        search_focus:String(d.search_focus||"").trim()};
+      if(decomposition.research_questions.length){
+        effectiveQuestion="ORIGINAL QUESTION: "+question+
+          (decomposition.objective?"\nUNDERLYING OBJECTIVE: "+decomposition.objective:"")+
+          "\nRESEARCH QUESTIONS:\n- "+decomposition.research_questions.join("\n- ")+
+          (decomposition.adjacent_opportunity_questions.length?"\nADJACENT OPPORTUNITIES TO CHECK (report only what evidence supports; say so if nothing material is found):\n- "+decomposition.adjacent_opportunity_questions.join("\n- "):"")+
+          (decomposition.assumptions.length?"\nASSUMPTIONS IN THE QUESTION TO TEST:\n- "+decomposition.assumptions.join("\n- "):"");
+      }
+      if(decomposition.search_focus&&decomposition.search_focus.split(/\s+/).length>=2)searchQuestion=decomposition.search_focus+" "+question;
+      try{showToast&&showToast("Research plan: "+(decomposition.objective||question).slice(0,160)+" \u2014 "+decomposition.research_questions.length+" research questions, "+decomposition.adjacent_opportunity_questions.length+" adjacent-opportunity checks.","info");}catch{}
     }
-  }catch{ /* refinement failing must never block research itself — fall back to the raw question */ }
+  }catch{ decomposition=null; /* decomposition failing must never block research - raw question is used */ }
 
   try{showToast&&showToast("Research Desk running deep multi-angle search via "+routes.map(r=>r.provider).join(" → ")+"… this can take up to 2-3 minutes.","info");}catch{}
   let usedProvider=route.provider;
@@ -896,7 +922,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
         }catch{}
       }
       if(useExternalSearch){
-        const qs=buildAngleQueries(effectiveQuestion,angle.id,co);
+        const qs=buildAngleQueries(searchQuestion,angle.id,co);
         const found:any[]=[];const seenUrls=new Set<string>();
         // Social and user-upload sites are never acceptable evidence for a capital
         // decision. A previous brief cited an Instagram reel about a tea stall, and
@@ -948,7 +974,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   const grounded=urlCount>0;
   if(!grounded){
     try{showToast&&showToast("Research Desk returned no source URLs — session is UNGROUNDED.","warning");}catch{}
-    return {brief:"⚠ **RESEARCH DESK RETURNED NO VERIFIABLE SOURCES**\n\nSearch ran via "+usedProvider+" but produced no source URL across any angle, so nothing below can be verified.\n\n---\n"+body,grounded:false,provider:route.provider};
+    return {brief:"⚠ **RESEARCH DESK RETURNED NO VERIFIABLE SOURCES**\n\nSearch ran via "+usedProvider+" but produced no source URL across any angle, so nothing below can be verified.\n\n---\n"+body,grounded:false,provider:route.provider,decomposition};
   }
   body=badgeBrief(body);
 
@@ -995,7 +1021,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   try{brief=brief+"\n\n"+attributionLine(usedProvider,"");}catch{}
   if(anyFail)brief="⚠ Some research angles could not be completed — see notes below.\n\n"+brief;
   setUsageFeature(prevUsageFeature,prevUsageIcon);
-  return {brief,grounded,provider:usedProvider};
+  return {brief,grounded,provider:usedProvider,decomposition};
 }
 // ── FINANCIAL LIVE FEED ─────────────────────────────────────────────────────
 // Fetches live financial data for Indian markets. Called at session start.
@@ -1201,6 +1227,7 @@ const DEPTS=[
     // everywhere at once - Boardroom, Executive Chat, Workflow, Autopilot.
     {id:"coach",t:"Career Coach",f:"Executive Career and Life Coach",ic:"\uD83E\uDDED",d:"Career Growth \u00b7 Difficult Managers \u00b7 Work-Life",qa:["How do I handle an unreasonable manager?","Build my 12-month promotion plan","I am burning out \u2014 what do I change first?","Negotiate my salary and title"]},
     {id:"trade",t:"Trade Officer",f:"Chief International Trade Officer",ic:"\uD83C\uDF0F",d:"Import \u00b7 Export \u00b7 Customs \u00b7 Trade Compliance",qa:["How do I start exporting from India?","Find the HS code and duty for my product","Which market should I enter first?","Get my documentation and Incoterms right"]},
+    {id:"cro",t:"Chief Risk Officer",f:"Chief Risk Officer",ic:"\uD83D\uDEE1\uFE0F",d:"Strategic \u00b7 Operational \u00b7 Financial \u00b7 Regulatory \u00b7 Execution \u00b7 Control Risk",qa:["Build a risk register for this plan","What could make this decision fail?","Stress-test our key assumptions","Which controls are missing?"]},
     {id:"strat_mgr",t:"Strategy Manager",f:"Senior Strategy Manager",ic:"📐",d:"Strategic Projects · Analysis",qa:["Market sizing analysis","Five Forces analysis","Business model canvas","Strategic options evaluation"]},
     {id:"biz_ana",t:"Business Analyst",f:"Senior Business Analyst",ic:"💡",d:"Process Analysis · Requirements",qa:["Business requirements document","As-is vs to-be process map","Stakeholder analysis","Cost-benefit analysis"]},
     {id:"strat_ana",t:"Strategy Analyst",f:"Strategy and Research Analyst",ic:"🔭",d:"Market Research · Competitor Intel",qa:["Industry landscape report","Competitor deep-dive","Market entry feasibility","PESTLE analysis"]},
@@ -1227,7 +1254,24 @@ const AR=DEPTS.flatMap(d=>d.roles.map(r=>({...r,dc:d.c,dl:d.l})));
 // Both new executives are added here so they appear in the Boardroom picker
 // alongside the rest. They are ordinary participants: they debate, they are
 // challenged, and they challenge others.
-const CS=AR.filter(r=>["chairman","ceo","cfo","cto","coo","cmo","chro","clo","cso","coach","trade"].includes(r.id));
+// PHASE 18: the user can address any executive by name in a follow-up.
+// Deterministic word-boundary matching - "trade-offs" does not summon the
+// Trade Officer, "CHRO" does not match "CRO". Tested against 8 phrasings.
+const EXEC_ALIASES:Record<string,string[]>={
+  chairman:["chairman","chairperson"], ceo:["ceos?","chief executive"], coo:["coos?","chief operating"],
+  cfo:["cfos?","chief financial","finance head"], cto:["ctos?","chief technology","chief technical"],
+  cmo:["cmos?","chief marketing"], chro:["chros?","chief human","chief people","hr head"],
+  clo:["clos?","chief legal","legal counsel","general counsel"], cso:["cso","chief strategy","strategy officer"],
+  coach:["career coach"], trade:["trade officer"], cro:["cro","chief risk","risk officer"],
+};
+function detectAddressedExecs(text:string):string[]{
+  const t=String(text||"").toLowerCase(); const out:string[]=[];
+  for(const [id,aliases] of Object.entries(EXEC_ALIASES)){
+    if(aliases.some(a=>new RegExp("\\b"+a+"\\b").test(t)))out.push(id);
+  }
+  return out;
+}
+const CS=AR.filter(r=>["chairman","ceo","cfo","cto","coo","cmo","chro","clo","cso","coach","trade","cro"].includes(r.id));
 
 const EP={
   chairman:{b:"MBA Strategy Harvard · LLB Cambridge · 45 years.",m:"You are the Executive Chairman. Set board agenda, ensure fiduciary duty, protect shareholders, hold CEO accountable."},
@@ -1323,6 +1367,7 @@ const EP={
   dir_comp:{b:"LLB NLU · MBA Risk Management · CAMS · ISO 27001 Lead Auditor · 18 years.",m:"You are the Director of Compliance. Design the compliance programme, run RCSA, monitor regulatory changes."},
   comp_mgr:{b:"LLB · MBA Risk and Compliance · CCEP · ISO 31000 Lead Risk Manager · 11 years.",m:"You are the Compliance Manager. Run compliance training, maintain policies, monitor for breaches."},
   legal_ana:{b:"LLB Hons NLU · Diploma Corporate Law · Advanced Legal Research · 5 years.",m:"You are the Legal and Compliance Analyst. Research laws, analyse contracts, produce clear legal summaries."},
+  cro:{b:"FRM · PRM · 25 years: Chief Risk Officer in banking and infrastructure, Big Four risk advisory partner.",m:"You are the Chief Risk Officer. You own strategic, operational, financial, regulatory, execution and control risk. For every proposal: name the risks that could make it fail, rate likelihood and impact, identify missing controls, and state what evidence would reduce each risk. You do not block decisions for the sake of caution; you make the risk visible and quantified so the board decides with open eyes."},
   cso:{b:"MBA Strategy Harvard Baker Scholar · CFA Charterholder · 28 years: McKinsey Partner.",m:"You are the Chief Strategy Officer. Build 3-year strategic plans, evaluate M&A targets."},
   strat_mgr:{b:"MBA Strategy IIM Bangalore · BTech NIT · Certified Strategy Consultant · 12 years.",m:"You are the Senior Strategy Manager. Build rigorous strategy documents and analytical deep-dives."},
   biz_ana:{b:"MBA IIM · CBAP Certified · Agile BA Certified · 10 years.",m:"You are the Senior Business Analyst. Capture requirements with precision, map processes in detail."},
@@ -2641,6 +2686,7 @@ const BOARD_RESEARCH_REMIT: Record<string,string> = {
   coo:"Operating cost drivers, capacity and throughput benchmarks, process cycle times, supply-chain and vendor costs, and published operational failure modes.",
   cto:"Infrastructure, hosting, storage, API and model pricing from vendor primary sources; build-vs-buy costs; scaling cost curves; and security or reliability requirements.",
   cmo:"Demand evidence, segment sizing, channel costs and CAC benchmarks, competitor pricing and positioning, and conversion benchmarks for this category.",
+  cro:"Published failure cases and loss events in comparable ventures, regulatory enforcement actions, insurance cost benchmarks, and control-failure precedents.",
   cso:"Macro and regulatory environment, competitive structure, substitute threats, defensibility precedents, and scenario evidence.",
   clo:"Applicable statutes, licences, registration requirements, their cost and lead time, penalty exposure, contractual norms, and IP position.",
   chro:"Salary and fully-loaded cost benchmarks by role and geography, statutory employment costs, hiring lead times, and skill availability.",
@@ -2739,7 +2785,7 @@ function buildBoardIdentity(role,fallback?){
 // be tuned later without touching any prompt-construction line.
 const BOARD_WORD_BUDGET: Record<string,number> = {
   chairman:1200, ceo:1200, cfo:1400, coo:1200, cto:1200, cmo:1100,
-  cso:1000, clo:1000, chro:900, board:900, vp_fin:1200, fin_ctrl:1000,
+  cso:1000, cro:1000, clo:1000, chro:900, board:900, vp_fin:1200, fin_ctrl:1000,
 };
 // 900 words could not hold a competency framework plus two salary tables, which is
 // what the CHRO is mandated to produce. The hard scope limits (max 8 sections, no
@@ -5276,7 +5322,11 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         const rdBR=await runResearchDesk(ask,co,compData,brQ,showToast,keys);
         researchBrief=rdBR.brief;
         brGrounded=rdBR.grounded;
-        setBrCur(prev=>({...prev,researchBrief,grounded:rdBR.grounded}));
+        // PHASE 14: a structured Research State, kept with the session - not just
+        // the brief text. Follow-ups read this instead of starting from zero.
+        setBrCur(prev=>({...prev,researchBrief,grounded:rdBR.grounded,
+          researchState:{question:brQ,decomposition:(rdBR as any).decomposition||null,
+            grounded:rdBR.grounded,provider:rdBR.provider,createdAt:new Date().toISOString(),followUps:[]}}));
         setBrResearching(false);
       }
       const researchContext=(brGrounded
@@ -5504,7 +5554,29 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     const prevExecIds=followUpExecIds.length>0
       ?followUpExecIds
       :(prevStages.length>0?prevStages[prevStages.length-1].executiveIds:brAg);
-    const agents=prevExecIds.map(id=>AR.find(r=>r.id===id)).filter(Boolean);
+    // PHASE 18: if the user names executives ("Ask the CFO", "Chairman, ..."),
+    // only those answer. Otherwise the previous behaviour is unchanged.
+    const addressedIds=detectAddressedExecs(brFollowUp).filter(id=>AR.some(r=>r.id===id));
+    const agents=(addressedIds.length?addressedIds:prevExecIds).map(id=>AR.find(r=>r.id===id)).filter(Boolean);
+    if(addressedIds.length){try{showToast("Routing this question to: "+agents.map((a:any)=>a.t).join(", "),"info");}catch{}}
+
+    // PHASE 14/15/26: THE GAP THIS FIXES - follow-ups previously received the
+    // prior debate text but NOT the Research Brief, so every follow-up silently
+    // lost the evidence and executives answered from memory. The stored
+    // Research State is now passed in, so they answer from existing evidence
+    // and say plainly when it does not cover the new question.
+    const rs:any=(brCur as any).researchState||null;
+    const rsDecomp=rs?.decomposition;
+    const researchStateBlock=((brCur as any).researchBrief||rsDecomp)
+      ?"\n\nRESEARCH STATE FOR THIS INVESTIGATION (already established - build on it, do not restart):\n"
+        +(rsDecomp?.objective?"Underlying objective: "+rsDecomp.objective+"\n":"")
+        +(rsDecomp?.assumptions?.length?"Assumptions in the original question: "+rsDecomp.assumptions.join("; ")+"\n":"")
+        +(rsDecomp?.dimensions?.length?"Problem dimensions: "+rsDecomp.dimensions.join("; ")+"\n":"")
+        +((brCur as any).researchBrief?"Research Brief "+((brCur as any).grounded?"(grounded in sources)":"(UNGROUNDED - no verifiable sources)")+":\n"+String((brCur as any).researchBrief).slice(0,12000)+"\n":"")
+        +"If this evidence does not cover the follow-up question, say exactly what evidence is missing instead of filling the gap from memory."
+      :"";
+    // PHASES 21-24, 43, 44: challenge protocol for follow-ups.
+    const challengeProtocol="\n\nIF THE FOLLOW-UP CONTAINS A USER PROPOSAL OR ASSUMPTION, assess it with exactly one label - SUPPORTED, CONDITIONALLY SUPPORTED (state the conditions), CHALLENGED, CONTRADICTED BY AVAILABLE EVIDENCE, or INSUFFICIENT EVIDENCE - and give the evidence-based reason. If it is genuinely strong, say specifically why; do not flatter. If it is weak, say so plainly: the weak assumption, the contradicting evidence, the likely consequence, and what evidence would change your view. Add a short 'What you may be overlooking' only where there is a real logical or evidentiary basis. Do not disagree with other executives for effect; converge when the evidence converges. Never claim an opportunity is novel or that 'nobody is doing this' unless the evidence shows it.";
 
     // Build full prior context from ALL previous stages
     const priorStagesContext=prevStages.map((st,si)=>{
@@ -5525,6 +5597,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           +buildBoardIdentity(ag,p)+CLARITY_PROTOCOL+"\n"
           +buildCtx(co,compData)
           +"\n\nDECISION THREAD CONTEXT (all previous stages — do not repeat, only reference):\n"+priorStagesContext
+          +researchStateBlock+challengeProtocol
           +"\n\n"+"=".repeat(60)+"\n\n"
           +"CURRENT FOLLOW-UP QUESTION: \""+brFollowUp+"\"\n"
           +"YOUR TURN as "+ag.f+". Respond ONLY to the follow-up question above.\n"
