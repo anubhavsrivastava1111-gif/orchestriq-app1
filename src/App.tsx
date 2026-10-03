@@ -26,7 +26,7 @@ import { ENGINE_ENABLED, runPipeline, classifyDomain, classifyIntent, selectFram
 import { buildScaffoldPrompt, buildViabilityPrompt, inferArchetype } from "./lib/BusinessScaffold";
 import { scanSuppliedInputs, buildIntakePrompt, buildRegisterInjection, INTAKE_FAILED_NOTICE } from "./lib/IntakeRegister";
 import { runSearch, formatResultsForPrompt, RETRIEVED_RESULTS_RULES, hasExternalSearch, SEARCH_PROVIDERS, estimateSearchCost } from "./lib/SearchProviders";
-import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney } from "./lib/ModelRouting";
+import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney, stageProviderChain, PREMIUM_PROVIDERS } from "./lib/ModelRouting";
 import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
 import { detectDocumentRequest, buildDocumentBrief, buildSynthesisOverride, suggestedFormats, CONSULTING_STANDARD } from "./lib/DocumentLibrary";
 import { NVIDIA_DEFAULT_MODEL, nvidiaModelOptions, nvidiaShouldReason, nvidiaTokenBudget } from "./lib/NvidiaModels";
@@ -595,20 +595,38 @@ function enabledKeys(keys:any):Record<string,string>{
   return out;
 }
  
-// PROVIDER ORDER FOR A STAGE: the provider chosen for this stage in Settings
-// (Economy / Balanced / Premium / Custom) leads, then every other enabled TEXT
-// provider cheapest-first (COST_CHAIN from lib/ModelRouting). Premium models are
-// reached only after the economical ones fail. Image providers are never included.
-// Defined here (not imported) so App.tsx builds on its own: importing it made
-// a single-file deploy fail with MISSING_EXPORT when ModelRouting.ts was not
-// updated alongside it. Same order as the fallback chain in lib/ModelRouting.
-const COST_CHAIN=["deepseek","gemini","groq","kimi","openai","claude","nvidia"];
+// PROVIDER ORDER FOR A STAGE - delegates entirely to stageProviderChain() in
+// lib/ModelRouting, the single source of truth. No routing policy lives here.
+// (The local COST_CHAIN copy added to fix a build was removed: two copies of a
+// routing policy drift apart.)
 function costOrderedProviders(keys:any,stage:string):Array<{provider:string;key:string}>{
-  const ek=enabledKeys(keys); const out:Array<{provider:string;key:string}>=[];
-  const pref=stageRoute(keys,stage);
-  if(pref&&ek[pref.provider])out.push({provider:pref.provider,key:ek[pref.provider]});
-  for(const p of COST_CHAIN){ if(ek[p]&&!out.some(r=>r.provider===p))out.push({provider:p,key:ek[p]}); }
-  return out;
+  const ek=enabledKeys(keys);
+  return stageProviderChain(stage as any,STAGE_PROFILE,(id:string)=>!!ek[id]).map(p=>({provider:p,key:ek[p]}));
+}
+const STAGE_LABEL=(stage:string)=>(STAGES.find((x:any)=>x.id===stage)?.label)||stage;
+const providerTier=(p:string)=>PREMIUM_PROVIDERS.includes(p)?"premium":p==="nvidia"?"free tier":"economical";
+// One line describing what actually ran: stage, provider, model, tier, primary/fallback.
+function describeStageRun(stage:string,provider:string,fallbackFrom:string[]):string{
+  const model=stageModelOverride(stage as any,provider)||(MODELS as any)[provider]?.model||"";
+  return STAGE_LABEL(stage)+": "+((MODELS as any)[provider]?.name||provider)+(model?" ("+model+")":"")+" \u00b7 "+providerTier(provider)
+    +" \u00b7 "+(fallbackFrom.length?"fallback after "+fallbackFrom.map(f=>f.split(":")[0]).join(", ")+" failed":"primary");
+}
+// Runs one Boardroom/research step on the providers its stage permits, in
+// order. If none is permitted or all fail it THROWS with the reason - it never
+// widens the list to a provider the routing mode does not allow.
+async function callStage(keys:any,stage:string,sys:any,msgs:any,maxT:number):Promise<{text:string;truncated:boolean;provider:string;fallbackFrom:string[];note:string}>{
+  const chain=costOrderedProviders(keys,stage);
+  if(!chain.length)throw new Error("No provider permitted for \""+STAGE_LABEL(stage)+"\" is available under your current routing mode. Economy and Balanced never use OpenAI or Claude for this step without your permission. Turn DeepSeek or Gemini back on, or choose a premium provider for this step in Settings \u2192 Model Routing.");
+  const failed:string[]=[];
+  for(const r of chain){
+    try{
+      const out:any=await callAI(r.provider,r.key,sys,msgs,maxT,false,stageModelOverride(stage as any,r.provider));
+      const text=String(out?.text||"");
+      if(!text.trim())throw new Error("empty answer");
+      return {text,truncated:!!out?.truncated,provider:r.provider,fallbackFrom:failed,note:describeStageRun(stage,r.provider,failed)};
+    }catch(e:any){ failed.push(r.provider+": "+String(e?.message||e).slice(0,160)); }
+  }
+  throw new Error("\""+STAGE_LABEL(stage)+"\" failed on every provider your routing mode permits ("+chain.map(c=>c.provider).join(" \u2192 ")+"). Errors: "+failed.join(" | "));
 }
 
 function resolveSearchProviders(keys){
@@ -817,7 +835,10 @@ function synthesisPrompt(co,question,sections){
 }
 
 async function runResearchDesk(ask,co,compData,question,showToast,keys){
-  let routes=resolveSearchProviders(keys);
+  // Native web search (no Serper): Gemini, or Claude only if a research stage
+  // is configured to a premium provider. Was unconditional Claude fallback.
+  const researchPremiumOk=PREMIUM_PROVIDERS.includes((STAGE_PROFILE as any)?.research_extract)||PREMIUM_PROVIDERS.includes((STAGE_PROFILE as any)?.research_synthesis);
+  let routes=resolveSearchProviders(keys).filter((r:any)=>researchPremiumOk||!PREMIUM_PROVIDERS.includes(r.provider));
   // When an external search service (Serper/Tavily/Brave/DataForSEO) is
   // configured, the app does the searching itself and the model only READS the
   // results - so any text model can do it. THE FIX: this used to apply only when
@@ -5369,7 +5390,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         // written - which is the console warning you sent me: "DeepSeek ran out
         // of output budget while reasoning and produced no answer."
         // 5200 matches what the research angles already use.
-        const brIntakeRaw=await ask(brIntakeSys,[{role:"user",content:"Produce the evidence register now."}],5200);
+        const brIntakeRaw=(await (async()=>{const _r=await callStage(keys,"research_synthesis",brIntakeSys,[{role:"user",content:"Produce the evidence register now."}],5200);return _r.text;})());
         const brRegister=(brIntakeRaw&&typeof brIntakeRaw==="object"&&"text" in brIntakeRaw)?brIntakeRaw.text:String(brIntakeRaw||"");
         brRegisterBlock=buildRegisterInjection(brRegister);
         brIntakeRegister=String(brRegister||"").trim();
@@ -5456,7 +5477,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           // reports "did not produce an answer" for a reason that has nothing to
           // do with the provider. Say what is actually wrong instead.
           if(!allProviders.length){
-            agText="\u26a0 **No AI provider is available.**\n\nEvery provider is either switched off in Settings or has no key. Nothing was sent, and nothing was charged.\n\nFix: Settings \u2192 API \u2192 switch on at least one provider. NVIDIA (Free) needs no key.";
+            agText="\u26a0 **No provider permitted for executive analysis is available.**\n\nYour routing mode allows only: "+(costOrderedProviders(keys,"executive").map(r=>r.provider).join(", ")||"none currently enabled")+". Economy and Balanced never send executive work to OpenAI or Claude without your permission, so nothing was sent and nothing was charged.\n\nFix: turn DeepSeek or Gemini back on, or choose a premium provider for Executive analysis in Settings \u2192 Model Routing.";
             gotResponse=true;
             break;
           }
@@ -5466,7 +5487,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
             const pKey=brKeys[prov]||"";
             if(!pKey.trim())continue;
             try{
-              setBrPh(ag.ic+" "+ag.t+(agText?" — resuming via "+prov+"…":" is analyzing… ("+prov+")"));
+              setBrPh(ag.ic+" "+ag.t+(agText?" — resuming via "+prov+"…":" is analyzing… ("+prov+" \u00b7 "+providerTier(prov)+(allProviders.indexOf(prov)>0?" \u00b7 fallback":" \u00b7 primary")+")"));
               brCallBudget.current--;
               const replyFull=await callAI(prov,pKey,sys,[{role:"user",content:userMsg}],boardMaxTokens(ag),boardCanSearch(prov)&&!agText.trim())
               // A provider can return HTTP 200 with an EMPTY body - DeepSeek does this
@@ -5537,7 +5558,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           setBrPh(ag.ic+" "+ag.t+" is continuing response… (part "+(contAttempts+1)+")");
           try{
             const contSys="You are "+ag.f+" at \""+co.name+"\". You were speaking in a boardroom debate and your response was cut off. Here is what you wrote so far:\n\n"+agText+"\n\nContinue EXACTLY from where you left off. Do not repeat anything already written. Do not restart. Pick up mid-sentence if needed.";
-            const cont=await askFull(contSys,[{role:"user",content:"Finish your response now. Close out your current point, complete any table you started, state your conclusion, and stop. Do not open a new section."}],1800);
+            const cont=(await (async()=>{const _r=await callStage(keys,"executive",contSys,[{role:"user",content:"Finish your response now. Close out your current point, complete any table you started, state your conclusion, and stop. Do not open a new section."}],1800);return {primary:_r.text,truncated:_r.truncated};})());
             agText=agText+cont.primary;
             agTruncated=!!cont.truncated;
           }catch(contErr:any){
@@ -5570,7 +5591,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         // replaced by that document's own required structure. This is the fix for a
         // business plan arriving as a debate summary with empty headings.
         const synSysFinal=brDoc.matched?(synSys+"\n\n"+buildSynthesisOverride(brDoc,synCur.sym)):synSys;
-        let syn=await ask(synSysFinal,[{role:"user",content:(brDoc.matched?("Produce the "+brDoc.documentName+" now, using the executive contributions below as your source material.\n\nOriginal request: \""+brQ+"\""):("Question: \""+brQ+"\""))+"\nDebate:\n"+allPos}],brDoc.matched?9000:7000);
+        let syn=(await (async()=>{const _r=await callStage(keys,"chairman",synSysFinal,[{role:"user",content:(brDoc.matched?("Produce the "+brDoc.documentName+" now, using the executive contributions below as your source material.\n\nOriginal request: \""+brQ+"\""):("Question: \""+brQ+"\""))+"\nDebate:\n"+allPos}],brDoc.matched?9000:7000);try{showToast(_r.note,"info");}catch{}return _r.text;})());
         // Intelligence Engine quality review — same standard as Workflow and Task
         // Queue final levels. HARDENED: the reviewed version must prove it is a
         // complete, well-formed improvement (all structural markers present,
@@ -5580,7 +5601,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           setBrPh("\ud83d\udd0d Quality Review \u2014 validating board synthesis...");
           const ieCompany={name:co.name||"the company",industry:co.industry||"",stage:co.stage||"",location:co.location||"",markets:co.markets||"",currency:co.currency||"INR",currencySymbol:synCur.sym||""};
           const reviewed:any=await Promise.race([
-            selfReview(syn,brQ,ieCompany,(s,m,_t)=>ask(s,m,6500,false)),
+            selfReview(syn,brQ,ieCompany,(s,m,_t)=>callStage(keys,"chairman",s,m,6500).then(r=>r.text)),
             new Promise((_,rej)=>setTimeout(()=>rej(new Error("review timeout")),90000)),
           ]);
           const structurallyComplete=
@@ -5653,7 +5674,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           "EXECUTIVES (id: remit):\n"+CS.map((r:any)=>r.id+": "+r.t+" - "+r.d).join("\n")+
           (rsR?"\nINVESTIGATION CONTEXT: objective: "+(rsR.objective||rsR.originalQuestion||"")+"; dimensions: "+(rsR.dimensions||[]).join(", ")+
             ((rsR.decisions||[]).length?"; prior decisions: "+rsR.decisions.map((d:any)=>d.status).join(", "):""):"");
-        const rr=await askFull(routerSys,[{role:"user",content:"FOLLOW-UP QUESTION: "+brFollowUp}],700);
+        const rr=(await (async()=>{const _r=await callStage(keys,"research_extract",routerSys,[{role:"user",content:"FOLLOW-UP QUESTION: "+brFollowUp}],700);return {primary:_r.text,truncated:_r.truncated};})());
         const txt=String((rr as any)?.primary||"");
         const a=txt.indexOf("{"),b=txt.lastIndexOf("}");
         if(a>=0&&b>a){
@@ -5743,7 +5764,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         let replyFull=null;let lastErr=null;
         for(let attempt=0;attempt<2;attempt++){
           if(cancelRef.current.br)break;
-          try{replyFull=await askFull(sys,[{role:"user",content:"FOLLOW-UP: "+brFollowUp}],4000);lastErr=null;break;}
+          try{replyFull=(await (async()=>{const _r=await callStage(keys,"executive",sys,[{role:"user",content:"FOLLOW-UP: "+brFollowUp}],4000);return {primary:_r.text,truncated:_r.truncated};})());lastErr=null;break;}
           catch(agentErr){lastErr=agentErr;if(attempt===0)await new Promise(res=>setTimeout(res,1500));}
         }
         if(cancelRef.current.br)break;
@@ -5767,7 +5788,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           +"DECISION STATUS (mandatory final line):\n"
           +"DECISION STATUS: [Proceed | Proceed with Conditions | Needs More Information | Do Not Proceed | No Consensus]\n"
           +"Reason: [one sentence]";
-        try{stageSyn=await ask(stageSynSys,[{role:"user",content:"Follow-up: \""+brFollowUp+"\"\nResponses:\n"+allPos}],3000);}
+        try{stageSyn=(await (async()=>{const _r=await callStage(keys,"chairman",stageSynSys,[{role:"user",content:"Follow-up: \""+brFollowUp+"\"\nResponses:\n"+allPos}],3000);try{showToast(_r.note,"info");}catch{}return _r.text;})());}
         catch(e){stageSyn="(Synthesis unavailable for this stage: "+e.message+")";}
       }
 
