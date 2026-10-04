@@ -27,6 +27,7 @@ import { buildScaffoldPrompt, buildViabilityPrompt, inferArchetype } from "./lib
 import { scanSuppliedInputs, buildIntakePrompt, buildRegisterInjection, INTAKE_FAILED_NOTICE } from "./lib/IntakeRegister";
 import { runSearch, formatResultsForPrompt, RETRIEVED_RESULTS_RULES, hasExternalSearch, SEARCH_PROVIDERS, estimateSearchCost } from "./lib/SearchProviders";
 import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney, stageProviderChain, PREMIUM_PROVIDERS } from "./lib/ModelRouting";
+import { parseResearchEvidence, assembleExecutiveContext, extractLedgerEntry, renderLedger, renderEvidence, budgetCheck, type LedgerEntry, emptyIntelligence, mergeIntoIntelligence, discoverResearchOpportunities, recordUserDecision, classifyFollowUp, renderIntelligence, adaptiveOutputBudget, taskKindFor, type IntelligenceState } from "./lib/ContextIntelligence";
 import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
 import { detectDocumentRequest, buildDocumentBrief, buildSynthesisOverride, suggestedFormats, CONSULTING_STANDARD } from "./lib/DocumentLibrary";
 import { NVIDIA_DEFAULT_MODEL, nvidiaModelOptions, nvidiaShouldReason, nvidiaTokenBudget } from "./lib/NvidiaModels";
@@ -625,6 +626,14 @@ async function callStage(keys:any,stage:string,sys:any,msgs:any,maxT:number,prov
   if(!chain.length)throw new Error("No provider permitted for \""+STAGE_LABEL(stage)+"\" is available under your current routing mode. Economy and Balanced never use OpenAI or Claude for this step without your permission. Turn DeepSeek or Gemini back on, or choose a premium provider for this step in Settings \u2192 Model Routing.");
   const failed:string[]=[];
   for(const r of chain){
+    // CONTEXT BUDGET, checked BEFORE the request: a prompt that cannot fit this
+    // provider is not sent. That is a skip, not a failure to retry.
+    const bc=budgetCheck(r.provider,typeof sys==="string"?sys:JSON.stringify(sys),(msgs||[]).map((m:any)=>String(m?.content||"")).join("\n"),maxT);
+    if(!bc.fits){
+      failed.push(r.provider+": prompt too long for this provider (pre-check, not sent: ~"+bc.estTotal+" > "+bc.usable+" usable tokens)");
+      if(provState)provState[r.provider]={kind:"permanent",label:"prompt too long (pre-check)",retryAt:Infinity};
+      continue;
+    }
     try{
       const out:any=await callAI(r.provider,r.key,sys,msgs,maxT,false,stageModelOverride(stage as any,r.provider));
       const text=String(out?.text||"");
@@ -675,7 +684,10 @@ function classifyProviderError(raw:string):{kind:ProvErrKind;label:string;retryA
     return {kind:"retryable",label:"rate limited",retryAfterMs:ra};
   if(/quota|resource_exhausted|per[_ ]day|perday|daily (?:limit|quota)|tokens per day|requests per day|\btpd\b|\brpd\b/.test(m))
     return {kind:"quota",label:ra!=null&&ra<=90000?"quota limit (resets in "+Math.ceil(ra/1000)+"s)":"free-tier / daily quota exhausted",retryAfterMs:ra};
-  if(/context length|maximum context|context window|too long|\b413\b|reduce the length|prompt is too large|maximum.*tokens/.test(m))
+  // Output budget used up by a reasoning model is NOT an input-size problem.
+  if(/output budget|ran out of (?:output )?budget|used its (?:whole|entire) output/.test(m))
+    return {kind:"permanent",label:"output budget used up by reasoning",retryAfterMs:null};
+  if(/context length|maximum context|context window|too long|\b413\b|request too large|reduce the length|prompt is too large/.test(m))
     return {kind:"permanent",label:"prompt too long for this provider",retryAfterMs:null};
   if(/\b400\b|bad request|invalid request|invalid_request_error/.test(m))
     return {kind:"permanent",label:"request rejected as invalid",retryAfterMs:null};
@@ -1378,9 +1390,17 @@ function normalizeResearchState(rs:any,fb:any={}):any{
     adjacentOpportunityQuestions:arr(r.adjacentOpportunityQuestions).length?r.adjacentOpportunityQuestions:arr(d?.adjacent_opportunity_questions),
     decomposition:d,
     researchBrief:r.researchBrief??fb.researchBrief??"",
-    evidence:arr(r.evidence), findings:arr(r.findings), opportunities:arr(r.opportunities),
-    hypotheses:arr(r.hypotheses), risks:arr(r.risks), contradictions:arr(r.contradictions),
-    unresolvedQuestions:arr(r.unresolvedQuestions), decisions:arr(r.decisions), followUps:arr(r.followUps),
+    // DECISION LEDGER V2: the canonical shared decision-intelligence state lives
+    // here (one store - no second state). Opportunities, risks, contradictions and
+    // unresolved questions read from it; older sessions without it still load.
+    intelligence:r.intelligence||null,
+    evidence:arr(r.evidence), findings:arr(r.findings),
+    opportunities:r.intelligence?arr(r.intelligence.opportunities):arr(r.opportunities),
+    hypotheses:arr(r.hypotheses),
+    risks:r.intelligence?arr(r.intelligence.risks):arr(r.risks),
+    contradictions:r.intelligence?arr(r.intelligence.contradictions):arr(r.contradictions),
+    unresolvedQuestions:r.intelligence?arr(r.intelligence.unresolved).map((u:any)=>u.text):arr(r.unresolvedQuestions),
+    decisions:arr(r.decisions), followUps:arr(r.followUps),
     investigationDirection:r.investigationDirection||"",
     provider:r.provider||fb.provider||"",
     grounded:r.grounded??fb.grounded??false,
@@ -1993,11 +2013,17 @@ async function callGemini(key,sys,msgs,maxT,enableSearch=false){
 // anyone adds re-creates the bug. The floor belongs HERE, once, where the
 // model's behaviour is actually known.
 const DEEPSEEK_REASONING_OVERHEAD=3200;
+const DEEPSEEK_OUTPUT_CEILING=32768;      // normal ceiling per call
+const DEEPSEEK_OUTPUT_CEILING_RETRY=65536; // one retry with more room - never a shorter prompt
 async function callDeepSeek(key,sys,msgs,maxT,modelOverride=""){
   // Reserve the thinking budget on top of the answer the caller asked for, and
   // keep a floor so a tiny request still leaves room to reply.
   const _want=Math.max(Number(maxT)||1500,600);
-  maxT=Math.min(_want+DEEPSEEK_REASONING_OVERHEAD,8192);
+  // Was capped at 8,192 - DeepSeek V3's old ceiling. DeepSeek V4's official limit
+  // is 384K output / 1M context (api-docs.deepseek.com, checked 2026-10-04). The
+  // old cap let the reasoning phase consume the whole budget on larger prompts,
+  // returning an empty answer. 32K is a bounded, still-cheap working ceiling.
+  maxT=Math.min(_want+DEEPSEEK_REASONING_OVERHEAD,(msgs as any)?.__dsRetry?DEEPSEEK_OUTPUT_CEILING_RETRY:DEEPSEEK_OUTPUT_CEILING);
   const r=await fetch("https://api.deepseek.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:(modelOverride||MODELS.deepseek.model),max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}if(r.status===401)throw new Error("DeepSeek: Invalid API key.");if(r.status===429)throw new Error("DeepSeek: Rate limit. Wait a moment.");throw new Error("DeepSeek "+r.status+": "+(m||r.statusText));}
   const d=await r.json();
@@ -2025,13 +2051,14 @@ async function callDeepSeek(key,sys,msgs,maxT,modelOverride=""){
       //
       // One retry only. If a halved prompt still cannot finish, the failover
       // moves to another provider rather than burning your credit twice more.
-      if(!(msgs as any)?.__dsRetry){
-        const _half=(t:string)=>{const s=String(t||"");return s.length>1200?s.slice(0,Math.floor(s.length*0.5))+"\n\n[Shortened so the model has room to answer.]":s;};
-        const _msgs=msgs.map((m:any)=>({...m,content:_half(m.content)}));
-        (_msgs as any).__dsRetry=true;
-        return await callDeepSeek(key,_half(sys),_msgs,maxT,modelOverride);
+      // WAS: retry with the prompt cut in half by character count - silently
+      // slicing the research brief mid-text. Now: retry ONCE with more output
+      // room and the prompt untouched.
+      if(!(msgs as any)?.__dsRetry&&maxT<DEEPSEEK_OUTPUT_CEILING_RETRY){
+        const _m=msgs.map((m:any)=>({...m})); (_m as any).__dsRetry=true;
+        return await callDeepSeek(key,sys,_m,DEEPSEEK_OUTPUT_CEILING_RETRY-DEEPSEEK_REASONING_OVERHEAD,modelOverride);
       }
-      throw new Error("DeepSeek could not finish this request - it is a reasoning model and this prompt is too long for its 8,192 token answer limit. Use Claude or NVIDIA for long documents, or ask a shorter question.");
+      throw new Error("DeepSeek used its whole output budget ("+maxT+" tokens) on reasoning and produced no answer. This is not a prompt-size problem (DeepSeek accepts up to 1M input tokens).");
     }
     if(reasoned)return reasoned;
     throw new Error("DeepSeek returned an empty answer (finish_reason: "+(fin||"unknown")+").");
@@ -5517,23 +5544,48 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         setBrCur(prev=>({...prev,researchBrief,grounded:rdBR.grounded,researchState:brResearchState}));
         setBrResearching(false);
       }
-      const researchContext=(brGrounded
+      // Same wording as before; the brief part is now a parameter so each executive
+      // can receive only the evidence relevant to its mandate.
+      const mkResearchCtx=(briefPart:string)=>(brGrounded
         ?"\nVERIFIED RESEARCH BRIEF (current data gathered for this debate - use these figures and cite this brief as your source; do not re-search):\n"
-          +researchBrief
+          +briefPart
           +"\n\nEVIDENCE PROTOCOL (non-negotiable): The Research Brief above is your STARTING POINT, not your boundary. You have live web search and you are REQUIRED to independently verify or source the figures that matter most within your own research remit. Rules: (a) a figure taken from the brief is cited as 'per Research Brief'; (b) a figure you retrieve yourself must carry the source name and its URL; (c) a figure you cannot source carries [ESTIMATE - UNVERIFIED] and states the basis of the estimate; (d) an untagged number presented as fact is a failure of your role; (e) if a prior speaker stated a figure you believe is wrong, verify it and present the corrected figure with its source. Prefer vendor, government, regulator and recognised research-firm sources over blogs and aggregators.\n"
-        :"\nRESEARCH DESK UNAVAILABLE FOR THIS DEBATE:\n"+researchBrief
+        :"\nRESEARCH DESK UNAVAILABLE FOR THIS DEBATE:\n"+briefPart
           +"\n\nMANDATORY: No live figure was retrieved for this session. Every price, cost, rate, salary, valuation, or market figure in this debate MUST carry the tag [ESTIMATE - UNVERIFIED]. Do not present any number as fact. If a prior speaker presented an untagged number, challenge it explicitly before continuing.\n"
         )+buildDecisionHistoryContext(brQ);
+      const researchContext=mkResearchCtx(researchBrief);
       // Per-provider failure state for this whole run: a provider that fails
       // permanently for one executive is not retried for the next one.
       const brProvState:any={};
       let brNoProvider:string|null=null;
+      // CONTEXT INTELLIGENCE: evidence with provenance (F#/S# ids), a compact
+      // Decision Ledger instead of raw prior answers, and a log of every call.
+      const brEvidence=parseResearchEvidence(researchBrief);
+      const brLedger:LedgerEntry[]=[];
+      const brCtxLog:any[]=[];
+      // DECISION LEDGER V2: shared intelligence state - seeded with opportunities the
+      // research itself surfaces (unrequested, with provenance), then grown after each
+      // executive. A resumed session continues its existing state (stable ids).
+      const brDims:string[]=(brResearchState&&brResearchState.dimensions)||[];
+      let brIntel:IntelligenceState=brResearchState&&brResearchState.intelligence?JSON.parse(JSON.stringify(brResearchState.intelligence)):emptyIntelligence();
+      brIntel=discoverResearchOpportunities(brIntel,brEvidence,brDims);
+      // Value-chain lens for opportunity discovery, built from THIS problem's own
+      // decomposition (nothing industry-specific is hard-coded).
+      const brOppLens="\n\nOPPORTUNITY LENS: Beyond the literal question, inspect each stage of this problem's value chain"
+        +(brDims.length?" ("+brDims.join(" \u2192 ")+")":"")+" for underserved needs, costly inefficiencies, delays, risks or information gaps that someone would pay to solve. "
+        +"Mark each genuine one on its own line starting [Opportunity], with the evidence it rests on (cite F#/S# ids where available) - or label it [Expert Inference] if it is your reasoning. "
+        +"An opportunity is not a recommendation: record it even if you advise against pursuing it. Do not invent novelty. "
+        +"Mark each fact you need but cannot verify on its own line starting [Evidence Gap].";
       for(let i=0;i<agents.length;i++){
         if(cancelRef.current.br){showToast("Boardroom cancelled","warning");break;}
         const ag=agents[i];const p=EP[ag.id]||{};
-        const prev=res.map(r=>"\n--- "+r.ag.t+" ---\n"+r.text).join("\n");
+        // (Raw prior answers are no longer injected - see the Decision Ledger below.)
+        // Context-size skips are re-evaluated per executive: a provider too small
+        // for one prompt may fit the next one.
+        for(const k of Object.keys(brProvState)){ if(/prompt too long/.test(brProvState[k].label))delete brProvState[k]; }
+        const mandateText=[ag.t,ag.f,ag.d,ag.dl,(p as any).m,(BOARD_RESEARCH_REMIT as any)[ag.id]].filter(Boolean).join(" ");
         setBrPh(ag.ic+" "+ag.t+" is analyzing…");announceBoardroomPhase(ag.t+" is analyzing");
-        const sys="You are "+ag.f+" at \""+co.name+"\".\n"+buildBoardIdentity(ag,p)+CLARITY_PROTOCOL+"\n"+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS AVAILABLE: "+frameworks.map(f=>f.name+" ("+f.reason+")").join("; ")+"\nFRAMEWORK REQUIREMENT: you MUST explicitly apply at least one named framework and SHOW ITS OUTPUT — the populated table, the calculation, the scored matrix, the register. Naming a framework without producing its output does not count. Choose the framework that answers a specific question you actually need answered; if none of the above fits, name and apply a more appropriate one and say why you chose it. Never insert a framework to look thorough.\n"+brDocBrief+fxRuleBlock()+brScaffold+brWorkspaceBlock+brRegisterBlock+"\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — ONLY permitted when you give BOTH a named source AND a URL on the same line. No URL means it is NOT a verified fact, however confident you are.\n"+"[Recalled — Unverified] — you believe it from prior knowledge but cannot produce a source URL. Use this instead of [Verified Fact] whenever the URL is missing.\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label. Tagging a recalled figure as a Verified Fact is the most serious error you can make in this boardroom.":"Previous contributions:\n"+prev+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Conduct your own independent analysis of the question from your "+ag.dl+" perspective, and discharge your standing mandate in full. If your mandate requires a financial model, build it. If it requires a process or capacity map, produce it. If it requires a risk or regulatory register, write it. Another executive having touched a topic does NOT relieve you of your own analysis of it.\n"+"Step 2: You MAY re-derive, recompute, or rebuild any figure a prior speaker presented. If your figure differs from theirs, show both side by side and explain the reason for the gap.\n"+"Step 3: Where an input you need is missing, name the missing variable and state how it changes your conclusion. Do not assume through a gap silently.\n"+"Step 4: Only after presenting your own analysis, state where it contradicts a prior speaker and why yours is better founded.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\nLENGTH AND SCOPE — HARD LIMITS, not suggestions:\n"+"You have approximately "+boardWordBudget(ag)+" words. You will be cut off at that point mid-sentence, so plan the whole response to fit and reach your conclusion inside it.\n"+"Produce AT MOST 8 sections. No appendices, annexures or addenda.\n"+"Stay strictly inside your own functional mandate — never write another executive\u2019s deliverable. A CFO does not write a marketing roadmap; a CTO does not write a hiring plan.\n"+"Depth means the reasoning behind your numbers, NOT more sections. One well-derived figure beats ten listed ones.\n"+"Never state or estimate your own word count.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
+        const mkSys=(researchCtx:string,prior:string)=>"You are "+ag.f+" at \""+co.name+"\".\n"+buildBoardIdentity(ag,p)+CLARITY_PROTOCOL+"\n"+buildCtx(co,compData)+researchCtx+"\nBUSINESS DOMAIN: "+domain+"\nANALYTICAL FRAMEWORKS AVAILABLE: "+frameworks.map(f=>f.name+" ("+f.reason+")").join("; ")+"\nFRAMEWORK REQUIREMENT: you MUST explicitly apply at least one named framework and SHOW ITS OUTPUT — the populated table, the calculation, the scored matrix, the register. Naming a framework without producing its output does not count. Choose the framework that answers a specific question you actually need answered; if none of the above fits, name and apply a more appropriate one and say why you chose it. Never insert a framework to look thorough.\n"+brDocBrief+fxRuleBlock()+brScaffold+brWorkspaceBlock+brRegisterBlock+"\n"+"LIVE BOARDROOM DEBATE. "+(i===0?"Speak first. State your opening position with specific calculations in "+synCur.sym+".\n\n"+"EVIDENCE RULES — label every key statement with one of these tags:\n"+"[Verified Fact] — ONLY permitted when you give BOTH a named source AND a URL on the same line. No URL means it is NOT a verified fact, however confident you are.\n"+"[Recalled — Unverified] — you believe it from prior knowledge but cannot produce a source URL. Use this instead of [Verified Fact] whenever the URL is missing.\n"+"[Assumption] — an assumption you are making, stated explicitly\n"+"[Expert Inference] — reasoned from your domain expertise\n"+"[Estimate] — unverified figure, labeled as such\n"+"Never present an invented number without a label. Tagging a recalled figure as a Verified Fact is the most serious error you can make in this boardroom.":"Previous contributions:\n"+prior+"\n\n"+"YOUR TURN as "+ag.f+".\n"+"Step 1: Conduct your own independent analysis of the question from your "+ag.dl+" perspective, and discharge your standing mandate in full. If your mandate requires a financial model, build it. If it requires a process or capacity map, produce it. If it requires a risk or regulatory register, write it. Another executive having touched a topic does NOT relieve you of your own analysis of it.\n"+"Step 2: You MAY re-derive, recompute, or rebuild any figure a prior speaker presented. If your figure differs from theirs, show both side by side and explain the reason for the gap.\n"+"Step 3: Where an input you need is missing, name the missing variable and state how it changes your conclusion. Do not assume through a gap silently.\n"+"Step 4: Only after presenting your own analysis, state where it contradicts a prior speaker and why yours is better founded.\n\n"+"EVIDENCE RULES — label every key statement:\n"+"[Verified Fact] [Assumption] [Expert Inference] [Estimate]\n"+"If you have nothing genuinely new to add, say so in 2-3 sentences.")+"\nLENGTH AND SCOPE — HARD LIMITS, not suggestions:\n"+"You have approximately "+boardWordBudget(ag)+" words. You will be cut off at that point mid-sentence, so plan the whole response to fit and reach your conclusion inside it.\n"+"Produce AT MOST 8 sections. No appendices, annexures or addenda.\n"+"Stay strictly inside your own functional mandate — never write another executive\u2019s deliverable. A CFO does not write a marketing roadmap; a CTO does not write a hiring plan.\n"+"Depth means the reasoning behind your numbers, NOT more sections. One well-derived figure beats ten listed ones.\n"+"Never state or estimate your own word count.\n\n"+"VERIFICATION RULE: For any price, cost, rate, fee, salary benchmark, or market figure, use the VERIFIED RESEARCH BRIEF above where relevant (cite it as 'per Research Brief'). If you need a figure not covered by the brief and cannot verify it, label it [Estimate (unverified)]. Never present an invented number as fact.";
         let agText="";
         let agTruncated=false;
         let gotResponse=false;
@@ -5591,8 +5643,21 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
             if(!pKey.trim())continue;
             try{
               setBrPh(ag.ic+" "+ag.t+(agText?" — resuming via "+prov+"…":" is analyzing… ("+prov+" \u00b7 "+providerTier(prov)+(allProviders.indexOf(prov)>0?" \u00b7 fallback":" \u00b7 primary")+")"));
+              const agBudget=adaptiveOutputBudget(boardMaxTokens(ag),taskKindFor({isFirstSpeaker:i===0,dimensionCount:brDims.length}));
+              const ctxA=assembleExecutiveContext({provider:prov,evidence:brEvidence,mandateText,ledger:brLedger,intel:brIntel,userText:userMsg,
+                maxOutputTokens:agBudget,build:(evB:string,ledB:string)=>mkSys(mkResearchCtx(evB),ledB||"(no earlier contributions yet)")+brOppLens});
+              brCtxLog.push({executive:ag.t,provider:prov,estInput:ctxA.check.estInput,requestedOutput:ctxA.check.requestedOutput,
+                estTotal:ctxA.check.estTotal,limit:ctxA.check.limit,margin:ctxA.check.margin,basis:ctxA.check.basis,strategy:ctxA.strategy,
+                evidenceIncluded:ctxA.evidenceIncluded,evidenceTotal:ctxA.evidenceTotal,rawPriorOutputsIncluded:ctxA.rawPriorOutputsIncluded,
+                ledgerEntries:ctxA.ledgerEntries,ledgerTokens:ctxA.ledgerTokens,sent:ctxA.fits,outputBudget:agBudget});
+              if(!ctxA.fits){
+                // Not sent: even fully compacted it exceeds this provider. A skip, not a retry.
+                brProvState[prov]={kind:"permanent",label:"prompt too long (pre-check)",retryAt:Infinity};
+                lastProvErr=prov+": prompt too long for this provider even after compaction (~"+ctxA.check.estTotal+" > "+ctxA.check.usable+" usable tokens; not sent)";
+                continue;
+              }
               brCallBudget.current--;
-              const replyFull=await callAI(prov,pKey,sys,[{role:"user",content:userMsg}],boardMaxTokens(ag),boardCanSearch(prov)&&!agText.trim())
+              const replyFull=await callAI(prov,pKey,ctxA.system,[{role:"user",content:userMsg}],agBudget,boardCanSearch(prov)&&!agText.trim())
               // A provider can return HTTP 200 with an EMPTY body - DeepSeek does this
               // when the input is large relative to the output budget. The old code
               // accepted that as success, broke out of the loop, and wrote a BLANK
@@ -5684,10 +5749,18 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           }
         }
         res.push({ag,text:agText,truncated:agTruncated});
+        // DECISION LEDGER: verbatim, attributed extract of this answer. Placeholder
+        // cards (no real answer) never become ledger content.
+        if(!/^\u26a0 \*\*/.test(String(agText||""))){
+          const brEntry=extractLedgerEntry(ag.t,ag.id,agText,brEvidence.sources);
+          brLedger.push(brEntry);
+          brIntel=mergeIntoIntelligence(brIntel,brEntry,agText,brEvidence,{question:brQ,dimensions:brDims});
+          brResearchState=normalizeResearchState({...(brResearchState||{question:brQ,researchBrief,grounded:brGrounded}),intelligence:brIntel});
+        }
         // Update threaded format during debate so cards render as they arrive
         const runningStage={stageNumber:1,type:"original",question:brQ,
           executiveIds:brAg,debate:[...res],synthesis:"",
-          decisionStatus:null,completedAt:null,frozen:false};
+          decisionStatus:null,completedAt:null,frozen:false,ledger:[...brLedger],contextLog:[...brCtxLog]};
         const updatedCur={q:brQ,researchBrief,format:"threaded",stages:[runningStage],sessionId:brSessionId,
           grounded:brGrounded,intakeRegister:brIntakeRegister,researchState:brResearchState};
         setBrCur(updatedCur);
@@ -5697,7 +5770,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         // PAUSED, NOT LOST: research brief + Research State saved with the session;
         // re-running the same question resumes from here without new web research.
         const pausedStage={stageNumber:1,type:"original",question:brQ,executiveIds:brAg,debate:[...res],synthesis:"",
-          decisionStatus:null,completedAt:null,frozen:false};
+          decisionStatus:null,completedAt:null,frozen:false,ledger:[...brLedger],contextLog:[...brCtxLog]};
         const pausedInfo={reason:brNoProvider,at:new Date().toISOString()};
         const pausedCur={q:brQ,researchBrief,format:"threaded",stages:[pausedStage],sessionId:brSessionId,
           grounded:brGrounded,intakeRegister:brIntakeRegister,researchState:brResearchState,paused:pausedInfo};
@@ -5714,12 +5787,27 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       }
       if(!cancelRef.current.br&&res.length>0&&!brNoProvider){
         setBrPh("Synthesizing consensus…");
-        const allPos=res.map(r=>r.ag.t+":\n"+r.text).join("\n\n---\n\n");
+        let allPos=res.map(r=>r.ag.t+":\n"+r.text).join("\n\n---\n\n");
         const synSys="You are Chief of Staff at "+JSON.stringify(co.name)+". "+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN CLASSIFIED: "+domain+"\nRECOMMENDED FRAMEWORKS (for reference — apply where relevant to strengthen the synthesis): "+frameworks.map(f=>f.name).join(", ")+"\n\nSynthesize the boardroom debate into a board-ready executive report. Use this EXACT format with all sections present:\n\n"+"# Executive Summary\n"+"(3-4 sentences: the single decision, headline number in "+synCur.sym+", recommended action)\n\n"+"## Business Domain\n"+"Domain: "+domain+" | Frameworks referenced: "+frameworks.map(f=>f.name).join(" · ")+"\n\n"+"## Key Insights\n"+"(4-6 bullet points, each opening with a bold keyword. New synthesis only — do not restate individual exec arguments.)\n\n"+"## Conflicts Resolved\n"+"| Disagreement | Position A (who) | Position B (who) | RULING | Why | What would change this ruling |\n|---|---|---|---|---|---|\n"+"(One row per genuine disagreement. You are the ARBITRATOR, not a reporter: for every row you MUST state which position the board adopts and the evidence reason. Both are right is NOT a ruling and is not permitted — if the evidence genuinely cannot separate the two positions, rule for the one that fails more cheaply if it turns out wrong, and say that is why you ruled that way. If the executives did not disagree anywhere, say so explicitly and flag it as a warning sign that the debate lacked real challenge.)\n\n"+"## Evidence Quality Review\n"+"(Review the evidence labels used in the debate. List any [Assumption] or [Estimate] that materially affects the recommendation and note what validation is needed.)\n\n"+"## Cost Architecture\n"+"| Cost bucket | Low | Expected | High | Fixed/Variable | Reducible? | Lever |\n|---|---|---|---|---|---|---|\n"+"(Consolidate the executives nine-bucket work into ONE agreed cost stack. Where two executives gave different figures for the same bucket, choose one and note the other in brackets. Omit buckets that genuinely do not apply, but state which you omitted and why.)\n\n"+"## Break-Even and Viability\n"+"(State each of these with its formula shown: contribution per unit, contribution margin percent, total fixed cost per period, break-even volume, break-even revenue, and time to reach it. If an input is unknown, say which, and give the break-even at the low and the high end of its plausible range instead of a single false number.)\n\n"+"## What We Still Do Not Know\n"+"(Carry forward the UNKNOWN items from the Phase 0 evidence register that were NOT resolved during the debate. For each: the variable, why it is load-bearing, the cheapest way to obtain it, and how the recommendation changes if it lands at the bad end.)\n\n"+"## Quantified Recommendation\n"+"(Single recommended path. Show: formula, assumption, result for every figure in "+synCur.sym+")\n\n"+"## Financial Impact\n"+"| Phase | Actions | Investment "+synCur.sym+" | Expected Return | Owner |\n|-------|---------|--------------------------|-----------------|-------|\n"+"(30-60-90 day plan, one row per phase)\n\n"+"## Risk Register\n"+"| Risk | Likelihood | Impact | Mitigation | Owner |\n|------|------------|--------|------------|-------|\n"+"(max 5 rows)\n\n"+"## Opportunities\n"+"(3-5 bullets, each with upside in "+synCur.sym+", timeframe, and owner)\n\n"+"## This Week's Decision\n"+"(Single action required now. Cost of inaction: "+synCur.sym+" per week. Owner and deadline.)\n\n"+"## Recommendations\n"+"| Priority | Action | Impact | Effort | Deadline |\n|----------|--------|--------|--------|----------|\n"+"(ranked by priority)\n\n"+"## Sources and References\n"+"(every figure cited: Source name, figure, URL or evidence label)\n\n"+fxRuleBlock()+"FORMATTING RULES: Bold all key metrics. Use tables for all numbers. Never write unbroken paragraph blocks. Every number must have a unit ("+synCur.sym+" or %). Under 2600 words. All sections must be present and complete. Figures from VERIFIED RESEARCH BRIEF: cite source and URL. All others: label [Assumption] or [Estimate (unverified)].\n\nDECISION STATUS (mandatory final line). GATING RULE — apply this BEFORE you choose:\nCount the load-bearing figures in your Quantified Recommendation, meaning the figures the decision actually rests on. If MORE THAN HALF of them carry [Assumption], [Estimate] or [Recalled — Unverified] rather than a real source URL, you MAY NOT choose Proceed or Proceed with Conditions. You must choose Needs More Information, and the What We Still Do Not Know section becomes the primary output of this report. Confidence is earned by evidence, not by tone.\nThen write exactly:\nDECISION STATUS: [choose one: Proceed | Proceed with Conditions | Needs More Information | Do Not Proceed | No Consensus]\nReason: [one sentence explaining this status, and if the gating rule forced you to Needs More Information, say so and name the unverified figures]\n\nBOARD KPIS (mandatory, after DECISION STATUS). Output exactly this block and nothing after it:\n===BOARD_KPIS===\n[{\"label\":\"SHORT UPPERCASE LABEL\",\"value\":\"figure with unit\",\"why\":\"max 7 words on why this is the number the board must watch\"}]\n===END_KPIS===\nRules: exactly 4 objects. Choose the 4 figures that most determine the decision — capital required, break-even point, headline return, and the single largest risk figure. Value must be a complete figure with its unit, never a fragment. Label must describe the figure, never a job title. Only use figures that appear in your synthesis above.\n\nCRUX (mandatory, after the KPI block):\n===CRUX===\n(3 sentences: the decision, the number that drives it, and the one condition that must hold. No markdown.)\n===END_CRUX===";
         // When a document was requested, the Chairman's generic debate template is
         // replaced by that document's own required structure. This is the fix for a
         // business plan arriving as a debate summary with empty headings.
-        const synSysFinal=brDoc.matched?(synSys+"\n\n"+buildSynthesisOverride(brDoc,synCur.sym)):synSys;
+        let synSysFinal=brDoc.matched?(synSys+"\n\n"+buildSynthesisOverride(brDoc,synCur.sym)):synSys;
+        // CONTEXT BUDGET FOR SYNTHESIS: the full debate is used when it fits the
+        // Chairman stage's first permitted provider. Otherwise the verbatim Decision
+        // Ledger and the full evidence (with F#/S# ids) replace the raw answers.
+        // The raw answers stay in the transcript either way.
+        {
+          const synMaxT=brDoc.matched?9000:7000;
+          const chairFirst=costOrderedProviders(keys,"chairman")[0]?.provider||"";
+          if(chairFirst&&brLedger.length&&!budgetCheck(chairFirst,synSysFinal,allPos,synMaxT).fits){
+            synSysFinal=synSysFinal.split(researchContext).join(mkResearchCtx(renderEvidence(brEvidence.items,brEvidence.sources)));
+            allPos=renderLedger(brLedger,"full")+"\n\nSHARED DECISION INTELLIGENCE STATE:\n"+renderIntelligence(brIntel,brQ,"full")+"\n\n(The full executive answers are kept in the transcript. This synthesis received the verbatim Decision Ledger because the full debate exceeds the context of "+chairFirst+".)";
+            brCtxLog.push({executive:"Chairman synthesis",provider:chairFirst,strategy:"decision ledger + full evidence (full debate too large)",rawPriorOutputsIncluded:0,ledgerEntries:brLedger.length,estInput:budgetCheck(chairFirst,synSysFinal,allPos,synMaxT).estInput});
+          }else{
+            brCtxLog.push({executive:"Chairman synthesis",provider:chairFirst,strategy:"full debate (fits)",rawPriorOutputsIncluded:res.length,ledgerEntries:brLedger.length,estInput:chairFirst?budgetCheck(chairFirst,synSysFinal,allPos,synMaxT).estInput:0});
+          }
+        }
         let syn=(await (async()=>{const _r=await callStage(keys,"chairman",synSysFinal,[{role:"user",content:(brDoc.matched?("Produce the "+brDoc.documentName+" now, using the executive contributions below as your source material.\n\nOriginal request: \""+brQ+"\""):("Question: \""+brQ+"\""))+"\nDebate:\n"+allPos}],brDoc.matched?9000:7000);try{showToast(_r.note,"info");}catch{}return _r.text;})());
         // Intelligence Engine quality review — same standard as Workflow and Task
         // Queue final levels. HARDENED: the reviewed version must prove it is a
@@ -5752,7 +5840,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         try{saveDecisionRecord({id:Date.now(),ts:new Date().toISOString(),question:brQ,executives:brAg,status:decisionStatus,recommendation:extractRecommendationSnippet(syn)});}catch{}
         const stage1={stageNumber:1,type:"original",question:brQ,
           executiveIds:brAg,debate:res,synthesis:syn,
-          decisionStatus,completedAt:new Date().toISOString(),frozen:true};
+          decisionStatus,completedAt:new Date().toISOString(),frozen:true,ledger:[...brLedger],contextLog:[...brCtxLog]};
         // PHASE 14/29: the decision is recorded in the Research State itself.
         const finalResearchState=normalizeResearchState({...(brResearchState||{question:brQ,researchBrief,grounded:brGrounded}),
           decisions:[...((brResearchState&&brResearchState.decisions)||[]),
@@ -5830,6 +5918,19 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     // and say plainly when it does not cover the new question.
     const rs:any=(brCur as any).researchState?normalizeResearchState((brCur as any).researchState):null;
     const briefText=String((brCur as any).researchBrief||rs?.researchBrief||"");
+    // DECISION LEDGER V2 IN FOLLOW-UPS: record any user decision/constraint, classify
+    // what the follow-up needs (A existing evidence / B a known evidence gap / C new
+    // research), and give executives the compact intelligence state - no new search
+    // is run here; a B-type need is recorded as a targeted-research candidate.
+    const fuEvidence=parseResearchEvidence(briefText);
+    let fuIntel:IntelligenceState=rs&&rs.intelligence?JSON.parse(JSON.stringify(rs.intelligence)):emptyIntelligence();
+    const fuUserDecision=recordUserDecision(fuIntel,brFollowUp);
+    const fuNeed=classifyFollowUp(fuIntel,fuEvidence,brFollowUp);
+    if(fuNeed.need==="B"&&fuNeed.gap){const g=fuIntel.gaps.find((x:any)=>x.id===fuNeed.gap!.id);if(g)g.current_status="targeted_research_candidate";}
+    try{
+      showToast((fuNeed.need==="A"?"Answering from the saved research.":fuNeed.need==="B"?"This matches open evidence gap "+fuNeed.gap!.id+" \u2014 recorded as a targeted-research candidate (no new search run). Executives will answer with what is known and say what is missing."
+        :"Not covered by the saved research \u2014 executives will flag what new research is needed.")+(fuUserDecision?" Recorded your "+fuUserDecision.type+" as "+fuUserDecision.id+".":""),"info");
+    }catch{}
     // GATE A VISIBILITY: tells the user, on screen, whether this follow-up is
     // building on the saved investigation - so tests A2/A3/A4 can be verified
     // without opening developer tools. Shows the session it belongs to, so a
@@ -5856,6 +5957,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         +(rs?.unresolvedQuestions?.length?"Unresolved questions: "+rs.unresolvedQuestions.join("; ")+"\n":"")
         +(rs?.decisions?.length?"Prior decisions: "+rs.decisions.map((d:any)=>"[stage "+d.stage+"] "+d.question+" -> "+(d.status||"")+(d.recommendation?" ("+String(d.recommendation).slice(0,200)+")":"")).join(" | ")+"\n":"")
         +(rs?.followUps?.length?"Earlier follow-ups: "+rs.followUps.map((f:any)=>f.question).join(" | ")+"\n":"")
+        +(fuIntel&&(fuIntel.opportunities.length||fuIntel.gaps.length||fuIntel.userDecisions.length||fuIntel.contradictions.length)?"SHARED DECISION INTELLIGENCE STATE:\n"+renderIntelligence(fuIntel,brFollowUp,"core")+"\n":"")
         +(briefText?"Research Brief "+(((brCur as any).grounded??rs?.grounded)?"(grounded in sources)":"(UNGROUNDED - no verifiable sources)")+":\n"+briefText.slice(0,12000)+"\n":"")
         +"If this evidence does not cover the follow-up question, say exactly what evidence is missing instead of filling the gap from memory."
       :"";
@@ -5893,11 +5995,14 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         let replyFull=null;let lastErr=null;
         for(let attempt=0;attempt<2;attempt++){
           if(cancelRef.current.br)break;
-          try{replyFull=(await (async()=>{const _r=await callStage(keys,"executive",sys,[{role:"user",content:"FOLLOW-UP: "+brFollowUp}],4000);return {primary:_r.text,truncated:_r.truncated};})());lastErr=null;break;}
+          try{replyFull=(await (async()=>{const _r=await callStage(keys,"executive",sys,[{role:"user",content:"FOLLOW-UP: "+brFollowUp}],adaptiveOutputBudget(4000,taskKindFor({isFirstSpeaker:false,dimensionCount:0,isFollowUp:true,followUpWords:String(brFollowUp).trim().split(/\s+/).length})));return {primary:_r.text,truncated:_r.truncated};})());lastErr=null;break;}
           catch(agentErr){lastErr=agentErr;if(attempt===0)await new Promise(res=>setTimeout(res,1500));}
         }
         if(cancelRef.current.br)break;
-        if(replyFull){followUpResponses.push({ag,text:replyFull.primary,truncated:!!replyFull.truncated});}
+        if(replyFull){
+          followUpResponses.push({ag,text:replyFull.primary,truncated:!!replyFull.truncated});
+          try{fuIntel=mergeIntoIntelligence(fuIntel,extractLedgerEntry(ag.t,ag.id,replyFull.primary,fuEvidence.sources),replyFull.primary,fuEvidence,{question:brFollowUp,dimensions:(rs&&rs.dimensions)||[]});}catch{}
+        }
         else if(lastErr){failedAgents.push(ag.t);followUpResponses.push({ag,text:"_"+ag.t+" could not respond ("+lastErr.message+")_",truncated:false});}
       }
 
@@ -5938,7 +6043,8 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         const updatedStages=[...prevStages,newStage];
         const priorRS=(brCur as any).researchState;
         const updatedRS=priorRS?normalizeResearchState({...priorRS,
-          followUps:[...(priorRS.followUps||[]),{question:brFollowUp,executives:agents.map((a:any)=>a.id),at:new Date().toISOString()}],
+          intelligence:fuIntel,
+          followUps:[...(priorRS.followUps||[]),{question:brFollowUp,executives:agents.map((a:any)=>a.id),need:fuNeed.need,needReason:fuNeed.reason,at:new Date().toISOString()}],
           decisions:[...(priorRS.decisions||[]),{stage:updatedStages.length,question:brFollowUp,status:newStage.decisionStatus,
             recommendation:(()=>{try{return extractRecommendationSnippet(stageSyn);}catch{return "";}})(),at:new Date().toISOString()}]}):priorRS;
         const updatedCur={...brCur,stages:updatedStages,researchState:updatedRS};
