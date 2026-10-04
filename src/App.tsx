@@ -629,6 +629,76 @@ async function callStage(keys:any,stage:string,sys:any,msgs:any,maxT:number):Pro
   throw new Error("\""+STAGE_LABEL(stage)+"\" failed on every provider your routing mode permits ("+chain.map(c=>c.provider).join(" \u2192 ")+"). Errors: "+failed.join(" | "));
 }
 
+// PROVIDER ERROR CLASSIFICATION. Decides whether a provider failure is worth
+// retrying at all - previously any message mentioning rate/quota/limit/context
+// set ONE global "retryable" flag, so a 402 or 403 provider was retried after
+// a 65-second countdown labelled "all providers at limit".
+//   permanent - billing, auth, missing/retired model, invalid request, prompt
+//               too long: waiting cannot fix it; never retried this run.
+//   quota     - daily/free-tier quota: retried ONLY if the provider says when
+//               it resets, and only if that is within 90 seconds.
+//   retryable - per-minute rate limit, overload, timeout, transient 5xx.
+type ProvErrKind="retryable"|"quota"|"permanent";
+function parseRetryAfterMs(m:string):number|null{
+  let x=m.match(/"?retry_?delay"?\s*[:=]\s*"?(\d+(?:\.\d+)?)s/);              if(x)return Math.ceil(parseFloat(x[1])*1000);
+  x=m.match(/retry[- ]?after[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(ms|milliseconds)?/); if(x)return Math.ceil(parseFloat(x[1])*(x[2]?1:1000));
+  x=m.match(/(?:try again|retry) in\s*(?:(\d+)\s*m(?:in(?:utes?)?)?\s*)?(\d+(?:\.\d+)?)\s*(ms|s|sec|seconds?)\b/);
+  if(x)return Math.ceil((x[1]?parseInt(x[1])*60000:0)+parseFloat(x[2])*(x[3]==="ms"?1:1000));
+  x=m.match(/(?:try again|retry) in\s*(\d+(?:\.\d+)?)\s*(m|min|minutes?|h|hours?)\b/);
+  if(x)return Math.ceil(parseFloat(x[1])*(x[2].startsWith("h")?3600000:60000));
+  return null;
+}
+function classifyProviderError(raw:string):{kind:ProvErrKind;label:string;retryAfterMs:number|null}{
+  const m=String(raw||"").toLowerCase(); const ra=parseRetryAfterMs(m);
+  if(/\b402\b|insufficient[_ ]balance|insufficient_quota|payment required|billing|check your plan|credit balance|credits are exhausted/.test(m))
+    return {kind:"permanent",label:"insufficient balance / billing",retryAfterMs:null};
+  // Authorization BEFORE quota: provider messages often mention "free tier"
+  // incidentally (e.g. "...or clear it to use the shared free tier").
+  if(/\b401\b|unauthori[sz]ed|invalid[_ ]api[_ ]key|incorrect api key|api key not valid|no api key|missing (?:api )?key/.test(m))
+    return {kind:"permanent",label:"invalid or missing API key",retryAfterMs:null};
+  if(/\b403\b|forbidden|authori[sz]ation failed|permission denied|refused authori[sz]ation/.test(m))
+    return {kind:"permanent",label:"authorization failed",retryAfterMs:null};
+  if(/\b404\b|\b410\b|not found|does not exist|model_not_found|retired|decommissioned|does not recogni[sz]e the model|deprecated model/.test(m))
+    return {kind:"permanent",label:"model or endpoint not found / retired",retryAfterMs:null};
+  // Per-minute limits are ordinary rate limits even when the text says "free tier".
+  if(/per minute|\btpm\b|\brpm\b/.test(m))
+    return {kind:"retryable",label:"rate limited",retryAfterMs:ra};
+  if(/quota|resource_exhausted|per[_ ]day|perday|daily (?:limit|quota)|tokens per day|requests per day|\btpd\b|\brpd\b/.test(m))
+    return {kind:"quota",label:ra!=null&&ra<=90000?"quota limit (resets in "+Math.ceil(ra/1000)+"s)":"free-tier / daily quota exhausted",retryAfterMs:ra};
+  if(/context length|maximum context|context window|too long|\b413\b|reduce the length|prompt is too large|maximum.*tokens/.test(m))
+    return {kind:"permanent",label:"prompt too long for this provider",retryAfterMs:null};
+  if(/\b400\b|bad request|invalid request|invalid_request_error/.test(m))
+    return {kind:"permanent",label:"request rejected as invalid",retryAfterMs:null};
+  if(/\b429\b|rate[_ ]?limit|too many requests|right now|try again in a few seconds/.test(m))
+    return {kind:"retryable",label:"rate limited",retryAfterMs:ra};
+  if(/overload|\b5\d\d\b|timeout|timed out|did not finish within|network|econnreset|fetch failed|temporarily|service unavailable|try again later/.test(m))
+    return {kind:"retryable",label:"temporary provider error",retryAfterMs:ra};
+  return {kind:"permanent",label:"unexpected error",retryAfterMs:null};
+}
+// PER-PROVIDER STATE for one Boardroom run. Each provider's failure is recorded
+// individually; only providers whose own state allows it are tried again.
+type ProvState=Record<string,{kind:ProvErrKind;label:string;retryAt:number}>;
+function recordProviderFailure(state:ProvState,prov:string,msg:string,now:number){
+  const c=classifyProviderError(msg);
+  const retryAt=c.kind==="permanent"?Infinity
+    :c.kind==="quota"?(c.retryAfterMs!=null&&c.retryAfterMs<=90000?now+c.retryAfterMs:Infinity)
+    :now+Math.min(Math.max(c.retryAfterMs??20000,1000),65000);
+  state[prov]={kind:c.kind,label:c.label,retryAt};
+  return state[prov];
+}
+function providersUsableNow(chain:string[],state:ProvState,now:number):string[]{
+  return chain.filter(p=>!state[p]||state[p].retryAt<=now);
+}
+// null = nothing in the chain can ever become usable this run -> stop now.
+function nextRetryWaitMs(chain:string[],state:ProvState,now:number):number|null{
+  if(chain.some(p=>!state[p]))return 0;
+  const times=chain.map(p=>state[p].retryAt).filter(t=>t!==Infinity);
+  return times.length?Math.max(0,Math.min(...times)-now):null;
+}
+function providerStateSummary(chain:string[],state:ProvState,names:Record<string,string>={}):string{
+  return chain.map(p=>(names[p]||p)+": "+(state[p]?state[p].label:"not attempted")).join(" \u00b7 ");
+}
+
 function resolveSearchProviders(keys){
   const out:Array<{provider:string;key:string}>=[];
   // Gated: a provider switched off in Settings is never used for research.
@@ -5319,7 +5389,17 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     brCallBudget.current=BR_MAX_CALLS;
     setBrRun(true);setError(null);
     setUsageFeature("AI Boardroom","🏛️");
-    const brSessionId=Date.now();
+    // RESUME: if the last saved run of THIS question has research but never
+    // finished (e.g. paused because no reasoning provider was available), reuse
+    // its research instead of searching the web again. Editing the question
+    // forces fresh research.
+    let brPrior:any=null;
+    try{
+      const pv=WorkspaceMemory.get<any>("cos-br-live");
+      if(pv&&pv.q===brQ&&String(pv.researchBrief||"").trim()&&pv.researchState
+         &&!(pv.stages||[]).some((st:any)=>String(st?.synthesis||"").trim()))brPrior=pv;
+    }catch{}
+    const brSessionId=brPrior?.sessionId||Date.now();
     setBrCur({q:brQ,researchBrief:"",format:"threaded",stages:[],sessionId:brSessionId});
     const agents=brAg.map(id=>AR.find(r=>r.id===id)).filter(Boolean);
     const res=[];
@@ -5379,7 +5459,10 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     // with an explicit warning rather than silently ungrounded.
     let brRegisterBlock="";
     try{
-      if(!cancelRef.current.br){
+      if(brPrior){
+        brIntakeRegister=String(brPrior.intakeRegister||"");
+        brRegisterBlock=brIntakeRegister?buildRegisterInjection(brIntakeRegister):"";
+      }else if(!cancelRef.current.br){
         setBrPh("🔍 Establishing what is known and unknown…");
         const brScan=scanSuppliedInputs(brQ);
         const brIntakeSys=buildIntakePrompt(brQ,buildCtx(co,compData)+brWorkspaceBlock,brScan);
@@ -5405,7 +5488,13 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       // RESEARCH STEP: one search-enabled call gathers current verifiable figures
       // relevant to the question. All agents then reference this shared brief
       // instead of each searching independently (cost + consistency).
-      if(!cancelRef.current.br){
+      if(brPrior){
+        researchBrief=String(brPrior.researchBrief||"");
+        brGrounded=!!brPrior.grounded;
+        brResearchState=normalizeResearchState(brPrior.researchState);
+        setBrCur(prev=>({...prev,researchBrief,grounded:brGrounded,researchState:brResearchState,intakeRegister:brIntakeRegister}));
+        try{showToast("Resuming the paused investigation using its saved research. Web research is NOT being repeated. (Edit the question if you want fresh research.)","info");}catch{}
+      }else if(!cancelRef.current.br){
         setBrResearching(true);
         setBrPh("📡 Research Desk is gathering current data…");
         const rdBR=await runResearchDesk(ask,co,compData,brQ,showToast,keys);
@@ -5425,6 +5514,10 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         :"\nRESEARCH DESK UNAVAILABLE FOR THIS DEBATE:\n"+researchBrief
           +"\n\nMANDATORY: No live figure was retrieved for this session. Every price, cost, rate, salary, valuation, or market figure in this debate MUST carry the tag [ESTIMATE - UNVERIFIED]. Do not present any number as fact. If a prior speaker presented an untagged number, challenge it explicitly before continuing.\n"
         )+buildDecisionHistoryContext(brQ);
+      // Per-provider failure state for this whole run: a provider that fails
+      // permanently for one executive is not retried for the next one.
+      const brProvState:any={};
+      let brNoProvider:string|null=null;
       for(let i=0;i<agents.length;i++){
         if(cancelRef.current.br){showToast("Boardroom cancelled","warning");break;}
         const ag=agents[i];const p=EP[ag.id]||{};
@@ -5482,7 +5575,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
             break;
           }
           let cycleSuccess=false;
-          for(const prov of allProviders){
+          for(const prov of providersUsableNow(allProviders,brProvState,Date.now())){
             if(cancelRef.current.br)break;
             const pKey=brKeys[prov]||"";
             if(!pKey.trim())continue;
@@ -5505,41 +5598,44 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
               agTruncated=!!replyFull.truncated;
               gotResponse=true;
               cycleSuccess=true;
+              delete brProvState[prov];
               break;
             }catch(provErr:any){
               lastProvErr=prov+": "+String(provErr?.message||provErr);
-              if(isContextOrRateErr(provErr.message)){
-                sawRetryableErr=true;
-                markProviderExhausted(prov);
-                continue; // try next provider
-              }
-              // Non-rate error — previously swallowed silently. Now recorded
-              // above, so the user sees the actual cause.
-              continue;
+              // Classified individually. Was: any rate/quota/limit wording set ONE
+              // global flag and every provider - including 402/403 ones - was
+              // retried after a 65s countdown labelled "all providers at limit".
+              const pst=recordProviderFailure(brProvState,prov,String(provErr?.message||provErr),Date.now());
+              if(pst.kind==="retryable")markProviderExhausted(prov);
+              continue; // next provider; this one is retried only if its own state allows
             }
           }
           if(cycleSuccess||cancelRef.current.br)break;
-          // THE FAKE COUNTDOWN BUG: this used to wait 65 seconds, three times,
-          // for EVERY failure - including permanent ones like a rejected key
-          // (403) or a retired model (404), which no amount of waiting fixes.
-          // It showed "all providers at limit" even when nothing was rate
-          // limited. Waiting now only happens when a genuine rate/limit error
-          // was actually seen; otherwise it stops at once with the real cause.
-          if(!sawRetryableErr){
-            try{showToast(ag.t+" could not answer. Real cause: "+(lastProvErr||"no provider available")+" (Report this message to the administrator.)","error");}catch{}
+          // Re-evaluate every cycle: nothing that can recover -> stop now;
+          // otherwise wait only for the provider(s) that can, as long as they said.
+          const brWaitMs=nextRetryWaitMs(allProviders,brProvState,Date.now());
+          if(brWaitMs===null){
+            brNoProvider=providerStateSummary(allProviders,brProvState,Object.fromEntries(allProviders.map(p=>[p,(MODELS as any)[p]?.name||p])));
             break;
           }
-          if(cyclesDone<3){
-            await waitWithCountdown(65,(s)=>{
-              setBrPh(ag.ic+" "+ag.t+" — all providers at limit. Resuming in "+s+"s… (Cancel to stop)");
+          if(cyclesDone<3&&brWaitMs>0){
+            const waitingFor=allProviders.filter(p=>brProvState[p]&&brProvState[p].retryAt!==Infinity)
+              .map(p=>((MODELS as any)[p]?.name||p)+" ("+brProvState[p].label+")").join(", ");
+            await waitWithCountdown(Math.max(1,Math.ceil(brWaitMs/1000)),(sec)=>{
+              setBrPh(ag.ic+" "+ag.t+" \u2014 waiting for "+waitingFor+". Retrying in "+sec+"s\u2026 (Cancel to stop)");
             },()=>cancelRef.current.br);
             if(cancelRef.current.br)break;
-            // ProviderManager auto-resets after 60s; 65s guarantees reset
           }
         }
         // If all 3 cycles failed, record placeholder
         // Final safety net: a card must never render empty. If every provider and
         // every retry produced nothing, say so plainly on the card itself.
+        if(!gotResponse&&!cancelRef.current.br&&!brNoProvider){
+          const chE=costOrderedProviders(keys,"executive").map(r=>r.provider);
+          if(nextRetryWaitMs(chE,brProvState,Date.now())===null)
+            brNoProvider=providerStateSummary(chE,brProvState,Object.fromEntries(chE.map(p=>[p,(MODELS as any)[p]?.name||p])));
+        }
+        if(brNoProvider)break; // stop the board; nothing can answer - see the pause below
         if(!gotResponse||String(agText||"").trim().length<40){
           agText=(String(agText||"").trim().length>=40?"[Response incomplete — API limit reached]\n\n"+agText
             :"\u26a0 **"+ag.t+" did not produce an answer.**\n\nEvery configured provider either failed or returned an empty response for this executive."+(lastProvErr?"\n\n**Actual error:** "+lastProvErr.slice(0,500):"")+"\n\nWhat to try: reduce the number of executives, switch off the Research Desk for this run, or add a second provider key in Settings. This executive contributed nothing to the synthesis below.");
@@ -5583,7 +5679,26 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         setBrCur(updatedCur);
         sv("cos-br-live",updatedCur);
       }
-      if(!cancelRef.current.br&&res.length>0){
+      if(brNoProvider&&!cancelRef.current.br){
+        // PAUSED, NOT LOST: research brief + Research State saved with the session;
+        // re-running the same question resumes from here without new web research.
+        const pausedStage={stageNumber:1,type:"original",question:brQ,executiveIds:brAg,debate:[...res],synthesis:"",
+          decisionStatus:null,completedAt:null,frozen:false};
+        const pausedInfo={reason:brNoProvider,at:new Date().toISOString()};
+        const pausedCur={q:brQ,researchBrief,format:"threaded",stages:[pausedStage],sessionId:brSessionId,
+          grounded:brGrounded,intakeRegister:brIntakeRegister,researchState:brResearchState,paused:pausedInfo};
+        setBrCur(pausedCur);
+        try{sv("cos-br-live",pausedCur);}catch{}
+        const pausedSession={id:brSessionId,q:brQ,agents:brAg,format:"threaded",stages:[pausedStage],researchBrief,
+          ts:new Date().toISOString(),grounded:brGrounded,intakeRegister:brIntakeRegister,researchState:brResearchState,paused:pausedInfo};
+        const nsP=[pausedSession,...brSessions.filter((x:any)=>x.id!==brSessionId)].slice(0,20);setBrSessions(nsP);sv("cos-br",nsP);
+        const econ=!PREMIUM_PROVIDERS.includes((STAGE_PROFILE as any)?.executive);
+        showToast("Boardroom reasoning paused: no "+(econ?"economical ":"")+"reasoning provider permitted by your routing mode is currently available.\n"
+          +brNoProvider+"\n"+(String(researchBrief||"").trim()?"Your web research was retrieved and is saved. ":"")
+          +"Run the same question again once a provider is available \u2014 the saved research will be reused, not searched again.","warning");
+        setBrPh("");
+      }
+      if(!cancelRef.current.br&&res.length>0&&!brNoProvider){
         setBrPh("Synthesizing consensus…");
         const allPos=res.map(r=>r.ag.t+":\n"+r.text).join("\n\n---\n\n");
         const synSys="You are Chief of Staff at "+JSON.stringify(co.name)+". "+buildCtx(co,compData)+researchContext+"\nBUSINESS DOMAIN CLASSIFIED: "+domain+"\nRECOMMENDED FRAMEWORKS (for reference — apply where relevant to strengthen the synthesis): "+frameworks.map(f=>f.name).join(", ")+"\n\nSynthesize the boardroom debate into a board-ready executive report. Use this EXACT format with all sections present:\n\n"+"# Executive Summary\n"+"(3-4 sentences: the single decision, headline number in "+synCur.sym+", recommended action)\n\n"+"## Business Domain\n"+"Domain: "+domain+" | Frameworks referenced: "+frameworks.map(f=>f.name).join(" · ")+"\n\n"+"## Key Insights\n"+"(4-6 bullet points, each opening with a bold keyword. New synthesis only — do not restate individual exec arguments.)\n\n"+"## Conflicts Resolved\n"+"| Disagreement | Position A (who) | Position B (who) | RULING | Why | What would change this ruling |\n|---|---|---|---|---|---|\n"+"(One row per genuine disagreement. You are the ARBITRATOR, not a reporter: for every row you MUST state which position the board adopts and the evidence reason. Both are right is NOT a ruling and is not permitted — if the evidence genuinely cannot separate the two positions, rule for the one that fails more cheaply if it turns out wrong, and say that is why you ruled that way. If the executives did not disagree anywhere, say so explicitly and flag it as a warning sign that the debate lacked real challenge.)\n\n"+"## Evidence Quality Review\n"+"(Review the evidence labels used in the debate. List any [Assumption] or [Estimate] that materially affects the recommendation and note what validation is needed.)\n\n"+"## Cost Architecture\n"+"| Cost bucket | Low | Expected | High | Fixed/Variable | Reducible? | Lever |\n|---|---|---|---|---|---|---|\n"+"(Consolidate the executives nine-bucket work into ONE agreed cost stack. Where two executives gave different figures for the same bucket, choose one and note the other in brackets. Omit buckets that genuinely do not apply, but state which you omitted and why.)\n\n"+"## Break-Even and Viability\n"+"(State each of these with its formula shown: contribution per unit, contribution margin percent, total fixed cost per period, break-even volume, break-even revenue, and time to reach it. If an input is unknown, say which, and give the break-even at the low and the high end of its plausible range instead of a single false number.)\n\n"+"## What We Still Do Not Know\n"+"(Carry forward the UNKNOWN items from the Phase 0 evidence register that were NOT resolved during the debate. For each: the variable, why it is load-bearing, the cheapest way to obtain it, and how the recommendation changes if it lands at the bad end.)\n\n"+"## Quantified Recommendation\n"+"(Single recommended path. Show: formula, assumption, result for every figure in "+synCur.sym+")\n\n"+"## Financial Impact\n"+"| Phase | Actions | Investment "+synCur.sym+" | Expected Return | Owner |\n|-------|---------|--------------------------|-----------------|-------|\n"+"(30-60-90 day plan, one row per phase)\n\n"+"## Risk Register\n"+"| Risk | Likelihood | Impact | Mitigation | Owner |\n|------|------------|--------|------------|-------|\n"+"(max 5 rows)\n\n"+"## Opportunities\n"+"(3-5 bullets, each with upside in "+synCur.sym+", timeframe, and owner)\n\n"+"## This Week's Decision\n"+"(Single action required now. Cost of inaction: "+synCur.sym+" per week. Owner and deadline.)\n\n"+"## Recommendations\n"+"| Priority | Action | Impact | Effort | Deadline |\n|----------|--------|--------|--------|----------|\n"+"(ranked by priority)\n\n"+"## Sources and References\n"+"(every figure cited: Source name, figure, URL or evidence label)\n\n"+fxRuleBlock()+"FORMATTING RULES: Bold all key metrics. Use tables for all numbers. Never write unbroken paragraph blocks. Every number must have a unit ("+synCur.sym+" or %). Under 2600 words. All sections must be present and complete. Figures from VERIFIED RESEARCH BRIEF: cite source and URL. All others: label [Assumption] or [Estimate (unverified)].\n\nDECISION STATUS (mandatory final line). GATING RULE — apply this BEFORE you choose:\nCount the load-bearing figures in your Quantified Recommendation, meaning the figures the decision actually rests on. If MORE THAN HALF of them carry [Assumption], [Estimate] or [Recalled — Unverified] rather than a real source URL, you MAY NOT choose Proceed or Proceed with Conditions. You must choose Needs More Information, and the What We Still Do Not Know section becomes the primary output of this report. Confidence is earned by evidence, not by tone.\nThen write exactly:\nDECISION STATUS: [choose one: Proceed | Proceed with Conditions | Needs More Information | Do Not Proceed | No Consensus]\nReason: [one sentence explaining this status, and if the gating rule forced you to Needs More Information, say so and name the unverified figures]\n\nBOARD KPIS (mandatory, after DECISION STATUS). Output exactly this block and nothing after it:\n===BOARD_KPIS===\n[{\"label\":\"SHORT UPPERCASE LABEL\",\"value\":\"figure with unit\",\"why\":\"max 7 words on why this is the number the board must watch\"}]\n===END_KPIS===\nRules: exactly 4 objects. Choose the 4 figures that most determine the decision — capital required, break-even point, headline return, and the single largest risk figure. Value must be a complete figure with its unit, never a fragment. Label must describe the figure, never a job title. Only use figures that appear in your synthesis above.\n\nCRUX (mandatory, after the KPI block):\n===CRUX===\n(3 sentences: the decision, the number that drives it, and the one condition that must hold. No markdown.)\n===END_CRUX===";
@@ -5636,7 +5751,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         setBrCur(finalCur);
         try{sv("cos-br-live",finalCur);}catch{}
         // (usage is now logged centrally inside callAI, with the real provider)
-        const ns=[finalSession,...brSessions].slice(0,20);setBrSessions(ns);sv("cos-br",ns);
+        const ns=[finalSession,...brSessions.filter((x:any)=>x.id!==brSessionId)].slice(0,20);setBrSessions(ns);sv("cos-br",ns);
       }
     }catch(err){
       if(!cancelRef.current.br){setError(err.message);showToast("Boardroom error: "+err.message,"error");}
