@@ -614,8 +614,14 @@ function describeStageRun(stage:string,provider:string,fallbackFrom:string[]):st
 // Runs one Boardroom/research step on the providers its stage permits, in
 // order. If none is permitted or all fail it THROWS with the reason - it never
 // widens the list to a provider the routing mode does not allow.
-async function callStage(keys:any,stage:string,sys:any,msgs:any,maxT:number):Promise<{text:string;truncated:boolean;provider:string;fallbackFrom:string[];note:string}>{
-  const chain=costOrderedProviders(keys,stage);
+async function callStage(keys:any,stage:string,sys:any,msgs:any,maxT:number,provState?:any):Promise<{text:string;truncated:boolean;provider:string;fallbackFrom:string[];note:string}>{
+  const fullChain=costOrderedProviders(keys,stage);
+  // Optional run-level provider state (Boardroom). When given, providers already
+  // known to be unusable are skipped and new failures are recorded - the same
+  // classification the executive loop uses. Without it, behaviour is unchanged.
+  const chain=provState?fullChain.filter(r=>providersUsableNow([r.provider],provState,Date.now()).length>0):fullChain;
+  if(provState&&fullChain.length&&!chain.length)
+    throw new Error("\""+STAGE_LABEL(stage)+"\" skipped: no permitted provider can answer right now \u2014 "+providerStateSummary(fullChain.map(r=>r.provider),provState,Object.fromEntries(fullChain.map(r=>[r.provider,(MODELS as any)[r.provider]?.name||r.provider]))));
   if(!chain.length)throw new Error("No provider permitted for \""+STAGE_LABEL(stage)+"\" is available under your current routing mode. Economy and Balanced never use OpenAI or Claude for this step without your permission. Turn DeepSeek or Gemini back on, or choose a premium provider for this step in Settings \u2192 Model Routing.");
   const failed:string[]=[];
   for(const r of chain){
@@ -623,8 +629,12 @@ async function callStage(keys:any,stage:string,sys:any,msgs:any,maxT:number):Pro
       const out:any=await callAI(r.provider,r.key,sys,msgs,maxT,false,stageModelOverride(stage as any,r.provider));
       const text=String(out?.text||"");
       if(!text.trim())throw new Error("empty answer");
+      if(provState)delete provState[r.provider];
       return {text,truncated:!!out?.truncated,provider:r.provider,fallbackFrom:failed,note:describeStageRun(stage,r.provider,failed)};
-    }catch(e:any){ failed.push(r.provider+": "+String(e?.message||e).slice(0,160)); }
+    }catch(e:any){
+      failed.push(r.provider+": "+String(e?.message||e).slice(0,160));
+      if(provState)recordProviderFailure(provState,r.provider,String(e?.message||e),Date.now());
+    }
   }
   throw new Error("\""+STAGE_LABEL(stage)+"\" failed on every provider your routing mode permits ("+chain.map(c=>c.provider).join(" \u2192 ")+"). Errors: "+failed.join(" | "));
 }
@@ -5654,18 +5664,22 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           setBrPh(ag.ic+" "+ag.t+" is continuing response… (part "+(contAttempts+1)+")");
           try{
             const contSys="You are "+ag.f+" at \""+co.name+"\". You were speaking in a boardroom debate and your response was cut off. Here is what you wrote so far:\n\n"+agText+"\n\nContinue EXACTLY from where you left off. Do not repeat anything already written. Do not restart. Pick up mid-sentence if needed.";
-            const cont=(await (async()=>{const _r=await callStage(keys,"executive",contSys,[{role:"user",content:"Finish your response now. Close out your current point, complete any table you started, state your conclusion, and stop. Do not open a new section."}],1800);return {primary:_r.text,truncated:_r.truncated};})());
+            const cont=(await (async()=>{const _r=await callStage(keys,"executive",contSys,[{role:"user",content:"Finish your response now. Close out your current point, complete any table you started, state your conclusion, and stop. Do not open a new section."}],1800,brProvState);return {primary:_r.text,truncated:_r.truncated};})());
             agText=agText+cont.primary;
             agTruncated=!!cont.truncated;
           }catch(contErr:any){
-            if(isRateLimit(contErr.message)){
-              for(let countdown=30;countdown>0;countdown--){
-                if(cancelRef.current.br)break;
-                setBrPh(ag.ic+" "+ag.t+" is continuing — API limit. Retrying in "+countdown+"s…");
-                await new Promise(r=>setTimeout(r,1000));
-              }
-            }else{
-              agTruncated=false;
+            // Same per-provider decision as the main loop (was a keyword match that
+            // re-tried every provider, 402/403 ones included, behind "API limit").
+            const chC=costOrderedProviders(keys,"executive").map(r=>r.provider);
+            const wC=nextRetryWaitMs(chC,brProvState,Date.now());
+            if(wC===null||wC>30000){
+              agTruncated=false; // nothing can recover soon: keep the partial answer, stop continuing
+            }else if(wC>0){
+              const waitingForC=chC.filter(p=>brProvState[p]&&brProvState[p].retryAt!==Infinity)
+                .map(p=>((MODELS as any)[p]?.name||p)+" ("+brProvState[p].label+")").join(", ");
+              await waitWithCountdown(Math.max(1,Math.ceil(wC/1000)),(sec)=>{
+                setBrPh(ag.ic+" "+ag.t+" is continuing \u2014 waiting for "+waitingForC+". Retrying in "+sec+"s\u2026");
+              },()=>cancelRef.current.br);
             }
           }
         }
