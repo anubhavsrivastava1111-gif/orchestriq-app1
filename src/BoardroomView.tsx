@@ -1,6 +1,15 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import ReadAloudButton from "./components/ReadAloudButton";
-import { claimSummary, executivePosition, userQuestions, validateContribution, completenessReport, boardDecisionState, kpiBasis, buildFullThreadMarkdown, buildEmailBrief } from "./lib/BoardroomIntegrity";
+import { claimSummary, executivePosition, userQuestions, validateContribution, completenessReport, boardDecisionState, kpiBasis, buildFullThreadMarkdown, buildEmailBrief, analyseStage, type StageAnalysis } from "./lib/BoardroomIntegrity";
+import { tierLabel, type LinkedClaim } from "./lib/DecisionIntegrity";
+// One analysis per (stage object, brief, research state) - recomputed only when they change.
+const _analysisCache = new WeakMap<object, { key: string; a: StageAnalysis }>();
+function cachedAnalysis(cur: any, si: number, location: string): StageAnalysis | null {
+  const st = cur?.stages?.[si]; if (!st) return null;
+  const key = String((cur.researchBrief || "").length) + "|" + JSON.stringify(cur.researchState?.intelligence?.gaps || []).length + "|" + JSON.stringify(cur.researchState?.pendingUserQuestions || []).length + "|" + location;
+  const hit = _analysisCache.get(st); if (hit && hit.key === key) return hit.a;
+  try { const a = analyseStage(cur, si, { location }); _analysisCache.set(st, { key, a }); return a; } catch (e) { console.warn("[OIQ] stage analysis failed", e); return null; }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BOARDROOM VIEW — Enterprise Redesign
@@ -347,12 +356,13 @@ const STATUS_STYLE: Record<string, { label: string; tone: "ok" | "warn" | "bad" 
   FAILED: { label: "Failed", tone: "bad" }, IDENTITY_MISMATCH: { label: "Identity mismatch", tone: "bad" },
   DUPLICATE_CONTENT: { label: "Duplicate of another executive", tone: "bad" }, PROVIDER_LIMIT: { label: "No provider available", tone: "bad" },
   CONTEXT_LIMIT: { label: "Context limit", tone: "bad" },
+  LEGACY: { label: "Legacy (unattributed)", tone: "warn" },
 };
 // EXECUTIVE CONTRIBUTION CARD - progressive disclosure:
 // position -> what I need from you -> opportunities -> full analysis (inline) -> sources.
 // Reads the canonical full text; nothing here shortens the stored response.
 function ExecutiveCard({
-  entry, index, question, isDark, tok, stageNumber, intel, drillAnswers,
+  entry, index, question, isDark, tok, stageNumber, intel, drillAnswers, claims,
   onDrill, drillRole, drillQ, setDrillQ, drillRun, runDrill,
   onCopy, onContinue, showDrillClose,
 }: any) {
@@ -363,7 +373,7 @@ function ExecutiveCard({
   // executive whose identity it carries. Legacy entries (saved before identity
   // existed) have no callId and are shown as they were.
   const idCheck = entry.identity ? validateContribution(entry, { executiveId: ag.id, stageId: entry.identity.stageId }) : { valid: true, reason: "" };
-  const status: string = !idCheck.valid ? "IDENTITY_MISMATCH" : (entry.status || (entry.truncated ? "TRUNCATED" : "COMPLETE"));
+  const status: string = !idCheck.valid ? "IDENTITY_MISMATCH" : !entry.identity ? "LEGACY" : (entry.status || (entry.truncated ? "TRUNCATED" : "COMPLETE"));
   const st = STATUS_STYLE[status] || STATUS_STYLE.COMPLETE;
   const toneBg = st.tone === "ok" ? tok.successBg : st.tone === "warn" ? tok.warnBg : tok.dangerBg;
   const toneFg = st.tone === "ok" ? tok.success : st.tone === "warn" ? tok.warn : tok.danger;
@@ -396,17 +406,28 @@ function ExecutiveCard({
             {entry.identity?.provider && entry.identity.provider !== "none" && entry.identity.provider !== "see stage log" ? <span style={{ fontSize: 10.5, color: tok.muted }}>· {entry.identity.provider}</span> : null}
           </div>
           <div style={{ fontSize: 11.5, color: tok.text3, marginTop: 2 }}>{ag.d || "Executive Perspective"}</div>
-          {/* claim-level evidence summary - replaces the single Verified/Estimate badge */}
+          {/* EVIDENCE-LINKED claim summary: "verified" means backed by a retrieved
+              source - never just the model's own "[Verified Fact]" label. */}
           <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 7 }}>
-            {cs.total ? (<>
-              {chip(cs.total + " claims", tok.surface2, tok.text2)}
-              {cs.FACT ? chip(cs.FACT + " verified", tok.successBg, tok.success) : null}
-              {cs.INFERENCE ? chip(cs.INFERENCE + " inference", tok.surface2, tok.text2) : null}
-              {cs.ASSUMPTION ? chip(cs.ASSUMPTION + " assumptions", tok.warnBg, tok.warn) : null}
-              {cs.ESTIMATE ? chip(cs.ESTIMATE + " estimates", tok.warnBg, tok.warn) : null}
-              {cs.UNVERIFIED ? chip(cs.UNVERIFIED + " unverified", tok.dangerBg, tok.danger) : null}
-            </>) : chip("no material claims tagged", tok.surface2, tok.text3)}
+            {(() => {
+              const cl: LinkedClaim[] = Array.isArray(claims) ? claims : [];
+              if (!cl.length) return chip(cs.total ? cs.total + " claims (evidence not linked)" : "no material claims tagged", tok.surface2, tok.text3);
+              const n = (k: string) => cl.filter((c) => c.support === k).length;
+              const ma = cl.filter((c) => c.modelAsserted).length;
+              const bestTier = Math.min(...cl.filter((c) => c.support === "SUPPORTED").map((c) => c.sourceTier), 9);
+              return (<>
+                {chip(cl.length + " claims", tok.surface2, tok.text2)}
+                {n("SUPPORTED") ? chip(n("SUPPORTED") + " verified" + (bestTier < 9 ? " (best: " + tierLabel(bestTier) + ")" : ""), tok.successBg, tok.success) : null}
+                {n("PARTIALLY_SUPPORTED") ? chip(n("PARTIALLY_SUPPORTED") + " partly supported", tok.surface2, tok.text2) : null}
+                {n("CONTRADICTED") ? chip(n("CONTRADICTED") + " contradicted by research", tok.dangerBg, tok.danger) : null}
+                {n("INFERRED") ? chip(n("INFERRED") + " inference", tok.surface2, tok.text2) : null}
+                {n("ASSUMED") ? chip(n("ASSUMED") + " assumptions", tok.warnBg, tok.warn) : null}
+                {n("ESTIMATED") ? chip(n("ESTIMATED") + " estimates", tok.warnBg, tok.warn) : null}
+                {n("UNVERIFIED") ? chip(n("UNVERIFIED") + " unverified" + (ma ? " (" + ma + " model-labelled \u201cverified\u201d)" : ""), tok.dangerBg, tok.danger) : null}
+              </>);
+            })()}
           </div>
+          {entry.execution && !/^Completed using [A-Za-z]+\.$/.test(entry.execution) && <div style={{ fontSize: 11, color: tok.muted, marginTop: 5 }}>{entry.execution}</div>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           <ReadAloudButton text={full.replace(/[#*`_>|]/g, "")} id={"br-exec-" + (ag?.t || "exec") + "-" + index} />
@@ -460,7 +481,7 @@ function ExecutiveCard({
 }
 
 // ─── SYNTHESIS CARD ───────────────────────────────────────────────────────────
-function SynthesisCard({ synthesis, question, tok, isDark, onCopy, onExportPDF, onExportPPT, onExportMD, onExtractActions, extracting, basisText }: any) {
+function SynthesisCard({ synthesis, question, tok, isDark, onCopy, onExportPDF, onExportPPT, onExportMD, onExtractActions, extracting, basisText, kpiClaims }: any) {
   const [kpiOpen, setKpiOpen] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const raw = typeof synthesis === "string" ? synthesis : "";
@@ -521,9 +542,14 @@ function SynthesisCard({ synthesis, question, tok, isDark, onCopy, onExportPDF, 
                 // Where the figure came from, and what kind of claim it is - so an
                 // estimate never looks like a verified fact.
                 const kb = kpiBasis(String(basisText || "") + "\n" + raw, k.value);
-                const lbl = kb.kind === "FACT" ? "Verified (sourced)" : kb.kind === "ESTIMATE" ? "Modelled estimate" : kb.kind === "ASSUMPTION" ? "Assumption"
-                  : kb.kind === "INFERENCE" ? "Inference" : kb.kind === "UNVERIFIED" ? "Unverified" : "Basis not stated";
-                const ok = kb.kind === "FACT";
+                // Label from EVIDENCE LINKING when the figure's sentence was linked; the
+                // model's own tag alone never makes a KPI "verified".
+                const lc: any = (Array.isArray(kpiClaims) ? kpiClaims : []).find((c: any) => kb.basis && (c.text.includes(kb.basis.slice(0, 60)) || kb.basis.includes(c.text.slice(0, 60))));
+                const sup = lc ? lc.support : "";
+                const lbl = sup === "SUPPORTED" ? "Verified \u00b7 " + tierLabel(lc.sourceTier) : sup === "PARTIALLY_SUPPORTED" ? "Partly supported" : sup === "CONTRADICTED" ? "Contradicted by research"
+                  : sup === "ESTIMATED" || kb.kind === "ESTIMATE" ? "Modelled estimate" : sup === "ASSUMED" || kb.kind === "ASSUMPTION" ? "Assumption" : sup === "INFERRED" || kb.kind === "INFERENCE" ? "Inference"
+                  : kb.basis ? (lc && lc.modelAsserted ? "Unverified (model-labelled verified)" : "Unverified") : "Basis not stated";
+                const ok = sup === "SUPPORTED";
                 return (<>
                   <span onClick={() => setKpiOpen(kpiOpen === i ? null : i)} style={{ display: "inline-block", marginTop: 7, fontSize: 9.5, fontWeight: 800, padding: "2px 6px", borderRadius: 4, cursor: kb.basis ? "pointer" : "default",
                     background: ok ? tok.successBg : tok.warnBg, color: ok ? tok.success : tok.warn }}>{lbl}{kb.basis ? (kpiOpen === i ? " \u25b4" : " \u25be") : ""}</span>
@@ -911,6 +937,8 @@ function actionBtn(tok: typeof T.light, accent = false, color?: string): React.C
 // ═══════════════════════════════════════════════════════════════════════════
 interface BoardroomViewProps {
   exportVerbatimPDF?: (title: string, markdown: string) => Promise<void> | void;
+  researchPriorityGaps?: (stageIndex: number) => void;
+  brFreshResearch?: boolean; setBrFreshResearch?: (v: boolean) => void;
   // Data
   brQ: string; setBrQ: (v: string) => void;
   brAg: string[]; setBrAg: (v: string[]) => void;
@@ -948,7 +976,7 @@ interface BoardroomViewProps {
 
 export default function BoardroomView(props: BoardroomViewProps) {
   const {
-    brQ, setBrQ, brAg, setBrAg, brCur, brRun, brPh, exportVerbatimPDF,
+    brQ, setBrQ, brAg, setBrAg, brCur, brRun, brPh, exportVerbatimPDF, researchPriorityGaps, brFreshResearch, setBrFreshResearch,
     brSessions, setBrSessions, brShowHistory, setBrShowHistory,
     brFollowUp, setBrFollowUp, drillRole, setDrillRole,
     drillQ, setDrillQ, drillRun, brEnd,
@@ -960,6 +988,8 @@ export default function BoardroomView(props: BoardroomViewProps) {
     followUpSuggestions, setFollowUpSuggestions,
     suggestFollowUpExecs,
   } = props;
+  // Which stage's contradiction list is expanded (clickable count in Board Status).
+  const [showContradictions, setShowContradictions] = useState<number | null>(null);
 
   const tok = isDark ? T.dark : T.light;
 
@@ -1061,6 +1091,11 @@ export default function BoardroomView(props: BoardroomViewProps) {
             onSubmit={runBR} disabled={brRun || brAg.length < 2}
             isRunning={brRun} onCancel={cancelBR}
             MicButton={MicButton} vLang={vLang} tok={tok} />
+          {setBrFreshResearch && (
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 12, color: tok.text3, cursor: "pointer" }}>
+              <input type="checkbox" checked={!!brFreshResearch} onChange={(e: any) => setBrFreshResearch(e.target.checked)} />
+              Fresh research (otherwise research from the last 7 days for this exact question is reused)
+            </label>)}
         </div>
 
         {/* ── PHASE INDICATOR ── */}
@@ -1107,6 +1142,7 @@ export default function BoardroomView(props: BoardroomViewProps) {
               <SynthesisCard
                 synthesis={stage.synthesis} question={stage.question}
                 basisText={(stage.debate || []).map((d: any) => d.fullText || d.text || "").join("\n")}
+                kpiClaims={cachedAnalysis(brCur, si, co?.location || "")?.claims || []}
                 tok={tok} isDark={isDark}
                 onCopy={() => cp(stage.synthesis)}
                 onExportPDF={() => quickExport("pdf", "executive",
@@ -1136,6 +1172,7 @@ export default function BoardroomView(props: BoardroomViewProps) {
                       key={e.identity?.callId || ((e.ag?.id || "x") + "-" + si + "-" + ei)} entry={e} index={ei} question={stage.question}
                       isDark={isDark} tok={tok} stageNumber={si + 1}
                       intel={brCur.researchState?.intelligence} drillAnswers={brCur.drilldown?.[e.ag?.id]}
+                      claims={(cachedAnalysis(brCur, si, co?.location || "")?.claims || []).filter((c: any) => c.executive === e.ag?.t)}
                       drillRole={drillRole}
                       drillQ={drillQ} setDrillQ={setDrillQ}
                       drillRun={drillRun} runDrill={runDrill}
@@ -1148,59 +1185,78 @@ export default function BoardroomView(props: BoardroomViewProps) {
                 </div>
               </div>
 
-              {/* RIGHT - Board Status, structured Board Decision, claim-level Evidence */}
+              {/* RIGHT - one deterministic analysis drives every panel (and the exports) */}
               {(() => {
                 const debate = stage.debate || [];
-                const expected = debate.map((d: any) => ({ executiveId: d?.ag?.id || d?.identity?.executiveId, executiveKey: d?.ag?.t || d?.identity?.executiveKey }));
-                const rows = (stage.completeness && stage.completeness.length ? stage.completeness : completenessReport(debate, expected, "stage-" + (si + 1)));
+                const an = cachedAnalysis(brCur, si, co?.location || "");
+                if (!an) return <div style={{ fontSize: 12, color: tok.muted }}>Analysis unavailable for this stage.</div>;
                 const intel = brCur.researchState?.intelligence || null;
-                const uq: string[] = Array.from(new Set(debate.flatMap((d: any) => userQuestions(d.fullText || d.text || ""))));
-                const ds = boardDecisionState({ rows, userQuestions: uq, contradictions: intel?.contradictions || [], gaps: intel?.gaps || [] });
+                const d = an.decision; const rows = an.rows;
                 const done = rows.filter((r: any) => r.complete).length;
                 const partial = rows.filter((r: any) => !r.complete && r.included !== "excluded").length;
                 const failed = rows.filter((r: any) => r.included === "excluded").length;
-                const cs = debate.reduce((acc: any, d: any) => { const c = claimSummary(d.fullText || d.text || ""); for (const k of Object.keys(acc)) acc[k] += (c as any)[k]; return acc; }, { total: 0, FACT: 0, INFERENCE: 0, ASSUMPTION: 0, ESTIMATE: 0, UNVERIFIED: 0 });
+                const sp = an.support;
+                const openX = an.contradictions.filter((c) => c.status !== "resolved");
+                const hiGaps = (intel?.gaps || []).filter((g: any) => g.priority === "high" && g.current_status !== "closed");
                 const panel = (title: string, body: any) => (
                   <div style={{ borderRadius: 10, border: `1px solid ${tok.border}`, background: tok.surface, boxShadow: tok.shadow, overflow: "hidden" }}>
                     <div style={{ padding: "12px 18px", borderBottom: `1px solid ${tok.border}`, fontFamily: "var(--font-head)", fontSize: 15, fontWeight: 600, color: tok.text }}>{title}</div>
                     <div style={{ padding: "12px 18px" }}>{body}</div>
                   </div>);
-                const row = (dot: string, lbl: string, val: any) => (
-                  <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", fontSize: 12.5 }}>
+                const row = (dot: string, lbl: string, val: any, onClick?: () => void) => (
+                  <div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", fontSize: 12.5, cursor: onClick ? "pointer" : "default" }}>
                     <span style={{ width: 8, height: 8, borderRadius: 999, background: dot, flexShrink: 0 }} />
-                    <span style={{ color: tok.text2 }}>{lbl}</span><span style={{ marginLeft: "auto", fontWeight: 700, color: tok.text }}>{val}</span>
+                    <span style={{ color: tok.text2, textDecoration: onClick ? "underline dotted" : "none" }}>{lbl}</span><span style={{ marginLeft: "auto", fontWeight: 700, color: tok.text }}>{val}</span>
                   </div>);
+                const sub = (t: string, color?: string) => <div style={{ fontSize: 10, fontWeight: 800, color: color || tok.text3, letterSpacing: ".1em", textTransform: "uppercase", margin: "12px 0 5px" }}>{t}</div>;
+                const list = (xs: string[], ordered = false) => ordered
+                  ? <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.55, color: tok.text }}>{xs.map((x, i) => <li key={i}>{x}</li>)}</ol>
+                  : <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12.5, lineHeight: 1.55, color: tok.text2 }}>{xs.map((x, i) => <li key={i}>{x}</li>)}</ul>;
+                const confTone = d.confidence === "HIGH" ? tok.success : d.confidence === "MEDIUM" ? tok.warn : tok.danger;
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    {an.execution.message && (
+                      <div style={{ fontSize: 12, padding: "9px 14px", borderRadius: 8, border: `1px solid ${tok.border}`, background: an.execution.state === "SUCCESS" ? tok.surface : an.execution.state === "SUCCESS_AFTER_FALLBACK" ? tok.surface2 : tok.warnBg, color: tok.text2 }}>
+                        {an.execution.message}</div>)}
                     {panel("Board Decision", (<>
                       <div style={{ background: "var(--oiq-sbBg)", borderRadius: 9, padding: 14 }}>
-                        <div style={{ fontSize: 10, fontWeight: 800, color: "var(--oiq-accent)", letterSpacing: ".12em", textTransform: "uppercase" }}>{ds.state}</div>
-                        {stage.decisionStatus && <div style={{ fontSize: 11.5, color: "var(--oiq-sbText)", opacity: .8, marginTop: 4 }}>Chairman's verdict: {stage.decisionStatus}</div>}
+                        <div style={{ fontSize: 10, fontWeight: 800, color: "var(--oiq-accent)", letterSpacing: ".12em", textTransform: "uppercase" }}>{d.state}</div>
+                        <div style={{ fontFamily: "var(--font-head)", fontSize: 15, fontWeight: 600, color: "var(--oiq-sbText)", marginTop: 4 }}>{d.decision}</div>
+                        <div style={{ fontSize: 11.5, marginTop: 6 }}><span style={{ fontWeight: 800, color: confTone }}>Confidence: {d.confidence}</span> <span style={{ color: "var(--oiq-sbText)", opacity: .8 }}>— {d.confidenceReason}</span></div>
+                        {stage.decisionStatus && <div style={{ fontSize: 11, color: "var(--oiq-sbText)", opacity: .7, marginTop: 4 }}>Chairman's verdict: {stage.decisionStatus}</div>}
                       </div>
-                      {ds.why.length > 0 && (<>
-                        <div style={{ fontSize: 10, fontWeight: 800, color: tok.text3, letterSpacing: ".1em", textTransform: "uppercase", margin: "12px 0 5px" }}>Why</div>
-                        <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12.5, lineHeight: 1.55, color: tok.text2 }}>{ds.why.slice(0, 6).map((w: string, i: number) => <li key={i}>{w}</li>)}</ul></>)}
-                      {ds.required.length > 0 && (<>
-                        <div style={{ fontSize: 10, fontWeight: 800, color: tok.accent, letterSpacing: ".1em", textTransform: "uppercase", margin: "12px 0 5px" }}>Decision required from you</div>
-                        <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.55, color: tok.text }}>{ds.required.map((q: string, i: number) => <li key={i}>{q}</li>)}</ol></>)}
+                      {d.why.length > 0 && (<>{sub("Why")}{list(d.why.slice(0, 6))}</>)}
+                      {d.invalidators.length > 0 && (<>{sub("What could change it")}{list(d.invalidators)}</>)}
+                      {d.requiredUserDecisions.length > 0 && (<>{sub("Decision required from you", tok.accent)}{list(d.requiredUserDecisions, true)}</>)}
+                      {hiGaps.length > 0 && (<>{sub("High-priority evidence gaps", tok.warn)}{list(hiGaps.slice(0, 4).map((g: any) => g.id + " " + g.question))}
+                        {an.priorityGaps.length > 0 && researchPriorityGaps && !brRun && (
+                          <button onClick={() => researchPriorityGaps(si)} style={{ ...btnBase(tok, false, tok.accent), fontSize: 12, padding: "6px 12px", marginTop: 8 }}>
+                            Research {an.priorityGaps.length} priority gap{an.priorityGaps.length === 1 ? "" : "s"}</button>)}</>)}
                     </>))}
                     {panel("Board Status", (<>
                       {row(tok.accent, "Executives selected", rows.length)}
                       {row(tok.success, "Complete", done)}
-                      {row(tok.warn, "Partial", partial)}
+                      {row(tok.warn, "Partial / legacy", partial)}
                       {row(tok.danger, "Failed / excluded", failed)}
                       {row(tok.warn, "Open evidence gaps", (intel?.gaps || []).filter((g: any) => g.current_status !== "closed").length)}
-                      {row(tok.danger, "Unresolved contradictions", (intel?.contradictions || []).filter((c: any) => c.status === "unresolved").length)}
+                      {row(tok.danger, "Contradictions (open / total)", openX.length + " / " + an.contradictions.length, an.contradictions.length ? () => setShowContradictions(showContradictions === si ? null : si) : undefined)}
+                      {showContradictions === si && an.contradictions.map((c) => (
+                        <div key={c.id} style={{ fontSize: 11.5, color: tok.text2, padding: "6px 0", borderTop: `1px solid ${tok.border}` }}>
+                          <b>{c.id} {c.variable}</b> <span style={{ color: c.status === "resolved" ? tok.success : c.severity === "HIGH" ? tok.danger : tok.warn }}>[{c.type.toLowerCase()} · {c.severity.toLowerCase()} · {c.status.replace(/_/g, " ")}]</span>
+                          <div>{c.executiveA} vs {c.executiveB}: {c.resolutionMethod}{c.resolutionEvidence ? " (" + c.resolutionEvidence + ")" : ""}</div>
+                        </div>))}
                       {rows.filter((r: any) => !r.complete).map((r: any, i: number) => (
                         <div key={i} style={{ fontSize: 11.5, color: tok.text3, marginTop: 4 }}>{r.executive}: {r.status.replace(/_/g, " ").toLowerCase()}{r.note ? " \u2014 " + r.note : ""}</div>))}
                     </>))}
-                    {panel("Evidence Quality (claim level)", (<>
-                      {row(tok.success, "Verified facts (with source URL)", cs.FACT)}
-                      {row(tok.text3, "Expert inference", cs.INFERENCE)}
-                      {row(tok.warn, "Assumptions", cs.ASSUMPTION)}
-                      {row(tok.warn, "Estimates", cs.ESTIMATE)}
-                      {row(tok.danger, "Unverified figures", cs.UNVERIFIED)}
-                      <div style={{ fontSize: 11, color: tok.muted, marginTop: 6 }}>{cs.total} material claims across {debate.length} executives.</div>
+                    {panel("Evidence Quality (linked to sources)", (<>
+                      {row(tok.success, "Verified (backed by a retrieved source)", sp.SUPPORTED)}
+                      {row(tok.text3, "Partly supported", sp.PARTIALLY_SUPPORTED)}
+                      {row(tok.danger, "Contradicted by research", sp.CONTRADICTED)}
+                      {row(tok.text3, "Executive inference", sp.INFERRED)}
+                      {row(tok.warn, "Assumptions", sp.ASSUMED)}
+                      {row(tok.warn, "Estimates", sp.ESTIMATED)}
+                      {row(tok.danger, "Unverified", sp.UNVERIFIED)}
+                      <div style={{ fontSize: 11, color: tok.muted, marginTop: 6 }}>{sp.total} material claims across {debate.length} executives{sp.modelAsserted ? "; " + sp.modelAsserted + " labelled \u201cverified\u201d by the model without supporting evidence" : ""}.</div>
                     </>))}
                   </div>);
               })()}
