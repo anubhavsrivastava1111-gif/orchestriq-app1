@@ -7,11 +7,14 @@
 //  - The canonical text (fullText) is never shortened. Previews are separate.
 //  - Status is explicit: COMPLETE, CONTINUATION_COMPLETE, PARTIAL, TRUNCATED,
 //    FAILED, IDENTITY_MISMATCH, DUPLICATE_CONTENT, PROVIDER_LIMIT, CONTEXT_LIMIT.
-import { classifyClaim, type ClaimKind } from "./ContextIntelligence";
+import { classifyClaim, parseResearchEvidence, type ClaimKind } from "./ContextIntelligence";
+import { linkClaims, parseQuantities, analyseContradictions, buildRegistry, updateVariable, mergeUserQuestions, decide, boardExecutionState,
+  prioritiseGaps, supportSummary, tierLabel, sensitivity, modelDecision, buildSynthesisPacket, executionSummary,
+  type LinkedClaim, type AnalysedContradiction, type ModelRegistry, type PendingUserQuestion, type DecisionOutput, type ProviderAttempt } from "./DecisionIntegrity";
 
 export type ContributionStatus =
   | "COMPLETE" | "CONTINUATION_COMPLETE" | "PARTIAL" | "TRUNCATED" | "FAILED"
-  | "IDENTITY_MISMATCH" | "DUPLICATE_CONTENT" | "PROVIDER_LIMIT" | "CONTEXT_LIMIT";
+  | "IDENTITY_MISMATCH" | "DUPLICATE_CONTENT" | "PROVIDER_LIMIT" | "CONTEXT_LIMIT" | "LEGACY";
 
 export interface ContributionIdentity {
   sessionId: string | number; stageId: string; executiveId: string; executiveKey: string;
@@ -147,6 +150,9 @@ export function completenessReport(entries: any[], expected: { executiveId: stri
     // validation then catches a slot holding another executive's identity.
     const e = entries.find((x) => x?.ag?.id === ex.executiveId) || entries.find((x) => x?.identity?.executiveId === ex.executiveId && !x?.ag);
     if (!e) return { executive: ex.executiveKey, executiveId: ex.executiveId, status: "FAILED", complete: false, identityValid: false, evidence: "-", included: "excluded", note: "no contribution recorded" };
+    // LEGACY: saved before contributions carried an identity. Shown and included,
+    // but labelled unattributed and never counted as complete/verified.
+    if (!e.identity) return { executive: ex.executiveKey, executiveId: ex.executiveId, status: "LEGACY", complete: false, identityValid: true, evidence: "-", included: "partially included", note: "legacy contribution - saved before attribution existed" };
     const v = validateContribution(e, { executiveId: ex.executiveId, stageId });
     const status: ContributionStatus = !v.valid ? "IDENTITY_MISMATCH" : (e.status || (e.truncated ? "TRUNCATED" : "COMPLETE"));
     const cs = claimSummary(e.fullText || e.text || "");
@@ -206,6 +212,7 @@ export function buildFullThreadMarkdown(cur: any): string {
         String(d.fullText || d.text || ""), "");
     }
     if (st.synthesis) out.push("### Chairman Synthesis", "", String(st.synthesis), "");
+    try { out.push(renderDecisionMarkdown(analyseStage(cur, i))); } catch { /* analysis must never block an export */ }
   });
   if (intel) {
     const list = (title: string, arr: any[], fmt: (x: any) => string) => { if (arr && arr.length) out.push("## " + title, "", ...arr.map((x) => "- " + fmt(x)), ""); };
@@ -235,4 +242,79 @@ export function buildEmailBrief(cur: any, decision?: { state: string; why: strin
   }
   parts.push("FULL BOARD ANALYSIS (complete, unabridged)", "", buildFullThreadMarkdown(cur));
   return { subject, body: parts.join("\n") };
+}
+
+// ── STAGE ANALYSIS - the ONE deterministic trust-layer computation ──────────
+// Used by the UI, exports, email and the Chairman's synthesis packet, so they
+// can never disagree. Pure: same stored data in, same result out.
+export interface StageAnalysis {
+  rows: CompletenessRow[]; claims: LinkedClaim[]; contradictions: AnalysedContradiction[]; registry: ModelRegistry;
+  userQuestions: PendingUserQuestion[]; decision: DecisionOutput; execution: { state: string; message: string };
+  priorityGaps: { id: string; question: string; researchQuestion: string }[]; support: ReturnType<typeof supportSummary>;
+}
+export function analyseStage(cur: any, si: number, opts: { location?: string; overrideContradictions?: boolean } = {}): StageAnalysis {
+  const st = (cur?.stages || [])[si] || { debate: [] };
+  const stageId = "stage-" + (si + 1);
+  const debate: any[] = st.debate || [];
+  const ev = parseResearchEvidence(String(cur?.researchBrief || ""));
+  const rs = cur?.researchState || {}; const intel = rs.intelligence || {};
+  const expected = debate.map((d: any) => ({ executiveId: d?.ag?.id || d?.identity?.executiveId, executiveKey: d?.ag?.t || d?.identity?.executiveKey }));
+  const rows = completenessReport(debate, expected, stageId);
+  // Only contributions that pass identity validation (or are legacy) feed the analysis.
+  const usable = debate.filter((d: any) => { const r = rows.find((x) => x.executiveId === (d?.ag?.id || d?.identity?.executiveId)); return r && r.included !== "excluded"; });
+  const claims = usable.flatMap((d: any) => linkClaims(d?.ag?.t || "Executive", d.fullText || d.text || "", ev));
+  const qs = usable.flatMap((d: any) => parseQuantities(d.fullText || d.text || "", d?.ag?.t || "Executive"));
+  const contradictions = analyseContradictions(qs, claims);
+  // Explicit disagreements recorded by the Decision Ledger V2 (e.g. "I disagree with the
+  // CEO on ...") are often non-numeric; they must still reach the decision. Merged as
+  // typed contradictions, skipping any pair the numeric analysis already covers.
+  for (const x of ((intel.contradictions || []) as any[])) {
+    if (!x || x.status === "resolved") continue;
+    if (!usable.some((d: any) => d?.ag?.t === x.made_by_a) || !usable.some((d: any) => d?.ag?.t === x.made_by_b)) continue;
+    const dup = contradictions.some((c) => [c.executiveA, c.executiveB].sort().join() === [x.made_by_a, x.made_by_b].sort().join()
+      && (String(x.reason || "").toLowerCase().includes(c.variable.toLowerCase()) || String(x.reason || "").toLowerCase().includes(c.variable.replace(/([A-Z])/g, " $1").toLowerCase().trim())));
+    if (dup) continue;
+    const critical = /\b(margin|price|rate|revenue|cost|capital|capex|break-?even|utili[sz]ation|cash|payment|cac|market size|tam)\b/i.test(String(x.reason || "") + " " + x.statement_a + " " + x.statement_b);
+    contradictions.push({ id: x.id || ("CX-V2-" + contradictions.length), variable: (String(x.reason || "").match(/different figures for (.+)$/i) || [])[1] || "position", claimA: x.statement_a, claimB: x.statement_b,
+      executiveA: x.made_by_a, executiveB: x.made_by_b, evidenceA: x.evidence_a || [], evidenceB: x.evidence_b || [],
+      severity: critical ? "HIGH" : "MEDIUM", type: /different figures/i.test(String(x.reason || "")) ? "NUMERIC" : "STRATEGIC",
+      status: x.status === "conditionally_resolved" ? "conditionally_resolved" : critical ? "requires_chairman" : "unresolved",
+      resolutionMethod: "recorded by the Decision Ledger: " + (x.reason || "explicit disagreement"), resolutionEvidence: "", finalValue: null, confidence: "low" });
+  }
+  const registry = buildRegistry(qs, claims, contradictions);
+  // Values the USER set previously win over executive estimates (and are audited).
+  for (const [k, e] of Object.entries((rs.modelRegistry || {}) as ModelRegistry)) {
+    const userSet = (e.history || []).filter((h) => h.by === "user").slice(-1)[0];
+    if (userSet && registry[k] && userSet.new !== null) updateVariable(registry, k, userSet.new, "user", userSet.reason || "set by user");
+  }
+  const uqList = mergeUserQuestions(rs.pendingUserQuestions || [], usable.flatMap((d: any) => userQuestions(d.fullText || d.text || "").map((q) => ({ q, by: d?.ag?.t || "Executive" }))));
+  const positions = (intel.positions && intel.positions.length ? intel.positions : usable.map((d: any) => {
+    const r = executivePosition(d.fullText || d.text || "");
+    return { executive: d?.ag?.t, stance: /\b(do not|don't|avoid|no[- ]go)\b/i.test(r) ? (/\b(pilot|if|unless|only)\b/i.test(r) ? "conditional" : "no_go") : /\b(proceed|pursue)\b/i.test(r) ? "go" : "conditional" };
+  })).filter((x: any) => usable.some((d: any) => d?.ag?.t === x.executive));
+  const decision = decide({ rows, positions, claims, contradictions, gaps: intel.gaps || [], userQuestions: uqList, registry, overrideContradictions: opts.overrideContradictions });
+  const execution = boardExecutionState(debate.filter((d: any) => Array.isArray(d.attempts) && d.attempts.length).map((d: any) => ({ executive: d?.ag?.t, attempts: d.attempts as ProviderAttempt[] })));
+  const priorityGaps = prioritiseGaps(intel.gaps || [], registry, contradictions, opts.location || "");
+  return { rows, claims, contradictions, registry, userQuestions: uqList, decision, execution, priorityGaps, support: supportSummary(claims) };
+}
+export function synthesisPacketFor(cur: any, si: number, opts: { location?: string } = {}): string {
+  const a = analyseStage(cur, si, opts); const st = (cur?.stages || [])[si] || {}; const intel = cur?.researchState?.intelligence || {};
+  return buildSynthesisPacket({ question: st.question || cur?.q || "", researchSummary: String(cur?.researchBrief || "").split("\n").slice(0, 40).join("\n"),
+    positions: (st.debate || []).map((d: any) => { const r = a.rows.find((x) => x.executiveId === d?.ag?.id); return { executive: d?.ag?.t, stance: (intel.positions || []).find((p: any) => p.executive === d?.ag?.t)?.stance || "-", recommendation: executivePosition(d.fullText || d.text || ""), status: r ? r.status : "-" }; }),
+    claims: a.claims, contradictions: a.contradictions, gaps: intel.gaps || [], assumptions: a.claims.filter((c) => c.support === "ASSUMED" || c.support === "ESTIMATED").map((c) => c.executive + ": " + c.text),
+    userQuestions: a.userQuestions, providerStatus: a.execution.message, constraints: (intel.userDecisions || []).map((u: any) => u.id + " " + u.text), registry: a.registry });
+}
+export function renderDecisionMarkdown(a: StageAnalysis): string {
+  const d = a.decision; const L: string[] = ["### Board Decision", "", "**Decision:** " + d.decision + "  ", "**State:** " + d.state + "  ", "**Confidence:** " + d.confidence + " \u2014 " + d.confidenceReason, ""];
+  const sec = (t: string, xs: string[]) => { if (xs.length) L.push("**" + t + "**", ...xs.map((x) => "- " + x), ""); };
+  sec("Why", d.why); sec("Supporting evidence", d.supportingEvidence); sec("Missing evidence", d.missingEvidence); sec("Contradictions remaining", d.contradictionsRemaining);
+  sec("Key assumptions", d.keyAssumptions); sec("What could change the decision", d.invalidators); sec("Decisions required from you", d.requiredUserDecisions);
+  if (a.execution.message) L.push("_Execution: " + a.execution.message + "_", "");
+  const reg = Object.values(a.registry);
+  if (reg.length) L.push("### Canonical model", "", "| ID | Variable | Value | Range | Basis | Status |", "|---|---|---|---|---|---|",
+    ...reg.map((e) => "| " + e.id + " | " + e.label + " | " + (e.value === null ? "unknown" : Math.round(e.value * 100) / 100) + " " + e.unit + " | " + (e.range ? Math.round(e.range.low) + "\u2013" + Math.round(e.range.high) : "-") + " | " + e.classification + " | " + e.status + " |"), "");
+  if (a.contradictions.length) L.push("### Contradiction analysis", "", ...a.contradictions.map((c) => "- " + c.id + " **" + c.variable + "** [" + c.type + "; " + c.severity + "; " + c.status + "] " + c.executiveA + " vs " + c.executiveB + " \u2014 " + c.resolutionMethod + (c.resolutionEvidence ? " (" + c.resolutionEvidence + ")" : "")), "");
+  if (a.claims.length) L.push("### Claim support (evidence-linked, not model-labelled)", "", "| Executive | Claim | Support | Evidence | Source tier |", "|---|---|---|---|---|",
+    ...a.claims.map((c) => "| " + c.executive + " | " + c.text.replace(/\|/g, "/").slice(0, 160) + " | " + c.support + (c.modelAsserted ? " (model-asserted)" : "") + " | " + (c.evidenceRefs.join(",") || "-") + " | " + tierLabel(c.sourceTier) + " |"), "");
+  return L.join("\n");
 }
