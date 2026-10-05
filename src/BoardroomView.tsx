@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import ReadAloudButton from "./components/ReadAloudButton";
+import { claimSummary, executivePosition, userQuestions, validateContribution, completenessReport, boardDecisionState, kpiBasis, buildFullThreadMarkdown, buildEmailBrief } from "./lib/BoardroomIntegrity";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BOARDROOM VIEW — Enterprise Redesign
@@ -340,155 +341,127 @@ function ResearchBriefPanel({ text, tok }: { text: string; tok: typeof T.light }
 }
 
 // ─── EXECUTIVE CARD ──────────────────────────────────────────────────────────
+const STATUS_STYLE: Record<string, { label: string; tone: "ok" | "warn" | "bad" }> = {
+  COMPLETE: { label: "Complete", tone: "ok" }, CONTINUATION_COMPLETE: { label: "Complete (continued)", tone: "ok" },
+  PARTIAL: { label: "Partial \u2014 continuation failed", tone: "warn" }, TRUNCATED: { label: "Cut short", tone: "warn" },
+  FAILED: { label: "Failed", tone: "bad" }, IDENTITY_MISMATCH: { label: "Identity mismatch", tone: "bad" },
+  DUPLICATE_CONTENT: { label: "Duplicate of another executive", tone: "bad" }, PROVIDER_LIMIT: { label: "No provider available", tone: "bad" },
+  CONTEXT_LIMIT: { label: "Context limit", tone: "bad" },
+};
+// EXECUTIVE CONTRIBUTION CARD - progressive disclosure:
+// position -> what I need from you -> opportunities -> full analysis (inline) -> sources.
+// Reads the canonical full text; nothing here shortens the stored response.
 function ExecutiveCard({
-  entry, index, question, isDark, tok,
+  entry, index, question, isDark, tok, stageNumber, intel, drillAnswers,
   onDrill, drillRole, drillQ, setDrillQ, drillRun, runDrill,
   onCopy, onContinue, showDrillClose,
-}: {
-  entry: any; index: number; question: string; isDark: boolean; tok: typeof T.light;
-  onDrill: () => void; drillRole: string | null; drillQ: string; setDrillQ: (v: string) => void;
-  drillRun: boolean; runDrill: () => void; onCopy: () => void; onContinue: () => void;
-  showDrillClose: () => void;
-}) {
-  const ag = entry.ag;
+}: any) {
+  const ag = entry.ag || {};
   const [open, setOpen] = useState(false);
-  const raw = typeof entry.text === "string" ? entry.text : "";
+  const full: string = typeof entry.fullText === "string" && entry.fullText ? entry.fullText : (typeof entry.text === "string" ? entry.text : "");
+  // IDENTITY CHECK before display: a contribution is shown only under the
+  // executive whose identity it carries. Legacy entries (saved before identity
+  // existed) have no callId and are shown as they were.
+  const idCheck = entry.identity ? validateContribution(entry, { executiveId: ag.id, stageId: entry.identity.stageId }) : { valid: true, reason: "" };
+  const status: string = !idCheck.valid ? "IDENTITY_MISMATCH" : (entry.status || (entry.truncated ? "TRUNCATED" : "COMPLETE"));
+  const st = STATUS_STYLE[status] || STATUS_STYLE.COMPLETE;
+  const toneBg = st.tone === "ok" ? tok.successBg : st.tone === "warn" ? tok.warnBg : tok.dangerBg;
+  const toneFg = st.tone === "ok" ? tok.success : st.tone === "warn" ? tok.warn : tok.danger;
+  const position = executivePosition(full);
+  const questions = userQuestions(full);
+  const cs = claimSummary(full);
+  const opps = ((intel && intel.opportunities) || []).filter((o: any) => o.discovered_by === ag.t).slice(0, 4);
+  const sources = Array.from(new Set((full.match(/https?:\/\/[^\s)\]>"']+/g) || []).map((u: string) => u.replace(/[.,;:]+$/, "")))).slice(0, 8);
+  const chip = (txt: string, bg: string, fg: string) => (
+    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: bg, color: fg, letterSpacing: ".02em", whiteSpace: "nowrap" }}>{txt}</span>);
+  const label = (t: string) => <div style={{ fontSize: 10, fontWeight: 800, color: tok.text3, letterSpacing: ".1em", textTransform: "uppercase", margin: "12px 0 5px" }}>{t}</div>;
 
-  // Headline: first bold line, else first real sentence.
-  const bold = raw.match(/\*\*(.+?)\*\*/);
-  const firstPara = raw.split("\n").map(l => l.replace(/^[#>\-*\s]+/, "").trim())
-    .find(l => l.length > 40 && !l.startsWith("|")) || "";
-  const headline = (bold ? bold[1] : firstPara).replace(/[*`_]/g, "").slice(0, 190);
-
-  // Key figures the executive actually cited — currency, percentages, horizons.
-  const figures = Array.from(new Set(
-    (raw.match(/(?:₹|\$)\s?[\d,]+(?:\.\d+)?\s?(?:Cr|L|lakh|K|M|B|bn|mn)?|\b\d+(?:\.\d+)?%|\bMonth\s\d+|\b\d+(?:\.\d+)?x\b/gi) || [])
-      .map(s => s.trim())
-  )).slice(0, 4);
-
-  const verified = /\[Verified Fact|TIER 1|Verified\]/i.test(raw);
-
+  if (!idCheck.valid) {
+    return (
+      <div style={{ marginBottom: 10, borderRadius: 10, border: `1px solid ${tok.danger}`, background: tok.dangerBg, padding: "14px 18px" }}>
+        <div style={{ fontWeight: 700, color: tok.danger, fontSize: 13 }}>{ag.ic} {ag.t} — contribution withheld (identity mismatch)</div>
+        <div style={{ fontSize: 12, color: tok.text2, marginTop: 4 }}>{idCheck.reason}. This text is not shown under {ag.t} and is excluded from the synthesis.</div>
+      </div>);
+  }
   return (
-    <>
-      {/* ── COMPACT ROW ── */}
-      <div
-        onClick={() => setOpen(true)}
-        style={{
-          marginBottom: 10, borderRadius: 10, border: `1px solid ${tok.border}`,
-          background: tok.surface, boxShadow: tok.shadow, cursor: "pointer",
-          padding: "15px 18px", display: "flex", gap: 13, alignItems: "flex-start",
-        }}>
-        <div style={{
-          width: 34, height: 34, borderRadius: 8, background: ag.dc + "15",
-          border: `1px solid ${ag.dc}25`, display: "flex", alignItems: "center",
-          justifyContent: "center", fontSize: 16, flexShrink: 0,
-        }}>{ag.ic}</div>
-
+    <div style={{ marginBottom: 10, borderRadius: 10, border: `1px solid ${tok.border}`, background: tok.surface, boxShadow: tok.shadow, overflow: "hidden" }}>
+      {/* HEADER */}
+      <div style={{ padding: "13px 16px", display: "flex", gap: 12, alignItems: "flex-start" }}>
+        <div style={{ width: 34, height: 34, borderRadius: 8, background: (ag.dc || "#64748b") + "15", border: `1px solid ${(ag.dc || "#64748b")}25`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{ag.ic}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
             <span style={{ fontSize: 13.5, fontWeight: 700, color: tok.text }}>{ag.t}</span>
-            <span style={{
-              fontSize: 9.5, fontWeight: 800, padding: "2px 7px", borderRadius: 4, letterSpacing: ".04em",
-              background: verified ? tok.successBg : tok.warnBg,
-              color: verified ? tok.success : tok.warn,
-            }}>{verified ? "Verified" : "Estimate"}</span>
-            {entry.truncated && (
-              <span style={{ fontSize: 9.5, fontWeight: 800, padding: "2px 7px", borderRadius: 4, background: tok.dangerBg, color: tok.danger }}>Cut short</span>
-            )}
+            {chip(st.label, toneBg, toneFg)}
+            {stageNumber ? <span style={{ fontSize: 10.5, color: tok.muted }}>Stage {stageNumber}</span> : null}
+            {entry.identity?.provider && entry.identity.provider !== "none" && entry.identity.provider !== "see stage log" ? <span style={{ fontSize: 10.5, color: tok.muted }}>· {entry.identity.provider}</span> : null}
           </div>
           <div style={{ fontSize: 11.5, color: tok.text3, marginTop: 2 }}>{ag.d || "Executive Perspective"}</div>
-
-          <div style={{
-            fontSize: 13.5, lineHeight: 1.65, color: tok.text2, marginTop: 7,
-            display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any, overflow: "hidden",
-          }}>{headline}</div>
-
-          {figures.length > 0 && (
-            <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 9 }}>
-              {figures.map((f, i) => (
-                <span key={i} style={{
-                  fontFamily: "var(--font-head)", fontSize: 13, fontWeight: 700, color: tok.text,
-                  background: tok.surface2, border: `1px solid ${tok.border}`,
-                  padding: "3px 9px", borderRadius: 5, fontVariantNumeric: "tabular-nums",
-                }}>{f}</span>
-              ))}
-            </div>
-          )}
+          {/* claim-level evidence summary - replaces the single Verified/Estimate badge */}
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 7 }}>
+            {cs.total ? (<>
+              {chip(cs.total + " claims", tok.surface2, tok.text2)}
+              {cs.FACT ? chip(cs.FACT + " verified", tok.successBg, tok.success) : null}
+              {cs.INFERENCE ? chip(cs.INFERENCE + " inference", tok.surface2, tok.text2) : null}
+              {cs.ASSUMPTION ? chip(cs.ASSUMPTION + " assumptions", tok.warnBg, tok.warn) : null}
+              {cs.ESTIMATE ? chip(cs.ESTIMATE + " estimates", tok.warnBg, tok.warn) : null}
+              {cs.UNVERIFIED ? chip(cs.UNVERIFIED + " unverified", tok.dangerBg, tok.danger) : null}
+            </>) : chip("no material claims tagged", tok.surface2, tok.text3)}
+          </div>
         </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-          <ReadAloudButton text={raw.replace(/[#*`_>|]/g, "")} id={"br-exec-" + (ag?.t || "exec") + "-" + index} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <ReadAloudButton text={full.replace(/[#*`_>|]/g, "")} id={"br-exec-" + (ag?.t || "exec") + "-" + index} />
           <span style={{ fontSize: 11, color: tok.muted }}>#{index + 1}</span>
         </div>
       </div>
-
-      {/* ── FULL DETAIL ── */}
-      {open && (
-        <div onClick={() => setOpen(false)}
-          style={{ position: "fixed", inset: 0, background: "rgba(10,14,26,0.62)", zIndex: 9995, display: "flex", alignItems: "center", justifyContent: "center", padding: 26 }}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ width: "min(1080px,100%)", maxHeight: "90vh", background: tok.surface, borderRadius: 12, border: `1px solid ${tok.border}`, boxShadow: tok.shadowLg, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-
-            <div style={{ padding: "15px 22px", borderBottom: `1px solid ${tok.border}`, display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 9, background: ag.dc + "15", border: `1px solid ${ag.dc}25`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>{ag.ic}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontFamily: "var(--font-head)", fontSize: 17, fontWeight: 600, color: tok.text }}>{ag.t}</div>
-                <div style={{ fontSize: 11.5, color: tok.text3, marginTop: 1 }}>{ag.d || "Executive Perspective"} · ~{Math.max(1, Math.round(raw.split(" ").length / 200))} min read</div>
-              </div>
-              <ReadAloudButton text={raw.replace(/[#*`_>|]/g, "")} id={"br-modal-" + (ag?.t || "exec") + "-" + index} />
-              <button onClick={() => setOpen(false)}
-                style={{ background: "none", border: `1px solid ${tok.border}`, borderRadius: 7, width: 30, height: 30, cursor: "pointer", color: tok.text3, fontSize: 15, fontFamily: "inherit", flexShrink: 0 }}>✕</button>
-            </div>
-
-            <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
-              <RenderedMd text={entry.text} tok={tok} isDark={isDark} />
-
-              {entry.drilldown && Object.entries(entry.drilldown).map(([, qas]: any, di) =>
-                (Array.isArray(qas) ? qas : []).map((qa: any, qi: number) => (
-                  <div key={`${di}-${qi}`} style={{ marginTop: 16, padding: 16, background: tok.surface2, borderRadius: 10, border: `1px solid ${tok.border}` }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: ag.dc, marginBottom: 10, display: "flex", gap: 8, alignItems: "flex-start" }}>
-                      <span style={{ fontSize: 16, flexShrink: 0 }}>💬</span><span>{qa.q}</span>
-                    </div>
-                    <RenderedMd text={qa.a} tok={tok} isDark={isDark} />
-                  </div>
-                ))
-              )}
-
-              {drillRole === ag.id && (
-                <div style={{ marginTop: 18, padding: 16, background: tok.accentBg, borderRadius: 10, border: `1px solid ${tok.accent}33` }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: tok.accent, marginBottom: 10 }}>Ask {ag.t} a follow-up</div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <input value={drillQ} onChange={e => setDrillQ(e.target.value)}
-                      onKeyDown={e => e.key === "Enter" && runDrill()}
-                      placeholder="e.g. What's your biggest concern about the financial risk?"
-                      disabled={drillRun}
-                      style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: `1px solid ${tok.accent}44`, background: tok.inputBg, color: tok.text, fontSize: 14, outline: "none", fontFamily: "inherit" }} />
-                    <button onClick={runDrill} disabled={drillRun || !drillQ.trim()}
-                      style={{ padding: "10px 16px", borderRadius: 8, background: ag.dc, color: "#fff", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>
-                      {drillRun ? "Thinking…" : "Ask"}
-                    </button>
-                    <button onClick={showDrillClose}
-                      style={{ padding: "10px", borderRadius: 8, background: tok.surface2, color: tok.text3, border: `1px solid ${tok.border}`, cursor: "pointer" }}>✕</button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 22px", borderTop: `1px solid ${tok.border}`, background: tok.surface2, flexWrap: "wrap", flexShrink: 0 }}>
-              <button onClick={onDrill} style={{ ...btnBase(tok, drillRole === ag.id, tok.accent), fontSize: 12, padding: "6px 12px" }}>💬 Drill Down</button>
-              <button onClick={onCopy} style={{ ...btnBase(tok, false), fontSize: 12, padding: "6px 12px" }}>📋 Copy</button>
-              {entry.truncated && (
-                <button onClick={onContinue} style={{ ...btnBase(tok, false, tok.warn), fontSize: 12, padding: "6px 12px" }}>▶ Continue Response</button>
-              )}
-            </div>
-          </div>
+      {/* BODY - readable default view */}
+      <div style={{ padding: "0 16px 12px 62px" }}>
+        {label("Executive position")}
+        <div style={{ fontSize: 13.5, lineHeight: 1.6, color: tok.text2 }}>{position || "See the full analysis below."}</div>
+        {questions.length > 0 && (<>{label("What " + ag.t + " needs from you")}
+          <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.6, color: tok.text2 }}>{questions.map((q: string, i: number) => <li key={i}>{q}</li>)}</ol></>)}
+        {opps.length > 0 && (<>{label("Opportunities raised")}
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{opps.map((o: any) => (
+            <div key={o.id} style={{ fontSize: 12.5, color: tok.text2 }}><span style={{ fontFamily: "var(--font-mono),monospace", fontSize: 11, color: tok.accent }}>{o.id}</span> {o.title} <span style={{ color: tok.muted }}>({o.status.replace(/_/g, " ")})</span></div>))}</div></>)}
+        {(status === "PARTIAL" || status === "TRUNCATED") && (
+          <div style={{ marginTop: 10, fontSize: 12, color: tok.warn }}>This response is incomplete. Everything received is preserved below; it was not completed by the provider.</div>)}
+        <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <button onClick={() => setOpen(!open)} style={{ ...btnBase(tok, open, tok.accent), fontSize: 12, padding: "6px 12px" }}>{open ? "Hide full analysis" : "Read full analysis (~" + Math.max(1, Math.round(full.split(/\s+/).length / 200)) + " min)"}</button>
+          <button onClick={onDrill} style={{ ...btnBase(tok, drillRole === ag.id, tok.accent), fontSize: 12, padding: "6px 12px" }}>Ask {ag.t}</button>
+          <button onClick={onCopy} style={{ ...btnBase(tok, false), fontSize: 12, padding: "6px 12px" }}>Copy full text</button>
+          {(status === "PARTIAL" || status === "TRUNCATED") && <button onClick={onContinue} style={{ ...btnBase(tok, false, tok.warn), fontSize: 12, padding: "6px 12px" }}>Continue response</button>}
         </div>
-      )}
-    </>
+        {/* FULL ANALYSIS - inline, only this card expands */}
+        {open && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${tok.border}` }}>
+            <RenderedMd text={full} tok={tok} isDark={isDark} />
+            {sources.length > 0 && (<>{label("Sources cited")}
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>{sources.map((u: string, i: number) => <a key={i} href={u} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: tok.accent, wordBreak: "break-all" }}>{u}</a>)}</div></>)}
+          </div>)}
+        {/* drill-down answers (were saved per role but never displayed) */}
+        {(drillAnswers || []).map((qa: any, qi: number) => (
+          <div key={qi} style={{ marginTop: 12, padding: 14, background: tok.surface2, borderRadius: 10, border: `1px solid ${tok.border}` }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: ag.dc, marginBottom: 8 }}>{qa.q}</div>
+            <RenderedMd text={qa.a} tok={tok} isDark={isDark} />
+          </div>))}
+        {drillRole === ag.id && (
+          <div style={{ marginTop: 12, padding: 14, background: tok.accentBg, borderRadius: 10, border: `1px solid ${tok.accent}33` }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: tok.accent, marginBottom: 8 }}>Ask {ag.t} a follow-up</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={drillQ} onChange={(e: any) => setDrillQ(e.target.value)} onKeyDown={(e: any) => e.key === "Enter" && runDrill()}
+                placeholder="e.g. What's your biggest concern about the financial risk?" disabled={drillRun}
+                style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: `1px solid ${tok.accent}44`, background: tok.inputBg, color: tok.text, fontSize: 13.5, outline: "none", fontFamily: "inherit" }} />
+              <button onClick={runDrill} disabled={drillRun || !drillQ.trim()} style={{ padding: "9px 14px", borderRadius: 8, background: ag.dc, color: "#fff", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>{drillRun ? "Thinking\u2026" : "Ask"}</button>
+              <button onClick={showDrillClose} style={{ padding: "9px", borderRadius: 8, background: tok.surface2, color: tok.text3, border: `1px solid ${tok.border}`, cursor: "pointer" }}>✕</button>
+            </div>
+          </div>)}
+      </div>
+    </div>
   );
 }
+
 // ─── SYNTHESIS CARD ───────────────────────────────────────────────────────────
-function SynthesisCard({ synthesis, question, tok, isDark, onCopy, onExportPDF, onExportPPT, onExportMD, onExtractActions, extracting }: any) {
+function SynthesisCard({ synthesis, question, tok, isDark, onCopy, onExportPDF, onExportPPT, onExportMD, onExtractActions, extracting, basisText }: any) {
+  const [kpiOpen, setKpiOpen] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const raw = typeof synthesis === "string" ? synthesis : "";
 
@@ -510,8 +483,11 @@ function SynthesisCard({ synthesis, question, tok, isDark, onCopy, onExportPDF, 
 
   const cruxMatch = raw.match(/===CRUX===([\s\S]*?)===END_CRUX===/);
   const bold = raw.match(/\*\*(.+?)\*\*/);
-  const firstPara = raw.split("\n").map(l => l.replace(/^[#>\-*\s]+/, "").trim())
-    .find(l => l.length > 50 && !l.startsWith("|")) || "";
+  // Strip machine blocks (KPI JSON, crux markers) before choosing a headline, so
+  // raw JSON is never shown as the synthesis summary.
+  const proseOnly = raw.replace(/===BOARD_KPIS===[\s\S]*?===END_KPIS===/g, "").replace(/===CRUX===[\s\S]*?===END_CRUX===/g, "");
+  const firstPara = proseOnly.split("\n").map(l => l.replace(/^[#>\-*\s]+/, "").trim())
+    .find(l => l.length > 50 && !l.startsWith("|") && !l.startsWith("[{") && !l.startsWith("===")) || "";
   const headline = (cruxMatch ? cruxMatch[1] : (bold ? bold[1] : firstPara))
     .replace(/[*`_]/g, "").trim().slice(0, 420);
 
@@ -541,6 +517,19 @@ function SynthesisCard({ synthesis, question, tok, isDark, onCopy, onExportPDF, 
               <div style={{ fontSize: 10.5, fontWeight: 700, color: tok.text3, textTransform: "uppercase", letterSpacing: ".09em", marginBottom: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k.label}</div>
               <div style={{ fontFamily: "var(--font-head)", fontSize: 26, fontWeight: 700, color: tok.text, lineHeight: 1.1, fontVariantNumeric: "tabular-nums" }}>{k.value}</div>
               {k.why && <div style={{ fontSize: 11.5, fontWeight: 600, color: tok.text3, marginTop: 6, lineHeight: 1.35 }}>{k.why}</div>}
+              {(() => {
+                // Where the figure came from, and what kind of claim it is - so an
+                // estimate never looks like a verified fact.
+                const kb = kpiBasis(String(basisText || "") + "\n" + raw, k.value);
+                const lbl = kb.kind === "FACT" ? "Verified (sourced)" : kb.kind === "ESTIMATE" ? "Modelled estimate" : kb.kind === "ASSUMPTION" ? "Assumption"
+                  : kb.kind === "INFERENCE" ? "Inference" : kb.kind === "UNVERIFIED" ? "Unverified" : "Basis not stated";
+                const ok = kb.kind === "FACT";
+                return (<>
+                  <span onClick={() => setKpiOpen(kpiOpen === i ? null : i)} style={{ display: "inline-block", marginTop: 7, fontSize: 9.5, fontWeight: 800, padding: "2px 6px", borderRadius: 4, cursor: kb.basis ? "pointer" : "default",
+                    background: ok ? tok.successBg : tok.warnBg, color: ok ? tok.success : tok.warn }}>{lbl}{kb.basis ? (kpiOpen === i ? " \u25b4" : " \u25be") : ""}</span>
+                  {kpiOpen === i && kb.basis && <div style={{ fontSize: 11, color: tok.text3, marginTop: 6, lineHeight: 1.45 }}>Basis: {kb.basis}</div>}
+                </>);
+              })()}
             </div>
           ))}
         </div>
@@ -921,6 +910,7 @@ function actionBtn(tok: typeof T.light, accent = false, color?: string): React.C
 // MAIN EXPORT
 // ═══════════════════════════════════════════════════════════════════════════
 interface BoardroomViewProps {
+  exportVerbatimPDF?: (title: string, markdown: string) => Promise<void> | void;
   // Data
   brQ: string; setBrQ: (v: string) => void;
   brAg: string[]; setBrAg: (v: string[]) => void;
@@ -958,7 +948,7 @@ interface BoardroomViewProps {
 
 export default function BoardroomView(props: BoardroomViewProps) {
   const {
-    brQ, setBrQ, brAg, setBrAg, brCur, brRun, brPh,
+    brQ, setBrQ, brAg, setBrAg, brCur, brRun, brPh, exportVerbatimPDF,
     brSessions, setBrSessions, brShowHistory, setBrShowHistory,
     brFollowUp, setBrFollowUp, drillRole, setDrillRole,
     drillQ, setDrillQ, drillRun, brEnd,
@@ -1116,6 +1106,7 @@ export default function BoardroomView(props: BoardroomViewProps) {
             {stage.synthesis && (
               <SynthesisCard
                 synthesis={stage.synthesis} question={stage.question}
+                basisText={(stage.debate || []).map((d: any) => d.fullText || d.text || "").join("\n")}
                 tok={tok} isDark={isDark}
                 onCopy={() => cp(stage.synthesis)}
                 onExportPDF={() => quickExport("pdf", "executive",
@@ -1142,68 +1133,77 @@ export default function BoardroomView(props: BoardroomViewProps) {
                 <div style={{ padding: "6px 14px 14px" }}>
                   {(stage.debate || []).map((e: any, ei: number) => (
                     <ExecutiveCard
-                      key={ei} entry={e} index={ei} question={stage.question}
-                      isDark={isDark} tok={tok}
+                      key={e.identity?.callId || ((e.ag?.id || "x") + "-" + si + "-" + ei)} entry={e} index={ei} question={stage.question}
+                      isDark={isDark} tok={tok} stageNumber={si + 1}
+                      intel={brCur.researchState?.intelligence} drillAnswers={brCur.drilldown?.[e.ag?.id]}
                       drillRole={drillRole}
                       drillQ={drillQ} setDrillQ={setDrillQ}
                       drillRun={drillRun} runDrill={runDrill}
                       onDrill={() => setDrillRole(drillRole === e.ag.id ? null : e.ag.id)}
                       showDrillClose={() => { setDrillRole(null); setDrillQ(""); }}
-                      onCopy={() => cp(e.text)}
+                      onCopy={() => cp(e.fullText || e.text)}
                       onContinue={async () => showToast("Use the follow-up box below to continue.", "info")}
                     />
                   ))}
                 </div>
               </div>
 
-              {/* RIGHT — Board Decision + Evidence Quality */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                {stage.decisionStatus && (
+              {/* RIGHT - Board Status, structured Board Decision, claim-level Evidence */}
+              {(() => {
+                const debate = stage.debate || [];
+                const expected = debate.map((d: any) => ({ executiveId: d?.ag?.id || d?.identity?.executiveId, executiveKey: d?.ag?.t || d?.identity?.executiveKey }));
+                const rows = (stage.completeness && stage.completeness.length ? stage.completeness : completenessReport(debate, expected, "stage-" + (si + 1)));
+                const intel = brCur.researchState?.intelligence || null;
+                const uq: string[] = Array.from(new Set(debate.flatMap((d: any) => userQuestions(d.fullText || d.text || ""))));
+                const ds = boardDecisionState({ rows, userQuestions: uq, contradictions: intel?.contradictions || [], gaps: intel?.gaps || [] });
+                const done = rows.filter((r: any) => r.complete).length;
+                const partial = rows.filter((r: any) => !r.complete && r.included !== "excluded").length;
+                const failed = rows.filter((r: any) => r.included === "excluded").length;
+                const cs = debate.reduce((acc: any, d: any) => { const c = claimSummary(d.fullText || d.text || ""); for (const k of Object.keys(acc)) acc[k] += (c as any)[k]; return acc; }, { total: 0, FACT: 0, INFERENCE: 0, ASSUMPTION: 0, ESTIMATE: 0, UNVERIFIED: 0 });
+                const panel = (title: string, body: any) => (
                   <div style={{ borderRadius: 10, border: `1px solid ${tok.border}`, background: tok.surface, boxShadow: tok.shadow, overflow: "hidden" }}>
-                    <div style={{ padding: "14px 20px", borderBottom: `1px solid ${tok.border}` }}>
-                      <div style={{ fontFamily: "var(--font-head)", fontSize: 16, fontWeight: 600, color: tok.text }}>Board Decision</div>
-                    </div>
-                    <div style={{ padding: 18 }}>
-                      <div style={{ background: "var(--oiq-sbBg)", borderRadius: 9, padding: 18 }}>
-                        <div style={{ fontSize: 9.5, fontWeight: 800, color: "var(--oiq-accent)", letterSpacing: ".14em", textTransform: "uppercase", marginBottom: 10 }}>
-                          ✓ {stage.decisionStatus}
-                        </div>
-                        <div style={{ fontFamily: "var(--font-head)", fontSize: 15, fontWeight: 600, color: "var(--oiq-sbText)", lineHeight: 1.55 }}>
-                          {(() => {
-                            const r = (stage.synthesis || "").match(/Reason:\s*(.+)/);
-                            const c = (stage.synthesis || "").match(/===CRUX===([\s\S]*?)===END_CRUX===/);
-                            return (c ? c[1] : r ? r[1] : "Open the synthesis for the full board position.").replace(/[*`_]/g, "").trim().slice(0, 240);
-                          })()}
-                        </div>
+                    <div style={{ padding: "12px 18px", borderBottom: `1px solid ${tok.border}`, fontFamily: "var(--font-head)", fontSize: 15, fontWeight: 600, color: tok.text }}>{title}</div>
+                    <div style={{ padding: "12px 18px" }}>{body}</div>
+                  </div>);
+                const row = (dot: string, lbl: string, val: any) => (
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", fontSize: 12.5 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 999, background: dot, flexShrink: 0 }} />
+                    <span style={{ color: tok.text2 }}>{lbl}</span><span style={{ marginLeft: "auto", fontWeight: 700, color: tok.text }}>{val}</span>
+                  </div>);
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    {panel("Board Decision", (<>
+                      <div style={{ background: "var(--oiq-sbBg)", borderRadius: 9, padding: 14 }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: "var(--oiq-accent)", letterSpacing: ".12em", textTransform: "uppercase" }}>{ds.state}</div>
+                        {stage.decisionStatus && <div style={{ fontSize: 11.5, color: "var(--oiq-sbText)", opacity: .8, marginTop: 4 }}>Chairman's verdict: {stage.decisionStatus}</div>}
                       </div>
-                    </div>
-                  </div>
-                )}
-
-                <div style={{ borderRadius: 10, border: `1px solid ${tok.border}`, background: tok.surface, boxShadow: tok.shadow, overflow: "hidden" }}>
-                  <div style={{ padding: "14px 20px", borderBottom: `1px solid ${tok.border}` }}>
-                    <div style={{ fontFamily: "var(--font-head)", fontSize: 16, fontWeight: 600, color: tok.text }}>Evidence Quality</div>
-                  </div>
-                  <div style={{ padding: "6px 20px 12px" }}>
-                    {(() => {
-                      const all = ((stage.debate || []).map((e: any) => e.text || "").join(" ") + " " + (stage.synthesis || ""));
-                      const n = (re: RegExp) => (all.match(re) || []).length;
-                      const rows = [
-                        { dot: tok.success, label: "Verified facts", n: n(/\[Verified Fact|TIER 1|TIER 2/gi), unit: "sources" },
-                        { dot: tok.warn, label: "Expert inference", n: n(/\[Estimate/gi), unit: "claims" },
-                        { dot: tok.danger, label: "Unverified estimate", n: n(/\[Assumption/gi), unit: "figures" },
-                      ];
-                      return rows.map((r, i) => (
-                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, padding: "11px 0", borderBottom: i < 2 ? `1px solid ${tok.border}` : "none", fontSize: 12.5 }}>
-                          <span style={{ width: 9, height: 9, borderRadius: 999, background: r.dot, flexShrink: 0 }} />
-                          <span style={{ color: tok.text2 }}>{r.label}</span>
-                          <span style={{ marginLeft: "auto", fontWeight: 700, color: tok.text }}>{r.n} {r.unit}</span>
-                        </div>
-                      ));
-                    })()}
-                  </div>
-                </div>
-              </div>
+                      {ds.why.length > 0 && (<>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: tok.text3, letterSpacing: ".1em", textTransform: "uppercase", margin: "12px 0 5px" }}>Why</div>
+                        <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12.5, lineHeight: 1.55, color: tok.text2 }}>{ds.why.slice(0, 6).map((w: string, i: number) => <li key={i}>{w}</li>)}</ul></>)}
+                      {ds.required.length > 0 && (<>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: tok.accent, letterSpacing: ".1em", textTransform: "uppercase", margin: "12px 0 5px" }}>Decision required from you</div>
+                        <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.55, color: tok.text }}>{ds.required.map((q: string, i: number) => <li key={i}>{q}</li>)}</ol></>)}
+                    </>))}
+                    {panel("Board Status", (<>
+                      {row(tok.accent, "Executives selected", rows.length)}
+                      {row(tok.success, "Complete", done)}
+                      {row(tok.warn, "Partial", partial)}
+                      {row(tok.danger, "Failed / excluded", failed)}
+                      {row(tok.warn, "Open evidence gaps", (intel?.gaps || []).filter((g: any) => g.current_status !== "closed").length)}
+                      {row(tok.danger, "Unresolved contradictions", (intel?.contradictions || []).filter((c: any) => c.status === "unresolved").length)}
+                      {rows.filter((r: any) => !r.complete).map((r: any, i: number) => (
+                        <div key={i} style={{ fontSize: 11.5, color: tok.text3, marginTop: 4 }}>{r.executive}: {r.status.replace(/_/g, " ").toLowerCase()}{r.note ? " \u2014 " + r.note : ""}</div>))}
+                    </>))}
+                    {panel("Evidence Quality (claim level)", (<>
+                      {row(tok.success, "Verified facts (with source URL)", cs.FACT)}
+                      {row(tok.text3, "Expert inference", cs.INFERENCE)}
+                      {row(tok.warn, "Assumptions", cs.ASSUMPTION)}
+                      {row(tok.warn, "Estimates", cs.ESTIMATE)}
+                      {row(tok.danger, "Unverified figures", cs.UNVERIFIED)}
+                      <div style={{ fontSize: 11, color: tok.muted, marginTop: 6 }}>{cs.total} material claims across {debate.length} executives.</div>
+                    </>))}
+                  </div>);
+              })()}
             </div>
             {si < brCur.stages.length - 1 && (
               <div style={{ height: 1, background:
@@ -1250,24 +1250,36 @@ export default function BoardroomView(props: BoardroomViewProps) {
         {hasSession && !brRun && (
           <div style={{ display: "flex", gap: 8, padding: "14px 18px", background: tok.surface2, borderRadius: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: tok.text3, marginRight: 4, alignSelf: "center" }}>Full Thread:</div>
+            {/* FULL THREAD = every executive's complete text, completeness, evidence
+                classes, opportunities, contradictions, ledger and synthesis - built
+                from the canonical full texts, never from card previews. */}
             <button onClick={() => {
-              const fullText = isThreaded
-                ? brCur.stages.map((s: any, i: number) => `## Stage ${i+1}: "${s.question}"\n\n${s.debate?.map((d: any) => `**${d.ag.t}:**\n${d.text}`).join("\n\n")}${s.synthesis ? "\n\n**Chairman Synthesis:**\n"+s.synthesis : ""}`).join("\n\n---\n\n")
-                : brCur.debate?.map((d: any) => `**${d.ag.t}:**\n${d.text}`).join("\n\n") + (brCur.synthesis ? "\n\n**Synthesis:**\n"+brCur.synthesis : "");
-              quickExport("pdf", "detailed", "Decision Thread — " + brCur.q, fullText || "");
-            }} style={actionBtn(tok)}>📄 Full PDF</button>
+              const md = isThreaded ? buildFullThreadMarkdown(brCur) : ("# " + brCur.q + "\n\n" + (brCur.debate || []).map((d: any) => "**" + d.ag.t + ":**\n" + (d.fullText || d.text)).join("\n\n") + (brCur.synthesis ? "\n\n**Synthesis:**\n" + brCur.synthesis : ""));
+              // Verbatim PDF (no AI rewriting, paginates long responses) when available.
+              if (exportVerbatimPDF) { Promise.resolve(exportVerbatimPDF("Decision Thread \u2014 " + brCur.q, md)).catch((e: any) => showToast("PDF failed: " + String(e?.message || e), "error")); }
+              else quickExport("pdf", "detailed", "Decision Thread \u2014 " + brCur.q, md);
+            }} style={actionBtn(tok)}>Full PDF</button>
             <button onClick={() => {
-              const fullText = isThreaded
-                ? brCur.stages.map((s: any, i: number) => `## Stage ${i+1}: "${s.question}"\n\n${s.synthesis || ""}`).join("\n\n---\n\n")
-                : brCur.synthesis || "";
-              quickExport("pptx", "strategy", "Decision Thread — " + brCur.q, fullText);
-            }} style={actionBtn(tok)}>📊 Full PPT</button>
+              // Was: syntheses only - the executive debate was left out entirely.
+              const md = isThreaded ? buildFullThreadMarkdown(brCur) : ((brCur.debate || []).map((d: any) => d.ag.t + ": " + (d.fullText || d.text)).join("\n\n") + "\n\n" + (brCur.synthesis || ""));
+              quickExport("pptx", "strategy", "Decision Thread \u2014 " + brCur.q, md);
+            }} style={actionBtn(tok)}>Full PPT</button>
             <button onClick={() => {
-              const fullText = isThreaded
-                ? brCur.stages.map((s: any, i: number) => `## Stage ${i+1}: "${s.question}"\n\n${s.debate?.map((d: any) => `**${d.ag.t}:**\n${d.text}`).join("\n\n")}${s.synthesis ? "\n\n**Chairman Synthesis:**\n"+s.synthesis : ""}`).join("\n\n---\n\n")
-                : brCur.debate?.map((d: any) => d.ag.t+": "+d.text).join("\n\n") + "\n\n"+brCur.synthesis;
-              dlFile("Boardroom-Thread-" + Date.now() + ".md", "# " + brCur.q + "\n\n" + fullText, "text/markdown");
+              const md = isThreaded ? buildFullThreadMarkdown(brCur) : ("# " + brCur.q + "\n\n" + (brCur.debate || []).map((d: any) => "**" + d.ag.t + ":**\n" + (d.fullText || d.text)).join("\n\n") + (brCur.synthesis ? "\n\n**Synthesis:**\n" + brCur.synthesis : ""));
+              dlFile("Boardroom-Thread-" + Date.now() + ".md", md, "text/markdown");
             }} style={actionBtn(tok)}>Full MD</button>
+            <button onClick={() => {
+              // Structured brief first, then the COMPLETE thread. Copied to the clipboard
+              // (mailto: links are length-limited and would cut the analysis).
+              const last = (brCur.stages || []).slice(-1)[0] || {};
+              const intel = brCur.researchState?.intelligence || null;
+              const dbt = last.debate || [];
+              const rows = last.completeness && last.completeness.length ? last.completeness : completenessReport(dbt, dbt.map((d: any) => ({ executiveId: d?.ag?.id || d?.identity?.executiveId, executiveKey: d?.ag?.t })), "stage-" + (brCur.stages || []).length);
+              const ds = boardDecisionState({ rows, userQuestions: Array.from(new Set(dbt.flatMap((d: any) => userQuestions(d.fullText || d.text || "")))), contradictions: intel?.contradictions || [], gaps: intel?.gaps || [] });
+              const em = buildEmailBrief(brCur, ds);
+              cp(em.body);
+              showToast("Email brief copied (" + Math.round(em.body.length / 1000) + "k characters, complete). Paste it into your email; subject: " + em.subject, "success");
+            }} style={actionBtn(tok)}>Copy Email Brief</button>
             {isThreaded && latestDecisionStatus && (
               <div style={{ marginLeft: "auto" }}><DecisionStatus status={latestDecisionStatus} tok={tok} /></div>
             )}
