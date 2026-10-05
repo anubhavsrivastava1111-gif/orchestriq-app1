@@ -28,6 +28,7 @@ import { scanSuppliedInputs, buildIntakePrompt, buildRegisterInjection, INTAKE_F
 import { runSearch, formatResultsForPrompt, RETRIEVED_RESULTS_RULES, hasExternalSearch, SEARCH_PROVIDERS, estimateSearchCost } from "./lib/SearchProviders";
 import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney, stageProviderChain, PREMIUM_PROVIDERS } from "./lib/ModelRouting";
 import { attemptResultFor, executionSummary, answerUserQuestion, type ProviderAttempt } from "./lib/DecisionIntegrity";
+import { handoffContext, type DecisionHandoff } from "./lib/DecisionCockpit";
 import { synthesisPacketFor, analyseStage, makeCallId, appendContinuation, findDuplicate, deriveStatus, isExcludedFromSynthesis, isComplete, validateContribution, completenessReport, renderCompletenessReport } from "./lib/BoardroomIntegrity";
 import { parseResearchEvidence, assembleExecutiveContext, extractLedgerEntry, renderLedger, renderEvidence, budgetCheck, type LedgerEntry, emptyIntelligence, mergeIntoIntelligence, discoverResearchOpportunities, recordUserDecision, classifyFollowUp, renderIntelligence, adaptiveOutputBudget, taskKindFor, type IntelligenceState } from "./lib/ContextIntelligence";
 import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
@@ -1411,6 +1412,10 @@ function normalizeResearchState(rs:any,fb:any={}):any{
     // answers propagate to follow-ups and future sessions and are never re-asked.
     modelRegistry:r.modelRegistry||null,
     pendingUserQuestions:arr(r.pendingUserQuestions),
+    // DECISION COCKPIT: scenario runs, user challenges and Autopilot responses for this
+    // decision - persisted with the session (reloads, history, exports).
+    scenarios:arr(r.scenarios), challenges:arr(r.challenges), decisionResponses:arr(r.decisionResponses),
+    cockpitDecision:r.cockpitDecision||null,
     evidence:arr(r.evidence), findings:arr(r.findings),
     opportunities:r.intelligence?arr(r.intelligence.opportunities):arr(r.opportunities),
     hypotheses:arr(r.hypotheses),
@@ -5359,7 +5364,8 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       const researchContext=(rdGroundedTM
         ?"\nVERIFIED RESEARCH BRIEF (current data for this simulation - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n"
         :"\nRESEARCH DESK UNAVAILABLE FOR THIS SIMULATION:\n"+researchBrief+"\n\nMANDATORY: No live figure was retrieved. Every price, cost, rate, salary, or market figure you produce MUST carry the tag [ESTIMATE - UNVERIFIED]. Do not present any number as fact. Open your response with a one-line warning that this simulation is ungrounded.\n");
-      const sys="You are a Business Simulation Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nSimulate TWO parallel 12-month timelines. ALL figures in "+tmCur.sym+tmCur.code+".\nSections: Decision, Baseline Assumptions, TIMELINE A PROCEED (table: Month/Revenue/OpEx/Cash/Key Event), TIMELINE B DO NOT PROCEED (same table), Divergence Summary, Best/Worst/Black Swan scenarios, Verdict table (Expected Value A&B, Cost of Waiting per week, Reversibility, Recommendation with confidence %), First 30 Days Action Plan, Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled [Assumption]. Figures taken from the VERIFIED RESEARCH BRIEF must be labeled [Retrieved Evidence]. Derived figures must show the formula and be labeled [Calculation]. Do not present invented numbers as fact.";
+      let tmHandoff="";try{tmHandoff=handoffContext(WorkspaceMemory.get<DecisionHandoff>("oiq-decision-handoff"));}catch{}
+    const sys="You are a Business Simulation Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+tmHandoff+"\nSimulate TWO parallel 12-month timelines. ALL figures in "+tmCur.sym+tmCur.code+".\nSections: Decision, Baseline Assumptions, TIMELINE A PROCEED (table: Month/Revenue/OpEx/Cash/Key Event), TIMELINE B DO NOT PROCEED (same table), Divergence Summary, Best/Worst/Black Swan scenarios, Verdict table (Expected Value A&B, Cost of Waiting per week, Reversibility, Recommendation with confidence %), First 30 Days Action Plan, Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled [Assumption]. Figures taken from the VERIFIED RESEARCH BRIEF must be labeled [Retrieved Evidence]. Derived figures must show the formula and be labeled [Calculation]. Do not present invented numbers as fact.";
       const res=await ask(sys,[{role:"user",content:"Simulate: \""+tmDec+"\""}],4500);
       if(!cancelRef.current.tm){
         setTmRes(res);
@@ -5401,7 +5407,9 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       const researchContext=(rdAP.grounded
         ?"\nVERIFIED RESEARCH BRIEF (current data for this scan - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n"
         :"\nRESEARCH DESK UNAVAILABLE FOR THIS SCAN:\n"+researchBrief+"\n\nMANDATORY: No live figure was retrieved. Every price, cost, rate, salary, or market figure you produce MUST carry the tag [ESTIMATE - UNVERIFIED]. Do not present any number as fact. Open your response with a one-line warning that this scan is ungrounded.\n");
-      const sys="You are the Decision Intelligence Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+"\nIdentify 6 CRITICAL decisions the founder should make RIGHT NOW. ALL figures in "+apCur.sym+apCur.code+".\nFor each: Title, Urgency, Owner, Decide By, Cost of delay/week (with calculation), Options 1/2/3 with outcomes, Recommendation, "+co.location+" Context, Data Needed. End with: THE ONE DECISION THAT MATTERS MOST THIS WEEK. Then a final section: Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled [Assumption]. Figures taken from the VERIFIED RESEARCH BRIEF must be labeled [Retrieved Evidence]. Derived figures must show the formula and be labeled [Calculation]. Do not present invented numbers as fact.";
+      let apHandoff="";try{apHandoff=handoffContext(WorkspaceMemory.get<DecisionHandoff>("oiq-decision-handoff"));}catch{}
+    const sys="You are the Decision Intelligence Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+apHandoff
+      +(apHandoff?"\nUse the persisted Boardroom decision above as the current state: answer 'if I were operating this business under these conditions, what would I do next?' with CURRENT STATE, RECOMMENDED ACTION, WHY, EXPECTED IMPACT, RISK, TRIGGER, OWNER, DEADLINE, STOP CONDITION and ESCALATION CONDITION for each decision. Do not re-decide what the Boardroom settled unless new evidence or a challenge justifies it.":"")+"\nIdentify 6 CRITICAL decisions the founder should make RIGHT NOW. ALL figures in "+apCur.sym+apCur.code+".\nFor each: Title, Urgency, Owner, Decide By, Cost of delay/week (with calculation), Options 1/2/3 with outcomes, Recommendation, "+co.location+" Context, Data Needed. End with: THE ONE DECISION THAT MATTERS MOST THIS WEEK. Then a final section: Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled [Assumption]. Figures taken from the VERIFIED RESEARCH BRIEF must be labeled [Retrieved Evidence]. Derived figures must show the formula and be labeled [Calculation]. Do not present invented numbers as fact.";
       let res=await ask(sys,[{role:"user",content:"Run complete decision scan."}],4500);
       res+=ieEvidenceAudit(res);
       if(!cancelRef.current.ap){
@@ -5606,7 +5614,11 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       brIntel=discoverResearchOpportunities(brIntel,brEvidence,brDims);
       // Value-chain lens for opportunity discovery, built from THIS problem's own
       // decomposition (nothing industry-specific is hard-coded).
-      const brOppLens="\n\nOPPORTUNITY LENS: Beyond the literal question, inspect each stage of this problem's value chain"
+      // SIMULATIONS FROM EARLIER RUNS of this question (Time Machine / cockpit) - shown as
+      // SIMULATION RESULTS, never as facts.
+      let brSimCtx="";
+      try{const hh=WorkspaceMemory.get<DecisionHandoff>("oiq-decision-handoff");if(hh&&hh.question===brQ)brSimCtx=handoffContext(hh);}catch{}
+      const brOppLens=brSimCtx+"\n\nOPPORTUNITY LENS: Beyond the literal question, inspect each stage of this problem's value chain"
         +(brDims.length?" ("+brDims.join(" \u2192 ")+")":"")+" for underserved needs, costly inefficiencies, delays, risks or information gaps that someone would pay to solve. "
         +"Mark each genuine one on its own line starting [Opportunity], with the evidence it rests on (cite F#/S# ids where available) - or label it [Expert Inference] if it is your reasoning. "
         +"An opportunity is not a recommendation: record it even if you advise against pursuing it. Do not invent novelty. "
@@ -6059,6 +6071,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         +(rs?.unresolvedQuestions?.length?"Unresolved questions: "+rs.unresolvedQuestions.join("; ")+"\n":"")
         +(rs?.decisions?.length?"Prior decisions: "+rs.decisions.map((d:any)=>"[stage "+d.stage+"] "+d.question+" -> "+(d.status||"")+(d.recommendation?" ("+String(d.recommendation).slice(0,200)+")":"")).join(" | ")+"\n":"")
         +(rs?.followUps?.length?"Earlier follow-ups: "+rs.followUps.map((f:any)=>f.question).join(" | ")+"\n":"")
+        +((rs&&rs.scenarios&&rs.scenarios.length)?"SIMULATION RESULTS (scenarios the user tested - not facts):\n"+rs.scenarios.slice(-5).map((sc:any)=>"  "+sc.name+": "+(sc.decisionChanged?"changed the decision from "+sc.baseDecision+" to ":"decision stays ")+sc.decisionResult).join("\n")+"\n":"")
         +(fuPending.filter((u:any)=>u.status==="answered").length?"ANSWERS THE USER HAS GIVEN (facts - use them, do not ask again):\n"+fuPending.filter((u:any)=>u.status==="answered").map((u:any)=>"  "+u.id+" "+u.question+" -> "+u.answer).join("\n")+"\n":"")
         +(fuPending.filter((u:any)=>u.status==="open").length?"STILL OPEN FOR THE USER (do not invent answers): "+fuPending.filter((u:any)=>u.status==="open").map((u:any)=>u.id+" "+u.question).join(" | ")+"\n":"")
         +(fuIntel&&(fuIntel.opportunities.length||fuIntel.gaps.length||fuIntel.userDecisions.length||fuIntel.contradictions.length)?"SHARED DECISION INTELLIGENCE STATE:\n"+renderIntelligence(fuIntel,brFollowUp,"core")+"\n":"")
@@ -6186,6 +6199,27 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
   // max 2) -> targeted research -> evidence appended with ids -> gap closed when the
   // research is grounded -> claims/model/decision re-evaluated deterministically on
   // render. Executives are NOT re-run, which keeps the loop cheap.
+  // DECISION COCKPIT persistence: scenarios/challenges/responses are written into the
+  // session's Research State (same store as everything else) and a compact handoff is
+  // saved for Time Machine, Autopilot and the next Boardroom run.
+  const saveCockpit=useCallback((patch:any,handoff?:DecisionHandoff|null)=>{
+    const cur0:any=brCur;const rs0:any=cur0.researchState||{};
+    const newRS=normalizeResearchState({...rs0,...patch});
+    const updated={...cur0,researchState:newRS};
+    setBrCur(updated);try{sv("cos-br-live",updated);}catch{}
+    if(cur0.sessionId)setBrSessions((prev:any[])=>{const n=(prev||[]).map((x:any)=>x.id===cur0.sessionId?{...x,researchState:newRS}:x);try{sv("cos-br",n);}catch{};return n;});
+    if(handoff)try{sv("oiq-decision-handoff",handoff);}catch{}
+  },[brCur,sv]);
+  const addCockpitActions=useCallback((texts:string[],label:string)=>{
+    const now=new Date().toISOString();
+    const fresh=texts.filter(t=>t&&!actionItems.some((a:any)=>a.text===t)).map((t,i)=>({id:Date.now()+i,text:t,source:"boardroom" as const,sourceLabel:label,ownerRoleId:null,
+      status:"not_started" as const,priority:(i===0?"high":"medium") as "high"|"medium",createdAt:now,dueHint:null,notes:"From the Decision Cockpit"}));
+    if(!fresh.length){showToast("These actions are already in the Action Tracker.","info");return;}
+    const updated=[...fresh,...actionItems];setActionItems(updated);sv("cos-actions",updated);
+    showToast(fresh.length+" action"+(fresh.length===1?"":"s")+" added to the Action Tracker.","success");
+  },[actionItems,sv,showToast]);
+  const openInTimeMachine=useCallback((text:string)=>{setTmDec(text);setNTab("timemachine");},[]);
+
   const researchPriorityGaps=useCallback(async(si:number)=>{
     if(brRun)return;
     const cur0:any=brCur;
@@ -9366,6 +9400,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
   <BoardroomView
     exportVerbatimPDF={(title:string,md:string)=>generatePDFv2("detailed",title,md,co,cur)}
     researchPriorityGaps={researchPriorityGaps} brFreshResearch={brFreshResearch} setBrFreshResearch={setBrFreshResearch}
+    saveCockpit={saveCockpit} addCockpitActions={addCockpitActions} openInTimeMachine={openInTimeMachine}
     brQ={brQ} setBrQ={setBrQ}
     brAg={brAg} setBrAg={setBrAg}
     brCur={brCur} brRun={brRun} brPh={brPh}
