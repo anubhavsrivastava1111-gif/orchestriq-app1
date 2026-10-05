@@ -8,6 +8,7 @@
 //  - Status is explicit: COMPLETE, CONTINUATION_COMPLETE, PARTIAL, TRUNCATED,
 //    FAILED, IDENTITY_MISMATCH, DUPLICATE_CONTENT, PROVIDER_LIMIT, CONTEXT_LIMIT.
 import { classifyClaim, parseResearchEvidence, type ClaimKind } from "./ContextIntelligence";
+import { inputsFromRegistry, buildDecisionMap, compareScenarios } from "./DecisionCockpit";
 import { linkClaims, parseQuantities, analyseContradictions, buildRegistry, updateVariable, mergeUserQuestions, decide, boardExecutionState,
   prioritiseGaps, supportSummary, tierLabel, sensitivity, modelDecision, buildSynthesisPacket, executionSummary,
   type LinkedClaim, type AnalysedContradiction, type ModelRegistry, type PendingUserQuestion, type DecisionOutput, type ProviderAttempt } from "./DecisionIntegrity";
@@ -212,7 +213,21 @@ export function buildFullThreadMarkdown(cur: any): string {
         String(d.fullText || d.text || ""), "");
     }
     if (st.synthesis) out.push("### Chairman Synthesis", "", String(st.synthesis), "");
-    try { out.push(renderDecisionMarkdown(analyseStage(cur, i))); } catch { /* analysis must never block an export */ }
+    try {
+      const an = analyseStage(cur, i); out.push(renderDecisionMarkdown(an));
+      // Decision Map + scenarios (labelled SIMULATION RESULT - never facts).
+      const scen = (cur?.researchState?.scenarios || []) as any[];
+      const map = buildDecisionMap({ analysis: an, inputs: inputsFromRegistry(an.registry), intel: cur?.researchState?.intelligence || {}, scenarios: scen });
+      out.push("### Decision Map", "", "**Decision:** " + map.decision + " \u2014 " + map.oneSentence, "",
+        "**Next 3 actions:**", ...map.nextActions.map((a, k) => (k + 1) + ". " + a), "",
+        "| Gate | Status | Threshold | Current | Owner |", "|---|---|---|---|---|", ...map.gates.map((g) => "| " + g.name.replace(/\|/g, "/") + " | " + g.status + " | " + g.threshold + " | " + g.current + " | " + g.owner + " |"), "",
+        "**What would change the decision:**", ...map.wouldChange.map((w) => "- " + w), "");
+      if (scen.length) {
+        const cmp = compareScenarios(scen.slice(-4));
+        out.push("### Scenarios tested (SIMULATION RESULTS \u2014 not forecasts or facts)", "", "| Metric | " + scen.slice(-4).map((x) => x.name).join(" | ") + " |", "|---|" + scen.slice(-4).map(() => "---|").join(""),
+          ...cmp.map((r) => "| " + r.metric + " | " + r.values.join(" | ") + " |"), "");
+      }
+    } catch { /* analysis must never block an export */ }
   });
   if (intel) {
     const list = (title: string, arr: any[], fmt: (x: any) => string) => { if (arr && arr.length) out.push("## " + title, "", ...arr.map((x) => "- " + fmt(x)), ""); };
