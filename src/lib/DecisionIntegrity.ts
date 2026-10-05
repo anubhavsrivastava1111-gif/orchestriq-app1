@@ -193,6 +193,15 @@ const VARIABLES: { id: string; label: string; re: RegExp; unit: Quantity["unit"]
   { id: "contributionMargin", label: "contribution margin", re: /\bcontribution margin\b/i, unit: "PCT" },
   { id: "fixedCost", label: "monthly fixed cost", re: /\bfixed cost/i, unit: "INR" },
   { id: "capex", label: "initial capital required", re: /\b(capex|initial capital|capital required|upfront investment)\b/i, unit: "INR" },
+  // Generic business variables (scenario engine). Listed after the specific ones so
+  // existing classifications are unchanged.
+  { id: "funding", label: "funding available", re: /\b(funding|funds available|available capital|capital available|can invest|raised?)\b/i, unit: "INR" },
+  { id: "variableCostPct", label: "variable cost (% of revenue)", re: /\bvariable costs?\b.*%|%.*\bvariable costs?\b/i, unit: "PCT" },
+  { id: "interestRate", label: "interest rate", re: /\binterest rate\b/i, unit: "PCT" },
+  { id: "debt", label: "debt", re: /\b(debt|term loan|borrowings?)\b/i, unit: "INR" },
+  { id: "price", label: "price per unit", re: /\b(price|selling price|fee|ticket size) per (unit|order|project|client|customer|job)\b|\bper (unit|order|project|job) (price|fee)\b/i, unit: "INR" },
+  { id: "volume", label: "volume per month", re: /\b\d+\s?(units|orders|projects|clients|customers|jobs) (per|a|each) month\b/i, unit: "COUNT" },
+  { id: "funding", label: "funding available", re: /\b(funding (available|of)|capital available|available (capital|funds|funding)|we have (\u20b9|rs)|budget of|total funding)\b/i, unit: "INR" },
   { id: "cac", label: "customer acquisition cost", re: /\b(cac|customer acquisition cost|acquisition cost)\b/i, unit: "INR" },
   { id: "dso", label: "days sales outstanding", re: /\b(dso|payment cycle|days sales outstanding|receivable days)\b/i, unit: "DAYS" },
   { id: "marketSize", label: "market size", re: /\b(tam|sam|som|market size|addressable market|(total|overall|national|domestic) market|market (is )?(worth|valued))\b/i, unit: "INR" },
@@ -207,7 +216,7 @@ export function parseQuantities(text: string, by: string): Quantity[] {
     let value: number | undefined; let unit = v.unit;
     if (unit === "PCT") { const m = line.match(/(\d+(?:\.\d+)?)\s?%/); if (m) value = parseFloat(m[1]); }
     else if (unit === "DAYS") { const m = line.match(/(\d+(?:\.\d+)?)\s?(?:billable )?days?/i); if (m) value = parseFloat(m[1]); }
-    else if (unit === "COUNT") { const m = line.match(/(\d+)\s?(?:billable )?(?:engineers|consultants|staff|people|headcount)/i) || line.match(/headcount (?:of )?(\d+)/i); if (m) value = parseFloat(m[1]); }
+    else if (unit === "COUNT") { const m = line.match(/(\d+)\s?(?:billable )?(?:engineers|consultants|staff|people|headcount|units|orders|projects|clients|customers|jobs)/i) || line.match(/headcount (?:of )?(\d+)/i); if (m) value = parseFloat(m[1]); }
     else {
       const m = line.match(/(\u20b9|rs\.?\s?|\$)\s?(\d[\d,]*(?:\.\d+)?)\s*(crore|cr\b|lakh|lac\b|l\b|k\b|m\b|mn\b|million|bn\b|billion)?/i);
       if (m) { value = numbersIn(m[2] + " " + (m[3] || ""))[0]; if (m[1] === "$") unit = "USD"; }
@@ -227,7 +236,7 @@ export interface AnalysedContradiction {
   severity: "HIGH" | "MEDIUM" | "LOW"; type: ContradictionType; status: "resolved" | "conditionally_resolved" | "unresolved" | "requires_chairman" | "requires_user";
   resolutionMethod: string; resolutionEvidence: string; finalValue: number | null; confidence: "high" | "medium" | "low";
 }
-const CRITICAL_VARS = new Set(["dayRate", "utilisation", "breakEven", "contributionMargin", "fixedCost", "capex", "cac", "dso", "revenue", "headcount", "billableDays"]);
+const CRITICAL_VARS = new Set(["dayRate", "utilisation", "breakEven", "contributionMargin", "fixedCost", "capex", "cac", "dso", "revenue", "headcount", "billableDays", "funding", "variableCostPct", "price", "volume"]);
 // Pairwise analysis of quantities about the same variable from DIFFERENT executives,
 // resolving deterministically in the specified order before escalating.
 export function analyseContradictions(qs: Quantity[], claims: LinkedClaim[] = [], extraPercents: number[] = []): AnalysedContradiction[] {
