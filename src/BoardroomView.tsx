@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from "react";
 import ReadAloudButton from "./components/ReadAloudButton";
 import { claimSummary, executivePosition, userQuestions, validateContribution, completenessReport, boardDecisionState, kpiBasis, buildFullThreadMarkdown, buildEmailBrief, analyseStage, type StageAnalysis } from "./lib/BoardroomIntegrity";
 import { tierLabel, type LinkedClaim } from "./lib/DecisionIntegrity";
+import DecisionCockpitView from "./DecisionCockpitView";
 // One analysis per (stage object, brief, research state) - recomputed only when they change.
 const _analysisCache = new WeakMap<object, { key: string; a: StageAnalysis }>();
 function cachedAnalysis(cur: any, si: number, location: string): StageAnalysis | null {
@@ -938,6 +939,7 @@ function actionBtn(tok: typeof T.light, accent = false, color?: string): React.C
 interface BoardroomViewProps {
   exportVerbatimPDF?: (title: string, markdown: string) => Promise<void> | void;
   researchPriorityGaps?: (stageIndex: number) => void;
+  saveCockpit?: (patch: any, handoff?: any) => void; addCockpitActions?: (texts: string[], label: string) => void; openInTimeMachine?: (text: string) => void;
   brFreshResearch?: boolean; setBrFreshResearch?: (v: boolean) => void;
   // Data
   brQ: string; setBrQ: (v: string) => void;
@@ -977,6 +979,7 @@ interface BoardroomViewProps {
 export default function BoardroomView(props: BoardroomViewProps) {
   const {
     brQ, setBrQ, brAg, setBrAg, brCur, brRun, brPh, exportVerbatimPDF, researchPriorityGaps, brFreshResearch, setBrFreshResearch,
+    saveCockpit, addCockpitActions, openInTimeMachine,
     brSessions, setBrSessions, brShowHistory, setBrShowHistory,
     brFollowUp, setBrFollowUp, drillRole, setDrillRole,
     drillQ, setDrillQ, drillRun, brEnd,
@@ -990,6 +993,13 @@ export default function BoardroomView(props: BoardroomViewProps) {
   } = props;
   // Which stage's contradiction list is expanded (clickable count in Board Status).
   const [showContradictions, setShowContradictions] = useState<number | null>(null);
+  // Completed stages lead with the Decision Cockpit; the executive debate is secondary.
+  const [debateOpen, setDebateOpen] = useState<Record<number, boolean>>({});
+  // Problems are never hidden: a stage whose executives are not all complete (partial,
+  // duplicate, identity mismatch, failed, legacy) shows its debate by default.
+  const stageHasIssues = (st: any) => (st?.debate || []).some((d: any) => !d?.identity || !["COMPLETE", "CONTINUATION_COMPLETE"].includes(d?.status || "COMPLETE")
+    || (d?.identity && d?.ag?.id && d.identity.executiveId !== d.ag.id));
+  const isDebateOpen = (si: number, st: any) => (debateOpen[si] !== undefined ? debateOpen[si] : stageHasIssues(st));
 
   const tok = isDark ? T.dark : T.light;
 
@@ -1137,6 +1147,11 @@ export default function BoardroomView(props: BoardroomViewProps) {
                 <DecisionStatus status={stage.decisionStatus} tok={tok} />
               )}
             </div>
+            {/* DECISION COCKPIT - decision, gates, scenarios, Autopilot (calculated, no AI call) */}
+            {stage.synthesis && (
+              <DecisionCockpitView cur={brCur} si={si} analysis={cachedAnalysis(brCur, si, co?.location || "")} tok={tok}
+                saveCockpit={saveCockpit} addCockpitActions={addCockpitActions} openInTimeMachine={openInTimeMachine} showToast={showToast} />
+            )}
             {/* KPI strip + synthesis (renders the board's declared figures) */}
             {stage.synthesis && (
               <SynthesisCard
@@ -1157,7 +1172,12 @@ export default function BoardroomView(props: BoardroomViewProps) {
               />
             )}
 
+            {stage.synthesis && (
+              <button onClick={() => setDebateOpen({ ...debateOpen, [si]: !isDebateOpen(si, stage) })}
+                style={{ margin: "4px 0 12px", padding: "8px 14px", borderRadius: 8, border: `1px solid ${tok.border}`, background: tok.surface, color: tok.text2, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+                {isDebateOpen(si, stage) ? "Hide executive debate & evidence" : "View executive debate & evidence (" + (stage.debate || []).length + " executives)"}</button>)}
             {/* ── TWO COLUMNS: debate left, decision + evidence right ── */}
+            {(!stage.synthesis || isDebateOpen(si, stage)) && (
             <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.55fr) minmax(0,1fr)", gap: 18, alignItems: "start" }}>
 
               {/* LEFT — Executive Debate */}
@@ -1260,7 +1280,7 @@ export default function BoardroomView(props: BoardroomViewProps) {
                     </>))}
                   </div>);
               })()}
-            </div>
+            </div>)}
             {si < brCur.stages.length - 1 && (
               <div style={{ height: 1, background:
                 `linear-gradient(90deg, transparent, ${tok.accent}44, transparent)`,
