@@ -9,6 +9,7 @@
 //    FAILED, IDENTITY_MISMATCH, DUPLICATE_CONTENT, PROVIDER_LIMIT, CONTEXT_LIMIT.
 import { classifyClaim, parseResearchEvidence, type ClaimKind } from "./ContextIntelligence";
 import { inputsFromRegistry, buildDecisionMap, compareScenarios } from "./DecisionCockpit";
+import { parseUserInputs, mergeUserInputs, clusterContradictions, type CanonicalInput, type Ambiguity, type ModelConflict, type Cluster } from "./DecisionExperience";
 import { linkClaims, parseQuantities, analyseContradictions, buildRegistry, updateVariable, mergeUserQuestions, decide, boardExecutionState,
   prioritiseGaps, supportSummary, tierLabel, sensitivity, modelDecision, buildSynthesisPacket, executionSummary,
   type LinkedClaim, type AnalysedContradiction, type ModelRegistry, type PendingUserQuestion, type DecisionOutput, type ProviderAttempt } from "./DecisionIntegrity";
@@ -264,6 +265,7 @@ export function buildEmailBrief(cur: any, decision?: { state: string; why: strin
 // can never disagree. Pure: same stored data in, same result out.
 export interface StageAnalysis {
   rows: CompletenessRow[]; claims: LinkedClaim[]; contradictions: AnalysedContradiction[]; registry: ModelRegistry;
+  userInputs: CanonicalInput[]; ambiguities: Ambiguity[]; modelConflicts: ModelConflict[]; clusters: Cluster[]; ambiguityChoice: "A" | "B" | null;
   userQuestions: PendingUserQuestion[]; decision: DecisionOutput; execution: { state: string; message: string };
   priorityGaps: { id: string; question: string; researchQuestion: string }[]; support: ReturnType<typeof supportSummary>;
 }
@@ -296,7 +298,14 @@ export function analyseStage(cur: any, si: number, opts: { location?: string; ov
       status: x.status === "conditionally_resolved" ? "conditionally_resolved" : critical ? "requires_chairman" : "unresolved",
       resolutionMethod: "recorded by the Decision Ledger: " + (x.reason || "explicit disagreement"), resolutionEvidence: "", finalValue: null, confidence: "low" });
   }
-  const registry = buildRegistry(qs, claims, contradictions);
+  let registry = buildRegistry(qs, claims, contradictions);
+  // CANONICAL MODEL: the USER's question is the primary source. Executives' figures are
+  // proposals; where they differ from what the user stated, the user's value is kept and
+  // the difference is surfaced as a MODEL CONFLICT (never silently overwritten).
+  const parsedUser = parseUserInputs(String(cur?.q || st.question || ""));
+  const ambiguityChoice: "A" | "B" | null = (rs.inputChoices && rs.inputChoices.revenueBasis) || null;
+  const merged = mergeUserInputs(registry, parsedUser.inputs, ambiguityChoice, parsedUser.ambiguities);
+  registry = merged.registry;
   // Values the USER set previously win over executive estimates (and are audited).
   for (const [k, e] of Object.entries((rs.modelRegistry || {}) as ModelRegistry)) {
     const userSet = (e.history || []).filter((h) => h.by === "user").slice(-1)[0];
@@ -310,7 +319,8 @@ export function analyseStage(cur: any, si: number, opts: { location?: string; ov
   const decision = decide({ rows, positions, claims, contradictions, gaps: intel.gaps || [], userQuestions: uqList, registry, overrideContradictions: opts.overrideContradictions });
   const execution = boardExecutionState(debate.filter((d: any) => Array.isArray(d.attempts) && d.attempts.length).map((d: any) => ({ executive: d?.ag?.t, attempts: d.attempts as ProviderAttempt[] })));
   const priorityGaps = prioritiseGaps(intel.gaps || [], registry, contradictions, opts.location || "");
-  return { rows, claims, contradictions, registry, userQuestions: uqList, decision, execution, priorityGaps, support: supportSummary(claims) };
+  return { rows, claims, contradictions, registry, userQuestions: uqList, decision, execution, priorityGaps, support: supportSummary(claims),
+    userInputs: parsedUser.inputs, ambiguities: ambiguityChoice ? [] : parsedUser.ambiguities, modelConflicts: merged.conflicts, clusters: clusterContradictions(contradictions), ambiguityChoice };
 }
 export function synthesisPacketFor(cur: any, si: number, opts: { location?: string } = {}): string {
   const a = analyseStage(cur, si, opts); const st = (cur?.stages || [])[si] || {}; const intel = cur?.researchState?.intelligence || {};
