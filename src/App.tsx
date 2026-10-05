@@ -27,6 +27,7 @@ import { buildScaffoldPrompt, buildViabilityPrompt, inferArchetype } from "./lib
 import { scanSuppliedInputs, buildIntakePrompt, buildRegisterInjection, INTAKE_FAILED_NOTICE } from "./lib/IntakeRegister";
 import { runSearch, formatResultsForPrompt, RETRIEVED_RESULTS_RULES, hasExternalSearch, SEARCH_PROVIDERS, estimateSearchCost } from "./lib/SearchProviders";
 import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney, stageProviderChain, PREMIUM_PROVIDERS } from "./lib/ModelRouting";
+import { makeCallId, appendContinuation, findDuplicate, deriveStatus, isExcludedFromSynthesis, isComplete, validateContribution, completenessReport, renderCompletenessReport } from "./lib/BoardroomIntegrity";
 import { parseResearchEvidence, assembleExecutiveContext, extractLedgerEntry, renderLedger, renderEvidence, budgetCheck, type LedgerEntry, emptyIntelligence, mergeIntoIntelligence, discoverResearchOpportunities, recordUserDecision, classifyFollowUp, renderIntelligence, adaptiveOutputBudget, taskKindFor, type IntelligenceState } from "./lib/ContextIntelligence";
 import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
 import { detectDocumentRequest, buildDocumentBrief, buildSynthesisOverride, suggestedFormats, CONSULTING_STANDARD } from "./lib/DocumentLibrary";
@@ -1820,7 +1821,7 @@ async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string,userK
       budget:r.headers.get("x-oiq-budget")||"",
     };
   }catch{}
-  return ntext;
+  /*truncation reported*/return {text:ntext,truncated:d.choices?.[0]?.finish_reason==="length"};
 }
 async function callGroq(key,sys,msgs,maxT){
   // YOUR EXACT ERROR: "Limit 8000, Requested 9728".
@@ -1840,7 +1841,7 @@ async function callGroq(key,sys,msgs,maxT){
   const _groqMax=Math.max(300,Math.min(Number(maxT)||1500,_room));
   const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.groq.model,max_tokens:_groqMax,messages:[{role:"system",content:sys},...msgs]})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}if(r.status===401)throw new Error("Groq: Invalid API key.");if(r.status===429)throw new Error("Groq: Rate limit hit. Wait a moment.");throw new Error("Groq "+r.status+": "+(m||r.statusText));}
-  const d=await r.json();return d.choices?.[0]?.message?.content||"";
+  const d=await r.json();/*truncation reported*/return {text:d.choices?.[0]?.message?.content||"",truncated:d.choices?.[0]?.finish_reason==="length"};
 }
   // YOUR "signal timed out". THIS WAS A FIXED 90 SECONDS.
 //
@@ -1975,7 +1976,7 @@ async function callClaudeWithTools(key:string, sys:string, userMsg:string, histo
 async function callOpenAI(key,sys,msgs,maxT){
   const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.openai.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}if(r.status===401)throw new Error("OpenAI: Invalid API key.");if(r.status===429)throw new Error("OpenAI: Quota exceeded. Add billing credits.");throw new Error("OpenAI "+r.status+": "+(m||r.statusText));}
-  const d=await r.json();return d.choices?.[0]?.message?.content||"";
+  const d=await r.json();/*truncation reported*/return {text:d.choices?.[0]?.message?.content||"",truncated:d.choices?.[0]?.finish_reason==="length"};
 }
 async function callGemini(key,sys,msgs,maxT,enableSearch=false){
   // gemini-2.5-flash is also retired ("no longer available to new users"), so it
@@ -1991,7 +1992,7 @@ async function callGemini(key,sys,msgs,maxT,enableSearch=false){
       if(enableSearch)_body.tools=[{google_search:{}}];
       const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent?key="+key.trim(),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(_body)});
       if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}if(r.status===403)throw new Error("Gemini: API key invalid.");if(r.status===429){lastErr=new Error("Gemini: Free quota exceeded.");continue;}if(r.status===400&&(m.includes("not found")||m.includes("deprecated"))){lastErr=new Error("Gemini model "+model+" unavailable");continue;}lastErr=new Error("Gemini/"+model+" "+r.status+": "+(m||r.statusText));continue;}
-      const d=await r.json();const text=d.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("\n")||"";if(!text){lastErr=new Error("Gemini/"+model+": empty response");continue;}return text;
+      const d=await r.json();const text=d.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("\n")||"";if(!text){lastErr=new Error("Gemini/"+model+": empty response");continue;}/*truncation reported*/return {text,truncated:d.candidates?.[0]?.finishReason==="MAX_TOKENS"};
     }catch(e){if(e.message.includes("Failed to fetch")||e.message.includes("NetworkError"))throw new Error("Gemini: Network error.");if(e.message.includes("Invalid")||e.message.includes("quota"))throw e;lastErr=e;}
   }
   throw lastErr||new Error("Gemini: All model variants failed.");
@@ -2063,12 +2064,12 @@ async function callDeepSeek(key,sys,msgs,maxT,modelOverride=""){
     if(reasoned)return reasoned;
     throw new Error("DeepSeek returned an empty answer (finish_reason: "+(fin||"unknown")+").");
   }
-  return content;
+  /*truncation reported*/return {text:content,truncated:(ch?.finish_reason||"")==="length"};
 }
 async function callKimi(key,sys,msgs,maxT){
   const r=await fetch("https://api.moonshot.cn/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key.trim()},body:JSON.stringify({model:MODELS.kimi.model,max_tokens:maxT,messages:[{role:"system",content:sys},...msgs]})});
   if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{m=JSON.parse(t).error?.message;}catch{m=httpErrText(t,r.status);}if(r.status===401)throw new Error("Kimi: Invalid API key.");if(r.status===429)throw new Error("Kimi: Rate limit. Wait a moment.");throw new Error("Kimi "+r.status+": "+(m||r.statusText));}
-  const d=await r.json();return d.choices?.[0]?.message?.content||"";
+  const d=await r.json();/*truncation reported*/return {text:d.choices?.[0]?.message?.content||"",truncated:d.choices?.[0]?.finish_reason==="length"};
 }
 
 // ─── fal.ai — Image & Video Generation ──────────────────────────────────────
@@ -5576,6 +5577,12 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         +"Mark each genuine one on its own line starting [Opportunity], with the evidence it rests on (cite F#/S# ids where available) - or label it [Expert Inference] if it is your reasoning. "
         +"An opportunity is not a recommendation: record it even if you advise against pursuing it. Do not invent novelty. "
         +"Mark each fact you need but cannot verify on its own line starting [Evidence Gap].";
+      // RESPONSE CONTRACT - the final instruction each executive reads, so its own
+      // identity and mandate come last (after other executives' ledger statements).
+      const brContract=(a:any)=>"\n\nRESPONSE CONTRACT - you are the "+a.t+" ("+(a.d||a.dl||"")+"). Answer strictly from this mandate. "
+        +"The Decision Ledger and intelligence state above contain OTHER executives' statements: never reproduce their text - refer to them by name or DL id. "
+        +"Use these sections (at most 7): 1) POSITION (2-4 sentences); 2) KEY FINDINGS (tag each claim [Verified Fact] / [Expert Inference] / [Assumption] / [Estimate]); "
+        +"3) OPPORTUNITIES & RISKS; 4) CONTRADICTIONS & EVIDENCE GAPS; 5) WHAT I NEED FROM THE USER (as questions); 6) RECOMMENDATION; 7) CONFIDENCE & LIMITATIONS.";
       for(let i=0;i<agents.length;i++){
         if(cancelRef.current.br){showToast("Boardroom cancelled","warning");break;}
         const ag=agents[i];const p=EP[ag.id]||{};
@@ -5589,6 +5596,9 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         let agText="";
         let agTruncated=false;
         let gotResponse=false;
+        // IMMUTABLE EXECUTION IDENTITY for this executive's contribution.
+        const agCallId=makeCallId(brSessionId,"stage-1",ag.id);
+        let agProvider="";let agModel="";let agLastSystem="";let agLastBudget=boardMaxTokens(ag);
         // ── SMART RETRY: provider failover + pause-and-resume ──────────────
         // Cycle 1: try primary. On limit → try alternates → wait 65s → retry.
         // Accumulates partial text so responses never break mid-sentence.
@@ -5645,7 +5655,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
               setBrPh(ag.ic+" "+ag.t+(agText?" — resuming via "+prov+"…":" is analyzing… ("+prov+" \u00b7 "+providerTier(prov)+(allProviders.indexOf(prov)>0?" \u00b7 fallback":" \u00b7 primary")+")"));
               const agBudget=adaptiveOutputBudget(boardMaxTokens(ag),taskKindFor({isFirstSpeaker:i===0,dimensionCount:brDims.length}));
               const ctxA=assembleExecutiveContext({provider:prov,evidence:brEvidence,mandateText,ledger:brLedger,intel:brIntel,userText:userMsg,
-                maxOutputTokens:agBudget,build:(evB:string,ledB:string)=>mkSys(mkResearchCtx(evB),ledB||"(no earlier contributions yet)")+brOppLens});
+                maxOutputTokens:agBudget,build:(evB:string,ledB:string)=>mkSys(mkResearchCtx(evB),ledB||"(no earlier contributions yet)")+brOppLens+brContract(ag)});
               brCtxLog.push({executive:ag.t,provider:prov,estInput:ctxA.check.estInput,requestedOutput:ctxA.check.requestedOutput,
                 estTotal:ctxA.check.estTotal,limit:ctxA.check.limit,margin:ctxA.check.margin,basis:ctxA.check.basis,strategy:ctxA.strategy,
                 evidenceIncluded:ctxA.evidenceIncluded,evidenceTotal:ctxA.evidenceTotal,rawPriorOutputsIncluded:ctxA.rawPriorOutputsIncluded,
@@ -5656,6 +5666,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
                 lastProvErr=prov+": prompt too long for this provider even after compaction (~"+ctxA.check.estTotal+" > "+ctxA.check.usable+" usable tokens; not sent)";
                 continue;
               }
+              agLastSystem=ctxA.system;agLastBudget=agBudget;
               brCallBudget.current--;
               const replyFull=await callAI(prov,pKey,ctxA.system,[{role:"user",content:userMsg}],agBudget,boardCanSearch(prov)&&!agText.trim())
               // A provider can return HTTP 200 with an EMPTY body - DeepSeek does this
@@ -5669,8 +5680,10 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
                 markProviderExhausted(prov);
                 continue;
               }
-              agText=agText+replyFull.text;
+              // Resuming mid-response: append only the new part (no repeated ending).
+              agText=agText?appendContinuation(agText,replyFull.text).text:replyFull.text;
               agTruncated=!!replyFull.truncated;
+              agProvider=prov;agModel=(MODELS as any)[prov]?.model||prov;
               gotResponse=true;
               cycleSuccess=true;
               delete brProvState[prov];
@@ -5730,7 +5743,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           try{
             const contSys="You are "+ag.f+" at \""+co.name+"\". You were speaking in a boardroom debate and your response was cut off. Here is what you wrote so far:\n\n"+agText+"\n\nContinue EXACTLY from where you left off. Do not repeat anything already written. Do not restart. Pick up mid-sentence if needed.";
             const cont=(await (async()=>{const _r=await callStage(keys,"executive",contSys,[{role:"user",content:"Finish your response now. Close out your current point, complete any table you started, state your conclusion, and stop. Do not open a new section."}],1800,brProvState);return {primary:_r.text,truncated:_r.truncated};})());
-            agText=agText+cont.primary;
+            agText=appendContinuation(agText,cont.primary).text;
             agTruncated=!!cont.truncated;
           }catch(contErr:any){
             // Same per-provider decision as the main loop (was a keyword match that
@@ -5748,10 +5761,28 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
             }
           }
         }
-        res.push({ag,text:agText,truncated:agTruncated});
+        // DUPLICATE GUARD: an answer near-identical to an earlier executive's is an
+        // echo, not an independent analysis. Regenerate ONCE from this executive's own
+        // mandate; if it is still a duplicate, mark it and keep it out of synthesis.
+        const brPriors=res.filter((r:any)=>!isExcludedFromSynthesis(r.status||"COMPLETE")).map((r:any)=>({executiveId:r.ag.id,executiveKey:r.ag.t,text:r.fullText||r.text}));
+        let agDup=agText&&!/^\u26a0 \*\*/.test(String(agText))?findDuplicate(agText,brPriors):null;
+        if(agDup&&agLastSystem&&!cancelRef.current.br&&brCallBudget.current>0){
+          try{
+            showToast(ag.t+"'s answer was "+Math.round(agDup.similarity*100)+"% identical to "+agDup.executiveKey+"'s \u2014 regenerating once from the "+ag.t+"'s own mandate.","warning");
+            brCallBudget.current--;
+            const regen=await callStage(keys,"executive",agLastSystem+"\n\nINTEGRITY CHECK: your previous draft repeated the "+agDup.executiveKey+"'s analysis almost word for word. Write your OWN "+ag.t+" analysis strictly from your mandate ("+(ag.d||ag.dl||"")+"). Refer to other executives only by name or DL id; never reproduce their text.",[{role:"user",content:brQ}],agLastBudget,brProvState);
+            if(!findDuplicate(regen.text,brPriors)){agText=regen.text;agTruncated=regen.truncated;agProvider=regen.provider;agModel=(MODELS as any)[regen.provider]?.model||regen.provider;agDup=null;}
+          }catch{}
+        }
+        const agStatus=deriveStatus({text:agText,failed:/^\u26a0 \*\*/.test(String(agText||"")),noProvider:!!brNoProvider,truncated:agTruncated,continuationAttempts:contAttempts,duplicateOf:agDup?agDup.executiveKey:null});
+        // The stored contribution: full text is canonical and never shortened; the
+        // identity travels with it so it can only ever be shown under this executive.
+        res.push({ag,text:agText,fullText:agText,truncated:agTruncated,status:agStatus,duplicateOf:agDup?agDup.executiveKey:null,
+          identity:{sessionId:brSessionId,stageId:"stage-1",executiveId:ag.id,executiveKey:ag.t,callId:agCallId,provider:agProvider||"none",model:agModel||""},
+          metrics:{requestedOutput:agLastBudget,chars:String(agText||"").length,continuationRequired:contAttempts>0,continuationAttempts:contAttempts,continuationSucceeded:contAttempts>0&&!agTruncated}});
         // DECISION LEDGER: verbatim, attributed extract of this answer. Placeholder
         // cards (no real answer) never become ledger content.
-        if(!/^\u26a0 \*\*/.test(String(agText||""))){
+        if(!isExcludedFromSynthesis(agStatus)){
           const brEntry=extractLedgerEntry(ag.t,ag.id,agText,brEvidence.sources);
           brLedger.push(brEntry);
           brIntel=mergeIntoIntelligence(brIntel,brEntry,agText,brEvidence,{question:brQ,dimensions:brDims});
@@ -5793,6 +5824,15 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         // replaced by that document's own required structure. This is the fix for a
         // business plan arriving as a debate summary with empty headings.
         let synSysFinal=brDoc.matched?(synSys+"\n\n"+buildSynthesisOverride(brDoc,synCur.sym)):synSys;
+        // SYNTHESIS FROM VALIDATED CONTRIBUTIONS: every selected executive appears in a
+        // deterministic completeness report; identity-mismatched, duplicate or failed
+        // contributions are excluded (and named), partial ones are included and labelled.
+        const brRows=completenessReport(res,agents.map((a:any)=>({executiveId:a.id,executiveKey:a.t})),"stage-1");
+        const brIncluded=res.filter((r:any)=>!isExcludedFromSynthesis(r.status||"COMPLETE")&&validateContribution(r,{executiveId:r.ag.id,stageId:"stage-1"}).valid);
+        allPos=brIncluded.map((r:any)=>r.ag.t+(r.status&&!isComplete(r.status)?" ["+r.status+" \u2014 incomplete; all text received is shown]":"")+":\n"+(r.fullText||r.text)).join("\n\n---\n\n");
+        synSysFinal+="\n\n"+renderCompletenessReport(brRows)
+          +"\nSay plainly which executives were complete, partial or excluded - never omit one silently, never attribute one executive's view to another."
+          +(brDoc.matched?"":"\nStructure the synthesis with these headings: BOARD CONSENSUS; EXECUTIVE DISSENT; UNRESOLVED; REQUIRES USER DECISION; REQUIRES EVIDENCE; REQUIRES FOLLOW-UP RESEARCH; RECOMMENDED NEXT ACTIONS.");
         // CONTEXT BUDGET FOR SYNTHESIS: the full debate is used when it fits the
         // Chairman stage's first permitted provider. Otherwise the verbatim Decision
         // Ledger and the full evidence (with F#/S# ids) replace the raw answers.
@@ -5840,7 +5880,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         try{saveDecisionRecord({id:Date.now(),ts:new Date().toISOString(),question:brQ,executives:brAg,status:decisionStatus,recommendation:extractRecommendationSnippet(syn)});}catch{}
         const stage1={stageNumber:1,type:"original",question:brQ,
           executiveIds:brAg,debate:res,synthesis:syn,
-          decisionStatus,completedAt:new Date().toISOString(),frozen:true,ledger:[...brLedger],contextLog:[...brCtxLog]};
+          decisionStatus,completedAt:new Date().toISOString(),frozen:true,ledger:[...brLedger],contextLog:[...brCtxLog],completeness:brRows};
         // PHASE 14/29: the decision is recorded in the Research State itself.
         const finalResearchState=normalizeResearchState({...(brResearchState||{question:brQ,researchBrief,grounded:brGrounded}),
           decisions:[...((brResearchState&&brResearchState.decisions)||[]),
@@ -6000,10 +6040,14 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         }
         if(cancelRef.current.br)break;
         if(replyFull){
-          followUpResponses.push({ag,text:replyFull.primary,truncated:!!replyFull.truncated});
+          const fuStageId="stage-"+(prevStages.length+1);
+          followUpResponses.push({ag,text:replyFull.primary,fullText:replyFull.primary,truncated:!!replyFull.truncated,
+            status:deriveStatus({text:replyFull.primary,truncated:!!replyFull.truncated,continuationAttempts:0}),
+            identity:{sessionId:(brCur as any).sessionId||"",stageId:fuStageId,executiveId:ag.id,executiveKey:ag.t,callId:makeCallId((brCur as any).sessionId||"",fuStageId,ag.id),provider:"see stage log",model:""}});
           try{fuIntel=mergeIntoIntelligence(fuIntel,extractLedgerEntry(ag.t,ag.id,replyFull.primary,fuEvidence.sources),replyFull.primary,fuEvidence,{question:brFollowUp,dimensions:(rs&&rs.dimensions)||[]});}catch{}
         }
-        else if(lastErr){failedAgents.push(ag.t);followUpResponses.push({ag,text:"_"+ag.t+" could not respond ("+lastErr.message+")_",truncated:false});}
+        else if(lastErr){failedAgents.push(ag.t);followUpResponses.push({ag,text:"_"+ag.t+" could not respond ("+lastErr.message+")_",fullText:"",truncated:false,status:"FAILED",
+          identity:{sessionId:(brCur as any).sessionId||"",stageId:"stage-"+(prevStages.length+1),executiveId:ag.id,executiveKey:ag.t,callId:makeCallId((brCur as any).sessionId||"","stage-"+(prevStages.length+1),ag.id),provider:"none",model:""}});}
       }
 
       // Chairman synthesis for this stage
@@ -9219,6 +9263,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               {/* BOARDROOM */}
               {nTab==="boardroom"&&(
   <BoardroomView
+    exportVerbatimPDF={(title:string,md:string)=>generatePDFv2("detailed",title,md,co,cur)}
     brQ={brQ} setBrQ={setBrQ}
     brAg={brAg} setBrAg={setBrAg}
     brCur={brCur} brRun={brRun} brPh={brPh}
