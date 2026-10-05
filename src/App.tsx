@@ -27,7 +27,8 @@ import { buildScaffoldPrompt, buildViabilityPrompt, inferArchetype } from "./lib
 import { scanSuppliedInputs, buildIntakePrompt, buildRegisterInjection, INTAKE_FAILED_NOTICE } from "./lib/IntakeRegister";
 import { runSearch, formatResultsForPrompt, RETRIEVED_RESULTS_RULES, hasExternalSearch, SEARCH_PROVIDERS, estimateSearchCost } from "./lib/SearchProviders";
 import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney, stageProviderChain, PREMIUM_PROVIDERS } from "./lib/ModelRouting";
-import { makeCallId, appendContinuation, findDuplicate, deriveStatus, isExcludedFromSynthesis, isComplete, validateContribution, completenessReport, renderCompletenessReport } from "./lib/BoardroomIntegrity";
+import { attemptResultFor, executionSummary, answerUserQuestion, type ProviderAttempt } from "./lib/DecisionIntegrity";
+import { synthesisPacketFor, analyseStage, makeCallId, appendContinuation, findDuplicate, deriveStatus, isExcludedFromSynthesis, isComplete, validateContribution, completenessReport, renderCompletenessReport } from "./lib/BoardroomIntegrity";
 import { parseResearchEvidence, assembleExecutiveContext, extractLedgerEntry, renderLedger, renderEvidence, budgetCheck, type LedgerEntry, emptyIntelligence, mergeIntoIntelligence, discoverResearchOpportunities, recordUserDecision, classifyFollowUp, renderIntelligence, adaptiveOutputBudget, taskKindFor, type IntelligenceState } from "./lib/ContextIntelligence";
 import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
 import { detectDocumentRequest, buildDocumentBrief, buildSynthesisOverride, suggestedFormats, CONSULTING_STANDARD } from "./lib/DocumentLibrary";
@@ -971,6 +972,15 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   // focus (queries only keep 8 words); the research model gets the full
   // decomposition. Any failure falls back to the raw question - research is
   // never blocked by this step.
+  // Provider failures during research are COLLECTED and reported once at the end
+  // (was: one sticky warning per failure, even when a later provider succeeded).
+  const rdNotes:{prov:string;msg:string}[]=[];
+  const rdSummary=(provider:string,grounded:boolean)=>{
+    if(!rdNotes.length)return;
+    const byProv=Array.from(new Set(rdNotes.map(n=>n.prov+": "+attemptResultFor(n.msg).replace(/_/g," "))));
+    try{showToast&&showToast(grounded&&provider?"Research completed using "+provider+" after "+rdNotes.length+" provider fallback"+(rdNotes.length===1?"":"s")+" ("+byProv.join(" \u00b7 ")+")."
+      :"Research could not use some providers: "+byProv.join(" \u00b7 ")+".",grounded?"info":"warning");}catch{}
+  };
   let effectiveQuestion=question;   // used for the research instruction
   let searchQuestion=question;      // used to build search-engine queries
   let decomposition:any=null;
@@ -1054,7 +1064,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
         const isJunk=(u:string)=>JUNK_DOMAINS.some(d=>String(u||"").toLowerCase().includes(d));
         for(const q of qs){
           const so=await runSearch(q,SEARCH_CHAIN,keys,6,
-            (prov,msg)=>{try{showToast&&showToast("Search: "+prov+" — "+String(msg).slice(0,60),"warning");}catch{}});
+            (prov,msg)=>{rdNotes.push({prov,msg:String(msg)});});
           if(so.provider&&so.provider!=="none")searchProviderUsed=so.provider;
           if(!so.fromCache&&so.results.length){
             searchCount++;
@@ -1080,7 +1090,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
       }
       if(!angleSearchUsed&&libBlock)anglePrompt+=libBlock;
       const fo=await callSearchWithFailover(routes,anglePrompt,[{role:"user",content:"Research this angle now."}],5200,!angleSearchUsed,
-        (prov,msg)=>{try{showToast&&showToast("Research Desk: "+prov+" failed ("+msg.slice(0,600)+") — trying next provider…","warning");}catch{}});
+        (prov,msg)=>{rdNotes.push({prov,msg:String(msg)});});
       const raw=fo.out; usedProvider=fo.provider;
       const text=(raw&&typeof raw==="object"&&"text" in raw)?raw.text:String(raw||"");
       if(raw&&typeof raw==="object"&&(raw as any).truncated)anyTruncated=true;
@@ -1095,6 +1105,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   const urlCount=(body.match(/https?:\/\//g)||[]).length;
   const grounded=urlCount>0;
   if(!grounded){
+    rdSummary("",false);
     try{showToast&&showToast("Research Desk returned no source URLs — session is UNGROUNDED.","warning");}catch{}
     return {brief:"⚠ **RESEARCH DESK RETURNED NO VERIFIABLE SOURCES**\n\nSearch ran via "+usedProvider+" but produced no source URL across any angle, so nothing below can be verified.\n\n---\n"+body,grounded:false,provider:route.provider,decomposition};
   }
@@ -1143,6 +1154,7 @@ async function runResearchDesk(ask,co,compData,question,showToast,keys){
   try{brief=brief+"\n\n"+attributionLine(usedProvider,"");}catch{}
   if(anyFail)brief="⚠ Some research angles could not be completed — see notes below.\n\n"+brief;
   setUsageFeature(prevUsageFeature,prevUsageIcon);
+  rdSummary(usedProvider,grounded);
   return {brief,grounded,provider:usedProvider,decomposition};
 }
 // ── FINANCIAL LIVE FEED ─────────────────────────────────────────────────────
@@ -1395,6 +1407,10 @@ function normalizeResearchState(rs:any,fb:any={}):any{
     // here (one store - no second state). Opportunities, risks, contradictions and
     // unresolved questions read from it; older sessions without it still load.
     intelligence:r.intelligence||null,
+    // Canonical decision model and questions only the user can answer - persisted so
+    // answers propagate to follow-ups and future sessions and are never re-asked.
+    modelRegistry:r.modelRegistry||null,
+    pendingUserQuestions:arr(r.pendingUserQuestions),
     evidence:arr(r.evidence), findings:arr(r.findings),
     opportunities:r.intelligence?arr(r.intelligence.opportunities):arr(r.opportunities),
     hypotheses:arr(r.hypotheses),
@@ -4546,6 +4562,8 @@ export default function App(){
   const [drillRole,setDrillRole]=useState(null);
   const [brShowHistory,setBrShowHistory]=useState(false);
   const [brFollowUp,setBrFollowUp]=useState("");
+  // Research is reused for the same question unless the user explicitly asks for fresh research.
+  const [brFreshResearch,setBrFreshResearch]=useState(false);
   const [followUpExecIds,setFollowUpExecIds]=useState([]);
   const [followUpSuggestions,setFollowUpSuggestions]=useState([]);
   const [drillQ,setDrillQ]=useState("");
@@ -5437,6 +5455,12 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       if(pv&&pv.q===brQ&&String(pv.researchBrief||"").trim()&&pv.researchState
          &&!(pv.stages||[]).some((st:any)=>String(st?.synthesis||"").trim()))brPrior=pv;
     }catch{}
+    // RESEARCH CACHE: a completed session for the SAME question within 7 days supplies
+    // its research brief - no new web search - unless "Fresh research" is ticked.
+    let brCached:any=null;
+    if(!brPrior&&!brFreshResearch){
+      try{brCached=(brSessions||[]).find((x:any)=>x&&x.q===brQ&&String(x.researchBrief||"").trim()&&x.ts&&(Date.now()-new Date(x.ts).getTime())<7*864e5)||null;}catch{brCached=null;}
+    }
     const brSessionId=brPrior?.sessionId||Date.now();
     setBrCur({q:brQ,researchBrief:"",format:"threaded",stages:[],sessionId:brSessionId});
     const agents=brAg.map(id=>AR.find(r=>r.id===id)).filter(Boolean);
@@ -5497,8 +5521,8 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     // with an explicit warning rather than silently ungrounded.
     let brRegisterBlock="";
     try{
-      if(brPrior){
-        brIntakeRegister=String(brPrior.intakeRegister||"");
+      if(brPrior||brCached){
+        brIntakeRegister=String((brPrior||brCached).intakeRegister||"");
         brRegisterBlock=brIntakeRegister?buildRegisterInjection(brIntakeRegister):"";
       }else if(!cancelRef.current.br){
         setBrPh("🔍 Establishing what is known and unknown…");
@@ -5532,6 +5556,16 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         brResearchState=normalizeResearchState(brPrior.researchState);
         setBrCur(prev=>({...prev,researchBrief,grounded:brGrounded,researchState:brResearchState,intakeRegister:brIntakeRegister}));
         try{showToast("Resuming the paused investigation using its saved research. Web research is NOT being repeated. (Edit the question if you want fresh research.)","info");}catch{}
+      }else if(brCached){
+        // New session, cached evidence: decomposition and brief are reused; the previous
+        // session's executive conclusions are NOT carried in (a fresh board debates it).
+        researchBrief=String(brCached.researchBrief||"");
+        brGrounded=!!brCached.grounded;
+        const cRS=brCached.researchState||{};
+        brResearchState=normalizeResearchState({question:brQ,decomposition:cRS.decomposition||null,researchBrief,grounded:brGrounded,provider:cRS.provider,
+          modelRegistry:cRS.modelRegistry||null,pendingUserQuestions:(cRS.pendingUserQuestions||[]).filter((u:any)=>u.status==="answered")});
+        setBrCur(prev=>({...prev,researchBrief,grounded:brGrounded,researchState:brResearchState,intakeRegister:brIntakeRegister}));
+        try{showToast("Reusing research from "+new Date(brCached.ts).toLocaleDateString("en-IN")+" for this question (no new web search). Tick \u201cFresh research\u201d to search again.","info");}catch{}
       }else if(!cancelRef.current.br){
         setBrResearching(true);
         setBrPh("📡 Research Desk is gathering current data…");
@@ -5599,6 +5633,8 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         // IMMUTABLE EXECUTION IDENTITY for this executive's contribution.
         const agCallId=makeCallId(brSessionId,"stage-1",ag.id);
         let agProvider="";let agModel="";let agLastSystem="";let agLastBudget=boardMaxTokens(ag);
+        // STRUCTURED PROVIDER ATTEMPTS (execution diagnostics - never shown as reasoning).
+        const agAttempts:ProviderAttempt[]=[];
         // ── SMART RETRY: provider failover + pause-and-resume ──────────────
         // Cycle 1: try primary. On limit → try alternates → wait 65s → retry.
         // Accumulates partial text so responses never break mid-sentence.
@@ -5648,6 +5684,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           }
           let cycleSuccess=false;
           for(const prov of providersUsableNow(allProviders,brProvState,Date.now())){
+            let agAttempt:ProviderAttempt|null=null;let agT0=0;
             if(cancelRef.current.br)break;
             const pKey=brKeys[prov]||"";
             if(!pKey.trim())continue;
@@ -5661,12 +5698,17 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
                 evidenceIncluded:ctxA.evidenceIncluded,evidenceTotal:ctxA.evidenceTotal,rawPriorOutputsIncluded:ctxA.rawPriorOutputsIncluded,
                 ledgerEntries:ctxA.ledgerEntries,ledgerTokens:ctxA.ledgerTokens,sent:ctxA.fits,outputBudget:agBudget});
               if(!ctxA.fits){
+                agAttempts.push({provider:prov,model:(MODELS as any)[prov]?.model||prov,reason:agAttempts.length?"fallback":"primary",startedAt:new Date().toISOString(),durationMs:0,
+                  estimatedInputTokens:ctxA.check.estInput,requestedOutputTokens:agBudget,result:"context_limit",detail:"pre-check: not sent"});
                 // Not sent: even fully compacted it exceeds this provider. A skip, not a retry.
                 brProvState[prov]={kind:"permanent",label:"prompt too long (pre-check)",retryAt:Infinity};
                 lastProvErr=prov+": prompt too long for this provider even after compaction (~"+ctxA.check.estTotal+" > "+ctxA.check.usable+" usable tokens; not sent)";
                 continue;
               }
               agLastSystem=ctxA.system;agLastBudget=agBudget;
+              agT0=Date.now();
+              agAttempt={provider:prov,model:(MODELS as any)[prov]?.model||prov,reason:agAttempts.length?"fallback":"primary",startedAt:new Date(agT0).toISOString(),durationMs:0,
+                estimatedInputTokens:ctxA.check.estInput,requestedOutputTokens:agBudget,result:"other"};
               brCallBudget.current--;
               const replyFull=await callAI(prov,pKey,ctxA.system,[{role:"user",content:userMsg}],agBudget,boardCanSearch(prov)&&!agText.trim())
               // A provider can return HTTP 200 with an EMPTY body - DeepSeek does this
@@ -5684,6 +5726,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
               agText=agText?appendContinuation(agText,replyFull.text).text:replyFull.text;
               agTruncated=!!replyFull.truncated;
               agProvider=prov;agModel=(MODELS as any)[prov]?.model||prov;
+              if(agAttempt)agAttempts.push({...agAttempt,durationMs:Date.now()-agT0,result:"success"});
               gotResponse=true;
               cycleSuccess=true;
               delete brProvState[prov];
@@ -5694,6 +5737,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
               // global flag and every provider - including 402/403 ones - was
               // retried after a 65s countdown labelled "all providers at limit".
               const pst=recordProviderFailure(brProvState,prov,String(provErr?.message||provErr),Date.now());
+              if(agAttempt)agAttempts.push({...agAttempt,durationMs:Date.now()-agT0,result:attemptResultFor(pst.label+" "+String(provErr?.message||"")),detail:pst.label});
               if(pst.kind==="retryable")markProviderExhausted(prov);
               continue; // next provider; this one is retried only if its own state allows
             }
@@ -5779,6 +5823,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         // identity travels with it so it can only ever be shown under this executive.
         res.push({ag,text:agText,fullText:agText,truncated:agTruncated,status:agStatus,duplicateOf:agDup?agDup.executiveKey:null,
           identity:{sessionId:brSessionId,stageId:"stage-1",executiveId:ag.id,executiveKey:ag.t,callId:agCallId,provider:agProvider||"none",model:agModel||""},
+          attempts:agAttempts,execution:agAttempts.length?executionSummary(agAttempts):"",
           metrics:{requestedOutput:agLastBudget,chars:String(agText||"").length,continuationRequired:contAttempts>0,continuationAttempts:contAttempts,continuationSucceeded:contAttempts>0&&!agTruncated}});
         // DECISION LEDGER: verbatim, attributed extract of this answer. Placeholder
         // cards (no real answer) never become ledger content.
@@ -5829,7 +5874,15 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         // contributions are excluded (and named), partial ones are included and labelled.
         const brRows=completenessReport(res,agents.map((a:any)=>({executiveId:a.id,executiveKey:a.t})),"stage-1");
         const brIncluded=res.filter((r:any)=>!isExcludedFromSynthesis(r.status||"COMPLETE")&&validateContribution(r,{executiveId:r.ag.id,stageId:"stage-1"}).valid);
-        allPos=brIncluded.map((r:any)=>r.ag.t+(r.status&&!isComplete(r.status)?" ["+r.status+" \u2014 incomplete; all text received is shown]":"")+":\n"+(r.fullText||r.text)).join("\n\n---\n\n");
+        // SYNTHESIS PACKET: the Chairman reasons over the structured packet (positions,
+        // evidence-linked claims, canonical model, contradictions, gaps, user questions)
+        // rather than every executive's full essay. Full texts stay in the transcript,
+        // exports and "Read full analysis".
+        const brSynCur={q:brQ,researchBrief,researchState:{...(brResearchState||{}),intelligence:brIntel},stages:[{question:brQ,debate:res}]};
+        const brFullDebateTokens=Math.ceil(brIncluded.map((r:any)=>String(r.fullText||r.text||"")).join("").length/4);
+        allPos=synthesisPacketFor(brSynCur,0,{location:co.location||""});
+        brCtxLog.push({executive:"Chairman synthesis (packet)",provider:"-",strategy:"structured synthesis packet",rawPriorOutputsIncluded:0,
+          estInput:Math.ceil(allPos.length/4),fullDebateTokensAvoided:brFullDebateTokens});
         synSysFinal+="\n\n"+renderCompletenessReport(brRows)
           +"\nSay plainly which executives were complete, partial or excluded - never omit one silently, never attribute one executive's view to another."
           +(brDoc.matched?"":"\nStructure the synthesis with these headings: BOARD CONSENSUS; EXECUTIVE DISSENT; UNRESOLVED; REQUIRES USER DECISION; REQUIRES EVIDENCE; REQUIRES FOLLOW-UP RESEARCH; RECOMMENDED NEXT ACTIONS.");
@@ -5882,7 +5935,11 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
           executiveIds:brAg,debate:res,synthesis:syn,
           decisionStatus,completedAt:new Date().toISOString(),frozen:true,ledger:[...brLedger],contextLog:[...brCtxLog],completeness:brRows};
         // PHASE 14/29: the decision is recorded in the Research State itself.
+        let brAnalysis:any=null;
+        try{brAnalysis=analyseStage({q:brQ,researchBrief,researchState:{...(brResearchState||{}),intelligence:brIntel},stages:[{question:brQ,debate:res}]},0,{location:co.location||""});}catch{}
         const finalResearchState=normalizeResearchState({...(brResearchState||{question:brQ,researchBrief,grounded:brGrounded}),
+          modelRegistry:brAnalysis?brAnalysis.registry:(brResearchState&&brResearchState.modelRegistry)||null,
+          pendingUserQuestions:brAnalysis?brAnalysis.userQuestions:(brResearchState&&brResearchState.pendingUserQuestions)||[],
           decisions:[...((brResearchState&&brResearchState.decisions)||[]),
             {stage:1,question:brQ,status:decisionStatus,recommendation:(()=>{try{return extractRecommendationSnippet(syn);}catch{return "";}})(),at:new Date().toISOString()}]});
         const finalSession={id:brSessionId,q:brQ,agents:brAg,
@@ -5898,7 +5955,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     }catch(err){
       if(!cancelRef.current.br){setError(err.message);showToast("Boardroom error: "+err.message,"error");}
     }finally{setBrRun(false);setBrPh("");setBrResearching(false);cancelRef.current.br=false;}
-  },[brQ,brAg,brRun,co,compData,brSessions,keys,defP,showToast,ledgerEntries,workflows,tmRes,apRes,tmSessions,apSessions,cur]);
+  },[brQ,brAg,brRun,co,compData,brSessions,keys,defP,showToast,ledgerEntries,workflows,tmRes,apRes,tmSessions,apSessions,cur,brFreshResearch]);
 
   // Continue a reopened/finished debate with a follow-up. Same executives respond
   // again using the prior debate + synthesis as context. Appends to the live debate.
@@ -5966,6 +6023,11 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     let fuIntel:IntelligenceState=rs&&rs.intelligence?JSON.parse(JSON.stringify(rs.intelligence)):emptyIntelligence();
     const fuUserDecision=recordUserDecision(fuIntel,brFollowUp);
     const fuNeed=classifyFollowUp(fuIntel,fuEvidence,brFollowUp);
+    // A follow-up that answers an open user-only question closes it (never asked again)
+    // and the answer is shown to every executive from now on.
+    const fuPending:any[]=((rs&&rs.pendingUserQuestions)||[]).map((x:any)=>({...x,askedBy:[...(x.askedBy||[])]}));
+    const fuAnswered=answerUserQuestion(fuPending,brFollowUp);
+    if(fuAnswered){try{showToast("Recorded your answer to "+fuAnswered.id+": \u201c"+fuAnswered.question.slice(0,80)+"\u201d","success");}catch{}}
     if(fuNeed.need==="B"&&fuNeed.gap){const g=fuIntel.gaps.find((x:any)=>x.id===fuNeed.gap!.id);if(g)g.current_status="targeted_research_candidate";}
     try{
       showToast((fuNeed.need==="A"?"Answering from the saved research.":fuNeed.need==="B"?"This matches open evidence gap "+fuNeed.gap!.id+" \u2014 recorded as a targeted-research candidate (no new search run). Executives will answer with what is known and say what is missing."
@@ -5997,6 +6059,8 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         +(rs?.unresolvedQuestions?.length?"Unresolved questions: "+rs.unresolvedQuestions.join("; ")+"\n":"")
         +(rs?.decisions?.length?"Prior decisions: "+rs.decisions.map((d:any)=>"[stage "+d.stage+"] "+d.question+" -> "+(d.status||"")+(d.recommendation?" ("+String(d.recommendation).slice(0,200)+")":"")).join(" | ")+"\n":"")
         +(rs?.followUps?.length?"Earlier follow-ups: "+rs.followUps.map((f:any)=>f.question).join(" | ")+"\n":"")
+        +(fuPending.filter((u:any)=>u.status==="answered").length?"ANSWERS THE USER HAS GIVEN (facts - use them, do not ask again):\n"+fuPending.filter((u:any)=>u.status==="answered").map((u:any)=>"  "+u.id+" "+u.question+" -> "+u.answer).join("\n")+"\n":"")
+        +(fuPending.filter((u:any)=>u.status==="open").length?"STILL OPEN FOR THE USER (do not invent answers): "+fuPending.filter((u:any)=>u.status==="open").map((u:any)=>u.id+" "+u.question).join(" | ")+"\n":"")
         +(fuIntel&&(fuIntel.opportunities.length||fuIntel.gaps.length||fuIntel.userDecisions.length||fuIntel.contradictions.length)?"SHARED DECISION INTELLIGENCE STATE:\n"+renderIntelligence(fuIntel,brFollowUp,"core")+"\n":"")
         +(briefText?"Research Brief "+(((brCur as any).grounded??rs?.grounded)?"(grounded in sources)":"(UNGROUNDED - no verifiable sources)")+":\n"+briefText.slice(0,12000)+"\n":"")
         +"If this evidence does not cover the follow-up question, say exactly what evidence is missing instead of filling the gap from memory."
@@ -6087,7 +6151,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
         const updatedStages=[...prevStages,newStage];
         const priorRS=(brCur as any).researchState;
         const updatedRS=priorRS?normalizeResearchState({...priorRS,
-          intelligence:fuIntel,
+          intelligence:fuIntel,pendingUserQuestions:fuPending,
           followUps:[...(priorRS.followUps||[]),{question:brFollowUp,executives:agents.map((a:any)=>a.id),need:fuNeed.need,needReason:fuNeed.reason,at:new Date().toISOString()}],
           decisions:[...(priorRS.decisions||[]),{stage:updatedStages.length,question:brFollowUp,status:newStage.decisionStatus,
             recommendation:(()=>{try{return extractRecommendationSnippet(stageSyn);}catch{return "";}})(),at:new Date().toISOString()}]}):priorRS;
@@ -6118,6 +6182,43 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     }finally{setBrRun(false);setBrPh("");cancelRef.current.br=false;}
   },[brFollowUp,brRun,brCur,brAg,co,compData,keys,defP,showToast,followUpExecIds,followUpSuggestions]);
   
+  // RESEARCH FOLLOW-UP LOOP: open gap -> prioritise (HIGH impact + HIGH uncertainty only,
+  // max 2) -> targeted research -> evidence appended with ids -> gap closed when the
+  // research is grounded -> claims/model/decision re-evaluated deterministically on
+  // render. Executives are NOT re-run, which keeps the loop cheap.
+  const researchPriorityGaps=useCallback(async(si:number)=>{
+    if(brRun)return;
+    const cur0:any=brCur;
+    let a:any=null;try{a=analyseStage(cur0,si,{location:co.location||""});}catch{a=null;}
+    if(!a||!a.priorityGaps.length){showToast("No high-impact, high-uncertainty evidence gaps need research right now.","info");return;}
+    setBrRun(true);
+    let brief=String(cur0.researchBrief||"");const closed:string[]=[];const tried:string[]=[];
+    try{
+      for(const g of a.priorityGaps){
+        tried.push(g.id);
+        setBrPh("\uD83D\uDCE1 Targeted research ("+g.id+"): "+g.researchQuestion);
+        const rd:any=await runResearchDesk(ask,co,compData,g.researchQuestion,showToast,keys);
+        if(rd&&String(rd.brief||"").trim()){
+          brief+="\n\n### Targeted research \u2014 "+g.id+": "+g.researchQuestion+"\n"+rd.brief;
+          if(rd.grounded)closed.push(g.id);
+        }
+      }
+      const rs0:any=cur0.researchState||{};
+      const intel0:any=rs0.intelligence?JSON.parse(JSON.stringify(rs0.intelligence)):null;
+      if(intel0)intel0.gaps=(intel0.gaps||[]).map((g:any)=>closed.includes(g.id)?{...g,current_status:"closed"}:g);
+      const newRS=normalizeResearchState({...rs0,researchBrief:brief,intelligence:intel0});
+      const updated={...cur0,researchBrief:brief,researchState:newRS};
+      setBrCur(updated);
+      try{sv("cos-br-live",updated);}catch{}
+      if(cur0.sessionId){
+        setBrSessions((prev:any[])=>{const n=(prev||[]).map((x:any)=>x.id===cur0.sessionId?{...x,researchBrief:brief,researchState:newRS}:x);try{sv("cos-br",n);}catch{};return n;});
+      }
+      showToast("Targeted research: "+closed.length+" of "+tried.length+" priority gap"+(tried.length===1?"":"s")+" closed with sourced evidence"+(closed.length<tried.length?"; the rest stay open":"")+". The decision has been re-evaluated.",closed.length?"success":"warning");
+    }catch(e:any){
+      showToast("Targeted research stopped: "+String(e?.message||e).slice(0,200),"error");
+    }finally{setBrRun(false);setBrPh("");}
+  },[brCur,brRun,co,compData,keys,ask,showToast,sv]);
+
   const runDrill=useCallback(async()=>{
     if(!drillRole||!drillQ.trim()||drillRun)return;
     setDrillRun(true);setError(null);
@@ -9264,6 +9365,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
               {nTab==="boardroom"&&(
   <BoardroomView
     exportVerbatimPDF={(title:string,md:string)=>generatePDFv2("detailed",title,md,co,cur)}
+    researchPriorityGaps={researchPriorityGaps} brFreshResearch={brFreshResearch} setBrFreshResearch={setBrFreshResearch}
     brQ={brQ} setBrQ={setBrQ}
     brAg={brAg} setBrAg={setBrAg}
     brCur={brCur} brRun={brRun} brPh={brPh}
