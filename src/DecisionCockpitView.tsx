@@ -5,7 +5,9 @@ import {
   type ScenarioState, type Challenge, type InputKey, type DecisionResponse,
 } from "./lib/DecisionCockpit";
 import { cockpitContext, businessReportMarkdown, deckMarkdown, buildExcelModel, auditMarkdown, type CockpitContext } from "./lib/DecisionExports";
-import { GLOSSARY, stripIds } from "./lib/DecisionExperience";
+import { GLOSSARY, stripIds, plainDecision } from "./lib/DecisionExperience";
+import { actualsFromLedger, parseChallenges, explainDecisionChange } from "./lib/DecisionCockpit";
+import { getAllAccounts } from "./Ledger";
 
 // DECISION COCKPIT - the first thing a founder sees after a Boardroom run.
 // Everything here is CALCULATED from the canonical model (no AI call). Simulations
@@ -29,12 +31,24 @@ export function Explain({ k, tok, extra }: { k?: string; tok: any; extra?: { mea
           {g && <><b style={{ color: tok.text }}>{g.term}</b><br /><b>What is it?</b> {g.what}<br /><b>Why it matters:</b> {g.why}<br /><b>How it is calculated:</b> {extra?.how || g.how}<br /></>}
           {extra?.meaning && <><b>What the current number means:</b> {extra.meaning}<br /></>}
           {g && <><b>What would improve it:</b> {g.better}<br /></>}
+          {g?.formula && <><b>Formula:</b> {g.formula}<br /></>}
+          {g?.healthy && <><b>What is healthy:</b> {g.healthy}<br /></>}
+          {g?.need && <><b>What we need from you:</b> {g.need}<br /></>}
           {extra?.source && <><b>Where it comes from:</b> {extra.source}</>}
         </span>)}
     </span>);
 }
 const DCOLOR: Record<string, string> = { "PROCEED": "success", "CONDITIONAL PROCEED": "warn", "WAIT": "warn", "REWORK": "warn", "STOP": "danger", "INSUFFICIENT EVIDENCE": "muted" };
-export function DecisionLayer({ ctx, tok, advanced, saveCockpit, addCockpitActions, onShowDebate, onRunScenarios }: any) {
+// Internal reference chip: the ID stays visible (traceability) with a plain explanation.
+export function IdChip({ id, note, tok }: { id: string; note?: any; tok: any }) {
+  const [open, setOpen] = useState(false); if (!id) return null;
+  return (<span style={{ position: "relative", display: "inline-block", marginLeft: 6 }}>
+    <button onClick={() => setOpen(!open)} aria-label={"What is " + id + "?"} style={{ fontFamily: "var(--font-mono),monospace", fontSize: 10.5, padding: "1px 6px", borderRadius: 5, border: `1px solid ${tok.border}`, background: tok.surface2, color: tok.text3, cursor: "pointer" }}>{id} ?</button>
+    {open && note && <span style={{ display: "block", position: "absolute", zIndex: 30, top: 20, left: 0, width: "min(320px,80vw)", padding: "10px 12px", borderRadius: 8, border: `1px solid ${tok.border}`, background: tok.surface, boxShadow: tok.shadow, fontSize: 12, lineHeight: 1.5, color: tok.text2, whiteSpace: "normal" }}>
+      <b style={{ color: tok.text }}>{note.id} — {note.kind}</b><br />{note.what} {note.why}{note.missing && <><br /><b>Missing:</b> {note.missing}</>}{note.provide && <><br /><b>What to provide:</b> {note.provide}</>}{note.ifUnresolved && <><br /><b>If unresolved:</b> {note.ifUnresolved}</>}</span>}
+  </span>);
+}
+export function DecisionLayer({ ctx, tok, advanced, saveCockpit, addCockpitActions, onShowDebate, onRunScenarios, onTestChallenge, onAdvanced }: any) {
   const [showAllGaps, setShowAllGaps] = useState(false); const [openAction, setOpenAction] = useState<number | null>(null);
   const c: CockpitContext = ctx; const col = (tok as any)[DCOLOR[c.display] || "muted"] || tok.text2; const colBg = (tok as any)[(DCOLOR[c.display] || "muted") + "Bg"] || tok.surface2;
   const box = (id: string, title: string, body: any, right?: any) => (
@@ -60,7 +74,7 @@ export function DecisionLayer({ ctx, tok, advanced, saveCockpit, addCockpitActio
       {/* A. DECISION HEADER */}
       <section id="dj-decision" style={{ borderRadius: 12, border: `1px solid ${tok.border}`, background: tok.surface, boxShadow: tok.shadow, padding: "16px 18px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 10.5, fontWeight: 800, color: tok.text3, letterSpacing: ".12em" }}>DECISION</span>
+          <span style={{ fontSize: 10.5, fontWeight: 800, color: tok.text3, letterSpacing: ".12em" }}>YOUR DECISION</span>
           <span style={{ fontSize: 18, fontWeight: 800, padding: "3px 11px", borderRadius: 6, background: colBg, color: col }}>{c.display}</span>
           <Explain tok={tok} extra={{ meaning: c.meaning }} />
           <span style={{ fontSize: 12.5, color: tok.text3 }}>Confidence: <b style={{ color: tok.text }}>{c.confidence.level}</b></span>
@@ -82,7 +96,7 @@ export function DecisionLayer({ ctx, tok, advanced, saveCockpit, addCockpitActio
       </section>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 12 }}>
         {/* B. WHY */}
-        {box("dj-why", "Why", plainList(why))}
+        {box("dj-why", "Why this decision", plainList(why))}
         {/* C. WHAT MATTERS MOST */}
         {box("dj-matters", "What matters most", (<>
           {c.keyNumber && <div style={{ fontSize: 14, fontWeight: 700, color: tok.text, marginBottom: 8 }}>{c.keyNumber}</div>}
@@ -99,12 +113,15 @@ export function DecisionLayer({ ctx, tok, advanced, saveCockpit, addCockpitActio
           {c.unknowns.slice(0, showAllGaps ? 20 : 3).map((u, i) => (
             <div key={i} style={{ fontSize: 12.5, color: tok.text2, padding: "5px 0", borderTop: i ? `1px solid ${tok.border}` : "none" }}>
               <b style={{ color: tok.text }}>{tidy(u.missing)}</b><div>Why it matters: {u.whyMatters}</div><div>How to verify: {tidy(u.howToVerify)}</div>
-              {advanced && u.technicalRef && <div style={{ color: tok.muted, fontSize: 11 }}>Internal reference: {u.technicalRef}</div>}</div>))}
+              {u.technicalRef && <div style={{ marginTop: 2 }}>{String(u.technicalRef).split(/[ ,]+/).filter((x: string) => /^[A-Z]+-[A-Z0-9-]+$|^[A-Z]{2}-\d/.test(x)).map((id: string) => <IdChip key={id} id={id} note={c.idNotes[id]} tok={tok} />)}</div>}</div>))}
           {(c.unknowns.length > 3 || (c.analysis as any).contradictions) && btn(showAllGaps ? "Show fewer" : "Show all evidence gaps", () => setShowAllGaps(!showAllGaps))}
         </>), <Explain k="missing" tok={tok} />)}
       </div>
       {/* E. WHAT SHOULD I DO NOW? */}
-      {box("dj-actions", "What should I do now?", (<>
+      {/* THE BIGGEST THING HOLDING YOU BACK */}
+      {box("dj-blocker", "The biggest thing holding you back", <div style={{ fontSize: 14, fontWeight: 600, color: tok.text, lineHeight: 1.5 }}>{c.biggestBlocker}</div>)}
+      {c.analysisIncomplete && <div role="status" style={{ fontSize: 12.5, padding: "8px 12px", borderRadius: 8, background: tok.surface2, color: tok.text2 }}>{advanced ? c.analysisIncomplete.message : "Some analysis could not be completed. The decision uses the executives who did complete; open Advanced for details."}</div>}
+      {box("dj-actions", "What should I do next?", (<>
         <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: tok.text }}>
           {c.actions.slice(0, 5).map((a, i) => (
             <li key={i} style={{ marginBottom: 4 }}>{a.action} <span style={{ color: tok.muted }}>— {a.owner}, {a.deadline}</span>{" "}
@@ -124,7 +141,32 @@ export function DecisionLayer({ ctx, tok, advanced, saveCockpit, addCockpitActio
       {/* WHAT WOULD CHANGE THE ANSWER */}
       {box("dj-change", "What would change the answer", plainList(c.wouldChange))}
       {/* F. DECISION GATES - educational */}
-      {box("dj-gates", "Decision gates", (<>
+      {/* WHAT HAPPENS IF THINGS GO BADLY / WELL - calculated, labelled simulations */}
+      {c.outcomes.length > 0 && box("dj-outcomes", "What happens if things go badly — or well? (simulation, not a forecast)", (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 8 }}>
+          {c.outcomes.map((o, i) => (<div key={i} style={{ fontSize: 12.5, color: tok.text2, padding: "8px 10px", borderRadius: 8, border: `1px solid ${tok.border}`, borderLeft: `3px solid ${o.kind === "good" ? tok.success : o.kind === "stress" ? tok.danger : tok.warn}` }}>
+            <div style={{ fontWeight: 800, color: tok.text }}>{o.kind === "good" ? "If things go well" : o.kind === "stress" ? "If things go very badly" : "If things go badly"} <span style={{ fontWeight: 400, color: tok.muted }}>({o.name})</span></div>
+            <div>Decision: <b>{o.decision}</b> · profit {o.profit}/month{o.failureMonth !== null ? " · cash runs out in month " + o.failureMonth : ""}</div>
+            <div style={{ color: tok.muted }}>{o.explanation}</div>
+          </div>))}
+          {onRunScenarios && <div><button onClick={onRunScenarios} style={{ padding: "6px 11px", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1px solid ${tok.border}`, background: tok.surface, color: tok.text2 }}>Test your own scenario →</button></div>}
+        </div>))}
+      {/* EXTERNAL FACTORS - only retrieved ones are facts */}
+      {c.externalFactors.length > 0 && box("dj-external", "Outside factors that could affect this", (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {c.externalFactors.slice(0, advanced ? 12 : 5).map((e, i) => (<div key={i} style={{ fontSize: 12.5, color: tok.text2, borderTop: i ? `1px solid ${tok.border}` : "none", paddingTop: i ? 6 : 0 }}>
+            <b style={{ color: tok.text }}>{e.category}</b> <span style={{ fontSize: 10.5, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: e.verified ? tok.successBg : tok.warnBg, color: e.verified ? tok.success : tok.warn }}>{e.verified ? "FACT (retrieved source)" : "ASSUMPTION"}</span>
+            <div>{stripIds(e.text)}</div>
+            <div style={{ color: tok.muted }}>Affects: {e.affectedVariable || "context only"} · direction: {e.direction} · magnitude: impact direction known; magnitude uncertain{advanced ? " · source: " + e.source : ""}</div>
+            {onTestChallenge && e.affectedVariable && <button onClick={() => onTestChallenge(e.category + " — " + (e.direction === "down" ? "lower " : "higher ") + e.affectedVariable)} style={{ border: "none", background: "none", color: tok.accent, cursor: "pointer", fontSize: 12, padding: 0 }}>Test this as a scenario →</button>}
+          </div>))}
+        </div>))}
+      {/* PLAN vs ACTUAL - actual results kept separate from simulations */}
+      {c.actuals && box("dj-actuals", "Plan vs actual (from your General Ledger)", (
+        <div style={{ overflowX: "auto" }}><table style={{ borderCollapse: "collapse", fontSize: 12.5, width: "100%" }}><thead><tr style={{ color: tok.text3, textAlign: "left" }}><th style={{ padding: 4 }}>Metric</th><th style={{ padding: 4 }}>Expected (plan)</th><th style={{ padding: 4 }}>ACTUAL RESULT</th></tr></thead>
+          <tbody>{c.planVsActual.map((r) => <tr key={r.metric} style={{ borderTop: `1px solid ${tok.border}` }}><td style={{ padding: 4 }}>{r.metric}</td><td style={{ padding: 4 }}>{r.expected}</td><td style={{ padding: 4, fontWeight: 700 }}>{r.actual}</td></tr>)}</tbody></table>
+          <div style={{ fontSize: 11.5, color: tok.muted, marginTop: 4 }}>{c.actuals.entries} journal entries, {c.actuals.from} to {c.actuals.to}. Actuals are never mixed with simulations.</div></div>))}
+      {box("dj-gates", "What must be proven (decision gates)", (<>
         <div aria-label="Decision map" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, marginBottom: 10, fontSize: 11.5, color: tok.text2 }}>
           <div style={{ color: tok.muted }}>CURRENT POSITION</div><div>↓</div>
           <div style={{ fontWeight: 800, padding: "2px 10px", borderRadius: 6, background: colBg, color: col }}>{c.display}</div><div>↓</div>
@@ -158,6 +200,11 @@ export function DecisionLayer({ ctx, tok, advanced, saveCockpit, addCockpitActio
             </div>))}
           {!c.executives.length && <div style={{ fontSize: 12.5, color: tok.muted }}>No usable executive contributions for this stage.</div>}
         </div>))}
+      {box("dj-details", "Explore the details", (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {onShowDebate && <button onClick={onShowDebate} style={{ padding: "6px 11px", borderRadius: 7, fontSize: 12, cursor: "pointer", border: `1px solid ${tok.border}`, background: tok.surface, color: tok.text2 }}>Executive debate & evidence</button>}
+          {onAdvanced && <button onClick={onAdvanced} style={{ padding: "6px 11px", borderRadius: 7, fontSize: 12, cursor: "pointer", border: `1px solid ${tok.border}`, background: tok.surface, color: tok.text2 }}>{advanced ? "Back to Standard view" : "Calculations, technical terms & audit trail (Advanced)"}</button>}
+        </div>))}
       {/* ADVANCED: disagreements ledger + validation + canonical model */}
       {advanced && box("dj-audit", "Audit layer", (<div style={{ fontSize: 12, color: tok.text2 }}>
         <b>Material disagreements ({c.analysis.clusters.length}, from {c.analysis.contradictions.length} raw records)</b>
@@ -169,9 +216,10 @@ export function DecisionLayer({ ctx, tok, advanced, saveCockpit, addCockpitActio
     </div>);
 }
 
-export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpit, addCockpitActions, openInTimeMachine, showToast, quickExport, exportVerbatimPDF, dlFile, cp, onShowDebate, company, location }: any) {
+export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpit, addCockpitActions, openInTimeMachine, showToast, quickExport, exportVerbatimPDF, dlFile, cp, onShowDebate, company, location, ledgerEntries, customAccounts }: any) {
   // ONE context for the whole cockpit and every export (same canonical numbers everywhere).
-  const ctx = useMemo(() => cockpitContext(cur, si, { location: location || "" }), [cur, si, location]);
+  const actuals = useMemo(() => { try { return actualsFromLedger(ledgerEntries || [], getAllAccounts(customAccounts || [])); } catch { return null; } }, [ledgerEntries, customAccounts]);
+  const ctx = useMemo(() => cockpitContext(cur, si, { location: location || "", actuals }), [cur, si, location, actuals]);
   const [advanced, setAdvanced] = useState(false);
   const [exporting, setExporting] = useState("");
   const rs = cur?.researchState || {};
@@ -193,7 +241,7 @@ export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpi
     if (!analysis || !saveCockpit || si !== (cur?.stages || []).length - 1) return;
     if (rs.cockpitDecision && rs.cockpitDecision.decision === map.decision) return;
     saveCockpit({ cockpitDecision: { decision: map.decision, at: new Date().toISOString() } },
-      buildHandoff({ sessionId: cur.sessionId || "", question: cur.q || "", map, scenarios: saved }));
+      buildHandoff({ sessionId: cur.sessionId || "", question: cur.q || "", inputs, map, scenarios: saved }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map.decision]);
 
@@ -216,7 +264,7 @@ export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpi
   const persistRun = (run: ScenarioState, newChallenges: Challenge[] = []) => {
     const scenarios = [...saved, run].slice(-12);
     const challenges = [...(Array.isArray(rs.challenges) ? rs.challenges : []), ...newChallenges].slice(-30);
-    saveCockpit && saveCockpit({ scenarios, challenges }, buildHandoff({ sessionId: cur.sessionId || "", question: cur.q || "", map, scenarios, response }));
+    saveCockpit && saveCockpit({ scenarios, challenges }, buildHandoff({ sessionId: cur.sessionId || "", question: cur.q || "", inputs, map, scenarios, response }));
   };
   const run = (type: ScenarioState["scenarioType"], challenges: Challenge[] = [], name?: string) => {
     const ov = Object.entries(overrides).filter(([, v]) => v.trim() !== "" && isFinite(parseFloat(v))).map(([k, v]) => ({ variable: k as InputKey, to: parseFloat(v) }));
@@ -238,13 +286,13 @@ export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpi
     if (!runs.length) { showToast && showToast("There is no calculable lever to test yet \u2014 confirm the inputs first.", "warning"); return; }
     setActive(runs[runs.length - 1]);
     const scenarios = [...saved, ...runs].slice(-12);
-    saveCockpit && saveCockpit({ scenarios }, buildHandoff({ sessionId: cur.sessionId || "", question: cur.q || "", map, scenarios, response }));
+    saveCockpit && saveCockpit({ scenarios }, buildHandoff({ sessionId: cur.sessionId || "", question: cur.q || "", inputs, map, scenarios, response }));
     openInTimeMachine && showToast && showToast("Scenarios saved. Use \u201cExplore in Time Machine\u201d to simulate the timeline for any of them.", "info");
   };
   const parseAndRun = (text: string) => {
-    const pc = parseChallenge(text);
+    const pc = parseChallenges(text);
     if (!pc.challenges.length) { showToast && showToast("Could not link that to a model variable. Try e.g. \u201cdemand falls 20%\u201d or \u201csevere water shortage\u201d.", "warning"); return; }
-    if (pc.challenges.some((c) => c.change === null)) { setPending(pc); return; }   // ask for magnitude (max 3 questions) before running
+    if (pc.challenges.some((c) => c.change === null || (c.component && c.share == null))) { setPending(pc); return; }   // ask for magnitude (max 3 questions) before running
     run("custom", pc.challenges, text.slice(0, 60));
   };
   const askAutopilot = () => {
@@ -252,7 +300,7 @@ export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpi
     const r = decisionResponse({ map, base: inputs, scenario: active, priorDecision: prior });
     setResponse(r);
     saveCockpit && saveCockpit({ decisionResponses: [...(Array.isArray(rs.decisionResponses) ? rs.decisionResponses : []), { ...r, at: new Date().toISOString(), scenario: active ? active.name : null }].slice(-10) },
-      buildHandoff({ sessionId: cur.sessionId || "", question: cur.q || "", map, scenarios: saved, response: r }));
+      buildHandoff({ sessionId: cur.sessionId || "", question: cur.q || "", inputs, map, scenarios: saved, response: r }));
   };
   const compareSet = [...(saved.length ? saved.slice(-4) : [])];
   const cmp = compareSet.length ? compareScenarios(compareSet) : [];
@@ -289,6 +337,7 @@ export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpi
         <span style={{ fontSize: 11.5, color: tok.muted }}>{advanced ? "Technical terms, internal references and the audit layer are shown." : "Plain language; technical detail is one click away."}</span>
       </div>
       {ctx ? <DecisionLayer ctx={ctx} tok={tok} advanced={advanced} saveCockpit={saveCockpit} addCockpitActions={addCockpitActions} onShowDebate={onShowDebate}
+        onAdvanced={() => setAdvanced(!advanced)} onTestChallenge={(t: string) => { setChallengeText(t); parseAndRun(t); try { document.getElementById("dj-scenarios")?.scrollIntoView({ behavior: "smooth" }); } catch {} }}
         onRunScenarios={() => { runLadder(); try { document.getElementById("dj-scenarios")?.scrollIntoView({ behavior: "smooth" }); } catch {} }} />
         : <div style={{ fontSize: 12.5, color: tok.muted }}>The decision layer could not be computed for this stage.</div>}
       {/* 8: SCENARIOS */}
@@ -325,10 +374,12 @@ export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpi
           <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: tok.surface2, fontSize: 12, color: tok.text2 }}>
             <div><b>Understood:</b> {pending.summary}</div>
             <div style={{ marginTop: 4 }}>Impact direction known; magnitude uncertain. Enter a value to calculate it, or run with direction only (no number is invented).</div>
-            {pending.challenges.filter((c) => c.change === null).map((c) => (
-              <label key={c.id} style={{ display: "block", marginTop: 6 }}>{pending.questions[pending.challenges.filter((x) => x.change === null).indexOf(c)] || c.name}
-                <input placeholder={c.variable === "delay" ? "months" : c.changeType === "pp" ? "percentage points, e.g. -10" : "%, e.g. " + (c.direction === "down" ? "-15" : "15")}
-                  onChange={(e: any) => { const n = parseFloat(e.target.value); setPending({ ...pending, challenges: pending.challenges.map((x) => x.id === c.id ? { ...x, change: isFinite(n) ? (c.variable !== "delay" && c.direction === "down" && n > 0 ? -n : n) : null, confidence: isFinite(n) ? "user-stated" : "unknown-magnitude" } : x) }); }}
+            {pending.challenges.filter((c) => c.change === null || (c.component && c.share == null)).map((c) => (
+              <label key={c.id} style={{ display: "block", marginTop: 6 }}>{c.component && c.share == null ? "What share of your running costs is " + c.component + "? (%)" : c.variable === "funding" ? "How much funding do you actually have? (₹, e.g. 8000000)" : (pending.questions.find((q) => q.includes(c.variable)) || c.name)}
+                <input placeholder={c.component && c.share == null ? "%, e.g. 20" : c.variable === "funding" ? "₹" : c.variable === "delay" ? "months" : c.changeType === "pp" ? "percentage points, e.g. -10" : "%, e.g. " + (c.direction === "down" ? "-15" : "15")}
+                  onChange={(e: any) => { const n = parseFloat(e.target.value); const ok = isFinite(n); setPending({ ...pending, challenges: pending.challenges.map((x) => x.id !== c.id ? x
+                    : c.component && c.share == null ? { ...x, share: ok ? n : null } : c.variable === "funding" ? { ...x, change: ok ? n : null, changeType: "abs" }
+                    : { ...x, change: ok ? (c.variable !== "delay" && c.direction === "down" && n > 0 ? -n : n) : null, confidence: ok ? "user-stated" : "unknown-magnitude" }) }); }}
                   style={{ marginLeft: 6, width: 120, fontSize: 12, padding: "3px 6px", borderRadius: 5, border: `1px solid ${tok.border}`, background: tok.inputBg, color: tok.text }} /></label>))}
             <div style={{ marginTop: 8, display: "flex", gap: 6 }}>{btn("Run scenario", () => { run("custom", pending.challenges, challengeText.slice(0, 60) || pending.summary.slice(0, 60)); setPending(null); }, true)}{btn("Cancel", () => setPending(null))}</div>
           </div>)}
