@@ -186,46 +186,79 @@ export interface Quantity { variable: string; value: number; unit: "INR" | "USD"
 // Decision variables recognised by deterministic patterns. Order matters (most specific first).
 const VARIABLES: { id: string; label: string; re: RegExp; unit: Quantity["unit"] }[] = [
   { id: "dayRate", label: "billable day rate", re: /\b(day rate|per (engineer )?day|\/day|daily rate)\b/i, unit: "INR" },
-  { id: "utilisation", label: "utilisation", re: /\butili[sz]ation\b/i, unit: "PCT" },
+  { id: "utilisation", label: "utilisation / occupancy", re: /\butili[sz]ation\b|\boccupancy\b/i, unit: "PCT" },
   { id: "billableDays", label: "billable days per month", re: /\bbillable days\b/i, unit: "DAYS" },
   { id: "headcount", label: "billable headcount", re: /\b(headcount|engineers|consultants|billable staff)\b/i, unit: "COUNT" },
   { id: "breakEven", label: "monthly break-even revenue", re: /\bbreak[- ]?even\b/i, unit: "INR" },
   { id: "contributionMargin", label: "contribution margin", re: /\bcontribution margin\b/i, unit: "PCT" },
-  { id: "fixedCost", label: "monthly fixed cost", re: /\bfixed cost/i, unit: "INR" },
-  { id: "capex", label: "initial capital required", re: /\b(capex|initial capital|capital required|upfront investment)\b/i, unit: "INR" },
+  { id: "fixedCost", label: "monthly fixed cost", re: /\bfixed (operating |overhead )?costs?|\bopex\b|\boperating costs?\b/i, unit: "INR" },
+  { id: "capex", label: "initial capital required", re: /\b(capex|initial capital|capital required|upfront investment|project cost|total project|project size|total investment)\b|\b(?:crore|cr)\b\s+(?:[\w-]+\s+){0,3}(?:facility|plant|project|factory|warehouse|centre|center)\b/i, unit: "INR" },
   // Generic business variables (scenario engine). Listed after the specific ones so
   // existing classifications are unchanged.
+  { id: "equity", label: "equity", re: /\bequity\b|\bown (money|funds|capital)\b|\bpromoter contribution\b/i, unit: "INR" },
   { id: "funding", label: "funding available", re: /\b(funding|funds available|available capital|capital available|can invest|raised?)\b/i, unit: "INR" },
+  { id: "loanTenure", label: "loan tenure", re: /\b(tenure|repaid over|repayment (period|over)|loan term)\b/i, unit: "MONTHS" },
   { id: "variableCostPct", label: "variable cost (% of revenue)", re: /\bvariable costs?\b.*%|%.*\bvariable costs?\b/i, unit: "PCT" },
-  { id: "interestRate", label: "interest rate", re: /\binterest rate\b/i, unit: "PCT" },
+  { id: "interestRate", label: "interest rate", re: /\binterest\b|@\s?\d+(?:\.\d+)?\s?%|\b(?:debt|loans?|borrowings?)\b[^.;]*?\bat\s+(?:about\s+|around\s+|~)?\d+(?:\.\d+)?\s?%/i, unit: "PCT" },
   { id: "debt", label: "debt", re: /\b(debt|term loan|borrowings?)\b/i, unit: "INR" },
   { id: "price", label: "price per unit", re: /\b(price|selling price|fee|ticket size) per (unit|order|project|client|customer|job)\b|\bper (unit|order|project|job) (price|fee)\b/i, unit: "INR" },
   { id: "volume", label: "volume per month", re: /\b\d+\s?(units|orders|projects|clients|customers|jobs) (per|a|each) month\b/i, unit: "COUNT" },
   { id: "funding", label: "funding available", re: /\b(funding (available|of)|capital available|available (capital|funds|funding)|we have (\u20b9|rs)|budget of|total funding)\b/i, unit: "INR" },
   { id: "cac", label: "customer acquisition cost", re: /\b(cac|customer acquisition cost|acquisition cost)\b/i, unit: "INR" },
-  { id: "dso", label: "days sales outstanding", re: /\b(dso|payment cycle|days sales outstanding|receivable days)\b/i, unit: "DAYS" },
+  { id: "dso", label: "days sales outstanding", re: /\b(dso|payment cycle|days sales outstanding|receivable days|receivables?|credit (period|terms)|(pay|paid|payment) (in|within|after))\b/i, unit: "DAYS" },
   { id: "marketSize", label: "market size", re: /\b(tam|sam|som|market size|addressable market|(total|overall|national|domestic) market|market (is )?(worth|valued))\b/i, unit: "INR" },
   { id: "revenue", label: "monthly revenue", re: /\b(monthly revenue|revenue)\b/i, unit: "INR" },
 ];
 const SCOPE_WORDS = ["india", "national", "gurgaon", "gurugram", "delhi", "ncr", "total", "addressable", "serviceable", "obtainable", "residential", "commercial", "government", "private"];
+// Clause-based, proximity-bound extraction. Each line is split into clauses
+// (", " ; " and " " with " " funded by " " plus " sentence breaks). Within a clause,
+// every variable keyword is bound to the NEAREST number of its kind, and a number is
+// never used twice - so "Total project cost is Rs 12 crore, funded by Rs 8 crore equity
+// and Rs 4 crore debt at 11% interest" yields capex, equity, debt and interest - not
+// one mis-bound figure.
+const MONEY_RE = /(\u20b9|rs\.?\s?|inr\s?|\$)\s?(\d[\d,]*(?:\.\d+)?)\s*(crore|cr\b|lakhs?|lacs?\b|l\b|k\b|m\b|mn\b|million|bn\b|billion)?/gi;
+// Amounts written without a currency symbol but with a scale word ("8 crore", "4 Cr").
+const BARE_MONEY_RE = /(^|[^\d.,\u20b9$])(\d[\d,]*(?:\.\d+)?)\s*(crores?|cr\b|lakhs?|lacs?\b)/gi;
+function clausesOf(line: string): string[] {
+  return line.split(/;|,\s+(?!\d{2,3}\b)|\s+and\s+|\s+with\s+|\s+plus\s+|\s+funded by\s+|\.\s+(?=[A-Z\u20b9])/).map((c) => c.trim()).filter((c) => c && /\d/.test(c));
+}
 export function parseQuantities(text: string, by: string): Quantity[] {
   const out: Quantity[] = [];
   for (const raw of String(text || "").split("\n")) {
-    const line = raw.replace(/\*\*/g, "").replace(URL_RX, "").trim(); if (!/\d/.test(line)) continue;
-    const v = VARIABLES.find((x) => x.re.test(line)); if (!v) continue;
-    let value: number | undefined; let unit = v.unit;
-    if (unit === "PCT") { const m = line.match(/(\d+(?:\.\d+)?)\s?%/); if (m) value = parseFloat(m[1]); }
-    else if (unit === "DAYS") { const m = line.match(/(\d+(?:\.\d+)?)\s?(?:billable )?days?/i); if (m) value = parseFloat(m[1]); }
-    else if (unit === "COUNT") { const m = line.match(/(\d+)\s?(?:billable )?(?:engineers|consultants|staff|people|headcount|units|orders|projects|clients|customers|jobs)/i) || line.match(/headcount (?:of )?(\d+)/i); if (m) value = parseFloat(m[1]); }
-    else {
-      const m = line.match(/(\u20b9|rs\.?\s?|\$)\s?(\d[\d,]*(?:\.\d+)?)\s*(crore|cr\b|lakh|lac\b|l\b|k\b|m\b|mn\b|million|bn\b|billion)?/i);
-      if (m) { value = numbersIn(m[2] + " " + (m[3] || ""))[0]; if (m[1] === "$") unit = "USD"; }
+    const fullLine = raw.replace(/\*\*/g, "").replace(URL_RX, "").trim(); if (!/\d/.test(fullLine)) continue;
+    for (const line of clausesOf(fullLine)) {
+      const used = new Set<number>();
+      // candidate number tokens of each kind, with positions
+      const money: { pos: number; v: number; usd: boolean }[] = []; let m: RegExpExecArray | null; MONEY_RE.lastIndex = 0;
+      while ((m = MONEY_RE.exec(line))) { const n = numbersIn(m[2] + " " + (m[3] || "").replace(/s$/i, ""))[0]; if (n !== undefined && isFinite(n)) money.push({ pos: m.index, v: n, usd: m[1] === "$" }); }
+      BARE_MONEY_RE.lastIndex = 0;
+      while ((m = BARE_MONEY_RE.exec(line))) {
+        const pos = m.index + m[1].length; if (money.some((x) => Math.abs(x.pos - pos) <= 4)) continue;   // already captured with a symbol
+        const n = numbersIn(m[2] + " " + m[3].replace(/s$/i, ""))[0]; if (n !== undefined && isFinite(n)) money.push({ pos, v: n, usd: false });
+      }
+      const pcts = Array.from(line.matchAll(/(\d+(?:\.\d+)?)\s?(?:%|percent\b|per cent\b)/gi)).map((x) => ({ pos: x.index || 0, v: parseFloat(x[1]) }));
+      const days = Array.from(line.matchAll(/(\d+(?:\.\d+)?)\s?-?\s?(?:billable\s)?days?\b/gi)).map((x) => ({ pos: x.index || 0, v: parseFloat(x[1]) }));
+      const counts = Array.from(line.matchAll(/(\d+)\s?(?:billable\s)?(?:engineers|consultants|staff|people|headcount|units|orders|projects|clients|customers|jobs)\b/gi)).map((x) => ({ pos: x.index || 0, v: parseFloat(x[1]) }));
+      const years = Array.from(line.matchAll(/(\d+(?:\.\d+)?)\s?(years?|yrs?|months?)\b/gi)).map((x) => ({ pos: x.index || 0, v: parseFloat(x[1]) * (/^m/i.test(x[2]) ? 1 : 12) }));
+      const nearest = <T extends { pos: number }>(arr: T[], at: number): T | undefined =>
+        arr.filter((t) => !used.has(t.pos)).sort((a, b) => Math.abs(a.pos - at) - Math.abs(b.pos - at))[0];
+      const seenVar = new Set<string>();
+      for (const v of VARIABLES) {
+        const km = line.match(v.re); if (!km || seenVar.has(v.id)) continue;
+        const at = km.index || 0; let value: number | undefined; let unit = v.unit; let tok: { pos: number } | undefined;
+        if (unit === "PCT") { const t = nearest(pcts, at); if (t) { value = t.v; tok = t; } }
+        else if (unit === "DAYS") { const t = nearest(days, at); if (t) { value = t.v; tok = t; } }
+        else if (unit === "MONTHS") { const t = nearest(years, at); if (t) { value = t.v; tok = t; } }
+        else if (unit === "COUNT") { const t = nearest(counts, at) || (/headcount (?:of )?(\d+)/i.test(line) ? { pos: line.search(/headcount/i), v: parseFloat((line.match(/headcount (?:of )?(\d+)/i) as RegExpMatchArray)[1]) } : undefined); if (t) { value = (t as any).v; tok = t; } }
+        else { const t = nearest(money, at); if (t) { value = t.v; tok = t; if (t.usd) unit = "USD"; } }
+        if (value === undefined || !isFinite(value) || !tok) continue;
+        used.add(tok.pos); seenVar.add(v.id);
+        const period: Quantity["period"] = /\b(per day|\/day|a day|daily|day rate)\b/i.test(line) ? "day" : /\b(per month|\/month|monthly|a month|\/mo)\b/i.test(line) ? "month"
+          : /\b(per quarter|quarterly)\b/i.test(line) ? "quarter" : /\b(per year|\/year|annual|annually|a year|p\.a\.|yearly)\b/i.test(line) ? "year" : "";
+        const scope = SCOPE_WORDS.filter((w) => new RegExp("\\b" + w + "\\b", "i").test(line));
+        out.push({ variable: v.id, value, unit, period: unit === "INR" || unit === "USD" ? period : "", scope, text: fullLine, by });
+      }
     }
-    if (value === undefined || !isFinite(value)) continue;
-    const period: Quantity["period"] = /\b(per day|\/day|a day|daily|day rate)\b/i.test(line) ? "day" : /\b(per month|\/month|monthly|a month|\/mo)\b/i.test(line) ? "month"
-      : /\b(per quarter|quarterly)\b/i.test(line) ? "quarter" : /\b(per year|\/year|annual|annually|a year|p\.a\.|yearly)\b/i.test(line) ? "year" : "";
-    const scope = SCOPE_WORDS.filter((w) => new RegExp("\\b" + w + "\\b", "i").test(line));
-    out.push({ variable: v.id, value, unit, period, scope, text: line, by });
   }
   return out;
 }
