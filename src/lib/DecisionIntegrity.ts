@@ -196,16 +196,16 @@ const VARIABLES: { id: string; label: string; re: RegExp; unit: Quantity["unit"]
   // Generic business variables (scenario engine). Listed after the specific ones so
   // existing classifications are unchanged.
   { id: "equity", label: "equity", re: /\bequity\b|\bown (money|funds|capital)\b|\bpromoter contribution\b/i, unit: "INR" },
-  { id: "funding", label: "funding available", re: /\b(funding|funds available|available capital|capital available|can invest|raised?)\b/i, unit: "INR" },
+  { id: "funding", label: "funding available", re: /\b(funding|funds available|available capital|capital available|can invest|raised?)\b|\b(?:start|starting|begin|beginning|launch|launching|set up|setting up|open|opening)\b[^.;]*?\bwith\s+(?=(?:\u20b9|rs\.?\s?|inr\s?)\s?\d)|\b(?:i|we) (?:only )?(?:have|can invest|can put in)\b|\bonly\s+(?=(?:\u20b9|rs\.?\s?|inr\s?)\s?\d)|\bbudget\b/i, unit: "INR" },
   { id: "loanTenure", label: "loan tenure", re: /\b(tenure|repaid over|repayment (period|over)|loan term)\b/i, unit: "MONTHS" },
   { id: "variableCostPct", label: "variable cost (% of revenue)", re: /\bvariable costs?\b.*%|%.*\bvariable costs?\b/i, unit: "PCT" },
   { id: "interestRate", label: "interest rate", re: /\binterest\b|@\s?\d+(?:\.\d+)?\s?%|\b(?:debt|loans?|borrowings?)\b[^.;]*?\bat\s+(?:about\s+|around\s+|~)?\d+(?:\.\d+)?\s?%/i, unit: "PCT" },
   { id: "debt", label: "debt", re: /\b(debt|term loan|borrowings?)\b/i, unit: "INR" },
   { id: "price", label: "price per unit", re: /\b(price|selling price|fee|ticket size) per (unit|order|project|client|customer|job)\b|\bper (unit|order|project|job) (price|fee)\b/i, unit: "INR" },
   { id: "volume", label: "volume per month", re: /\b\d+\s?(units|orders|projects|clients|customers|jobs) (per|a|each) month\b/i, unit: "COUNT" },
-  { id: "funding", label: "funding available", re: /\b(funding (available|of)|capital available|available (capital|funds|funding)|we have (\u20b9|rs)|budget of|total funding)\b/i, unit: "INR" },
+  { id: "funding", label: "funding available", re: /\b(funding (available|of)|capital available|available (capital|funds|funding)|we have (\u20b9|rs)|budget of|total funding)\b|\b(?:start|starting|begin|beginning|launch|launching|set up|setting up|open|opening)\b[^.;]*?\bwith\s+(?=(?:\u20b9|rs\.?\s?|inr\s?)\s?\d)|\b(?:i|we) (?:only )?(?:have|can invest|can put in)\b|\bonly\s+(?=(?:\u20b9|rs\.?\s?|inr\s?)\s?\d)|\bbudget\b/i, unit: "INR" },
   { id: "cac", label: "customer acquisition cost", re: /\b(cac|customer acquisition cost|acquisition cost)\b/i, unit: "INR" },
-  { id: "dso", label: "days sales outstanding", re: /\b(dso|payment cycle|days sales outstanding|receivable days|receivables?|credit (period|terms)|(pay|paid|payment) (in|within|after))\b/i, unit: "DAYS" },
+  { id: "dso", label: "days sales outstanding", re: /\b(dso|payment cycle|days sales outstanding|receivable days|receivables?|credit (period|terms)|(pay|paid|payment) (in|within|after))\b|\b(?:take|takes|taking)\s+\d+\s?-?\s?days?\b|\bdays? to pay\b/i, unit: "DAYS" },
   { id: "marketSize", label: "market size", re: /\b(tam|sam|som|market size|addressable market|(total|overall|national|domestic) market|market (is )?(worth|valued))\b/i, unit: "INR" },
   { id: "revenue", label: "monthly revenue", re: /\b(monthly revenue|revenue)\b/i, unit: "INR" },
 ];
@@ -220,7 +220,7 @@ const MONEY_RE = /(\u20b9|rs\.?\s?|inr\s?|\$)\s?(\d[\d,]*(?:\.\d+)?)\s*(crore|cr
 // Amounts written without a currency symbol but with a scale word ("8 crore", "4 Cr").
 const BARE_MONEY_RE = /(^|[^\d.,\u20b9$])(\d[\d,]*(?:\.\d+)?)\s*(crores?|cr\b|lakhs?|lacs?\b)/gi;
 function clausesOf(line: string): string[] {
-  return line.split(/;|,\s+(?!\d{2,3}\b)|\s+and\s+|\s+with\s+|\s+plus\s+|\s+funded by\s+|\.\s+(?=[A-Z\u20b9])/).map((c) => c.trim()).filter((c) => c && /\d/.test(c));
+  return line.split(/;|,\s+(?!\d{2,3}\b)|\s+and\s+|\s+with\s+(?!(?:\u20b9|rs\.?\s?|inr\s?)\s?\d)|\s+plus\s+|\s+funded by\s+|\.\s+(?=[A-Z\u20b9])/).map((c) => c.trim()).filter((c) => c && /\d/.test(c));
 }
 export function parseQuantities(text: string, by: string): Quantity[] {
   const out: Quantity[] = [];
