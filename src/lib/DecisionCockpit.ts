@@ -173,6 +173,9 @@ export interface Challenge {
   id: string; name: string; category: string; variable: ChallengeVar; change: number | null; changeType: "pct" | "pp" | "abs" | "days" | "months";
   unit: string; direction: "up" | "down" | "unknown"; source: "user" | "preset" | "research"; userEntered: boolean; confidence: "user-stated" | "assumption" | "unknown-magnitude";
   affectedComponents: string[]; baselineValue: number | null; changedValue: number | null; note: string;
+  // A change to ONE part of a cost line (e.g. electricity within running costs) needs
+  // that part's share; without it the impact is not calculated (never assumed).
+  component?: string; share?: number | null;
 }
 export const SCENARIO_PRESETS: Record<string, { label: string; challenges: Omit<Challenge, "id" | "baselineValue" | "changedValue" | "note" | "affectedComponents">[] }> = {
   base: { label: "Base case", challenges: [] },
@@ -217,14 +220,17 @@ export function applyChallenges(inp: Inputs, challenges: Challenge[]): { inputs:
       case "variableCost": {
         const vc = has("variableCostPct") ? out.variableCostPct!.value : has("contributionMargin") ? 100 - out.contributionMargin!.value : null;
         if (vc === null) { notApplied.push({ ...c, note: "No variable cost or contribution margin in the model.", affectedComponents: COMPONENTS.variableCost }); break; }
-        const nvc = Math.min(100, vc * (1 + c.change / 100));
+        if (c.component && (c.share === null || c.share === undefined)) { notApplied.push({ ...c, note: "Impact direction known; magnitude uncertain \u2014 enter what share of your running costs is " + c.component + " to calculate it.", affectedComponents: COMPONENTS.variableCost }); break; }
+        const eff = c.component ? c.change * (c.share as number) / 100 : c.change;
+        const nvc = Math.min(100, vc * (1 + eff / 100));
         if (has("variableCostPct")) set("variableCostPct", nvc, c); else set("contributionMargin", 100 - nvc, c); break; }
       case "utilisation":
         if (!has("utilisation")) { notApplied.push({ ...c, note: "No utilisation in the model.", affectedComponents: COMPONENTS.utilisation }); break; }
         set("utilisation", Math.max(0, Math.min(100, c.changeType === "pp" ? out.utilisation!.value + c.change : pct("utilisation"))), c); break;
       case "dso":
+        if (!has("dso") && c.changeType === "abs") { out.dso = { value: c.change, label: "Scenario", source: c.name }; applied.push({ ...c, baselineValue: null, changedValue: c.change, affectedComponents: COMPONENTS.dso }); break; }
         if (!has("dso")) { notApplied.push({ ...c, note: "No DSO / payment cycle in the model.", affectedComponents: COMPONENTS.dso }); break; }
-        set("dso", Math.max(0, c.changeType === "days" ? out.dso!.value + c.change : pct("dso")), c); break;
+        set("dso", Math.max(0, c.changeType === "abs" ? c.change : c.changeType === "days" ? out.dso!.value + c.change : pct("dso")), c); break;
       case "funding":
         if (c.changeType === "abs") { if (has("funding")) set("funding", c.change, c); else { out.funding = { value: c.change, label: "Scenario", source: c.name }; applied.push({ ...c, baselineValue: null, changedValue: c.change, affectedComponents: COMPONENTS.funding }); } break; }
         if (!has("funding")) { notApplied.push({ ...c, note: "No funding figure in the model.", affectedComponents: COMPONENTS.funding }); break; }
@@ -255,13 +261,19 @@ const QUALITATIVE: { re: RegExp; category: string; name: string; effects: { vari
   { re: /inflation/i, category: "inflation", name: "Inflation", effects: [{ variable: "variableCost", direction: "up" }, { variable: "fixedCost", direction: "up" }] },
   { re: /competitor|price war/i, category: "competitor", name: "Competitor price pressure", effects: [{ variable: "price", direction: "down" }] },
   { re: /recession|slowdown|downturn/i, category: "economic", name: "Economic slowdown", effects: [{ variable: "demand", direction: "down" }] },
+  { re: /(largest|biggest|major|key|anchor) (customer|client|buyer)s? (may |could |might |will )?(leave|exit|stop|churn|switch)/i, category: "competitor", name: "Loss of a major customer", effects: [{ variable: "demand", direction: "down" }] },
+  { re: /subsid(y|ies) (may |could |might |will )?(disappear|be withdrawn|end|stop|be removed)|(withdraw|end|remove)\w* (the )?subsid/i, category: "government policy", name: "Subsidy withdrawn", effects: [{ variable: "capex", direction: "up" }] },
+  { re: /(rupee|currency|inr) (depreciat|weaken|fall)|exchange rate/i, category: "currency", name: "Currency weakens", effects: [{ variable: "variableCost", direction: "up" }] },
+  { re: /flood|heatwave|heat wave|cyclone|extreme weather|climate/i, category: "climate", name: "Extreme weather", effects: [{ variable: "utilisation", direction: "down" }] },
+  { re: /political|unrest|election|policy uncertainty/i, category: "political/regulatory", name: "Political uncertainty", effects: [{ variable: "demand", direction: "down" }] },
+  { re: /funding (is |may be |could be )?(limited|constrained|tight|short)|limited (funding|capital)/i, category: "economic", name: "Limited funding", effects: [{ variable: "funding", direction: "down" }] },
 ];
 const VAR_WORDS: { re: RegExp; variable: ChallengeVar; category: string }[] = [
   { re: /\bdemand|sales volume|orders|customers\b/i, variable: "demand", category: "economic" },
   { re: /\b(variable|raw material|material|input|unit) costs?\b/i, variable: "variableCost", category: "supply chain" },
   { re: /\bfixed costs?|overheads?|rent|salar(y|ies)\b/i, variable: "fixedCost", category: "economic" },
   { re: /\bcapex|capital expenditure|project cost|setup cost\b/i, variable: "capex", category: "economic" },
-  { re: /\bfunding|capital available|investment available|funds?\b/i, variable: "funding", category: "economic" },
+  { re: /\bfunding|capital available|investment available|funds?\b|\b(?:i|we) (?:only )?have\b|\bonly\s+(?=(?:\u20b9|rs\.?\s?)\s?\d)|\bbudget\b/i, variable: "funding", category: "economic" },
   { re: /\bdso|payment (cycle|terms|delay)|receivables?|debtor days\b/i, variable: "dso", category: "economic" },
   { re: /\butili[sz]ation\b/i, variable: "utilisation", category: "operations" },
   { re: /\binterest rates?\b/i, variable: "interestRate", category: "interest rates" },
@@ -298,6 +310,94 @@ export function parseChallenge(text: string): { challenges: Challenge[]; questio
     questions.push(c.variable === "delay" ? "Roughly how many months could this delay revenue?" : "Roughly how much could this change " + c.variable + " (e.g. " + (c.direction === "down" ? "\u221215%" : "+15%") + ")?");
   const summary = challenges.length ? challenges.map((c) => c.name + (c.change === null ? " (magnitude uncertain)" : "")).join("; ") : "Not recognised as a quantifiable business challenge.";
   return { challenges, questions: questions.slice(0, 3), summary };
+}
+
+// One sentence may hold several challenges ("demand falls 20%, electricity costs rise
+// 15%, and customers pay 30 days later"): each clause is parsed with ITS OWN direction.
+const ENERGY_RE = /\b(electricity|power|energy|fuel|diesel|gas) (price|cost|tariff|bill)s?\b|\b(price|cost|tariff)s? of (electricity|power|energy|fuel)\b/i;
+const mkCh = (p: Partial<Challenge> & { name: string; variable: ChallengeVar }): Challenge => ({ id: "CH-" + String(++_cid).padStart(3, "0"), category: "economic", change: null, changeType: "pct", unit: "%",
+  direction: "up", source: "user", userEntered: true, confidence: "user-stated", affectedComponents: COMPONENTS[p.variable] || [], baselineValue: null, changedValue: null, note: "", ...p } as Challenge);
+export function parseChallenges(text: string): { challenges: Challenge[]; questions: string[]; summary: string } {
+  const clauses = String(text || "").split(/;|\.\s|\n|,\s*(?:and\s+)?|\s+and\s+(?=[a-z]+\s+(?:may|might|could|will|is|are|falls?|rises?|drops?|increases?|decreases?|take|pay|becomes?|leaves?|disappears?|costs?|prices?)\b)/i)
+    .map((x) => x.trim()).filter((x) => x.length > 2);
+  const all: Challenge[] = [];
+  for (const cl of clauses) {
+    if (ENERGY_RE.test(cl)) {   // affects only PART of running costs -> needs that share
+      const pct = cl.match(/([+-]?\d+(?:\.\d+)?)\s?%/); const down = /\b(fall|drop|decline|lower|cheaper|reduce)/i.test(cl);
+      all.push(mkCh({ name: "Electricity / energy cost " + (pct ? (down ? "\u2212" : "+") + Math.abs(parseFloat(pct[1])) + "%" : (down ? "\u2193" : "\u2191")), category: "energy", variable: "variableCost",
+        change: pct ? Math.abs(parseFloat(pct[1])) * (down ? -1 : 1) : null, direction: down ? "down" : "up", confidence: pct ? "user-stated" : "unknown-magnitude", component: "electricity / energy", share: null }));
+      continue;
+    }
+    const abs = cl.match(/(?:take|takes|taking|pay (?:us )?in|paid in|credit of)\s+(\d+)\s?-?\s?days?/i) || cl.match(/(\d+)\s?-?\s?days?\s+(?:to pay|credit|payment terms)/i);
+    if (abs && !/later|longer|more|extra|additional|\+/.test(cl)) { all.push(mkCh({ name: "Customers pay in " + abs[1] + " days", variable: "dso", change: parseFloat(abs[1]), changeType: "abs", unit: "days" })); continue; }
+    const later = cl.match(/(\d+)\s?-?\s?days?\s+(?:later|longer|more|extra)/i);
+    if (later) { all.push(mkCh({ name: "Customers pay " + later[1] + " days later", variable: "dso", change: parseFloat(later[1]), changeType: "days", unit: "days" })); continue; }
+    const r = parseChallenge(cl);
+    for (const c of r.challenges) if (c.variable === "interestRate" && c.changeType === "pct" && c.change !== null) { c.changeType = "pp"; c.unit = "pp"; c.name = "Interest rate " + (c.change < 0 ? "\u2212" : "+") + Math.abs(c.change) + " pp"; }
+    // A clause with neither a direction nor a number ("demand looks attractive") is not a challenge.
+    all.push(...r.challenges.filter((c) => !(c.change === null && c.direction === "unknown")));
+  }
+  const merged: Challenge[] = [];   // one per variable+component; a stated magnitude wins
+  for (const c of all) {
+    const k = c.variable + "|" + (c.component || ""); const i = merged.findIndex((m) => m.variable + "|" + (m.component || "") === k);
+    if (i < 0) merged.push(c); else if (merged[i].change === null && c.change !== null) merged[i] = c;
+  }
+  const questions: string[] = [];
+  for (const c of merged) {
+    if (questions.length >= 3) break;
+    if (c.component && c.share == null) questions.push("What share of your running costs is " + c.component + " (e.g. 20%)?");
+    else if (c.change === null) questions.push(c.variable === "delay" ? "Roughly how many months could this delay revenue?" : c.variable === "funding" ? "How much funding do you actually have (e.g. \u20b980 lakh)?" : "Roughly how much could this change " + c.variable + " (e.g. " + (c.direction === "down" ? "\u221215%" : "+15%") + ")?");
+  }
+  return { challenges: merged, questions, summary: merged.length ? merged.map((c) => c.name + (c.change === null || (c.component && c.share == null) ? " (magnitude uncertain)" : "")).join("; ") : "Not recognised as a quantifiable business challenge." };
+}
+
+// ── WHY DID THE DECISION CHANGE? ────────────────────────────────────────────
+export function explainDecisionChange(base: Inputs, scen: Inputs, baseDecision: Decision, newDecision: Decision): { changed: boolean; headline: string; variables: string[]; because: string[] } {
+  const variables: string[] = [];
+  for (const k of Object.keys({ ...base, ...scen }) as InputKey[]) {
+    const a = base[k]?.value, b = scen[k]?.value; if (!INPUT_LABEL[k]) continue;
+    if (a === undefined && b !== undefined) variables.push(INPUT_LABEL[k].label + ": added " + fmt(b, INPUT_LABEL[k].unit));
+    else if (a !== undefined && b !== undefined && Math.abs(a - b) > 1e-9 * Math.max(1, Math.abs(a))) variables.push(INPUT_LABEL[k].label + ": " + fmt(a, INPUT_LABEL[k].unit) + " \u2192 " + fmt(b, INPUT_LABEL[k].unit));
+  }
+  const key = (x: string) => x.replace(/[\d.,\u20b9%\u00d7]+|\bL\b|\bCr\b/g, "").replace(/\s+/g, " ").slice(0, 50);
+  const before = diagnose(compute(base)), after = diagnose(compute(scen));
+  const appeared = after.filter((x) => !before.some((y) => key(y.issue) === key(x.issue))).map((x) => "New problem: " + x.issue);
+  const solved = before.filter((x) => !after.some((y) => key(y.issue) === key(x.issue))).map((x) => "Resolved: " + x.issue);
+  const changed = baseDecision !== newDecision;
+  return { changed, variables, because: [...appeared, ...solved],
+    headline: changed ? "Your decision changed from " + baseDecision + " to " + newDecision + " because " + (variables.length ? variables.slice(0, 3).join("; ") : "the inputs changed") + "."
+      : "The decision stays " + newDecision + (variables.length ? " even with: " + variables.slice(0, 3).join("; ") : "") + "." };
+}
+
+// ── ACTUAL RESULTS FROM THE GENERAL LEDGER (read-only) ──────────────────────
+export interface Actuals { periodDays: number; from: string; to: string; revenue: number; expenses: number; profit: number; cash: number; receivables: number; payables: number; entries: number; label: "ACTUAL RESULT"; }
+export function actualsFromLedger(entries: { date: string; lines: { accountCode: string; debit: number; credit: number }[] }[], accounts: { code: string; name: string; type: string }[], periodDays = 30, now = new Date()): Actuals | null {
+  if (!Array.isArray(entries) || !entries.length) return null;
+  const acc = new Map(accounts.map((a) => [a.code, a])); const to = now.getTime(), from = to - periodDays * 864e5;
+  let revenue = 0, expenses = 0, cash = 0, receivables = 0, payables = 0, n = 0;
+  for (const e of entries) {
+    const t = new Date(e.date).getTime(); const inPeriod = isFinite(t) && t >= from && t <= to; if (inPeriod) n++;
+    for (const l of e.lines || []) {
+      const a = acc.get(l.accountCode); if (!a) continue; const d = +l.debit || 0, c = +l.credit || 0;
+      if (inPeriod && a.type === "Income") revenue += c - d;
+      if (inPeriod && a.type === "Expense") expenses += d - c;
+      if (a.type === "Asset" && /cash|bank/i.test(a.name)) cash += d - c;
+      if (a.type === "Asset" && /receivable/i.test(a.name)) receivables += d - c;
+      if (a.type === "Liability" && /payable/i.test(a.name)) payables += c - d;
+    }
+  }
+  if (!n) return null;
+  return { periodDays, from: new Date(from).toISOString().slice(0, 10), to: new Date(to).toISOString().slice(0, 10), revenue, expenses, profit: revenue - expenses, cash, receivables, payables, entries: n, label: "ACTUAL RESULT" };
+}
+// EXPECTED (plan) vs SIMULATED (scenario) vs ACTUAL (ledger) - always separate columns.
+export function planVsActual(plan: Outputs, sim: Outputs | null, act: Actuals | null): { metric: string; expected: string; simulated: string; actual: string }[] {
+  const m = (v: number | null | undefined) => fmt(v ?? null, "INR"); const per = act ? 30 / act.periodDays : 1;
+  return [
+    { metric: "Revenue / month", expected: m(plan.revenue), simulated: sim ? m(sim.revenue) : "\u2014", actual: act ? m(act.revenue * per) : "no ledger data" },
+    { metric: "Profit / month", expected: m(plan.profit), simulated: sim ? m(sim.profit) : "\u2014", actual: act ? m(act.profit * per) : "no ledger data" },
+    { metric: "Receivables", expected: m(plan.workingCapital), simulated: sim ? m(sim.workingCapital) : "\u2014", actual: act ? m(act.receivables) : "no ledger data" },
+    { metric: "Cash", expected: m(plan.cashStart), simulated: sim ? m(sim.cashStart) : "\u2014", actual: act ? m(act.cash) : "no ledger data" },
+  ];
 }
 
 // ── TIME HORIZONS ───────────────────────────────────────────────────────────
@@ -544,11 +644,11 @@ export function externalFactorsFromEvidence(ev: { items: { id: string; text: str
 }
 
 // ── CROSS-MODULE HANDOFF (Boardroom -> Time Machine -> Autopilot -> Boardroom) ─
-export interface DecisionHandoff { sessionId: string | number; question: string; decision: Decision; confidence: string; at: string;
+export interface DecisionHandoff { sessionId: string | number; question: string; decision: Decision; confidence: string; at: string; inputs?: Inputs;
   gates: { name: string; status: string }[]; scenarios: { name: string; decision: Decision; base: Decision; changed: boolean; at: string }[];
   response: { action: string; trigger: string; stop: string; escalation: string } | null; }
-export function buildHandoff(p: { sessionId: string | number; question: string; map: DecisionMap; scenarios: ScenarioState[]; response?: DecisionResponse | null }): DecisionHandoff {
-  return { sessionId: p.sessionId, question: p.question, decision: p.map.decision, confidence: p.map.confidence, at: new Date().toISOString(),
+export function buildHandoff(p: { sessionId: string | number; question: string; map: DecisionMap; scenarios: ScenarioState[]; response?: DecisionResponse | null; inputs?: Inputs }): DecisionHandoff {
+  return { sessionId: p.sessionId, question: p.question, decision: p.map.decision, confidence: p.map.confidence, at: new Date().toISOString(), inputs: p.inputs,
     gates: p.map.gates.map((g) => ({ name: g.name, status: g.status })),
     scenarios: p.scenarios.slice(-5).map((s) => ({ name: s.name, decision: s.decisionResult, base: s.baseDecision, changed: s.decisionChanged, at: s.createdAt })),
     response: p.response ? { action: p.response.recommendedAction, trigger: p.response.trigger, stop: p.response.stopCondition, escalation: p.response.escalationCondition } : null };
