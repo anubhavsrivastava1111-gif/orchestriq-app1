@@ -939,7 +939,7 @@ function actionBtn(tok: typeof T.light, accent = false, color?: string): React.C
 interface BoardroomViewProps {
   exportVerbatimPDF?: (title: string, markdown: string) => Promise<void> | void;
   researchPriorityGaps?: (stageIndex: number) => void;
-  saveCockpit?: (patch: any, handoff?: any) => void; addCockpitActions?: (texts: string[], label: string) => void; openInTimeMachine?: (text: string) => void;
+  saveCockpit?: (patch: any, handoff?: any) => void; addCockpitActions?: (texts: string[], label: string, notes?: string[]) => void; openInTimeMachine?: (text: string) => void;
   brFreshResearch?: boolean; setBrFreshResearch?: (v: boolean) => void;
   // Data
   brQ: string; setBrQ: (v: string) => void;
@@ -1150,7 +1150,9 @@ export default function BoardroomView(props: BoardroomViewProps) {
             {/* DECISION COCKPIT - decision, gates, scenarios, Autopilot (calculated, no AI call) */}
             {stage.synthesis && (
               <DecisionCockpitView cur={brCur} si={si} analysis={cachedAnalysis(brCur, si, co?.location || "")} tok={tok}
-                saveCockpit={saveCockpit} addCockpitActions={addCockpitActions} openInTimeMachine={openInTimeMachine} showToast={showToast} />
+                saveCockpit={saveCockpit} addCockpitActions={addCockpitActions} openInTimeMachine={openInTimeMachine} showToast={showToast}
+                quickExport={quickExport} exportVerbatimPDF={exportVerbatimPDF} dlFile={dlFile} cp={cp} company={co?.name || ""} location={co?.location || ""}
+                onShowDebate={() => { setDebateOpen({ ...debateOpen, [si]: true }); setTimeout(() => { try { document.getElementById("debate-" + si)?.scrollIntoView({ behavior: "smooth" }); } catch {} }, 50); }} />
             )}
             {/* KPI strip + synthesis (renders the board's declared figures) */}
             {stage.synthesis && (
@@ -1178,7 +1180,7 @@ export default function BoardroomView(props: BoardroomViewProps) {
                 {isDebateOpen(si, stage) ? "Hide executive debate & evidence" : "View executive debate & evidence (" + (stage.debate || []).length + " executives)"}</button>)}
             {/* ── TWO COLUMNS: debate left, decision + evidence right ── */}
             {(!stage.synthesis || isDebateOpen(si, stage)) && (
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.55fr) minmax(0,1fr)", gap: 18, alignItems: "start" }}>
+            <div id={"debate-" + si} style={{ display: "grid", gridTemplateColumns: "minmax(0,1.55fr) minmax(0,1fr)", gap: 18, alignItems: "start" }}>
 
               {/* LEFT — Executive Debate */}
               <div style={{ borderRadius: 10, border: `1px solid ${tok.border}`, background: tok.surface, boxShadow: tok.shadow, overflow: "hidden" }}>
