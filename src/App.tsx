@@ -28,7 +28,8 @@ import { scanSuppliedInputs, buildIntakePrompt, buildRegisterInjection, INTAKE_F
 import { runSearch, formatResultsForPrompt, RETRIEVED_RESULTS_RULES, hasExternalSearch, SEARCH_PROVIDERS, estimateSearchCost } from "./lib/SearchProviders";
 import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverride, estimateSessionCost, fmtMoney, stageProviderChain, PREMIUM_PROVIDERS } from "./lib/ModelRouting";
 import { attemptResultFor, executionSummary, answerUserQuestion, type ProviderAttempt } from "./lib/DecisionIntegrity";
-import { handoffContext, type DecisionHandoff } from "./lib/DecisionCockpit";
+import { handoffContext, fmt as fmtCanon, type DecisionHandoff } from "./lib/DecisionCockpit";
+import { parseUserInputs } from "./lib/DecisionExperience";
 import { synthesisPacketFor, analyseStage, makeCallId, appendContinuation, findDuplicate, deriveStatus, isExcludedFromSynthesis, isComplete, validateContribution, completenessReport, renderCompletenessReport } from "./lib/BoardroomIntegrity";
 import { parseResearchEvidence, assembleExecutiveContext, extractLedgerEntry, renderLedger, renderEvidence, budgetCheck, type LedgerEntry, emptyIntelligence, mergeIntoIntelligence, discoverResearchOpportunities, recordUserDecision, classifyFollowUp, renderIntelligence, adaptiveOutputBudget, taskKindFor, type IntelligenceState } from "./lib/ContextIntelligence";
 import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
@@ -1416,6 +1417,7 @@ function normalizeResearchState(rs:any,fb:any={}):any{
     // decision - persisted with the session (reloads, history, exports).
     scenarios:arr(r.scenarios), challenges:arr(r.challenges), decisionResponses:arr(r.decisionResponses),
     cockpitDecision:r.cockpitDecision||null,
+    inputChoices:r.inputChoices||null,
     evidence:arr(r.evidence), findings:arr(r.findings),
     opportunities:r.intelligence?arr(r.intelligence.opportunities):arr(r.opportunities),
     hypotheses:arr(r.hypotheses),
@@ -5618,7 +5620,12 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       // SIMULATION RESULTS, never as facts.
       let brSimCtx="";
       try{const hh=WorkspaceMemory.get<DecisionHandoff>("oiq-decision-handoff");if(hh&&hh.question===brQ)brSimCtx=handoffContext(hh);}catch{}
-      const brOppLens=brSimCtx+"\n\nOPPORTUNITY LENS: Beyond the literal question, inspect each stage of this problem's value chain"
+      // CANONICAL USER INPUTS: the numbers the user gave, captured deterministically from
+      // the question. Executives must use them exactly and flag (never replace) disagreement.
+      let brCanon="";
+      try{const pu=parseUserInputs(brQ);if(pu.inputs.length){brCanon="\n\nYOUR CLIENT'S NUMBERS (canonical - from the question; use exactly these, never restate them differently; if you believe one is wrong, say so explicitly and keep the original visible):\n"
+        +pu.inputs.map((u:any)=>"- "+u.label+": "+fmtCanon(u.value,u.unit)+(u.ambiguous?" [AMBIGUOUS - "+u.interpretation+"; analyse BOTH readings, do not pick one]":"")).join("\n");}}catch{}
+      const brOppLens=brCanon+brSimCtx+"\n\nOPPORTUNITY LENS: Beyond the literal question, inspect each stage of this problem's value chain"
         +(brDims.length?" ("+brDims.join(" \u2192 ")+")":"")+" for underserved needs, costly inefficiencies, delays, risks or information gaps that someone would pay to solve. "
         +"Mark each genuine one on its own line starting [Opportunity], with the evidence it rests on (cite F#/S# ids where available) - or label it [Expert Inference] if it is your reasoning. "
         +"An opportunity is not a recommendation: record it even if you advise against pursuing it. Do not invent novelty. "
@@ -6210,10 +6217,10 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     if(cur0.sessionId)setBrSessions((prev:any[])=>{const n=(prev||[]).map((x:any)=>x.id===cur0.sessionId?{...x,researchState:newRS}:x);try{sv("cos-br",n);}catch{};return n;});
     if(handoff)try{sv("oiq-decision-handoff",handoff);}catch{}
   },[brCur,sv]);
-  const addCockpitActions=useCallback((texts:string[],label:string)=>{
+  const addCockpitActions=useCallback((texts:string[],label:string,notes?:string[])=>{
     const now=new Date().toISOString();
     const fresh=texts.filter(t=>t&&!actionItems.some((a:any)=>a.text===t)).map((t,i)=>({id:Date.now()+i,text:t,source:"boardroom" as const,sourceLabel:label,ownerRoleId:null,
-      status:"not_started" as const,priority:(i===0?"high":"medium") as "high"|"medium",createdAt:now,dueHint:null,notes:"From the Decision Cockpit"}));
+      status:"not_started" as const,priority:(i===0?"high":"medium") as "high"|"medium",createdAt:now,dueHint:null,notes:(notes&&notes[texts.indexOf(t)])||"From the Decision Cockpit"}));
     if(!fresh.length){showToast("These actions are already in the Action Tracker.","info");return;}
     const updated=[...fresh,...actionItems];setActionItems(updated);sv("cos-actions",updated);
     showToast(fresh.length+" action"+(fresh.length===1?"":"s")+" added to the Action Tracker.","success");
