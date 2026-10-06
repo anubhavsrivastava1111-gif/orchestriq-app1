@@ -30,6 +30,7 @@ import { STAGES, PRESETS, DEFAULT_PROFILE, resolveStageProvider, stageModelOverr
 import { attemptResultFor, executionSummary, answerUserQuestion, type ProviderAttempt } from "./lib/DecisionIntegrity";
 import { handoffContext, fmt as fmtCanon, type DecisionHandoff } from "./lib/DecisionCockpit";
 import { parseUserInputs } from "./lib/DecisionExperience";
+import { TimeMachineSimulator, OperatingPlanner } from "./DecisionSimulator";
 import { synthesisPacketFor, analyseStage, makeCallId, appendContinuation, findDuplicate, deriveStatus, isExcludedFromSynthesis, isComplete, validateContribution, completenessReport, renderCompletenessReport } from "./lib/BoardroomIntegrity";
 import { parseResearchEvidence, assembleExecutiveContext, extractLedgerEntry, renderLedger, renderEvidence, budgetCheck, type LedgerEntry, emptyIntelligence, mergeIntoIntelligence, discoverResearchOpportunities, recordUserDecision, classifyFollowUp, renderIntelligence, adaptiveOutputBudget, taskKindFor, type IntelligenceState } from "./lib/ContextIntelligence";
 import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
@@ -4571,6 +4572,9 @@ export default function App(){
   const [brFollowUp,setBrFollowUp]=useState("");
   // Research is reused for the same question unless the user explicitly asks for fresh research.
   const [brFreshResearch,setBrFreshResearch]=useState(false);
+  // Deterministic Time Machine runs and Autopilot operating plans (persisted).
+  const [tmSims,setTmSims]=useState<any[]>(()=>{try{return (WorkspaceMemory.get<any[]>("oiq-tm-sims")||[]) as any[];}catch{return [];}});
+  const [apPlans,setApPlans]=useState<any[]>(()=>{try{return (WorkspaceMemory.get<any[]>("oiq-autopilot-plans")||[]) as any[];}catch{return [];}});
   const [followUpExecIds,setFollowUpExecIds]=useState([]);
   const [followUpSuggestions,setFollowUpSuggestions]=useState([]);
   const [drillQ,setDrillQ]=useState("");
@@ -5409,7 +5413,9 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       const researchContext=(rdAP.grounded
         ?"\nVERIFIED RESEARCH BRIEF (current data for this scan - use these figures and cite this brief as your source where relevant; do not re-search):\n"+researchBrief+"\n"
         :"\nRESEARCH DESK UNAVAILABLE FOR THIS SCAN:\n"+researchBrief+"\n\nMANDATORY: No live figure was retrieved. Every price, cost, rate, salary, or market figure you produce MUST carry the tag [ESTIMATE - UNVERIFIED]. Do not present any number as fact. Open your response with a one-line warning that this scan is ungrounded.\n");
-      let apHandoff="";try{apHandoff=handoffContext(WorkspaceMemory.get<DecisionHandoff>("oiq-decision-handoff"));}catch{}
+      let apHandoff="";try{apHandoff=handoffContext(WorkspaceMemory.get<DecisionHandoff>("oiq-decision-handoff"));
+      const lp=(WorkspaceMemory.get<any[]>("oiq-autopilot-plans")||[]).slice(-1)[0];
+      if(lp)apHandoff+="\nLATEST OPERATING PLAN (calculated, advisory) under \u201c"+lp.constraint+"\u201d: "+lp.because+" Action: "+lp.recommendedAction+" Trigger: "+lp.trigger+".";}catch{}
     const sys="You are the Decision Intelligence Engine for \""+co.name+"\". "+buildCtx(co,compData)+researchContext+apHandoff
       +(apHandoff?"\nUse the persisted Boardroom decision above as the current state: answer 'if I were operating this business under these conditions, what would I do next?' with CURRENT STATE, RECOMMENDED ACTION, WHY, EXPECTED IMPACT, RISK, TRIGGER, OWNER, DEADLINE, STOP CONDITION and ESCALATION CONDITION for each decision. Do not re-decide what the Boardroom settled unless new evidence or a challenge justifies it.":"")+"\nIdentify 6 CRITICAL decisions the founder should make RIGHT NOW. ALL figures in "+apCur.sym+apCur.code+".\nFor each: Title, Urgency, Owner, Decide By, Cost of delay/week (with calculation), Options 1/2/3 with outcomes, Recommendation, "+co.location+" Context, Data Needed. End with: THE ONE DECISION THAT MATTERS MOST THIS WEEK. Then a final section: Confidence & Verification (state which figures came from the VERIFIED RESEARCH BRIEF, cite it, versus which are ESTIMATE (unverified)).\n\nVERIFICATION RULE: Any price, cost, rate, or market figure must either (a) come from the VERIFIED RESEARCH BRIEF (cite it), or (b) be explicitly labeled [Assumption]. Figures taken from the VERIFIED RESEARCH BRIEF must be labeled [Retrieved Evidence]. Derived figures must show the formula and be labeled [Calculation]. Do not present invented numbers as fact.";
       let res=await ask(sys,[{role:"user",content:"Run complete decision scan."}],4500);
@@ -6226,6 +6232,8 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
     showToast(fresh.length+" action"+(fresh.length===1?"":"s")+" added to the Action Tracker.","success");
   },[actionItems,sv,showToast]);
   const openInTimeMachine=useCallback((text:string)=>{setTmDec(text);setNTab("timemachine");},[]);
+  // The persisted Boardroom decision (with canonical inputs) for Time Machine and Autopilot.
+  const decisionHandoff=useMemo(()=>{try{return WorkspaceMemory.get<DecisionHandoff>("oiq-decision-handoff")||null;}catch{return null;}},[nTab,brCur]);
 
   const researchPriorityGaps=useCallback(async(si:number)=>{
     if(brRun)return;
@@ -9408,6 +9416,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     exportVerbatimPDF={(title:string,md:string)=>generatePDFv2("detailed",title,md,co,cur)}
     researchPriorityGaps={researchPriorityGaps} brFreshResearch={brFreshResearch} setBrFreshResearch={setBrFreshResearch}
     saveCockpit={saveCockpit} addCockpitActions={addCockpitActions} openInTimeMachine={openInTimeMachine}
+    ledgerEntries={ledgerEntries} customAccounts={customAccounts}
     brQ={brQ} setBrQ={setBrQ}
     brAg={brAg} setBrAg={setBrAg}
     brCur={brCur} brRun={brRun} brPh={brPh}
@@ -9440,6 +9449,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                     <div style={{fontSize:13,fontWeight:800,color:"#F1F5F9"}}>Business Time Machine</div>
                     {tmSessions.length>0&&<button onClick={()=>setTmShowHistory(s=>!s)} style={{...S.hBtn,...(tmShowHistory?{color:"#8B5CF6",borderColor:"#8B5CF644"}:{})}}>{tmShowHistory?"✕ Close":"🕓 Past Runs ("+tmSessions.length+")"}</button>}
                   </div>
+                  <TimeMachineSimulator handoff={decisionHandoff} saved={tmSims} onSave={(runs:any[])=>{setTmSims(runs);try{sv("oiq-tm-sims",runs);}catch{}}} onSendToAutopilot={addCockpitActions}/>
                   <p style={{fontSize:10,color:"#5A6480",marginBottom:10}}>Two parallel 12-month futures · {co.location||"Set location"} · {cur.code} · 60s timeout</p>
                   {tmShowHistory&&(
                     <div style={{marginBottom:10,background:"#0c1120",border:"1px solid #1a2030",borderRadius:8,padding:"10px 12px"}}>
@@ -9480,6 +9490,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                     <div style={{fontSize:13,fontWeight:800,color:"var(--oiq-ink)"}}>Decision Autopilot</div>
                     {apSessions.length>0&&<button onClick={()=>setApShowHistory(s=>!s)} style={{...S.hBtn,...(apShowHistory?{color:"#F59E0B",borderColor:"#F59E0B44"}:{})}}>{apShowHistory?"✕ Hide":"🕘 History ("+apSessions.length+")"}</button>}
                   </div>
+                  <OperatingPlanner handoff={decisionHandoff} onAddActions={addCockpitActions} onSave={(r:any)=>{const n=[...apPlans,r].slice(-10);setApPlans(n);try{sv("oiq-autopilot-plans",n);}catch{}}}/>
                   {apShowHistory&&(
                     <div style={{marginBottom:10,background:"var(--oiq-surface2)",border:"1px solid var(--oiq-border)",borderRadius:8,padding:"10px 12px"}}>
                       <div style={{fontSize:9,fontWeight:700,color:"var(--oiq-muted)",textTransform:"uppercase",letterSpacing:0.8,marginBottom:8}}>Saved Scans</div>
