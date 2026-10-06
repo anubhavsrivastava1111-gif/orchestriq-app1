@@ -939,6 +939,7 @@ function actionBtn(tok: typeof T.light, accent = false, color?: string): React.C
 interface BoardroomViewProps {
   exportVerbatimPDF?: (title: string, markdown: string) => Promise<void> | void;
   researchPriorityGaps?: (stageIndex: number) => void;
+  ledgerEntries?: any[]; customAccounts?: any[];
   saveCockpit?: (patch: any, handoff?: any) => void; addCockpitActions?: (texts: string[], label: string, notes?: string[]) => void; openInTimeMachine?: (text: string) => void;
   brFreshResearch?: boolean; setBrFreshResearch?: (v: boolean) => void;
   // Data
@@ -979,7 +980,7 @@ interface BoardroomViewProps {
 export default function BoardroomView(props: BoardroomViewProps) {
   const {
     brQ, setBrQ, brAg, setBrAg, brCur, brRun, brPh, exportVerbatimPDF, researchPriorityGaps, brFreshResearch, setBrFreshResearch,
-    saveCockpit, addCockpitActions, openInTimeMachine,
+    saveCockpit, addCockpitActions, openInTimeMachine, ledgerEntries, customAccounts,
     brSessions, setBrSessions, brShowHistory, setBrShowHistory,
     brFollowUp, setBrFollowUp, drillRole, setDrillRole,
     drillQ, setDrillQ, drillRun, brEnd,
@@ -1151,7 +1152,7 @@ export default function BoardroomView(props: BoardroomViewProps) {
             {stage.synthesis && (
               <DecisionCockpitView cur={brCur} si={si} analysis={cachedAnalysis(brCur, si, co?.location || "")} tok={tok}
                 saveCockpit={saveCockpit} addCockpitActions={addCockpitActions} openInTimeMachine={openInTimeMachine} showToast={showToast}
-                quickExport={quickExport} exportVerbatimPDF={exportVerbatimPDF} dlFile={dlFile} cp={cp} company={co?.name || ""} location={co?.location || ""}
+                quickExport={quickExport} exportVerbatimPDF={exportVerbatimPDF} dlFile={dlFile} cp={cp} company={co?.name || ""} location={co?.location || ""} ledgerEntries={ledgerEntries} customAccounts={customAccounts}
                 onShowDebate={() => { setDebateOpen({ ...debateOpen, [si]: true }); setTimeout(() => { try { document.getElementById("debate-" + si)?.scrollIntoView({ behavior: "smooth" }); } catch {} }, 50); }} />
             )}
             {/* KPI strip + synthesis (renders the board's declared figures) */}
