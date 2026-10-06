@@ -14,16 +14,17 @@ export type Label = "Retrieved Evidence" | "User Input" | "Assumption" | "Calcul
 export interface Val { value: number; label: Label; source: string; }
 export type Inputs = Partial<Record<InputKey, Val>>;
 export type InputKey = "revenue" | "price" | "volume" | "dayRate" | "billableDays" | "headcount" | "utilisation" | "contributionMargin"
-  | "variableCostPct" | "fixedCost" | "capex" | "funding" | "dso" | "cac" | "interestRate" | "debt";
+  | "variableCostPct" | "fixedCost" | "capex" | "funding" | "dso" | "cac" | "interestRate" | "debt" | "revenueFull" | "loanTenure" | "equity";
 const REG_KEY: Record<string, InputKey> = { revenue: "revenue", price: "price", volume: "volume", dayRate: "dayRate", billableDays: "billableDays",
   headcount: "headcount", utilisation: "utilisation", contributionMargin: "contributionMargin", variableCostPct: "variableCostPct", fixedCost: "fixedCost",
-  capex: "capex", funding: "funding", dso: "dso", cac: "cac", interestRate: "interestRate", debt: "debt" };
+  capex: "capex", funding: "funding", dso: "dso", cac: "cac", interestRate: "interestRate", debt: "debt", revenueFull: "revenueFull", loanTenure: "loanTenure", equity: "equity" };
 export const INPUT_LABEL: Record<InputKey, { label: string; unit: "INR" | "PCT" | "DAYS" | "COUNT" }> = {
   revenue: { label: "Monthly revenue", unit: "INR" }, price: { label: "Price per unit", unit: "INR" }, volume: { label: "Volume per month", unit: "COUNT" },
   dayRate: { label: "Day rate", unit: "INR" }, billableDays: { label: "Billable days / month", unit: "DAYS" }, headcount: { label: "Billable headcount", unit: "COUNT" },
   utilisation: { label: "Utilisation", unit: "PCT" }, contributionMargin: { label: "Contribution margin", unit: "PCT" }, variableCostPct: { label: "Variable cost (% of revenue)", unit: "PCT" },
   fixedCost: { label: "Monthly fixed cost", unit: "INR" }, capex: { label: "Capital expenditure", unit: "INR" }, funding: { label: "Funding available", unit: "INR" },
   dso: { label: "Days sales outstanding", unit: "DAYS" }, cac: { label: "Customer acquisition cost", unit: "INR" }, interestRate: { label: "Interest rate", unit: "PCT" }, debt: { label: "Debt", unit: "INR" },
+  revenueFull: { label: "Monthly revenue at full capacity", unit: "INR" }, loanTenure: { label: "Loan tenure (months)", unit: "COUNT" }, equity: { label: "Equity", unit: "INR" },
 };
 export function fmt(v: number | null | undefined, unit: string): string {
   if (v === null || v === undefined || !isFinite(v)) return "\u2014";
@@ -49,6 +50,7 @@ export function inputsFromRegistry(reg: ModelRegistry): Inputs {
 
 // ── FINANCIAL MODEL (monthly) ───────────────────────────────────────────────
 export interface Outputs {
+  ebitda: number | null; interestCoverage: number | null; debtService: number; dscr: number | null; cashFlow: number | null;
   revenue: number | null; contribution: number | null; contributionMarginPct: number | null; fixedCost: number | null; interestCost: number;
   profit: number | null; breakEven: number | null; marginOfSafety: number | null; workingCapital: number | null; cashStart: number | null;
   runwayMonths: number | null; paybackMonths: number | null; missing: string[]; basis: string[];
@@ -59,6 +61,7 @@ export function compute(inp: Inputs): Outputs {
   let revenue: number | null = null;
   if (v("price") !== null && v("volume") !== null) { revenue = v("price")! * v("volume")!; basis.push("revenue = price \u00d7 volume [Calculation]"); }
   else if (v("dayRate") !== null && v("billableDays") !== null && v("headcount") !== null && v("utilisation") !== null) { revenue = v("dayRate")! * v("billableDays")! * v("headcount")! * v("utilisation")! / 100; basis.push("revenue = day rate \u00d7 billable days \u00d7 headcount \u00d7 utilisation [Calculation]"); }
+  else if (v("revenueFull") !== null && v("utilisation") !== null) { revenue = v("revenueFull")! * v("utilisation")! / 100; basis.push("revenue = revenue at full capacity \u00d7 occupancy [Calculation]"); }
   else if (v("revenue") !== null) { revenue = v("revenue")!; basis.push("revenue from the canonical model"); }
   else missing.push("revenue (or price \u00d7 volume, or day rate \u00d7 days \u00d7 headcount \u00d7 utilisation)");
   let cm: number | null = v("contributionMargin") !== null ? v("contributionMargin")! / 100 : v("variableCostPct") !== null ? 1 - v("variableCostPct")! / 100 : null;
@@ -67,14 +70,23 @@ export function compute(inp: Inputs): Outputs {
   const interestCost = v("debt") !== null && v("interestRate") !== null ? v("debt")! * v("interestRate")! / 100 / 12 : 0;
   if (interestCost) basis.push("interest = debt \u00d7 rate / 12 [Calculation]");
   const contribution = revenue !== null && cm !== null ? revenue * cm : null;
-  const profit = contribution !== null && fixed !== null ? contribution - fixed - interestCost : null;
+  const ebitda = contribution !== null && fixed !== null ? contribution - fixed : null;
+  const profit = ebitda !== null ? ebitda - interestCost : null;
+  // Debt service: interest always (when debt + rate known); principal ONLY when a loan
+  // tenure is known - a repayment schedule is never invented.
+  const principal = v("debt") !== null && v("loanTenure") !== null && v("loanTenure")! > 0 ? v("debt")! / v("loanTenure")! : 0;
+  const debtService = interestCost + principal;
+  const interestCoverage = ebitda !== null && interestCost > 0 ? ebitda / interestCost : null;
+  const dscr = ebitda !== null && principal > 0 ? ebitda / debtService : null;
+  if (principal) basis.push("principal = debt / tenure; DSCR = EBITDA / (interest + principal) [Calculation]");
+  const cashFlow = ebitda !== null ? ebitda - debtService : null;
   const breakEven = fixed !== null && cm !== null && cm > 0 ? (fixed + interestCost) / cm : null;
   const marginOfSafety = revenue !== null && breakEven !== null && breakEven > 0 ? (revenue - breakEven) / breakEven : null;
   const workingCapital = revenue !== null && v("dso") !== null ? revenue * v("dso")! / 30 : null;   // receivables tied up
   const cashStart = v("funding") !== null ? v("funding")! - (v("capex") || 0) - (workingCapital || 0) : null;
-  const runwayMonths = cashStart === null || profit === null ? null : profit >= 0 ? Infinity : cashStart <= 0 ? 0 : cashStart / -profit;
+  const runwayMonths = cashStart === null || cashFlow === null ? null : cashFlow >= 0 ? Infinity : cashStart <= 0 ? 0 : cashStart / -cashFlow;
   const paybackMonths = v("capex") !== null && profit !== null && profit > 0 ? v("capex")! / profit : null;
-  return { revenue, contribution, contributionMarginPct: cm === null ? null : cm * 100, fixedCost: fixed, interestCost, profit, breakEven, marginOfSafety,
+  return { ebitda, interestCoverage, debtService, dscr, cashFlow, revenue, contribution, contributionMarginPct: cm === null ? null : cm * 100, fixedCost: fixed, interestCost, profit, breakEven, marginOfSafety,
     workingCapital, cashStart, runwayMonths, paybackMonths, missing, basis };
 }
 
@@ -84,15 +96,33 @@ export const DECISION_RULES = {
   doNotProceedBelowBreakEvenRatio: 0.6,   // revenue below 60% of break-even
   minimumRunwayMonths: 6,                 // loss-making with under 6 months of cash
   proceedMarginOfSafety: 0.2,             // 20% headroom above break-even for an unconditional PROCEED
+  minDSCR: 1.25,                          // common lender minimum: cash from operations / debt service
+  minInterestCoverage: 1.5,               // used when tenure is unknown: operating cash / interest
 };
 export const DECISION_RANK: Record<Decision, number> = { "DO NOT PROCEED": 0, "WAIT": 1, "PROCEED WITH CONDITIONS": 2, "PROCEED": 3, "INSUFFICIENT EVIDENCE": -1 };
+// EVERY failing condition, in plain language (the decision itself still comes from
+// decideModel's ordered rules). Used for "Why" so a funding gap never hides a loss.
+export function diagnose(o: Outputs): { issue: string; severity: "blocking" | "serious" | "watch" }[] {
+  const r = DECISION_RULES; const out: { issue: string; severity: "blocking" | "serious" | "watch" }[] = [];
+  if (o.revenue === null || o.breakEven === null) return [{ issue: "The economics cannot be calculated yet (missing: " + o.missing.join("; ") + ").", severity: "blocking" }];
+  if (o.cashStart !== null && o.cashStart < 0) out.push({ issue: "The money available does not cover the project plus the cash tied up in unpaid customer bills (short by " + fmt(-o.cashStart, "INR") + ").", severity: "blocking" });
+  if (o.revenue < o.breakEven) out.push({ issue: "Expected revenue (" + fmt(o.revenue, "INR") + "/month) is below the level needed to cover all costs (" + fmt(o.breakEven, "INR") + "/month), so the business would lose money each month.", severity: o.revenue < r.doNotProceedBelowBreakEvenRatio * o.breakEven ? "blocking" : "serious" });
+  if (o.dscr !== null && o.dscr < r.minDSCR) out.push({ issue: "Operating cash covers the loan payments only " + o.dscr.toFixed(2) + "\u00d7; lenders usually want at least " + r.minDSCR + "\u00d7.", severity: o.dscr < 1 ? "blocking" : "serious" });
+  else if (o.dscr === null && o.interestCoverage !== null && o.interestCoverage < r.minInterestCoverage) out.push({ issue: "Operating cash covers the loan interest only " + o.interestCoverage.toFixed(2) + "\u00d7" + (o.interestCoverage < 1 ? " \u2014 not enough to pay the interest at all" : "") + ".", severity: o.interestCoverage < 1 ? "blocking" : "serious" });
+  if (o.runwayMonths !== null && isFinite(o.runwayMonths) && o.runwayMonths > 0 && o.runwayMonths < r.minimumRunwayMonths && (o.cashFlow ?? o.profit ?? 0) < 0) out.push({ issue: "At this rate the cash lasts about " + fmt(o.runwayMonths, "MONTHS") + ".", severity: "serious" });
+  if (o.revenue >= o.breakEven && (o.marginOfSafety || 0) < r.proceedMarginOfSafety) out.push({ issue: "Revenue is only " + Math.round((o.marginOfSafety || 0) * 100) + "% above break-even, so a small shortfall would turn it into a loss.", severity: "watch" });
+  return out;
+}
 export function decideModel(o: Outputs, openCriticalGates = 0): { decision: Decision; reasons: string[] } {
   const r = DECISION_RULES; const reasons: string[] = [];
   if (o.revenue === null || o.breakEven === null) return { decision: "INSUFFICIENT EVIDENCE", reasons: ["The model is missing: " + o.missing.join("; ") + "."] };
   if (o.cashStart !== null && o.cashStart < 0) return { decision: "DO NOT PROCEED", reasons: ["Funding does not cover capital expenditure plus working capital (short by " + fmt(-o.cashStart, "INR") + ") [Calculation]."] };
   if (o.revenue < r.doNotProceedBelowBreakEvenRatio * o.breakEven) return { decision: "DO NOT PROCEED", reasons: ["Revenue " + fmt(o.revenue, "INR") + " is below " + r.doNotProceedBelowBreakEvenRatio * 100 + "% of break-even " + fmt(o.breakEven, "INR") + " [Calculation]."] };
   if (o.revenue < o.breakEven) return { decision: "WAIT", reasons: ["Revenue " + fmt(o.revenue, "INR") + " is below break-even " + fmt(o.breakEven, "INR") + " [Calculation]."] };
-  if (o.runwayMonths !== null && o.runwayMonths < r.minimumRunwayMonths && (o.profit || 0) < 0) return { decision: "WAIT", reasons: ["Cash runway is " + fmt(o.runwayMonths, "MONTHS") + " (< " + r.minimumRunwayMonths + ") [Calculation]."] };
+  if (o.runwayMonths !== null && o.runwayMonths < r.minimumRunwayMonths && (o.cashFlow ?? o.profit ?? 0) < 0) return { decision: "WAIT", reasons: ["Cash runway is " + fmt(o.runwayMonths, "MONTHS") + " (< " + r.minimumRunwayMonths + ") [Calculation]."] };
+  // DEBT SAFETY: operating cash must cover debt payments with a margin.
+  if (o.dscr !== null && o.dscr < r.minDSCR) return { decision: "WAIT", reasons: ["Operating cash covers loan payments only " + o.dscr.toFixed(2) + "\u00d7 (lenders usually need \u2265 " + r.minDSCR + "\u00d7) [Calculation]."] };
+  if (o.dscr === null && o.interestCoverage !== null && o.interestCoverage < r.minInterestCoverage) return { decision: "WAIT", reasons: ["Operating cash covers the loan interest only " + o.interestCoverage.toFixed(2) + "\u00d7 (\u2265 " + r.minInterestCoverage + "\u00d7 needed for comfort) [Calculation]."] };
   if ((o.marginOfSafety || 0) < r.proceedMarginOfSafety) reasons.push("Only " + Math.round((o.marginOfSafety || 0) * 100) + "% headroom above break-even (< " + r.proceedMarginOfSafety * 100 + "%) [Calculation].");
   if (openCriticalGates > 0) reasons.push(openCriticalGates + " decision gate(s) still open.");
   if (reasons.length) return { decision: "PROCEED WITH CONDITIONS", reasons };
@@ -101,7 +131,7 @@ export function decideModel(o: Outputs, openCriticalGates = 0): { decision: Deci
 
 // ── SENSITIVITY: does changing a variable change the decision? ──────────────
 export interface Sensitivity { variable: InputKey; label: string; unit: string; base: number; table: { value: number; decision: Decision }[]; thresholds: { value: number; from: Decision; to: Decision; statement: string }[]; note: string; }
-const SWEEPABLE: InputKey[] = ["utilisation", "volume", "price", "dayRate", "contributionMargin", "variableCostPct", "fixedCost", "capex", "funding", "dso", "headcount", "billableDays", "revenue"];
+const SWEEPABLE: InputKey[] = ["utilisation", "volume", "price", "dayRate", "revenueFull", "contributionMargin", "variableCostPct", "fixedCost", "capex", "funding", "debt", "interestRate", "dso", "headcount", "billableDays", "revenue"];
 function gridFor(k: InputKey, base: number): number[] {
   if (INPUT_LABEL[k].unit === "PCT" && k !== "interestRate") return [20, 30, 40, 50, 60, 70, 80, 90].filter((x, i, a) => a.indexOf(x) === i);
   return [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.5].map((f) => base * f);
@@ -179,10 +209,10 @@ export function applyChallenges(inp: Inputs, challenges: Challenge[]): { inputs:
     const has = (k: InputKey) => !!out[k];
     switch (c.variable) {
       case "demand":
-        if (has("volume")) set("volume", pct("volume"), c); else if (has("utilisation")) set("utilisation", Math.max(0, Math.min(100, pct("utilisation"))), c);
+        if (has("volume")) set("volume", pct("volume"), c); else if (has("utilisation") && (has("revenueFull") || has("dayRate"))) set("utilisation", Math.max(0, Math.min(100, pct("utilisation"))), c);
         else if (has("revenue")) set("revenue", pct("revenue"), c); else notApplied.push({ ...c, note: "No volume, utilisation or revenue in the model to apply demand to.", affectedComponents: COMPONENTS.demand }); break;
       case "price":
-        if (has("price")) set("price", pct("price"), c); else if (has("dayRate")) set("dayRate", pct("dayRate"), c);
+        if (has("price")) set("price", pct("price"), c); else if (has("dayRate")) set("dayRate", pct("dayRate"), c); else if (has("revenueFull")) set("revenueFull", pct("revenueFull"), c);
         else if (has("revenue")) set("revenue", pct("revenue"), c); else notApplied.push({ ...c, note: "No price, day rate or revenue in the model.", affectedComponents: COMPONENTS.price }); break;
       case "variableCost": {
         const vc = has("variableCostPct") ? out.variableCostPct!.value : has("contributionMargin") ? 100 - out.contributionMargin!.value : null;
@@ -399,7 +429,7 @@ export function buildDecisionMap(p: { analysis: any; inputs: Inputs; intel?: any
     current: fmt(p.inputs.funding?.value ?? null, "INR"), evidence: labelsOf(p.inputs, ["funding", "capex", "dso"]), owner: "CFO / You", ifPass: "Plan is fundable", ifFail: "DO NOT PROCEED unless funding rises or capex falls" });
   for (const u of openUQ.slice(0, 3)) gates.push({ name: "Your answer: " + u.question, status: "OPEN", threshold: "answered by you", current: "unanswered", evidence: "[User Input] required", owner: "You", ifPass: "Executives reason from your answer", ifFail: "Decision stays conditional" });
   for (const g of hiGaps.slice(0, 3)) gates.push({ name: "Evidence: " + g.question.replace(/\[evidence gap\]\s*/i, ""), status: "OPEN", threshold: "sourced evidence found", current: g.current_status.replace(/_/g, " "), evidence: "missing", owner: "Research Desk", ifPass: "Assumption replaced by evidence", ifFail: "Risk remains unquantified" });
-  for (const c of material.slice(0, 2)) gates.push({ name: "Resolve " + c.variable + " conflict (" + c.executiveA + " vs " + c.executiveB + ")", status: "OPEN", threshold: "one agreed value", current: "conflicting", evidence: c.type, owner: "Chairman", ifPass: "One canonical figure", ifFail: "Decision uses a range, not a value" });
+  for (const c of material.filter((x: any, i: number, arr: any[]) => arr.findIndex((y: any) => y.variable === x.variable) === i).slice(0, 2)) gates.push({ name: "Resolve " + c.variable + " conflict (" + c.executiveA + " vs " + c.executiveB + ")", status: "OPEN", threshold: "one agreed value", current: "conflicting", evidence: c.type, owner: "Chairman", ifPass: "One canonical figure", ifFail: "Decision uses a range, not a value" });
   const nextActions = [
     ...openUQ.slice(0, 2).map((u: any) => "Answer " + u.id + ": " + u.question),
     ...hiGaps.slice(0, 2).map((g: any) => "Close evidence gap " + g.id + ": " + g.question.replace(/\[evidence gap\]\s*/i, "")),
