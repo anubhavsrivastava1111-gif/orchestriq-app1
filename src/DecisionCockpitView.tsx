@@ -4,16 +4,179 @@ import {
   quickWhatIfs, applyChallengesFromScenario, fmt, INPUT_LABEL, SCENARIO_PRESETS, HORIZONS, DECISION_RULES,
   type ScenarioState, type Challenge, type InputKey, type DecisionResponse,
 } from "./lib/DecisionCockpit";
+import { cockpitContext, businessReportMarkdown, deckMarkdown, buildExcelModel, auditMarkdown, type CockpitContext } from "./lib/DecisionExports";
+import { GLOSSARY, stripIds } from "./lib/DecisionExperience";
 
 // DECISION COCKPIT - the first thing a founder sees after a Boardroom run.
 // Everything here is CALCULATED from the canonical model (no AI call). Simulations
 // are labelled SIMULATION RESULT and never replace evidence.
 const DTONE: Record<string, string> = { "PROCEED": "success", "PROCEED WITH CONDITIONS": "warn", "WAIT": "warn", "DO NOT PROCEED": "danger", "INSUFFICIENT EVIDENCE": "muted" };
 
-export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpit, addCockpitActions, openInTimeMachine, showToast }: any) {
+// ── TWO-LAYER DECISION EXPERIENCE ────────────────────────────────────────────
+// Layer 1 = plain-language answer. Layer 2 (on demand, or Advanced mode) =
+// definitions, formulas, sources and internal references. Same data either way.
+export function Explain({ k, tok, extra }: { k?: string; tok: any; extra?: { meaning?: string; source?: string; how?: string } }) {
+  const [open, setOpen] = useState(false);
+  const g: any = (k && (GLOSSARY as any)[k]) || null;
+  if (!g && !extra) return null;
+  return (
+    <span style={{ position: "relative", display: "inline-block" }}>
+      <button aria-label="What does this mean?" onClick={() => setOpen(!open)} style={{ marginLeft: 5, width: 17, height: 17, borderRadius: 9, border: `1px solid ${tok.border}`,
+        background: open ? tok.accent : tok.surface2, color: open ? "#fff" : tok.text3, fontSize: 10, fontWeight: 800, cursor: "pointer", lineHeight: "15px", padding: 0 }}>?</button>
+      {open && (
+        <span style={{ display: "block", position: "absolute", zIndex: 30, top: 22, left: 0, width: "min(320px, 80vw)", padding: "10px 12px", borderRadius: 8, border: `1px solid ${tok.border}`,
+          background: tok.surface, boxShadow: tok.shadow, fontSize: 12, lineHeight: 1.5, color: tok.text2, textAlign: "left", fontWeight: 400, whiteSpace: "normal" }}>
+          {g && <><b style={{ color: tok.text }}>{g.term}</b><br /><b>What is it?</b> {g.what}<br /><b>Why it matters:</b> {g.why}<br /><b>How it is calculated:</b> {extra?.how || g.how}<br /></>}
+          {extra?.meaning && <><b>What the current number means:</b> {extra.meaning}<br /></>}
+          {g && <><b>What would improve it:</b> {g.better}<br /></>}
+          {extra?.source && <><b>Where it comes from:</b> {extra.source}</>}
+        </span>)}
+    </span>);
+}
+const DCOLOR: Record<string, string> = { "PROCEED": "success", "CONDITIONAL PROCEED": "warn", "WAIT": "warn", "REWORK": "warn", "STOP": "danger", "INSUFFICIENT EVIDENCE": "muted" };
+export function DecisionLayer({ ctx, tok, advanced, saveCockpit, addCockpitActions, onShowDebate, onRunScenarios }: any) {
+  const [showAllGaps, setShowAllGaps] = useState(false); const [openAction, setOpenAction] = useState<number | null>(null);
+  const c: CockpitContext = ctx; const col = (tok as any)[DCOLOR[c.display] || "muted"] || tok.text2; const colBg = (tok as any)[(DCOLOR[c.display] || "muted") + "Bg"] || tok.surface2;
+  const box = (id: string, title: string, body: any, right?: any) => (
+    <section id={id} style={{ borderRadius: 10, border: `1px solid ${tok.border}`, background: tok.surface, padding: "12px 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 10.5, fontWeight: 800, color: tok.text3, letterSpacing: ".1em", textTransform: "uppercase" }}>{title}</div><div style={{ marginLeft: "auto" }}>{right}</div></div>{body}</section>);
+  const plainList = (xs: string[]) => <ul style={{ margin: 0, paddingLeft: 17, fontSize: 13, lineHeight: 1.6, color: tok.text2 }}>{xs.map((x, i) => <li key={i}>{x}</li>)}</ul>;
+  const tidy = (s: string) => (advanced ? s : stripIds(s));
+  const why = (c.issues.length ? c.issues.map((x) => x.issue) : c.map.why.map(tidy)).slice(0, 5);
+  const know = [
+    ...c.analysis.userInputs.filter((u) => !u.ambiguous && u.sourceType === "user").slice(0, 4).map((u) => "You told us: " + u.label.toLowerCase() + " " + fmt(u.value, u.unit) + "."),
+    ...c.analysis.claims.filter((x) => x.support === "SUPPORTED").slice(0, 2).map((x) => "Confirmed by research: " + stripIds(x.text).replace(/\[[^\]]*\]\s*/g, "")),
+  ].slice(0, 5);
+  const btn = (label: string, onClick: () => void, primary = false) => (
+    <button onClick={onClick} style={{ padding: "6px 11px", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1px solid ${primary ? tok.accent : tok.border}`,
+      background: primary ? tok.accent : tok.surface, color: primary ? "#fff" : tok.text2 }}>{label}</button>);
+  const journey = [["dj-know", "What we know"], ["dj-matters", "What matters most"], ["dj-unknown", "What is uncertain"], ["dj-exec", "Executives"], ["dj-decision", "Decision"], ["dj-change", "What would change it"], ["dj-actions", "Next actions"], ["dj-scenarios", "Time Machine"], ["dj-autopilot", "Autopilot"]];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* DECISION JOURNEY - conceptual navigation */}
+      <nav aria-label="Decision journey" style={{ display: "flex", gap: 4, flexWrap: "wrap", fontSize: 11, color: tok.muted }}>
+        {journey.map(([id, l], i) => <span key={id}><a href={"#" + id} style={{ color: tok.text3, textDecoration: "none" }}>{l}</a>{i < journey.length - 1 ? " \u2192 " : ""}</span>)}</nav>
+      {/* A. DECISION HEADER */}
+      <section id="dj-decision" style={{ borderRadius: 12, border: `1px solid ${tok.border}`, background: tok.surface, boxShadow: tok.shadow, padding: "16px 18px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10.5, fontWeight: 800, color: tok.text3, letterSpacing: ".12em" }}>DECISION</span>
+          <span style={{ fontSize: 18, fontWeight: 800, padding: "3px 11px", borderRadius: 6, background: colBg, color: col }}>{c.display}</span>
+          <Explain tok={tok} extra={{ meaning: c.meaning }} />
+          <span style={{ fontSize: 12.5, color: tok.text3 }}>Confidence: <b style={{ color: tok.text }}>{c.confidence.level}</b></span>
+          <Explain k="confidence" tok={tok} extra={{ meaning: c.confidence.why + " What would increase it: " + c.confidence.increase + " What would reduce it: " + c.confidence.decrease }} />
+        </div>
+        <div style={{ fontSize: 15, color: tok.text, marginTop: 10, lineHeight: 1.55 }}>{c.oneSentence}</div>
+        {c.map.simulationNotes.map((n, i) => <div key={i} style={{ fontSize: 11.5, color: tok.warn, marginTop: 4 }}>{n}</div>)}
+        {!c.validation.ok && (
+          <div role="alert" style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: tok.warnBg, color: tok.warn, fontSize: 12.5 }}>
+            <b>MODEL VALIDATION REQUIRED</b> — treat this answer as provisional: {c.validation.checks.filter((x) => !x.pass).map((x) => x.name.charAt(0).toLowerCase() + x.name.slice(1) + (x.detail && advanced ? " (" + x.detail + ")" : "")).join("; ")}.</div>)}
+        {c.provisional && c.readings.length > 1 && (
+          <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, border: `1px solid ${tok.warn}`, background: tok.surface2, fontSize: 12.5, color: tok.text2 }}>
+            <b style={{ color: tok.text }}>INPUT AMBIGUITY — please confirm</b><br />{c.analysis.ambiguities[0]?.question}
+            <div style={{ overflowX: "auto", marginTop: 6 }}><table style={{ borderCollapse: "collapse", fontSize: 12 }}><tbody>
+              {c.readings.map((r) => <tr key={r.key}><td style={{ padding: "3px 8px 3px 0" }}><b>{r.key}</b> {r.label}</td><td style={{ padding: "3px 8px" }}>revenue {fmt(r.outputs.revenue, "INR")}/month</td>
+                <td style={{ padding: "3px 8px" }}>profit {fmt(r.outputs.profit, "INR")}/month</td><td style={{ padding: "3px 8px", fontWeight: 700 }}>{(c.readingDecisions.find((x) => x.key === r.key) || { display: "" }).display}</td>
+                <td style={{ padding: "3px 0" }}>{saveCockpit && btn("Use " + r.key, () => saveCockpit({ inputChoices: { revenueBasis: r.key } }))}</td></tr>)}</tbody></table></div>
+          </div>)}
+      </section>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 12 }}>
+        {/* B. WHY */}
+        {box("dj-why", "Why", plainList(why))}
+        {/* C. WHAT MATTERS MOST */}
+        {box("dj-matters", "What matters most", (<>
+          {c.keyNumber && <div style={{ fontSize: 14, fontWeight: 700, color: tok.text, marginBottom: 8 }}>{c.keyNumber}</div>}
+          {c.numbers.slice(0, advanced ? 8 : 4).map((n, i) => (
+            <div key={i} style={{ fontSize: 12.5, color: tok.text2, padding: "5px 0", borderTop: i ? `1px solid ${tok.border}` : "none" }}>
+              <b style={{ color: tok.text }}>{n.label}: {n.value}</b><Explain k={n.explain} tok={tok} extra={{ meaning: n.meaning + " " + n.comparison, source: n.kind }} />
+              <div>{n.impact}</div></div>))}
+        </>))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 12 }}>
+        {/* D. WHAT WE KNOW / DON'T KNOW */}
+        {box("dj-know", "What we know", plainList(know.length ? know : ["Nothing has been independently confirmed yet."]), <Explain k="confirmed" tok={tok} />)}
+        {box("dj-unknown", "What we don't know yet", (<>
+          {c.unknowns.slice(0, showAllGaps ? 20 : 3).map((u, i) => (
+            <div key={i} style={{ fontSize: 12.5, color: tok.text2, padding: "5px 0", borderTop: i ? `1px solid ${tok.border}` : "none" }}>
+              <b style={{ color: tok.text }}>{tidy(u.missing)}</b><div>Why it matters: {u.whyMatters}</div><div>How to verify: {tidy(u.howToVerify)}</div>
+              {advanced && u.technicalRef && <div style={{ color: tok.muted, fontSize: 11 }}>Internal reference: {u.technicalRef}</div>}</div>))}
+          {(c.unknowns.length > 3 || (c.analysis as any).contradictions) && btn(showAllGaps ? "Show fewer" : "Show all evidence gaps", () => setShowAllGaps(!showAllGaps))}
+        </>), <Explain k="missing" tok={tok} />)}
+      </div>
+      {/* E. WHAT SHOULD I DO NOW? */}
+      {box("dj-actions", "What should I do now?", (<>
+        <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: tok.text }}>
+          {c.actions.slice(0, 5).map((a, i) => (
+            <li key={i} style={{ marginBottom: 4 }}>{a.action} <span style={{ color: tok.muted }}>— {a.owner}, {a.deadline}</span>{" "}
+              <button onClick={() => setOpenAction(openAction === i ? null : i)} style={{ border: "none", background: "none", color: tok.accent, cursor: "pointer", fontSize: 12 }}>{openAction === i ? "less" : "details"}</button>
+              {(openAction === i || advanced) && <div style={{ fontSize: 12, color: tok.text2 }}>Why: {a.why} · Success: {a.success} · If it fails: {a.fail} · Escalate: {a.escalation}</div>}</li>))}
+        </ol>
+        <div style={{ marginTop: 8, fontSize: 12.5, color: tok.text2, lineHeight: 1.6 }}>
+          <b style={{ color: tok.text }}>Decision path</b>
+          {[["NOW", c.actions[0]?.action || "Review the gates below"], ["THEN", c.actions[1]?.action || "Run a downside scenario"],
+            ...c.map.tree.filter((t) => /^IF |TRIGGER/.test(t.step)).map((t) => [t.step, tidy(t.text)])].map(([k, v], i) => <div key={i}><b style={{ color: tok.text }}>{k}</b> → {v}</div>)}
+        </div>
+        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+          {addCockpitActions && btn("Send these actions to Autopilot / Action Tracker", () => addCockpitActions(c.actions.map((a) => a.action), "Decision Cockpit", c.actions.map((a) => "Owner: " + a.owner + " \u00b7 Deadline: " + a.deadline + " \u00b7 Success: " + a.success + " \u00b7 If it fails: " + a.fail + " \u00b7 Escalate: " + a.escalation)), true)}
+          {onRunScenarios && btn("Test this in Time Machine", onRunScenarios)}
+        </div>
+      </>))}
+      {/* WHAT WOULD CHANGE THE ANSWER */}
+      {box("dj-change", "What would change the answer", plainList(c.wouldChange))}
+      {/* F. DECISION GATES - educational */}
+      {box("dj-gates", "Decision gates", (<>
+        <div aria-label="Decision map" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, marginBottom: 10, fontSize: 11.5, color: tok.text2 }}>
+          <div style={{ color: tok.muted }}>CURRENT POSITION</div><div>↓</div>
+          <div style={{ fontWeight: 800, padding: "2px 10px", borderRadius: 6, background: colBg, color: col }}>{c.display}</div><div>↓</div>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "center" }}>
+            {c.gates.map((g, i) => <span key={i} style={{ padding: "2px 7px", borderRadius: 6, border: `1px solid ${g.gate.status === "PASS" ? tok.success : g.gate.status === "FAIL" ? tok.danger : tok.border}`,
+              color: g.gate.status === "PASS" ? tok.success : g.gate.status === "FAIL" ? tok.danger : tok.text2 }}>Gate {i + 1} · <b>{g.gate.status}</b></span>)}</div><div>↓</div>
+          <div>{c.display === "PROCEED" ? "SCALE" : c.display === "CONDITIONAL PROCEED" ? "PILOT" : "PROVE / REWORK"} → Time Machine → Autopilot → SCALE / STOP</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 8 }}>
+          {c.gates.map((g, i) => {
+            const gc = g.gate.status === "PASS" ? tok.success : g.gate.status === "FAIL" ? tok.danger : tok.warn;
+            return (<div key={i} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${tok.border}`, borderLeft: `3px solid ${gc}`, fontSize: 12.5, color: tok.text2 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 800, color: tok.muted }}>GATE {i + 1} · <span style={{ color: gc }}>{g.gate.status}</span></div>
+              <div style={{ fontWeight: 700, color: tok.text, margin: "2px 0 4px" }}>{tidy(g.plain.title)}{g.plain.explain && <Explain k={g.plain.explain} tok={tok} extra={{ how: g.gate.threshold.replace(" [Calculation]", "") }} />}</div>
+              <div>What we need: {tidy(g.plain.need)}</div>{g.plain.why && <div>Why: {g.plain.why}</div>}
+              <div>Now: {tidy(g.gate.current)}</div><div style={{ color: tok.muted }}>If it passes: {g.gate.ifPass}. If it fails: {g.gate.ifFail}.</div>
+              {advanced && <div style={{ color: tok.muted, fontSize: 11 }}>Threshold: {g.gate.threshold} · Owner: {g.gate.owner} · Evidence: {g.gate.evidence}</div>}</div>);
+          })}
+        </div></>))}
+      {/* H. EXECUTIVE VIEWS - plain; full analysis behind the debate toggle */}
+      {box("dj-exec", "What the executives think", (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 10 }}>
+          {c.executives.map((e, i) => (
+            <div key={i} style={{ fontSize: 12.5, color: tok.text2, padding: "8px 10px", borderRadius: 8, background: tok.surface2 }}>
+              <div style={{ fontWeight: 800, color: tok.text }}>{e.name}{e.status && e.status !== "COMPLETE" && e.status !== "CONTINUATION_COMPLETE" ? <span style={{ color: tok.warn, fontWeight: 600 }}> · {e.status.toLowerCase().replace(/_/g, " ")}</span> : null}</div>
+              <div style={{ margin: "3px 0" }}>{e.view.view || "No summary available."}</div>
+              {e.view.worried.length > 0 && <div><b>Worried about:</b>{plainList(e.view.worried)}</div>}
+              {e.view.wantsVerified.length > 0 && <div><b>Wants verified:</b>{plainList(e.view.wantsVerified)}</div>}
+              {e.view.impact && <div><b>Impact on your decision:</b> {e.view.impact}</div>}
+              {onShowDebate && <button onClick={onShowDebate} style={{ marginTop: 4, border: "none", background: "none", color: tok.accent, cursor: "pointer", fontSize: 12, padding: 0 }}>Read full {e.name} analysis →</button>}
+            </div>))}
+          {!c.executives.length && <div style={{ fontSize: 12.5, color: tok.muted }}>No usable executive contributions for this stage.</div>}
+        </div>))}
+      {/* ADVANCED: disagreements ledger + validation + canonical model */}
+      {advanced && box("dj-audit", "Audit layer", (<div style={{ fontSize: 12, color: tok.text2 }}>
+        <b>Material disagreements ({c.analysis.clusters.length}, from {c.analysis.contradictions.length} raw records)</b>
+        {plainList(c.analysis.clusters.map((x) => x.label + " [" + x.severity + ", " + x.status + "] " + x.parties.join(" vs ") + " \u2014 " + x.whyDisagree + " Resolved by: " + x.whatResolves + " (" + x.ids.join(", ") + ")"))}
+        <b>Validation checks</b>{plainList(c.validation.checks.map((x) => (x.pass ? "PASS " : "FAIL ") + x.name + (x.detail ? " \u2014 " + x.detail : "")))}
+        <b>Canonical inputs</b>{plainList(c.analysis.userInputs.map((u) => u.id + " " + u.label + " = " + fmt(u.value, u.unit) + " \u00b7 " + u.source + " \u00b7 " + u.interpretation))}
+        {c.analysis.modelConflicts.length > 0 && <><b>Model conflicts</b>{plainList(c.analysis.modelConflicts.map((m) => m.label + ": you said " + fmt(m.userValue, m.unit) + "; " + m.by + " said " + fmt(m.otherValue, m.unit) + " (your value kept)"))}</>}
+      </div>))}
+    </div>);
+}
+
+export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpit, addCockpitActions, openInTimeMachine, showToast, quickExport, exportVerbatimPDF, dlFile, cp, onShowDebate, company, location }: any) {
+  // ONE context for the whole cockpit and every export (same canonical numbers everywhere).
+  const ctx = useMemo(() => cockpitContext(cur, si, { location: location || "" }), [cur, si, location]);
+  const [advanced, setAdvanced] = useState(false);
+  const [exporting, setExporting] = useState("");
   const rs = cur?.researchState || {};
   const intel = rs.intelligence || {};
-  const inputs = useMemo(() => inputsFromRegistry(analysis?.registry || {}), [analysis]);
+  const inputs = useMemo(() => (ctx ? ctx.inputs : inputsFromRegistry(analysis?.registry || {})), [ctx, analysis]);
   const saved: ScenarioState[] = Array.isArray(rs.scenarios) ? rs.scenarios : [];
   const map = useMemo(() => buildDecisionMap({ analysis, inputs, intel, scenarios: saved }), [analysis, inputs, intel, saved]);
   const [horizon, setHorizon] = useState<number>(12);
@@ -60,6 +223,24 @@ export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpi
     const r = runScenario(inputs, type, challenges, { parentDecisionId: String(cur.sessionId || "") + ":stage-" + (si + 1), horizonMonths: horizon, openCriticalGates: openGates, name, overrides: ov });
     setActive(r); setDetail(false); persistRun(r, challenges.filter((c) => c.userEntered));
   };
+  // "Test this in Time Machine": run the main lever at its current value, at the level
+  // where the answer changes, and above it - then hand the set to Time Machine.
+  const runLadder = () => {
+    const runs: ScenarioState[] = []; const gates = openGates;
+    const mk = (name: string, ov: { variable: InputKey; to: number }[]) => runScenario(inputs, "custom", [], { parentDecisionId: String(cur.sessionId || "") + ":stage-" + (si + 1), horizonMonths: horizon, openCriticalGates: gates, name, overrides: ov });
+    const o = compute(inputs);
+    if (inputs.utilisation && (inputs.revenueFull || inputs.dayRate) && o.revenue && o.breakEven) {
+      const cur0 = inputs.utilisation.value, be = Math.min(100, Math.ceil(cur0 * o.breakEven / o.revenue));
+      for (const x of Array.from(new Set([cur0, be, Math.min(100, Math.max(be, cur0) + 10)]))) runs.push(mk("Occupancy " + x + "%", [{ variable: "utilisation", to: x }]));
+    } else if (ctx && ctx.driver && ctx.driver.required !== null) {
+      for (const x of [ctx.driver.current, ctx.driver.required, ctx.driver.required * 1.1]) runs.push(mk(ctx.driver.label + " " + fmt(x, ctx.driver.unit), [{ variable: ctx.driver.variable, to: x }]));
+    }
+    if (!runs.length) { showToast && showToast("There is no calculable lever to test yet \u2014 confirm the inputs first.", "warning"); return; }
+    setActive(runs[runs.length - 1]);
+    const scenarios = [...saved, ...runs].slice(-12);
+    saveCockpit && saveCockpit({ scenarios }, buildHandoff({ sessionId: cur.sessionId || "", question: cur.q || "", map, scenarios, response }));
+    openInTimeMachine && showToast && showToast("Scenarios saved. Use \u201cExplore in Time Machine\u201d to simulate the timeline for any of them.", "info");
+  };
   const parseAndRun = (text: string) => {
     const pc = parseChallenge(text);
     if (!pc.challenges.length) { showToast && showToast("Could not link that to a model variable. Try e.g. \u201cdemand falls 20%\u201d or \u201csevere water shortage\u201d.", "warning"); return; }
@@ -98,50 +279,20 @@ export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpi
 
   return (
     <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* 1-3: DECISION, CONFIDENCE, WHY */}
-      <div style={{ borderRadius: 12, border: `1px solid ${tok.border}`, background: tok.surface, boxShadow: tok.shadow, padding: "16px 18px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 10, fontWeight: 800, color: tok.text3, letterSpacing: ".12em" }}>DECISION</span>
-          <span style={{ fontSize: 17, fontWeight: 800, padding: "3px 10px", borderRadius: 6, background: toneBg(map.decision), color: tone(map.decision) }}>{map.decision}</span>
-          <span style={{ fontSize: 12, color: tok.text3 }}>Confidence: <b style={{ color: tok.text }}>{map.confidence}</b></span>
-          {map.modelDecision !== map.decision && map.modelDecision !== "INSUFFICIENT EVIDENCE" && <span style={{ fontSize: 11, color: tok.muted }}>(economics alone: {map.modelDecision})</span>}
-        </div>
-        <div style={{ fontSize: 14, color: tok.text, marginTop: 8, lineHeight: 1.5 }}>{map.oneSentence}</div>
-        {map.simulationNotes.map((n, i) => <div key={i} style={{ fontSize: 11.5, color: tok.warn, marginTop: 4 }}>{n}</div>)}
+      {/* STANDARD / ADVANCED - same data, different depth */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, color: tok.text3 }}>View:</span>
+        {(["Standard", "Advanced"] as const).map((m) => (
+          <button key={m} onClick={() => setAdvanced(m === "Advanced")} aria-pressed={advanced === (m === "Advanced")}
+            style={{ padding: "4px 10px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", border: `1px solid ${tok.border}`,
+              background: advanced === (m === "Advanced") ? tok.accent : tok.surface, color: advanced === (m === "Advanced") ? "#fff" : tok.text2 }}>{m}</button>))}
+        <span style={{ fontSize: 11.5, color: tok.muted }}>{advanced ? "Technical terms, internal references and the audit layer are shown." : "Plain language; technical detail is one click away."}</span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 12 }}>
-        {card("Why this decision", ul(map.why.length ? map.why : ["No calculable reason yet."]))}
-        {card("What matters most", ul(map.mattersMost.length ? map.mattersMost : ["Threshold cannot be calculated from current evidence."]))}
-        {card("Next 3 actions", <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.55, color: tok.text }}>{map.nextActions.map((a, i) => <li key={i}>{a}</li>)}</ol>,
-          addCockpitActions ? btn("Add to Action Tracker", () => addCockpitActions(map.nextActions, "Decision Cockpit \u2014 \u201c" + lastOf(cur.stages[si]).slice(0, 40) + "\u201d")) : null)}
-      </div>
-      {/* 6 + 20: DECISION GATES and the visual map generated from them */}
-      {card("Decision gates", (<>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, margin: "4px 0 12px", fontSize: 11.5 }}>
-          <div style={{ color: tok.muted }}>CURRENT POSITION</div><div>↓</div>
-          <div style={{ fontWeight: 800, padding: "3px 10px", borderRadius: 6, background: toneBg(map.decision), color: tone(map.decision) }}>{map.decision}</div><div>↓</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-            {map.gates.slice(0, 5).map((g, i) => (
-              <div key={i} title={g.name} style={{ padding: "4px 8px", borderRadius: 6, border: `1px solid ${g.status === "PASS" ? tok.success : g.status === "FAIL" ? tok.danger : tok.border}`,
-                color: g.status === "PASS" ? tok.success : g.status === "FAIL" ? tok.danger : tok.text2, maxWidth: 170, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {g.name.replace(/^Your answer: |^Evidence: /, "").slice(0, 28)} · <b>{g.status}</b></div>))}
-          </div><div>↓</div>
-          <div style={{ color: tok.text2 }}>{map.decision === "PROCEED" ? "SCALE" : "PILOT"} → Time Machine → Autopilot → SCALE / STOP</div>
-        </div>
-        <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
-          <thead><tr style={{ color: tok.text3, textAlign: "left" }}>{["Gate", "Status", "Threshold", "Current", "Evidence", "Owner", "If pass", "If fail"].map((h) => <th key={h} style={{ padding: "4px 6px", borderBottom: `1px solid ${tok.border}` }}>{h}</th>)}</tr></thead>
-          <tbody>{map.gates.map((g, i) => (<tr key={i} style={{ color: tok.text2 }}>
-            <td style={{ padding: "4px 6px" }}>{g.name}</td><td style={{ padding: "4px 6px", fontWeight: 700, color: g.status === "PASS" ? tok.success : g.status === "FAIL" ? tok.danger : tok.warn }}>{g.status}</td>
-            <td style={{ padding: "4px 6px" }}>{g.threshold}</td><td style={{ padding: "4px 6px" }}>{g.current}</td><td style={{ padding: "4px 6px" }}>{g.evidence}</td>
-            <td style={{ padding: "4px 6px" }}>{g.owner}</td><td style={{ padding: "4px 6px" }}>{g.ifPass}</td><td style={{ padding: "4px 6px" }}>{g.ifFail}</td></tr>))}</tbody>
-        </table></div></>))}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 12 }}>
-        {card("What would change the decision", ul(map.wouldChange))}
-        {card("What you must decide", ul(map.userMustDecide.length ? map.userMustDecide : ["Nothing outstanding that only you can answer."]))}
-        {card("What should I do now?", <div style={{ fontSize: 12.5, color: tok.text2, lineHeight: 1.6 }}>{map.tree.map((t, i) => <div key={i}><b style={{ color: tok.text }}>{t.step}</b> → {t.text}</div>)}</div>)}
-      </div>
-
+      {ctx ? <DecisionLayer ctx={ctx} tok={tok} advanced={advanced} saveCockpit={saveCockpit} addCockpitActions={addCockpitActions} onShowDebate={onShowDebate}
+        onRunScenarios={() => { runLadder(); try { document.getElementById("dj-scenarios")?.scrollIntoView({ behavior: "smooth" }); } catch {} }} />
+        : <div style={{ fontSize: 12.5, color: tok.muted }}>The decision layer could not be computed for this stage.</div>}
       {/* 8: SCENARIOS */}
+      <div id="dj-scenarios" />
       {card("Run a scenario (simulation \u2014 not a forecast)", (<>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {(Object.keys(SCENARIO_PRESETS) as ScenarioState["scenarioType"][]).map((k) => <span key={k}>{btn(SCENARIO_PRESETS[k].label, () => run(k))}</span>)}
@@ -220,6 +371,7 @@ export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpi
       </>))}
 
       {/* 9: ASK AUTOPILOT */}
+      <div id="dj-autopilot" />
       {card("Ask Autopilot \u2014 what would I do next?", (<>
         <div style={{ fontSize: 12, color: tok.text3, marginBottom: 8 }}>Uses the Boardroom decision{active ? " and the scenario \u201c" + active.name + "\u201d" : ""}. Advisory only — nothing is executed.</div>
         {btn(response ? "Refresh response" : "Ask Autopilot", askAutopilot, true)}
@@ -233,6 +385,28 @@ export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpi
           {(response.triggerStatus.stop || response.triggerStatus.escalate) && <div style={{ gridColumn: "1/-1", color: tok.danger, fontWeight: 700 }}>{response.triggerStatus.stop ? "STOP CONDITION MET. " : ""}{response.triggerStatus.escalate ? "ESCALATION CONDITION MET. " : ""}{response.triggerStatus.reasons.join(" ")}</div>}
         </div>)}
       </>))}
+      {/* J. EXPORTS - each format has a distinct purpose */}
+      {ctx && (
+        <section id="dj-exports" style={{ borderRadius: 10, border: `1px solid ${tok.border}`, background: tok.surface, padding: "12px 16px" }}>
+          <div style={{ fontSize: 10.5, fontWeight: 800, color: tok.text3, letterSpacing: ".1em", marginBottom: 8 }}>EXPORT</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 8 }}>
+            {([
+              ["PDF", "Complete business report", async () => { const md = businessReportMarkdown(cur, si, ctx, company || ""); if (exportVerbatimPDF) await exportVerbatimPDF("Decision Report \u2014 " + ctx.question.slice(0, 60), md); else if (quickExport) quickExport("pdf", "detailed", "Decision Report", md); }],
+              ["PPT", "Executive presentation", async () => { if (quickExport) await quickExport("pptx", "strategy", "Decision \u2014 " + ctx.question.slice(0, 50), deckMarkdown(ctx, company || "")); }],
+              ["Excel", "Interactive financial & decision model", async () => {
+                const ExcelJS: any = (await import("exceljs")).default; const wb = await buildExcelModel(ExcelJS, ctx, company || ""); const buf = await wb.xlsx.writeBuffer();
+                const url = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+                const el = document.createElement("a"); el.href = url; el.download = "Decision-Model-" + Date.now() + ".xlsx"; document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000); }],
+              ["MD", "Complete technical / audit record", async () => { dlFile && dlFile("Decision-Audit-" + Date.now() + ".md", auditMarkdown(cur, ctx), "text/markdown"); }],
+            ] as [string, string, () => Promise<void>][]).map(([f, purpose, go]) => (
+              <button key={f} disabled={!!exporting} onClick={async () => { setExporting(f); try { await go(); } catch (e: any) { showToast && showToast(f + " export failed: " + String(e?.message || e).slice(0, 160), "error"); } finally { setExporting(""); } }}
+                style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: `1px solid ${tok.border}`, background: tok.surface2, cursor: exporting ? "default" : "pointer", color: tok.text }}>
+                <div style={{ fontWeight: 800, fontSize: 13 }}>{exporting === f ? "Preparing\u2026" : f}</div><div style={{ fontSize: 11.5, color: tok.text3 }}>{purpose}</div></button>))}
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+            {btn("Copy Decision Brief", () => { if (cp) cp(ctx.brief); showToast && showToast("Decision Brief copied \u2014 paste it into email, WhatsApp or Slack.", "success"); }, true)}
+          </div>
+        </section>)}
     </div>
   );
 }
