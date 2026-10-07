@@ -31,6 +31,8 @@ import { attemptResultFor, executionSummary, answerUserQuestion, type ProviderAt
 import { handoffContext, fmt as fmtCanon, type DecisionHandoff } from "./lib/DecisionCockpit";
 import { parseUserInputs } from "./lib/DecisionExperience";
 import { TimeMachineSimulator, OperatingPlanner } from "./DecisionSimulator";
+import JourneyShell, { type ExplainLevel } from "./JourneyShell";
+import { actualsFromLedger as actualsFromLedgerJ } from "./lib/DecisionCockpit";
 import { synthesisPacketFor, analyseStage, makeCallId, appendContinuation, findDuplicate, deriveStatus, isExcludedFromSynthesis, isComplete, validateContribution, completenessReport, renderCompletenessReport } from "./lib/BoardroomIntegrity";
 import { parseResearchEvidence, assembleExecutiveContext, extractLedgerEntry, renderLedger, renderEvidence, budgetCheck, type LedgerEntry, emptyIntelligence, mergeIntoIntelligence, discoverResearchOpportunities, recordUserDecision, classifyFollowUp, renderIntelligence, adaptiveOutputBudget, taskKindFor, type IntelligenceState } from "./lib/ContextIntelligence";
 import { extractFacts, saveFacts, fetchFacts, formatLibraryFacts, logQuery } from "./lib/KnowledgeLibrary";
@@ -4575,6 +4577,9 @@ export default function App(){
   // Deterministic Time Machine runs and Autopilot operating plans (persisted).
   const [tmSims,setTmSims]=useState<any[]>(()=>{try{return (WorkspaceMemory.get<any[]>("oiq-tm-sims")||[]) as any[];}catch{return [];}});
   const [apPlans,setApPlans]=useState<any[]>(()=>{try{return (WorkspaceMemory.get<any[]>("oiq-autopilot-plans")||[]) as any[];}catch{return [];}});
+  // Journey shell: how much to explain (remembered across sessions).
+  const [explainLevel,setExplainLevelState]=useState<ExplainLevel>(()=>{try{return (WorkspaceMemory.get<string>("oiq-explain-level")==="expert"?"expert":"new");}catch{return "new";}});
+  const setExplainLevel=useCallback((l:ExplainLevel)=>{setExplainLevelState(l);try{sv("oiq-explain-level",l);}catch{}},[]);
   const [followUpExecIds,setFollowUpExecIds]=useState([]);
   const [followUpSuggestions,setFollowUpSuggestions]=useState([]);
   const [drillQ,setDrillQ]=useState("");
@@ -6233,6 +6238,7 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
   },[actionItems,sv,showToast]);
   const openInTimeMachine=useCallback((text:string)=>{setTmDec(text);setNTab("timemachine");},[]);
   // The persisted Boardroom decision (with canonical inputs) for Time Machine and Autopilot.
+  const journeyActuals=useMemo(()=>{try{return actualsFromLedgerJ(ledgerEntries||[],getAllAccounts(customAccounts||[]));}catch{return null;}},[ledgerEntries,customAccounts]);
   const decisionHandoff=useMemo(()=>{try{return WorkspaceMemory.get<DecisionHandoff>("oiq-decision-handoff")||null;}catch{return null;}},[nTab,brCur]);
 
   const researchPriorityGaps=useCallback(async(si:number)=>{
@@ -9409,6 +9415,8 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
                 <button key={id} className="oiq-nerve-btn" onClick={()=>setNTab(id)} style={{...S.nrvTab,...(nTab===id?{background:c+"10",color:c,borderColor:c+"30"}:{})}}><span style={{fontSize:15}}>{ic}</span><span style={{fontSize:10,fontWeight:700}}>{lb}</span></button>
               ))}
             </div>
+            <JourneyShell nTab={nTab} setNTab={setNTab} brCur={brCur} brRun={brRun} tmSims={tmSims} apPlans={apPlans} explainLevel={explainLevel} setExplainLevel={setExplainLevel}
+              exportDeps={{company:co.name||"",location:co.location||"",actuals:journeyActuals,exportVerbatimPDF:(title:string,md:string)=>generatePDFv2("detailed",title,md,co,cur),quickExport,dlFile,cp,showToast}}/>
             <div style={{flex:1,overflowY:"auto",padding:"12px 16px"}}>
               {/* BOARDROOM */}
               {nTab==="boardroom"&&(
@@ -9416,7 +9424,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     exportVerbatimPDF={(title:string,md:string)=>generatePDFv2("detailed",title,md,co,cur)}
     researchPriorityGaps={researchPriorityGaps} brFreshResearch={brFreshResearch} setBrFreshResearch={setBrFreshResearch}
     saveCockpit={saveCockpit} addCockpitActions={addCockpitActions} openInTimeMachine={openInTimeMachine}
-    ledgerEntries={ledgerEntries} customAccounts={customAccounts}
+    ledgerEntries={ledgerEntries} customAccounts={customAccounts} explainLevel={explainLevel}
     brQ={brQ} setBrQ={setBrQ}
     brAg={brAg} setBrAg={setBrAg}
     brCur={brCur} brRun={brRun} brPh={brPh}
