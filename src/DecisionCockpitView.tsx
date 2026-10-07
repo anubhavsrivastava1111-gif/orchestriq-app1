@@ -7,6 +7,7 @@ import {
 import { cockpitContext, businessReportMarkdown, deckMarkdown, buildExcelModel, auditMarkdown, type CockpitContext } from "./lib/DecisionExports";
 import { GLOSSARY, stripIds, plainDecision } from "./lib/DecisionExperience";
 import { actualsFromLedger, parseChallenges, explainDecisionChange } from "./lib/DecisionCockpit";
+import { runDecisionExport } from "./lib/DecisionExportActions";
 import { getAllAccounts } from "./Ledger";
 
 // DECISION COCKPIT - the first thing a founder sees after a Boardroom run.
@@ -28,10 +29,9 @@ export function Explain({ k, tok, extra }: { k?: string; tok: any; extra?: { mea
       {open && (
         <span style={{ display: "block", position: "absolute", zIndex: 30, top: 22, left: 0, width: "min(320px, 80vw)", padding: "10px 12px", borderRadius: 8, border: `1px solid ${tok.border}`,
           background: tok.surface, boxShadow: tok.shadow, fontSize: 12, lineHeight: 1.5, color: tok.text2, textAlign: "left", fontWeight: 400, whiteSpace: "normal" }}>
-          {g && <><b style={{ color: tok.text }}>{g.term}</b><br /><b>What is it?</b> {g.what}<br /><b>Why it matters:</b> {g.why}<br /><b>How it is calculated:</b> {extra?.how || g.how}<br /></>}
-          {extra?.meaning && <><b>What the current number means:</b> {extra.meaning}<br /></>}
-          {g && <><b>What would improve it:</b> {g.better}<br /></>}
-          {g?.formula && <><b>Formula:</b> {g.formula}<br /></>}
+          {g && <><b style={{ color: tok.text }}>{g.term}</b><br /><b>1. What is it?</b> {g.what}<br /><b>2. Why does it matter?</b> {g.why}<br /><b>3. How is it calculated?</b> {extra?.how || g.how}{g.formula ? <> ({g.formula})</> : null}<br /></>}
+          {extra?.meaning && <><b>{g ? "4. " : ""}What does my number mean?</b> {extra.meaning}<br /></>}
+          {g && <><b>{extra?.meaning ? "5. " : "4. "}What can change it?</b> {g.better}<br /></>}
           {g?.healthy && <><b>What is healthy:</b> {g.healthy}<br /></>}
           {g?.need && <><b>What we need from you:</b> {g.need}<br /></>}
           {extra?.source && <><b>Where it comes from:</b> {extra.source}</>}
@@ -94,6 +94,26 @@ export function DecisionLayer({ ctx, tok, advanced, saveCockpit, addCockpitActio
                 <td style={{ padding: "3px 0" }}>{saveCockpit && btn("Use " + r.key, () => saveCockpit({ inputChoices: { revenueBasis: r.key } }))}</td></tr>)}</tbody></table></div>
           </div>)}
       </section>
+      {/* THE BIGGEST THING HOLDING YOU BACK */}
+      {box("dj-blocker", "The biggest thing holding you back", <div style={{ fontSize: 14, fontWeight: 600, color: tok.text, lineHeight: 1.5 }}>{c.biggestBlocker}</div>)}
+      {c.analysisIncomplete && <div role="status" style={{ fontSize: 12.5, padding: "8px 12px", borderRadius: 8, background: tok.surface2, color: tok.text2 }}>{advanced ? c.analysisIncomplete.message : "Some analysis could not be completed. The decision uses the executives who did complete; open Advanced for details."}</div>}
+      {box("dj-actions", "What should I do next?", (<>
+        <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: tok.text }}>
+          {c.actions.slice(0, 5).map((a, i) => (
+            <li key={i} style={{ marginBottom: 4 }}>{a.action} <span style={{ color: tok.muted }}>— {a.owner}, {a.deadline}</span>{" "}
+              <button onClick={() => setOpenAction(openAction === i ? null : i)} style={{ border: "none", background: "none", color: tok.accent, cursor: "pointer", fontSize: 12 }}>{openAction === i ? "less" : "details"}</button>
+              {(openAction === i || advanced) && <div style={{ fontSize: 12, color: tok.text2 }}>Why: {a.why} · Success: {a.success} · If it fails: {a.fail} · Escalate: {a.escalation}</div>}</li>))}
+        </ol>
+        <div style={{ marginTop: 8, fontSize: 12.5, color: tok.text2, lineHeight: 1.6 }}>
+          <b style={{ color: tok.text }}>Decision path</b>
+          {[["NOW", c.actions[0]?.action || "Review the gates below"], ["THEN", c.actions[1]?.action || "Run a downside scenario"],
+            ...c.map.tree.filter((t) => /^IF |TRIGGER/.test(t.step)).map((t) => [t.step, tidy(t.text)])].map(([k, v], i) => <div key={i}><b style={{ color: tok.text }}>{k}</b> → {v}</div>)}
+        </div>
+        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+          {addCockpitActions && btn("Send these actions to Autopilot / Action Tracker", () => addCockpitActions(c.actions.map((a) => a.action), "Decision Cockpit", c.actions.map((a) => "Owner: " + a.owner + " \u00b7 Deadline: " + a.deadline + " \u00b7 Success: " + a.success + " \u00b7 If it fails: " + a.fail + " \u00b7 Escalate: " + a.escalation)), true)}
+          {onRunScenarios && btn("Test this in Time Machine", onRunScenarios)}
+        </div>
+      </>))}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 12 }}>
         {/* B. WHY */}
         {box("dj-why", "Why this decision", plainList(why))}
@@ -118,26 +138,6 @@ export function DecisionLayer({ ctx, tok, advanced, saveCockpit, addCockpitActio
         </>), <Explain k="missing" tok={tok} />)}
       </div>
       {/* E. WHAT SHOULD I DO NOW? */}
-      {/* THE BIGGEST THING HOLDING YOU BACK */}
-      {box("dj-blocker", "The biggest thing holding you back", <div style={{ fontSize: 14, fontWeight: 600, color: tok.text, lineHeight: 1.5 }}>{c.biggestBlocker}</div>)}
-      {c.analysisIncomplete && <div role="status" style={{ fontSize: 12.5, padding: "8px 12px", borderRadius: 8, background: tok.surface2, color: tok.text2 }}>{advanced ? c.analysisIncomplete.message : "Some analysis could not be completed. The decision uses the executives who did complete; open Advanced for details."}</div>}
-      {box("dj-actions", "What should I do next?", (<>
-        <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: tok.text }}>
-          {c.actions.slice(0, 5).map((a, i) => (
-            <li key={i} style={{ marginBottom: 4 }}>{a.action} <span style={{ color: tok.muted }}>— {a.owner}, {a.deadline}</span>{" "}
-              <button onClick={() => setOpenAction(openAction === i ? null : i)} style={{ border: "none", background: "none", color: tok.accent, cursor: "pointer", fontSize: 12 }}>{openAction === i ? "less" : "details"}</button>
-              {(openAction === i || advanced) && <div style={{ fontSize: 12, color: tok.text2 }}>Why: {a.why} · Success: {a.success} · If it fails: {a.fail} · Escalate: {a.escalation}</div>}</li>))}
-        </ol>
-        <div style={{ marginTop: 8, fontSize: 12.5, color: tok.text2, lineHeight: 1.6 }}>
-          <b style={{ color: tok.text }}>Decision path</b>
-          {[["NOW", c.actions[0]?.action || "Review the gates below"], ["THEN", c.actions[1]?.action || "Run a downside scenario"],
-            ...c.map.tree.filter((t) => /^IF |TRIGGER/.test(t.step)).map((t) => [t.step, tidy(t.text)])].map(([k, v], i) => <div key={i}><b style={{ color: tok.text }}>{k}</b> → {v}</div>)}
-        </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-          {addCockpitActions && btn("Send these actions to Autopilot / Action Tracker", () => addCockpitActions(c.actions.map((a) => a.action), "Decision Cockpit", c.actions.map((a) => "Owner: " + a.owner + " \u00b7 Deadline: " + a.deadline + " \u00b7 Success: " + a.success + " \u00b7 If it fails: " + a.fail + " \u00b7 Escalate: " + a.escalation)), true)}
-          {onRunScenarios && btn("Test this in Time Machine", onRunScenarios)}
-        </div>
-      </>))}
       {/* WHAT WOULD CHANGE THE ANSWER */}
       {box("dj-change", "What would change the answer", plainList(c.wouldChange))}
       {/* F. DECISION GATES - educational */}
@@ -216,11 +216,13 @@ export function DecisionLayer({ ctx, tok, advanced, saveCockpit, addCockpitActio
     </div>);
 }
 
-export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpit, addCockpitActions, openInTimeMachine, showToast, quickExport, exportVerbatimPDF, dlFile, cp, onShowDebate, company, location, ledgerEntries, customAccounts }: any) {
+export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpit, addCockpitActions, openInTimeMachine, showToast, quickExport, exportVerbatimPDF, dlFile, cp, onShowDebate, company, location, ledgerEntries, customAccounts, explainLevel }: any) {
   // ONE context for the whole cockpit and every export (same canonical numbers everywhere).
   const actuals = useMemo(() => { try { return actualsFromLedger(ledgerEntries || [], getAllAccounts(customAccounts || [])); } catch { return null; } }, [ledgerEntries, customAccounts]);
   const ctx = useMemo(() => cockpitContext(cur, si, { location: location || "", actuals }), [cur, si, location, actuals]);
-  const [advanced, setAdvanced] = useState(false);
+  const [advanced, setAdvanced] = useState(explainLevel === "expert");
+  useEffect(() => { setAdvanced(explainLevel === "expert"); }, [explainLevel]);
+  const expDeps = { company: company || "", location: location || "", actuals, exportVerbatimPDF, quickExport, dlFile, cp, showToast };
   const [exporting, setExporting] = useState("");
   const rs = cur?.researchState || {};
   const intel = rs.intelligence || {};
@@ -442,20 +444,17 @@ export default function DecisionCockpitView({ cur, si, analysis, tok, saveCockpi
           <div style={{ fontSize: 10.5, fontWeight: 800, color: tok.text3, letterSpacing: ".1em", marginBottom: 8 }}>EXPORT</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 8 }}>
             {([
-              ["PDF", "Complete business report", async () => { const md = businessReportMarkdown(cur, si, ctx, company || ""); if (exportVerbatimPDF) await exportVerbatimPDF("Decision Report \u2014 " + ctx.question.slice(0, 60), md); else if (quickExport) quickExport("pdf", "detailed", "Decision Report", md); }],
-              ["PPT", "Executive presentation", async () => { if (quickExport) await quickExport("pptx", "strategy", "Decision \u2014 " + ctx.question.slice(0, 50), deckMarkdown(ctx, company || "")); }],
-              ["Excel", "Interactive financial & decision model", async () => {
-                const ExcelJS: any = (await import("exceljs")).default; const wb = await buildExcelModel(ExcelJS, ctx, company || ""); const buf = await wb.xlsx.writeBuffer();
-                const url = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
-                const el = document.createElement("a"); el.href = url; el.download = "Decision-Model-" + Date.now() + ".xlsx"; document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000); }],
-              ["MD", "Complete technical / audit record", async () => { dlFile && dlFile("Decision-Audit-" + Date.now() + ".md", auditMarkdown(cur, ctx), "text/markdown"); }],
+              ["PDF", "Complete business report", () => runDecisionExport("pdf", cur, si, expDeps, ctx).then(() => undefined)],
+              ["PPT", "Executive presentation", () => runDecisionExport("ppt", cur, si, expDeps, ctx).then(() => undefined)],
+              ["Excel", "Interactive financial & decision model", () => runDecisionExport("excel", cur, si, expDeps, ctx).then(() => undefined)],
+              ["MD", "Complete technical / audit record", () => runDecisionExport("md", cur, si, expDeps, ctx).then(() => undefined)],
             ] as [string, string, () => Promise<void>][]).map(([f, purpose, go]) => (
               <button key={f} disabled={!!exporting} onClick={async () => { setExporting(f); try { await go(); } catch (e: any) { showToast && showToast(f + " export failed: " + String(e?.message || e).slice(0, 160), "error"); } finally { setExporting(""); } }}
                 style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: `1px solid ${tok.border}`, background: tok.surface2, cursor: exporting ? "default" : "pointer", color: tok.text }}>
                 <div style={{ fontWeight: 800, fontSize: 13 }}>{exporting === f ? "Preparing\u2026" : f}</div><div style={{ fontSize: 11.5, color: tok.text3 }}>{purpose}</div></button>))}
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-            {btn("Copy Decision Brief", () => { if (cp) cp(ctx.brief); showToast && showToast("Decision Brief copied \u2014 paste it into email, WhatsApp or Slack.", "success"); }, true)}
+            {btn("Copy Decision Brief", () => { runDecisionExport("brief", cur, si, expDeps, ctx); }, true)}
           </div>
         </section>)}
     </div>
