@@ -939,7 +939,7 @@ function actionBtn(tok: typeof T.light, accent = false, color?: string): React.C
 interface BoardroomViewProps {
   exportVerbatimPDF?: (title: string, markdown: string) => Promise<void> | void;
   researchPriorityGaps?: (stageIndex: number) => void;
-  ledgerEntries?: any[]; customAccounts?: any[];
+  ledgerEntries?: any[]; customAccounts?: any[]; explainLevel?: "new" | "expert";
   saveCockpit?: (patch: any, handoff?: any) => void; addCockpitActions?: (texts: string[], label: string, notes?: string[]) => void; openInTimeMachine?: (text: string) => void;
   brFreshResearch?: boolean; setBrFreshResearch?: (v: boolean) => void;
   // Data
@@ -980,7 +980,7 @@ interface BoardroomViewProps {
 export default function BoardroomView(props: BoardroomViewProps) {
   const {
     brQ, setBrQ, brAg, setBrAg, brCur, brRun, brPh, exportVerbatimPDF, researchPriorityGaps, brFreshResearch, setBrFreshResearch,
-    saveCockpit, addCockpitActions, openInTimeMachine, ledgerEntries, customAccounts,
+    saveCockpit, addCockpitActions, openInTimeMachine, ledgerEntries, customAccounts, explainLevel,
     brSessions, setBrSessions, brShowHistory, setBrShowHistory,
     brFollowUp, setBrFollowUp, drillRole, setDrillRole,
     drillQ, setDrillQ, drillRun, brEnd,
@@ -1092,8 +1092,8 @@ export default function BoardroomView(props: BoardroomViewProps) {
           <AgentSelector agents={CS} selected={brAg} onToggle={id => setBrAg(brAg.includes(id) ? brAg.filter(x => x !== id) : [...brAg, id])} disabled={brRun} tok={tok} />
         </div>
 
-        {/* ── QUESTION INPUT ── */}
-        <div style={{ marginBottom: 28 }}>
+        {/* ── QUESTION INPUT ── (journey step "Ask") */}
+        <div id="dj-ask" style={{ marginBottom: 28 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: tok.text3, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>
             Strategic Question
           </div>
@@ -1152,7 +1152,7 @@ export default function BoardroomView(props: BoardroomViewProps) {
             {stage.synthesis && (
               <DecisionCockpitView cur={brCur} si={si} analysis={cachedAnalysis(brCur, si, co?.location || "")} tok={tok}
                 saveCockpit={saveCockpit} addCockpitActions={addCockpitActions} openInTimeMachine={openInTimeMachine} showToast={showToast}
-                quickExport={quickExport} exportVerbatimPDF={exportVerbatimPDF} dlFile={dlFile} cp={cp} company={co?.name || ""} location={co?.location || ""} ledgerEntries={ledgerEntries} customAccounts={customAccounts}
+                quickExport={quickExport} exportVerbatimPDF={exportVerbatimPDF} dlFile={dlFile} cp={cp} company={co?.name || ""} location={co?.location || ""} ledgerEntries={ledgerEntries} customAccounts={customAccounts} explainLevel={explainLevel}
                 onShowDebate={() => { setDebateOpen({ ...debateOpen, [si]: true }); setTimeout(() => { try { document.getElementById("debate-" + si)?.scrollIntoView({ behavior: "smooth" }); } catch {} }, 50); }} />
             )}
             {/* KPI strip + synthesis (renders the board's declared figures) */}
