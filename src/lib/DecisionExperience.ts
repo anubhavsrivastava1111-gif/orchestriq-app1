@@ -234,12 +234,19 @@ const VERIFY: { re: RegExp; how: string; why: string }[] = [
   { re: /regulat|licen[cs]|permit|subsid|approval|compliance|noc/i, how: "Get written confirmation from the relevant authority.", why: "A missing approval or subsidy can delay or change the economics." },
 ];
 export interface Unknown { missing: string; whyMatters: string; howToVerify: string; decisionImpact: string; technicalRef: string; }
+// Plain words first, the technical term kept after it.
+const PLAIN_DRIVER: Record<string, string> = {
+  variableCostPct: "your running costs (materials, power, packaging)", contributionMargin: "what you keep from each sale", price: "your selling price",
+  volume: "how many you can sell each month", utilisation: "how full the facility will be", revenue: "your monthly sales", revenueFull: "what the facility earns when full",
+  fixedCost: "your monthly fixed costs (rent, salaries)", capex: "your setup cost", funding: "the money you actually have", dso: "how quickly customers pay",
+  dayRate: "your daily fee", headcount: "how many people can bill", billableDays: "billable days per month", debt: "the loan amount", interestRate: "the loan interest rate",
+};
 export function whatWeDontKnow(p: { ambiguities: Ambiguity[]; userQuestions: any[]; gaps: any[]; inputs: Inputs; driver?: Driver | null }): Unknown[] {
   const U: Unknown[] = [];
   for (const a of p.ambiguities) U.push({ missing: "Which occupancy your revenue figure assumes", whyMatters: a.impact, howToVerify: a.question, decisionImpact: "Both readings are calculated below; the decision uses the more cautious one until you confirm.", technicalRef: a.id });
   if (p.driver && p.inputs[p.driver.variable] && p.inputs[p.driver.variable]!.label !== "Retrieved Evidence") {
     const v = VERIFY.find((x) => x.re.test(p.driver!.label));
-    U.push({ missing: "Proof of " + p.driver.label.toLowerCase(), whyMatters: v ? v.why : "It is the number the decision is most sensitive to.", howToVerify: v ? v.how : "Find a document that confirms it.", decisionImpact: p.driver.statement, technicalRef: "driver:" + p.driver.variable });
+    U.push({ missing: "Proof of " + (PLAIN_DRIVER[p.driver.variable] ? PLAIN_DRIVER[p.driver.variable] + " \u2014 " + p.driver.label.toLowerCase() : p.driver.label.toLowerCase()), whyMatters: v ? v.why : "It is the number the decision is most sensitive to.", howToVerify: v ? v.how : "Find a document that confirms it.", decisionImpact: p.driver.statement, technicalRef: "driver:" + p.driver.variable });
   }
   for (const u of (p.userQuestions || []).filter((x: any) => x.status === "open").slice(0, 2)) U.push({ missing: u.question.replace(/\?$/, ""), whyMatters: "Only you can answer this; the executives need it to finish their analysis.", howToVerify: "Answer it in the follow-up box.", decisionImpact: "The decision stays conditional until it is answered.", technicalRef: u.id });
   for (const g of (p.gaps || []).filter((x: any) => x.priority === "high" && x.current_status !== "closed").slice(0, 3)) {
