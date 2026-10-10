@@ -124,7 +124,7 @@ export function decideModel(o: Outputs, openCriticalGates = 0): { decision: Deci
   if (o.dscr !== null && o.dscr < r.minDSCR) return { decision: "WAIT", reasons: ["Operating cash covers loan payments only " + o.dscr.toFixed(2) + "\u00d7 (lenders usually need \u2265 " + r.minDSCR + "\u00d7) [Calculation]."] };
   if (o.dscr === null && o.interestCoverage !== null && o.interestCoverage < r.minInterestCoverage) return { decision: "WAIT", reasons: ["Operating cash covers the loan interest only " + o.interestCoverage.toFixed(2) + "\u00d7 (\u2265 " + r.minInterestCoverage + "\u00d7 needed for comfort) [Calculation]."] };
   if ((o.marginOfSafety || 0) < r.proceedMarginOfSafety) reasons.push("Only " + Math.round((o.marginOfSafety || 0) * 100) + "% headroom above break-even (< " + r.proceedMarginOfSafety * 100 + "%) [Calculation].");
-  if (openCriticalGates > 0) reasons.push(openCriticalGates + " decision gate(s) still open.");
+  if (openCriticalGates > 0) reasons.push(openCriticalGates === 1 ? "1 condition still needs to be met before you commit money." : openCriticalGates + " conditions still need to be met before you commit money.");
   if (reasons.length) return { decision: "PROCEED WITH CONDITIONS", reasons };
   return { decision: "PROCEED", reasons: ["Revenue clears break-even with " + Math.round((o.marginOfSafety || 0) * 100) + "% headroom and funding covers the plan [Calculation]."] };
 }
