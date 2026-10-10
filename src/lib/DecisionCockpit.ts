@@ -54,6 +54,7 @@ export interface Outputs {
   revenue: number | null; contribution: number | null; contributionMarginPct: number | null; fixedCost: number | null; interestCost: number;
   profit: number | null; breakEven: number | null; marginOfSafety: number | null; workingCapital: number | null; cashStart: number | null;
   runwayMonths: number | null; paybackMonths: number | null; missing: string[]; basis: string[];
+  breakEvenOccupancy?: number | null;   // % occupancy needed to cover all costs (facilities)
 }
 export function compute(inp: Inputs): Outputs {
   const v = (k: InputKey) => (inp[k] ? inp[k]!.value : null);
@@ -63,6 +64,7 @@ export function compute(inp: Inputs): Outputs {
   else if (v("dayRate") !== null && v("billableDays") !== null && v("headcount") !== null && v("utilisation") !== null) { revenue = v("dayRate")! * v("billableDays")! * v("headcount")! * v("utilisation")! / 100; basis.push("revenue = day rate \u00d7 billable days \u00d7 headcount \u00d7 utilisation [Calculation]"); }
   else if (v("revenueFull") !== null && v("utilisation") !== null) { revenue = v("revenueFull")! * v("utilisation")! / 100; basis.push("revenue = revenue at full capacity \u00d7 occupancy [Calculation]"); }
   else if (v("revenue") !== null) { revenue = v("revenue")!; basis.push("revenue from the canonical model"); }
+  else if (v("revenueFull") !== null) missing.push("expected occupancy (%) \u2014 needed to turn full-capacity revenue into expected revenue");
   else missing.push("revenue (or price \u00d7 volume, or day rate \u00d7 days \u00d7 headcount \u00d7 utilisation)");
   let cm: number | null = v("contributionMargin") !== null ? v("contributionMargin")! / 100 : v("variableCostPct") !== null ? 1 - v("variableCostPct")! / 100 : null;
   if (cm === null) missing.push("contribution margin or variable cost %");
@@ -87,7 +89,9 @@ export function compute(inp: Inputs): Outputs {
   const runwayMonths = cashStart === null || cashFlow === null ? null : cashFlow >= 0 ? Infinity : cashStart <= 0 ? 0 : cashStart / -cashFlow;
   const paybackMonths = v("capex") !== null && profit !== null && profit > 0 ? v("capex")! / profit : null;
   return { ebitda, interestCoverage, debtService, dscr, cashFlow, revenue, contribution, contributionMarginPct: cm === null ? null : cm * 100, fixedCost: fixed, interestCost, profit, breakEven, marginOfSafety,
-    workingCapital, cashStart, runwayMonths, paybackMonths, missing, basis };
+    workingCapital, cashStart, runwayMonths, paybackMonths, missing, basis,
+    // The occupancy at which the facility covers all costs: needs no occupancy guess at all.
+    breakEvenOccupancy: breakEven !== null && v("revenueFull") !== null && v("revenueFull")! > 0 ? breakEven / v("revenueFull")! * 100 : null };
 }
 
 // ── DECISION RULES (explicit policy - shown to the user, not hidden) ────────
@@ -115,7 +119,8 @@ export function diagnose(o: Outputs): { issue: string; severity: "blocking" | "s
 }
 export function decideModel(o: Outputs, openCriticalGates = 0): { decision: Decision; reasons: string[] } {
   const r = DECISION_RULES; const reasons: string[] = [];
-  if (o.revenue === null || o.breakEven === null) return { decision: "INSUFFICIENT EVIDENCE", reasons: ["The model is missing: " + o.missing.join("; ") + "."] };
+  if (o.revenue === null || o.breakEven === null) return { decision: "INSUFFICIENT EVIDENCE", reasons: ["The model is missing: " + o.missing.join("; ") + "."]
+    .concat(o.breakEvenOccupancy != null ? [o.breakEvenOccupancy > 100 ? "Even 100% full, the facility would not cover its costs [Calculation]." : "The facility covers all its costs once it is at least " + Math.ceil(o.breakEvenOccupancy) + "% full [Calculation]. Compare that with the occupancy you can realistically achieve."] : []) };
   if (o.cashStart !== null && o.cashStart < 0) return { decision: "DO NOT PROCEED", reasons: ["Funding does not cover capital expenditure plus working capital (short by " + fmt(-o.cashStart, "INR") + ") [Calculation]."] };
   if (o.revenue < r.doNotProceedBelowBreakEvenRatio * o.breakEven) return { decision: "DO NOT PROCEED", reasons: ["Revenue " + fmt(o.revenue, "INR") + " is below " + r.doNotProceedBelowBreakEvenRatio * 100 + "% of break-even " + fmt(o.breakEven, "INR") + " [Calculation]."] };
   if (o.revenue < o.breakEven) return { decision: "WAIT", reasons: ["Revenue " + fmt(o.revenue, "INR") + " is below break-even " + fmt(o.breakEven, "INR") + " [Calculation]."] };
@@ -521,7 +526,14 @@ export function buildDecisionMap(p: { analysis: any; inputs: Inputs; intel?: any
   // Unquantified economics never get an unconditional PROCEED: the board's verdict is
   // capped until the "unit economics" gate can actually be evaluated.
   if (decision === "PROCEED" && md.decision === "INSUFFICIENT EVIDENCE") decision = "PROCEED WITH CONDITIONS";
+  // Fix 2.1: a verdict resting on an ESTIMATED revenue driver (e.g. occupancy the user did
+  // not know) is never unconditional - verifying that estimate becomes a stated condition.
+  const assumedDrivers = (["utilisation", "volume", "price", "revenue", "revenueFull", "dayRate"] as InputKey[]).filter((k) => p.inputs[k] && p.inputs[k]!.label === "Assumption");
+  if (decision === "PROCEED" && assumedDrivers.length) decision = "PROCEED WITH CONDITIONS";
   const gates: Gate[] = [];
+  for (const k of assumedDrivers.slice(0, 2)) gates.push({ name: "Verify the estimated " + (INPUT_LABEL as any)[k].label.toLowerCase(), status: "OPEN", threshold: "confirmed by quotes, contracts or comparable businesses",
+    current: fmt(p.inputs[k]!.value, (INPUT_LABEL as any)[k].unit) + " [Assumption]", evidence: "estimated by the executives, not given by you", owner: "You / CFO",
+    ifPass: "The decision stands on a verified number", ifFail: "Re-run with the real figure before committing money" });
   if (o.revenue !== null && o.breakEven !== null) gates.push({ name: "Revenue covers break-even", status: o.revenue >= o.breakEven ? "PASS" : "FAIL", threshold: fmt(o.breakEven, "INR") + "/month [Calculation]",
     current: fmt(o.revenue, "INR") + "/month", evidence: labelsOf(p.inputs, ["revenue", "price", "volume", "dayRate", "utilisation", "billableDays", "headcount"]), owner: "CFO", ifPass: "Economics support proceeding", ifFail: "WAIT until revenue or costs change" });
   else gates.push({ name: "Unit economics quantified", status: "UNKNOWN", threshold: "revenue and break-even both calculable", current: "missing: " + o.missing.join("; "), evidence: "\u2014", owner: "CFO", ifPass: "The model can test the decision", ifFail: "Decision rests on judgement, not calculation" });
@@ -538,7 +550,8 @@ export function buildDecisionMap(p: { analysis: any; inputs: Inputs; intel?: any
   ].slice(0, 3);
   const wouldChange = sens.flatMap((s) => s.thresholds.slice(0, 1).map((t) => t.statement)).slice(0, 5);
   if (!wouldChange.length) wouldChange.push(o.missing.length ? "Threshold cannot be calculated from current evidence (missing: " + o.missing.join("; ") + ")." : "No tested variable changes the decision within \u00b150%.");
-  const why = [...md.reasons, ...(d.why || []).filter((w: string) => !/^Model:/.test(w))].slice(0, 5);
+  const why = [...(assumedDrivers.length ? ["This rests on an ESTIMATED " + assumedDrivers.map((k) => (INPUT_LABEL as any)[k].label.toLowerCase()).join(" and ") + " (" + assumedDrivers.map((k) => fmt(p.inputs[k]!.value, (INPUT_LABEL as any)[k].unit)).join(", ") + ") [Assumption] \u2014 verify it before committing money."] : []),
+    ...md.reasons, ...(d.why || []).filter((w: string) => !/^Model:/.test(w))].slice(0, 5);
   const alt = (intel.alternatives || [])[0];
   const tree = [
     { step: "NOW", text: nextActions[0] || "Review the decision gates" },
