@@ -3,6 +3,7 @@ import ReadAloudButton from "./components/ReadAloudButton";
 import { claimSummary, executivePosition, userQuestions, validateContribution, completenessReport, boardDecisionState, kpiBasis, buildFullThreadMarkdown, buildEmailBrief, analyseStage, type StageAnalysis } from "./lib/BoardroomIntegrity";
 import { tierLabel, type LinkedClaim } from "./lib/DecisionIntegrity";
 import DecisionCockpitView from "./DecisionCockpitView";
+import GuidedInterview from "./GuidedInterview";
 // One analysis per (stage object, brief, research state) - recomputed only when they change.
 const _analysisCache = new WeakMap<object, { key: string; a: StageAnalysis }>();
 function cachedAnalysis(cur: any, si: number, location: string): StageAnalysis | null {
@@ -940,6 +941,7 @@ interface BoardroomViewProps {
   exportVerbatimPDF?: (title: string, markdown: string) => Promise<void> | void;
   researchPriorityGaps?: (stageIndex: number) => void;
   ledgerEntries?: any[]; customAccounts?: any[]; explainLevel?: "new" | "expert";
+  startBoardroom?: (question: string, executives: string[]) => void;
   saveCockpit?: (patch: any, handoff?: any) => void; addCockpitActions?: (texts: string[], label: string, notes?: string[]) => void; openInTimeMachine?: (text: string) => void;
   brFreshResearch?: boolean; setBrFreshResearch?: (v: boolean) => void;
   // Data
@@ -980,7 +982,7 @@ interface BoardroomViewProps {
 export default function BoardroomView(props: BoardroomViewProps) {
   const {
     brQ, setBrQ, brAg, setBrAg, brCur, brRun, brPh, exportVerbatimPDF, researchPriorityGaps, brFreshResearch, setBrFreshResearch,
-    saveCockpit, addCockpitActions, openInTimeMachine, ledgerEntries, customAccounts, explainLevel,
+    saveCockpit, addCockpitActions, openInTimeMachine, ledgerEntries, customAccounts, explainLevel, startBoardroom,
     brSessions, setBrSessions, brShowHistory, setBrShowHistory,
     brFollowUp, setBrFollowUp, drillRole, setDrillRole,
     drillQ, setDrillQ, drillRun, brEnd,
@@ -996,6 +998,8 @@ export default function BoardroomView(props: BoardroomViewProps) {
   const [showContradictions, setShowContradictions] = useState<number | null>(null);
   // Completed stages lead with the Decision Cockpit; the executive debate is secondary.
   const [debateOpen, setDebateOpen] = useState<Record<number, boolean>>({});
+  // Guided interview (Increment 2): opened from under the question box.
+  const [interviewing, setInterviewing] = useState(false);
   // Problems are never hidden: a stage whose executives are not all complete (partial,
   // duplicate, identity mismatch, failed, legacy) shows its debate by default.
   const stageHasIssues = (st: any) => (st?.debate || []).some((d: any) => !d?.identity || !["COMPLETE", "CONTINUATION_COMPLETE"].includes(d?.status || "COMPLETE")
@@ -1107,7 +1111,24 @@ export default function BoardroomView(props: BoardroomViewProps) {
               <input type="checkbox" checked={!!brFreshResearch} onChange={(e: any) => setBrFreshResearch(e.target.checked)} />
               Fresh research (otherwise research from the last 7 days for this exact question is reused)
             </label>)}
-        </div>
+                  {/* GUIDED INTERVIEW - asks only what changes the answer; the Run button above is unchanged */}
+          {startBoardroom && !brRun && !interviewing && String(brQ || "").trim().length > 8 && (
+            explainLevel === "expert"
+              ? <button onClick={() => setInterviewing(true)} style={{ marginTop: 10, border: "none", background: "none", color: tok.accent, cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 0 }}>Guide me with a few questions first</button>
+              : <div data-testid="guide-card" style={{ marginTop: 12, padding: "14px 16px", borderRadius: 12, border: `1px solid ${tok.accent}55`, background: tok.accentBg, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+                  <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, color: tok.text, fontSize: 14.5 }}>New to this? Answer a few quick questions first.</div>
+                    <div style={{ fontSize: 13.5, color: tok.text2 }}>About 2 minutes. The board then works with your real numbers instead of guesses — and "I don't know" is a fine answer.</div>
+                  </div>
+                  <button data-testid="guide-me" onClick={() => setInterviewing(true)} style={{ minHeight: 46, padding: "0 18px", borderRadius: 10, border: "none", background: tok.accent, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: "pointer" }}>Guide me</button>
+                </div>)}
+          {interviewing && startBoardroom && (
+            <div style={{ marginTop: 14 }}>
+              <GuidedInterview question={brQ} tok={tok} availableExecutives={(CS || []).map((a: any) => a.id)}
+                onCancel={() => setInterviewing(false)}
+                onFinish={(enriched: string, execs: string[]) => { setInterviewing(false); startBoardroom(enriched, execs); }} />
+            </div>)}
+</div>
 
         {/* ── PHASE INDICATOR ── */}
         <PhaseIndicator phase={brPh} tok={tok} />
