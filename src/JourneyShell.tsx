@@ -69,8 +69,9 @@ export default function JourneyShell({ nTab, setNTab, brCur, brRun, tmSims, apPl
   };
   const mark = (st: Status) => (st === "done" ? "\u2713" : st === "now" ? "\u25CF" : st === "ready" ? "\u25CB" : "");
   return (
-    <div data-testid="journey-shell" style={{ background: C.bar, borderBottom: `1px solid ${C.line}`, padding: "8px 14px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, position: "relative" }}>
-      <nav aria-label="Decision journey" style={{ flex: "999 1 520px", minWidth: 0, display: "flex", gap: 4, overflowX: "auto", alignItems: "center" }}>
+    <div data-testid="journey-shell" className="oiq-js" style={{ background: C.bar, borderBottom: `1px solid ${C.line}`, padding: "8px 14px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, position: "relative" }}>
+      <style>{".oiq-js .oiq-js-short{display:none}@media (max-width:640px){.oiq-js .oiq-js-long{display:none}.oiq-js .oiq-js-short{display:inline}.oiq-js{padding:6px 10px!important;gap:6px!important}.oiq-js button{min-height:36px!important;padding:0 9px!important}.oiq-js .oiq-js-steps{-webkit-mask-image:linear-gradient(90deg,#000 85%,transparent);mask-image:linear-gradient(90deg,#000 85%,transparent)}}"}</style>
+      <nav aria-label="Decision journey" className="oiq-js-steps" style={{ flex: "999 1 520px", minWidth: 0, display: "flex", gap: 4, overflowX: "auto", alignItems: "center", scrollbarWidth: "none" }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: C.muted, letterSpacing: ".08em", marginRight: 4, whiteSpace: "nowrap" }}>JOURNEY {doneCount}/4</span>
         {steps.map((s, i) => {
           const st = status[s.id]; const current = (s.tab === nTab && (s.id === "whatif" || s.id === "run")) || (nTab === "boardroom" && s.id === (si >= 0 ? "answer" : "ask"));
@@ -87,14 +88,14 @@ export default function JourneyShell({ nTab, setNTab, brCur, brRun, tmSims, apPl
         })}
       </nav>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-        <span style={{ fontSize: 11.5, color: C.muted }}>Explain like:</span>
+        <span className="oiq-js-long" style={{ fontSize: 11.5, color: C.muted }}>Explain like:</span>
         <div role="group" aria-label="How much to explain" style={{ display: "flex", gap: 4 }}>
-          <button aria-pressed={explainLevel === "new"} onClick={() => setExplainLevel("new")} style={chipBtn(explainLevel === "new")}>I'm new</button>
-          <button aria-pressed={explainLevel === "expert"} onClick={() => setExplainLevel("expert")} style={chipBtn(explainLevel === "expert")}>I know business</button>
+          <button aria-pressed={explainLevel === "new"} aria-label="I'm new" onClick={() => setExplainLevel("new")} style={chipBtn(explainLevel === "new")}><span className="oiq-js-long">I'm new</span><span className="oiq-js-short">Simple</span></button>
+          <button aria-pressed={explainLevel === "expert"} aria-label="I know business" onClick={() => setExplainLevel("expert")} style={chipBtn(explainLevel === "expert")}><span className="oiq-js-long">I know business</span><span className="oiq-js-short">Expert</span></button>
         </div>
-        <button aria-expanded={menu === "trust"} onClick={() => setMenu(menu === "trust" ? "" : "trust")} style={chipBtn(menu === "trust")}>How far to trust a number</button>
+        <button aria-expanded={menu === "trust"} onClick={() => setMenu(menu === "trust" ? "" : "trust")} style={chipBtn(menu === "trust")} aria-label="How far to trust a number"><span className="oiq-js-long">How far to trust a number</span><span className="oiq-js-short">Trust</span></button>
         <button aria-expanded={menu === "export"} disabled={si < 0} onClick={() => setMenu(menu === "export" ? "" : "export")}
-          title={si < 0 ? "Available after your first Boardroom answer" : undefined} style={{ ...chipBtn(menu === "export"), opacity: si < 0 ? 0.45 : 1 }}>Export {"\u25BE"}</button>
+          title={si < 0 ? "Available after your first Boardroom answer" : undefined} aria-label="Export ▾" style={{ ...chipBtn(menu === "export"), opacity: si < 0 ? 0.45 : 1 }}>Export {"\u25BE"}</button>
       </div>
       {menu === "trust" && (
         <div role="dialog" aria-label="How far to trust a number" style={{ position: "absolute", right: 14, top: "100%", zIndex: 40, boxSizing: "border-box", width: "min(460px, calc(100vw - 28px))", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, padding: 14, boxShadow: "0 12px 32px rgba(0,0,0,.4)" }}>
