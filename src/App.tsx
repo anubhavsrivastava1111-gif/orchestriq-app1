@@ -5986,6 +5986,11 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
       if(!cancelRef.current.br){setError(err.message);showToast("Boardroom error: "+err.message,"error");}
     }finally{setBrRun(false);setBrPh("");setBrResearching(false);cancelRef.current.br=false;}
   },[brQ,brAg,brRun,co,compData,brSessions,keys,defP,showToast,ledgerEntries,workflows,tmRes,apRes,tmSessions,apSessions,cur,brFreshResearch]);
+  // GUIDED INTERVIEW hand-off: put the enriched question in the box, choose a board if
+  // none is selected, then start the existing runBR once state has updated.
+  const [brAutoRun,setBrAutoRun]=useState(false);
+  useEffect(()=>{if(brAutoRun&&!brRun){setBrAutoRun(false);runBR();}},[brAutoRun,brRun,runBR]);
+  const startBoardroom=useCallback((q:string,execs:string[])=>{setBrQ(q);if(brAg.length<2&&execs&&execs.length>=2)setBrAg(execs);setBrAutoRun(true);},[brAg]);
 
   // Continue a reopened/finished debate with a follow-up. Same executives respond
   // again using the prior debate + synthesis as context. Appends to the live debate.
@@ -9424,7 +9429,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     exportVerbatimPDF={(title:string,md:string)=>generatePDFv2("detailed",title,md,co,cur)}
     researchPriorityGaps={researchPriorityGaps} brFreshResearch={brFreshResearch} setBrFreshResearch={setBrFreshResearch}
     saveCockpit={saveCockpit} addCockpitActions={addCockpitActions} openInTimeMachine={openInTimeMachine}
-    ledgerEntries={ledgerEntries} customAccounts={customAccounts} explainLevel={explainLevel}
+    ledgerEntries={ledgerEntries} customAccounts={customAccounts} explainLevel={explainLevel} startBoardroom={startBoardroom}
     brQ={brQ} setBrQ={setBrQ}
     brAg={brAg} setBrAg={setBrAg}
     brCur={brCur} brRun={brRun} brPh={brPh}
