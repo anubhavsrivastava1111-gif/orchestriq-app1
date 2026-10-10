@@ -41,6 +41,18 @@ export function parseUserInputs(question: string): { inputs: CanonicalInput[]; a
   if (eq && dt && !inputs.some((i) => i.key === "funding"))
     inputs.push({ id: "IN-funding", key: "funding", label: "Funding available", value: eq.value + dt.value, unit: "INR", source: "Calculated from your equity + debt", sourceType: "derived",
       confidence: "derived", userProvided: false, verified: false, ambiguous: false, interpretation: "equity + debt", derivedFrom: ["IN-equity", "IN-debt"], lastUpdated: now, originalText: "" });
+  // FULL-CAPACITY REVENUE WITHOUT OCCUPANCY (fix 2.1): "₹40 lakh at full capacity" is what a
+  // FULL facility earns, not what this one will earn. Used as expected revenue it silently
+  // assumes 100% occupancy and makes the decision look better than the evidence allows.
+  // It is kept as full-capacity revenue; occupancy is then reported as missing.
+  {
+    const r0 = inputs.find((i) => i.key === "revenue");
+    const fullRe = /\b(at )?(full|100%) (capacity|occupancy|utili[sz]ation)\b|\bat 100%|\bwhen (it is )?full\b/;
+    if (r0 && !inputs.some((i) => i.key === "utilisation") && !inputs.some((i) => i.key === "revenueFull") && fullRe.test(String(r0.originalText || "").toLowerCase())) {
+      inputs.splice(inputs.indexOf(r0), 1, { ...r0, id: "IN-revenueFull", key: "revenueFull", label: (INPUT_LABEL as any).revenueFull?.label || "Monthly revenue at full capacity",
+        interpretation: "revenue if 100% full \u2014 not expected revenue (occupancy not given)" });
+    }
+  }
   // AMBIGUITY: revenue stated alongside occupancy without saying which occupancy it assumes.
   const ambiguities: Ambiguity[] = [];
   const rev = inputs.find((i) => i.key === "revenue"), occ = inputs.find((i) => i.key === "utilisation");
