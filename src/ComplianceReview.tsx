@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
-import { REVIEW_PROCESSES, SCOPE_QUESTIONS, relevantQuestions, processRisk, evaluate, buildPlan, CASES, ROLE_CARDS, DETECT_TESTS, ANSWER_LABEL, boardroomQuestion, type ReviewProcess, type ScopeAnswers, type AnswerRec, type Answer } from "./lib/compliance/ReviewGuide";
-import { parseCsv, runTests, templateCsv, DEFAULT_SETTINGS, type Settings, type TestResult } from "./lib/compliance/Analytics";
+import { REVIEW_PROCESSES, DEPARTMENTS, SCOPE_QUESTIONS, relevantQuestions, processRisk, evaluate, buildPlan, CASES, ROLE_CARDS, DETECT_TESTS, ANSWER_LABEL, boardroomQuestion, type ReviewProcess, type ScopeAnswers, type AnswerRec, type Answer } from "./lib/compliance/ReviewGuide";
+import { parseCsv, runTests, templateCsv, hasDataTests, DEFAULT_SETTINGS, type Settings, type TestResult } from "./lib/compliance/Analytics";
 import { summariseAll, entityPatch, type BoardroomSummary } from "./lib/compliance/BoardroomLink";
 import { ALL_CONTROLS } from "./lib/compliance/ControlLibrary";
 import type { Entity } from "./lib/compliance/Frameworks";
@@ -38,8 +38,12 @@ export function StartHere({ onStart }: { onStart: (p: ReviewProcess) => void }) 
         {[["1. Scope", "A few questions decide which parts of the process matter for this business and how risky it is."], ["2. Interview", "Ask the process owner the right questions; each comes with what a good answer sounds like and the red flags."], ["3. Evaluate", "Answers become a maturity rating per area, a gap list, and a list of claims you still need to see evidence for."], ["4. Detect", "Upload expense, invoice or journal data; tests run on every row and show whether controls are really catching problems."], ["5. Plan", "Each gap becomes a control with an owner, steps, evidence and a 30/60/90-day deadline; the Board can be asked to prioritise."]].map(([t, d]) =>
           <div key={t} style={{ border: "1px solid " + V.border, borderRadius: 10, padding: "10px 12px" }}><div style={{ fontWeight: 800, color: V.accent }}>{t}</div><div style={{ fontSize: 13, color: V.text2 }}>{d}</div></div>)}
       </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-        {REVIEW_PROCESSES.map((p) => <button key={p.id} data-testid={"cmp-startreview-" + p.id} onClick={() => onStart(p.id)} style={btn(true)}>Review {p.name.split(" (")[0]}</button>)}
+      <div style={{ fontWeight: 800, color: V.text, margin: "14px 0 6px" }}>Choose an area to review — {REVIEW_PROCESSES.length} areas across {DEPARTMENTS.length} departments</div>
+      <div data-testid="cmp-areas" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 10 }}>
+        {DEPARTMENTS.map((d) => <div key={d} style={{ background: V.surface2, borderRadius: 10, padding: "10px 12px" }}>
+          <div style={{ fontWeight: 800, color: V.text, fontSize: 13, marginBottom: 6 }}>{d}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{REVIEW_PROCESSES.filter((p) => p.dept === d).map((p) => <button key={p.id} data-testid={"cmp-startreview-" + p.id} onClick={() => onStart(p.id)} style={{ ...btn(), textAlign: "left", fontSize: 12.5 }}>{p.name}</button>)}</div>
+        </div>)}
       </div>
     </div>
     <div style={card}>
@@ -98,7 +102,7 @@ export function BoardroomLinkPanel({ sessions, current, location, company, link,
 }
 
 // ── GUIDED REVIEW ─────────────────────────────────────────────────────────
-const STEPS = ["Scope", "Interview", "Evaluate", "Detect", "Plan"];
+const STEPS = ["Scope", "Interview", "Evaluate", "Detect / evidence", "Plan"];
 function ScopeStep({ p, st, set }: { p: ReviewProcess; st: ReviewState; set: (patch: Partial<ReviewState>) => void }) {
   const qs = SCOPE_QUESTIONS.filter((q) => q.process === p); const risk = processRisk(p, st.scope); const rel = relevantQuestions(p, st.scope);
   return <div style={card}>
@@ -160,7 +164,15 @@ function EvaluateStep({ ev }: { ev: ReturnType<typeof evaluate> }) {
   </div>;
 }
 function DetectStep({ p, st, set, onRecord }: { p: ReviewProcess; st: ReviewState; set: (patch: Partial<ReviewState>) => void; onRecord: (control: string, population: number, exceptions: number, test: string) => void }) {
-  const tests = DETECT_TESTS.filter((t) => t.process === p); const s = st.settings || DEFAULT_SETTINGS; const [err, setErr] = useState("");
+  const tests = DETECT_TESTS.filter((t) => t.process === p); const s = { ...DEFAULT_SETTINGS, ...(st.settings || {}) }; const [err, setErr] = useState("");
+  if (!hasDataTests(p)) { const ev = evaluate(p, st.scope, st.answers);
+    return <div style={card} data-testid="cmp-detect">
+      <H>Step 4 — Prove it with evidence</H>
+      <P>In this area, controls are proven with documents rather than transaction data: registers, certificates, minutes, logs and reports. Ask for the evidence listed below and inspect it. A control without evidence is treated as not operating.</P>
+      <P small>How to judge: the evidence must cover the whole period, be signed or system-generated, and show the control was performed on time by the right person. Record the results under Control library → Test a control.</P>
+      <ul data-testid="cmp-evidence-list" style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 13.5, color: V.text2 }}>{ev.questions.map((q) => <li key={q.id} style={{ marginBottom: 4 }}><b style={{ color: V.text }}>{q.area}:</b> {q.evidence} <span style={{ color: V.text3 }}>(control {q.controls.join(", ")})</span></li>)}</ul>
+      {!ev.questions.length && <P small>Answer the scoping questions in Step 1 first.</P>}
+    </div>; }
   const download = () => { const u = URL.createObjectURL(new Blob([templateCsv(p)], { type: "text/csv" })); const a = document.createElement("a"); a.href = u; a.download = "OrchestrIQ-" + p + "-template.csv"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 3000); };
   const onFile = (f: File | undefined) => { if (!f) return; setErr(""); const r = new FileReader(); r.onload = () => { const rows = parseCsv(String(r.result || "")); const out = runTests(p, rows, s);
     if (out.missing.length) { setErr("These columns were not found: " + out.missing.join(", ") + ". Rename them to match the template (download it below) and try again."); return; }
@@ -168,12 +180,17 @@ function DetectStep({ p, st, set, onRecord }: { p: ReviewProcess; st: ReviewStat
   const setS = (patch: Partial<Settings>) => set({ settings: { ...s, ...patch } });
   return <div style={card} data-testid="cmp-detect">
     <H>Step 4 — Are the controls actually catching problems?</H>
-    <P>The interview tells you how the process is <i>supposed</i> to work. Data tells you whether it <i>does</i>. Upload a CSV export of {p === "te" ? "expense claims" : p === "p2p" ? "supplier invoices" : "journal entries"} for a period; every row is tested in your browser and nothing is sent anywhere.</P>
+    <P>The interview tells you how the process is <i>supposed</i> to work. Data tells you whether it <i>does</i>. Upload a CSV export of {({ te: "expense claims", p2p: "supplier invoices", r2r: "journal entries", o2c: "sales invoices and credit notes", payroll: "payroll payments", inv: "stock movements (including opening balances)", itgc: "system users and their roles", treasury: "unreconciled bank reconciliation items", fa: "the fixed asset register", tax: "input tax credit per supplier invoice with the GSTR-2B figure" } as Record<string, string>)[p]} for a period; every row is tested in your browser and nothing is sent anywhere.</P>
     <P small>How to judge: an exception is a lead, not proof. Investigate each one. If any turns out to be a real error or fraud, the control it maps to is <b>not operating effectively</b>, even if the interview said it exists.</P>
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 10 }}>
       {p === "te" && <><label style={{ fontSize: 12, color: V.text2 }}>Receipt required from (₹)<input style={inp} inputMode="decimal" value={s.receiptThreshold} onChange={(e) => setS({ receiptThreshold: parseFloat(e.target.value) || 0 })} /></label><label style={{ fontSize: 12, color: V.text2 }}>Approval limit per claim (₹)<input style={inp} inputMode="decimal" value={s.approvalLimit} onChange={(e) => setS({ approvalLimit: parseFloat(e.target.value) || 0 })} /></label></>}
       {p === "p2p" && <label style={{ fontSize: 12, color: V.text2 }}>PO / approval threshold (₹)<input style={inp} inputMode="decimal" value={s.poThreshold} onChange={(e) => setS({ poThreshold: parseFloat(e.target.value) || 0 })} /></label>}
       {p === "r2r" && <><label style={{ fontSize: 12, color: V.text2 }}>Large journal threshold (₹)<input style={inp} inputMode="decimal" value={s.jeThreshold} onChange={(e) => setS({ jeThreshold: parseFloat(e.target.value) || 0 })} /></label><label style={{ fontSize: 12, color: V.text2 }}>Senior users (comma-separated names)<input style={inp} value={s.seniorUsers} onChange={(e) => setS({ seniorUsers: e.target.value })} /></label></>}
+      {p === "inv" && <label style={{ fontSize: 12, color: V.text2 }}>Large adjustment threshold (₹)<input style={inp} inputMode="decimal" value={s.invAdjThreshold} onChange={(e) => setS({ invAdjThreshold: parseFloat(e.target.value) || 0 })} /></label>}
+      {p === "treasury" && <label style={{ fontSize: 12, color: V.text2 }}>Large item threshold (₹)<input style={inp} inputMode="decimal" value={s.jeThreshold} onChange={(e) => setS({ jeThreshold: parseFloat(e.target.value) || 0 })} /></label>}
+      {p === "fa" && <label style={{ fontSize: 12, color: V.text2 }}>Capitalisation threshold (₹)<input style={inp} inputMode="decimal" value={s.faCapThreshold} onChange={(e) => setS({ faCapThreshold: parseFloat(e.target.value) || 0 })} /></label>}
+      {p === "itgc" && <><label style={{ fontSize: 12, color: V.text2 }}>Dormant after (days)<input style={inp} inputMode="numeric" value={s.dormantDays} onChange={(e) => setS({ dormantDays: parseInt(e.target.value) || 0 })} /></label><label style={{ fontSize: 12, color: V.text2, gridColumn: "span 2" }}>Conflicting role pairs (KEYWORD+KEYWORD; …)<input style={inp} value={s.sodPairs} onChange={(e) => setS({ sodPairs: e.target.value })} /></label></>}
+      {["itgc", "treasury", "fa"].includes(p) && <label style={{ fontSize: 12, color: V.text2 }}>Reference date (blank = latest in file{p === "fa" ? " / today" : ""})<input type="date" style={inp} value={s.refDate || ""} onChange={(e) => setS({ refDate: e.target.value })} /></label>}
     </div>
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
       <label style={{ ...btn(true), display: "inline-flex", alignItems: "center" }}>Upload CSV<input data-testid="cmp-upload" type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => onFile(e.target.files?.[0])} /></label>
@@ -242,9 +259,13 @@ export function ProcessReview({ p, setP, st, set, entity, link, risks, onRecord,
       const buf = await wb.xlsx.writeBuffer(); const u = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); const a = document.createElement("a"); a.href = u; a.download = "Control-Review-" + p + "-" + (entity || "entity").replace(/[^A-Za-z0-9]+/g, "-") + ".xlsx"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000);
     } catch (e) { console.warn(e); } };
   return <div data-testid="cmp-review">
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginBottom: 14 }}>
-      {REVIEW_PROCESSES.map((x) => <button key={x.id} data-testid={"cmp-rp-" + x.id} onClick={() => setP(x.id)} style={{ textAlign: "left", border: "2px solid " + (p === x.id ? V.accent : V.border), background: V.surface, borderRadius: 12, padding: "10px 12px", cursor: "pointer", color: V.text }}>
-        <div style={{ fontWeight: 800 }}>{x.name}</div><div style={{ fontSize: 12.5, color: V.text2 }}>{x.plain}</div></button>)}
+    <div style={{ ...card, padding: "12px 14px" }}>
+      <div style={{ fontWeight: 800, color: V.text, marginBottom: 8 }}>Area under review</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+        {DEPARTMENTS.map((d) => <div key={d}><div style={{ fontSize: 11.5, fontWeight: 800, color: V.text3, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>{d}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{REVIEW_PROCESSES.filter((x) => x.dept === d).map((x) => <button key={x.id} data-testid={"cmp-rp-" + x.id} aria-pressed={p === x.id} onClick={() => setP(x.id)} style={{ ...btn(p === x.id), fontSize: 12, minHeight: 32, padding: "0 10px" }}>{x.name.split(" (")[0]}</button>)}</div></div>)}
+      </div>
+      <div style={{ fontSize: 13, color: V.text2, marginTop: 10 }}><b style={{ color: V.text }}>{REVIEW_PROCESSES.find((x) => x.id === p)!.name}:</b> {REVIEW_PROCESSES.find((x) => x.id === p)!.plain}</div>
     </div>
     <div role="tablist" aria-label="Review steps" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
       {STEPS.map((s, i) => <button key={s} role="tab" aria-selected={step === i + 1} data-testid={"cmp-step-" + (i + 1)} onClick={() => set({ step: i + 1 })} style={btn(step === i + 1)}>{i + 1}. {s}</button>)}
@@ -267,7 +288,8 @@ export function RolesView({ names }: { names: Record<string, string[]> }) {
   const list = ROLE_CARDS.filter((r) => f === "all" || r.processes.includes(f));
   return <div data-testid="cmp-roles">
     <div style={card}><H>Who does what — and why it matters</H><P>Controls are only as strong as the people running them. Share this page with everyone in the process: each card explains the duty, why it is critical, the evidence to keep, the red lines, and how performance is judged.</P>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{([["all", "All roles"], ...REVIEW_PROCESSES.map((p) => [p.id, p.name.split(" (")[0]])] as [string, string][]).map(([k, l]) => <button key={k} aria-pressed={f === k} onClick={() => setF(k as any)} style={btn(f === k)}>{l}</button>)}</div></div>
+      <label style={{ fontSize: 12.5, color: V.text2, display: "block", maxWidth: 380 }}>Show roles for<select data-testid="cmp-roles-filter" value={f} onChange={(e) => setF(e.target.value as any)} style={inp}><option value="all">All areas ({ROLE_CARDS.length} roles)</option>
+        {DEPARTMENTS.map((d) => <optgroup key={d} label={d}>{REVIEW_PROCESSES.filter((p) => p.dept === d).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>)}</select></label></div>
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
       {list.map((r) => { const cs = CASES.find((c) => c.id === r.case); const people = r.controls.flatMap((c) => names[c] || []);
         return <div key={r.role} style={{ ...card, marginBottom: 0 }}>
