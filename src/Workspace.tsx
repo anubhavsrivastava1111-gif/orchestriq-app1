@@ -223,15 +223,14 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
   const [nvidiaLive, setNvidiaLive] = useState<any[] | null>(null);
   useEffect(() => {
     let cancelled = false;
-    if (nvidiaUserKey) {
-      import("./lib/AIModels").then(({ fetchNvidiaLiveCatalog }) =>
-        fetchNvidiaLiveCatalog(nvidiaUserKey).then(models => {
-          if (!cancelled && models.length) setNvidiaLive(models);
-        })
-      );
-    } else {
-      setNvidiaLive(null);
-    }
+    // Live list for everyone signed in: own key, or the shared Cloudflare keys.
+    // An empty result ends the "Loading" state instead of leaving it forever.
+    setNvidiaLive(null);
+    import("./lib/AIModels").then(({ fetchNvidiaLiveCatalog }) =>
+      fetchNvidiaLiveCatalog(nvidiaUserKey || "").then(models => {
+        if (!cancelled) setNvidiaLive(models);
+      })
+    ).catch(() => { if (!cancelled) setNvidiaLive([]); });
     return () => { cancelled = true; };
   }, [nvidiaUserKey]);
   const [convs, setConvs]       = useState<any[]>([]);
@@ -532,7 +531,7 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
             <span style={{ fontSize:9, color: nvidiaLive?.length ? "#22C55E" : C.faint }}>
               {nvidiaLive?.length
                 ? "● Live from NVIDIA · " + nvidiaLive.length + " models"
-                : nvidiaUserKey ? "Loading NVIDIA's live catalog…" : "Add your own NVIDIA key for the full live catalog"}
+                : nvidiaLive === null ? "Loading NVIDIA's live catalog…" : "Live list unavailable (sign in, or check your NVIDIA key) - showing the built-in list"}
             </span>
           )}
           {provider!=="nvidia" && findModel(provider,model) && (
