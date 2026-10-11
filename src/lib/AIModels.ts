@@ -149,19 +149,27 @@ function _guessNvidiaSpec(id: string): ModelSpec {
  * list, not break whatever screen asked for it.
  */
 export async function fetchNvidiaLiveCatalog(userKey: string): Promise<ModelSpec[]> {
-  if (!userKey || !userKey.startsWith("nvapi-")) return [];
+  // Read through our own /api/nvidia (GET): the browser cannot call NVIDIA's
+  // list directly (cross-site request blocked), which is why the catalog used
+  // to stay on "Loading" and retired models kept being offered. Works with the
+  // user's own key (sent only to our own function) or, without one, the shared
+  // Cloudflare keys.
+  const own = userKey && userKey.startsWith("nvapi-") && userKey.length >= 20 ? userKey : "";
   const now = Date.now();
   if (_nvidiaLiveCache.models.length && now - _nvidiaLiveCache.at < _NV_CACHE_MS) {
     return _nvidiaLiveCache.models;
   }
   try {
-    const r = await fetch("https://integrate.api.nvidia.com/v1/models", {
-      headers: { "Authorization": "Bearer " + userKey },
-      signal: AbortSignal.timeout(10000),
-    });
+    const { supabase } = await import("./supabase");
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token || "";
+    if (!token) return _nvidiaLiveCache.models;
+    const headers: Record<string, string> = { "Authorization": "Bearer " + token };
+    if (own) headers["x-nvidia-key"] = own;
+    const r = await fetch("/api/nvidia", { method: "GET", headers, signal: AbortSignal.timeout(12000) });
     if (!r.ok) return _nvidiaLiveCache.models; // stale cache beats nothing
     const data = await r.json();
-    const ids: string[] = Array.isArray(data?.data) ? data.data.map((m: any) => String(m.id)).filter(Boolean) : [];
+    const ids: string[] = Array.isArray(data?.models) ? data.models.map((m: any) => String(m)).filter(Boolean) : [];
     const models = ids.map(_guessNvidiaSpec).filter(m => m.caps.length > 0);
     if (models.length) { _nvidiaLiveCache.at = now; _nvidiaLiveCache.models = models; }
     return models;
