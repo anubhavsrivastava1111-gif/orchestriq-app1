@@ -4,6 +4,8 @@ import { claimSummary, executivePosition, userQuestions, validateContribution, c
 import { tierLabel, type LinkedClaim } from "./lib/DecisionIntegrity";
 import DecisionCockpitView from "./DecisionCockpitView";
 import GuidedInterview from "./GuidedInterview";
+import ProjectReportView from "./ProjectReportView";
+import { latestDecisionStage } from "./lib/DecisionExportActions";
 // One analysis per (stage object, brief, research state) - recomputed only when they change.
 const _analysisCache = new WeakMap<object, { key: string; a: StageAnalysis }>();
 function cachedAnalysis(cur: any, si: number, location: string): StageAnalysis | null {
@@ -942,6 +944,7 @@ interface BoardroomViewProps {
   researchPriorityGaps?: (stageIndex: number) => void;
   ledgerEntries?: any[]; customAccounts?: any[]; explainLevel?: "new" | "expert";
   startBoardroom?: (question: string, executives: string[]) => void;
+  researchProjectReport?: (question: string) => Promise<{ text: string; grounded: boolean }>;
   saveCockpit?: (patch: any, handoff?: any) => void; addCockpitActions?: (texts: string[], label: string, notes?: string[]) => void; openInTimeMachine?: (text: string) => void;
   brFreshResearch?: boolean; setBrFreshResearch?: (v: boolean) => void;
   // Data
@@ -982,7 +985,7 @@ interface BoardroomViewProps {
 export default function BoardroomView(props: BoardroomViewProps) {
   const {
     brQ, setBrQ, brAg, setBrAg, brCur, brRun, brPh, exportVerbatimPDF, researchPriorityGaps, brFreshResearch, setBrFreshResearch,
-    saveCockpit, addCockpitActions, openInTimeMachine, ledgerEntries, customAccounts, explainLevel, startBoardroom,
+    saveCockpit, addCockpitActions, openInTimeMachine, ledgerEntries, customAccounts, explainLevel, startBoardroom, researchProjectReport,
     brSessions, setBrSessions, brShowHistory, setBrShowHistory,
     brFollowUp, setBrFollowUp, drillRole, setDrillRole,
     drillQ, setDrillQ, drillRun, brEnd,
@@ -1000,6 +1003,8 @@ export default function BoardroomView(props: BoardroomViewProps) {
   const [debateOpen, setDebateOpen] = useState<Record<number, boolean>>({});
   // Guided interview (Increment 2): opened from under the question box.
   const [interviewing, setInterviewing] = useState(false);
+  // Bank project report without a Boardroom run (e.g. a banker appraising a proposal).
+  const [dprStandalone, setDprStandalone] = useState(false);
   // Problems are never hidden: a stage whose executives are not all complete (partial,
   // duplicate, identity mismatch, failed, legacy) shows its debate by default.
   const stageHasIssues = (st: any) => (st?.debate || []).some((d: any) => !d?.identity || !["COMPLETE", "CONTINUATION_COMPLETE"].includes(d?.status || "COMPLETE")
@@ -1122,6 +1127,12 @@ export default function BoardroomView(props: BoardroomViewProps) {
                   </div>
                   <button data-testid="guide-me" onClick={() => setInterviewing(true)} style={{ minHeight: 46, padding: "0 18px", borderRadius: 10, border: "none", background: tok.accent, color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: "pointer" }}>Guide me</button>
                 </div>)}
+          {!brRun && !interviewing && (
+            <div style={{ marginTop: 10 }}>
+              <button data-testid="dpr-standalone-toggle" onClick={() => setDprStandalone(!dprStandalone)} style={{ border: "none", background: "none", color: tok.accent, cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 0 }}>
+                {dprStandalone ? "Hide the bank project report" : "Prepare a bank loan project report or appraise a loan proposal"}</button>
+              {dprStandalone && <ProjectReportView standalone tok={tok} company={co?.name || ""} location={co?.location || ""} currency={co?.currency || "INR"} showToast={showToast} research={researchProjectReport} />}
+            </div>)}
           {interviewing && startBoardroom && (
             <div style={{ marginTop: 14 }}>
               <GuidedInterview question={brQ} tok={tok} availableExecutives={(CS || []).map((a: any) => a.id)}
@@ -1175,6 +1186,11 @@ export default function BoardroomView(props: BoardroomViewProps) {
                 saveCockpit={saveCockpit} addCockpitActions={addCockpitActions} openInTimeMachine={openInTimeMachine} showToast={showToast}
                 quickExport={quickExport} exportVerbatimPDF={exportVerbatimPDF} dlFile={dlFile} cp={cp} company={co?.name || ""} location={co?.location || ""} ledgerEntries={ledgerEntries} customAccounts={customAccounts} explainLevel={explainLevel}
                 onShowDebate={() => { setDebateOpen({ ...debateOpen, [si]: true }); setTimeout(() => { try { document.getElementById("debate-" + si)?.scrollIntoView({ behavior: "smooth" }); } catch {} }, 50); }} />
+            )}
+            {/* BANK PROJECT REPORT (DPR) - for the latest decision only */}
+            {stage.synthesis && si === latestDecisionStage(brCur) && (
+              <ProjectReportView key={String(brCur?.sessionId ?? "s") + "-" + si} cur={brCur} si={si} tok={tok} company={co?.name || ""} location={co?.location || ""}
+                currency={co?.currency || "INR"} showToast={showToast} research={researchProjectReport} />
             )}
             {/* KPI strip + synthesis (renders the board's declared figures) */}
             {stage.synthesis && (
