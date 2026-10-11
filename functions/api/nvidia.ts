@@ -89,10 +89,44 @@ const MODELS: Record<string, Spec> = {
   "deepseek-ai/deepseek-v4-pro":       { max: 12000, reason: true,  overhead: 3000 },
   "qwen/qwen3.5-397b-a17b":            { max: 12000, reason: true,  overhead: 1500 },
   "moonshotai/kimi-k2.6":              { max: 12000, reason: true,  overhead: 1500 },
+  "moonshotai/kimi-k3":                { max: 12000, reason: true,  overhead: 1500 },
   "openai/gpt-oss-120b":               { max: 8000,  reason: false, overhead: 0 },
   "meta/llama-3.3-70b-instruct":       { max: 8000,  reason: false, overhead: 0 },
 };
 const DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b";
+
+// ── LIVE CATALOG (server side) ───────────────────────────────────────────────
+// NVIDIA retires models on fixed dates and then answers HTTP 410 "end of life"
+// (e.g. nemotron-3-nano-30b-a3b on 2026-09-01, openai/gpt-oss-120b on
+// 2026-09-03). A hand-typed list cannot keep up, and the browser cannot read
+// NVIDIA's list itself (cross-site request blocked). So the list is read HERE,
+// with the same key that will make the call, cached for ten minutes, and used
+// to (a) show users what is really available and (b) replace a retired model
+// automatically instead of failing.
+const NVIDIA_MODELS_URL = "https://integrate.api.nvidia.com/v1/models";
+const _live: Record<string, { at: number; ids: string[] }> = {};
+const NOT_CHAT = /embed|rerank|guard|safety|reward|parse|ocr|retriev|clip|deplot|kosmos|neva|paligemma|yolox|detector|translat|asr|tts|audio|speech|riva|cosmos|flux|stable-diffusion|sdxl|bge|nv-dino|grounding|segment/i;
+// Preferred replacements, best first. Only models NVIDIA currently lists are ever used.
+const PREFERRED = ["nvidia/nemotron-3-super-120b-a12b", "moonshotai/kimi-k3", "zhipuai/glm-5.2", "moonshotai/kimi-k2.6",
+  "nvidia/nemotron-3-ultra-550b-a55b", "meta/llama-3.3-70b-instruct"];
+async function liveModelIds(key: string): Promise<{ ids: string[]; status: number }> {
+  const slot = key.slice(-10);
+  const c = _live[slot];
+  if (c && Date.now() - c.at < 600_000) return { ids: c.ids, status: 200 };
+  try {
+    const r = await fetch(NVIDIA_MODELS_URL, { headers: { Authorization: "Bearer " + key }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return { ids: c?.ids || [], status: r.status };
+    const d: any = await r.json();
+    const ids = (Array.isArray(d?.data) ? d.data : []).map((m: any) => String(m?.id || "")).filter(Boolean);
+    if (ids.length) _live[slot] = { at: Date.now(), ids };
+    return { ids, status: 200 };
+  } catch { return { ids: c?.ids || [], status: 0 }; }
+}
+function pickReplacement(ids: string[], failed: string): string {
+  const chat = ids.filter((i) => !NOT_CHAT.test(i) && i !== failed);
+  return PREFERRED.find((p) => chat.includes(p))
+    || chat.find((i) => /nemotron-3|kimi|glm|deepseek|qwen3|llama-3\.3|mistral-large|instruct/i.test(i)) || "";
+}
 const HARD_CEILING = 16000;
 
 function corsFor(env: Env, request: Request) {
@@ -108,8 +142,8 @@ function corsFor(env: Env, request: Request) {
     ok,
     headers: {
       "Access-Control-Allow-Origin": allowed || origin || "null",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, x-nvidia-key",
       "Vary": "Origin",
     },
   };
@@ -435,7 +469,8 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
   // from the real one. NVIDIA adding or retiring a model now requires
   // ZERO changes on our side for anyone using their own key.
   const spec = MODELS[requested];
-  if (!spec && !userKey) {
+  const listedLive = !spec && !userKey && activeNvidiaKey ? (await liveModelIds(activeNvidiaKey)).ids.includes(requested) : false;
+  if (!spec && !userKey && !listedLive) {
     return json({
       error: "NVIDIA model not supported on the free shared tier: \"" + requested + "\". Add your own free NVIDIA key in Settings to use any model NVIDIA offers, with no restriction from us.",
       availableModels: Object.keys(MODELS),
@@ -501,7 +536,9 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
     let upstream: Response | null = null;
     let text = "";
     const loopStart = Date.now();
+    let usedKey = attemptOrder[0]?.key || "";
     for (const attempt of attemptOrder) {
+      usedKey = attempt.key;
       upstream = await fetch(NVIDIA_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + attempt.key },
@@ -526,6 +563,25 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
     }
     if (!upstream) return json({ error: "NVIDIA proxy: no key was available to try." }, 503, obs);
     (obs as any)["x-oiq-rejected"] = rejectedSlots.join(",") || "none";
+
+    // RETIRED OR MISSING MODEL: switch once to a model NVIDIA currently lists,
+    // with the same key, instead of failing. The swap is reported in headers
+    // (x-oiq-model, x-oiq-model-substituted) and in the response body.
+    let servedModel = requested; let substitutedFrom = "";
+    if ((upstream.status === 410 || upstream.status === 404) && usedKey && Date.now() - loopStart < 30000) {
+      const repl = pickReplacement((await liveModelIds(usedKey)).ids, requested);
+      if (repl) {
+        const p2: any = { ...payload, model: repl };
+        if (!(MODELS[repl]?.reason)) delete p2.chat_template_kwargs;
+        try {
+          const r2 = await fetch(NVIDIA_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + usedKey },
+            body: JSON.stringify(p2), signal: AbortSignal.timeout(Math.max(15000, 70000 - (Date.now() - loopStart))) });
+          const t2 = await r2.text();
+          if (r2.ok) { upstream = r2; text = t2; servedModel = repl; substitutedFrom = requested;
+            (obs as any)["x-oiq-model"] = repl; (obs as any)["x-oiq-model-substituted"] = requested + " -> " + repl; }
+        } catch { /* keep the original 404/410 and report it below */ }
+      }
+    }
 
     // ── SECOND, INDEPENDENT PROVIDER ─────────────────────────────────────────
     // Every module (AI Boardroom, Chat, Workspace, Live Boardroom, Project
@@ -572,9 +628,16 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
       if (upstream.status === 401 || upstream.status === 403) {
         // A REPORTABLE REASON, not a raw code. Names the model and exactly
         // which keys were rejected - never the key values themselves.
+        // Tell apart "the key is wrong" from "the key is fine but NVIDIA has not
+        // given this account chat access": NVIDIA's model list accepts a valid key
+        // even when chat is refused (missing "Public API Endpoints" permission).
+        const listStatus = (await liveModelIds(usedKey)).status;
+        const accountBlock = listStatus === 200
+          ? " Diagnosis: this key IS valid (NVIDIA lists models for it) but NVIDIA refuses chat for its account. NVIDIA reports this when the account or key lacks the \"Public API Endpoints\" permission. Fix on NVIDIA's side: at build.nvidia.com create a new key with Public API Endpoints included; if that option is not offered, request it on NVIDIA's Developer Forum (NIM > Access/Accounts)."
+          : listStatus === 401 || listStatus === 403 ? " Diagnosis: NVIDIA does not accept this key at all (expired, revoked or mistyped). Generate a new key at build.nvidia.com." : "";
         const who = userKey
-          ? "Your own NVIDIA key (saved in Settings) was rejected. Generate a fresh key at build.nvidia.com and paste it again, or clear it to use the shared free tier."
-          : "Every shared key tried was rejected: " + rejectedSlots.join(", ") + ". Owner action: open build.nvidia.com with the account behind each listed key, generate a new key, and replace the matching Cloudflare variable (key #1 = NVIDIA_API_KEY, #2 = NVIDIA_API_KEY_2, and so on), then redeploy.";
+          ? "Your own NVIDIA key (saved in Settings) was refused." + (accountBlock || " Generate a fresh key at build.nvidia.com and paste it again, or clear it to use the shared free tier.")
+          : (accountBlock ? "Shared key refused." + accountBlock + " Keys tried: " + rejectedSlots.join(", ") + ". " : "") + "Every shared key tried was rejected: " + rejectedSlots.join(", ") + ". Owner action: open build.nvidia.com with the account behind each listed key, generate a new key, and replace the matching Cloudflare variable (key #1 = NVIDIA_API_KEY, #2 = NVIDIA_API_KEY_2, and so on), then redeploy.";
         return json({ error: "NVIDIA refused authorization (HTTP " + upstream.status + ") for model \"" + requested + "\". " + who + " NVIDIA said: " + reason + "." + fallbackNote }, upstream.status, obs);
       }
       return json({ error: "NVIDIA " + upstream.status + " for model \"" + requested + "\": " + reason + "." + fallbackNote }, upstream.status, obs);
@@ -584,6 +647,10 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
       const d = JSON.parse(text);
       const ch = d?.choices?.[0];
       const content = ch?.message?.content || "";
+      if (substitutedFrom) {
+        d.oiq_notice = "NVIDIA has retired \"" + substitutedFrom + "\"; answered with \"" + servedModel + "\" instead.";
+        d.model = servedModel; text = JSON.stringify(d);
+      }
       if (!String(content).trim()) {
         const reasoned = String(ch?.message?.reasoning_content || "").trim();
         const fin = ch?.finish_reason || "unknown";
@@ -605,6 +672,29 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
     }
     return json({ error: "NVIDIA proxy network error: " + msg }, 502, obs);
   }
+}
+
+// GET /api/nvidia - the live NVIDIA model list for this caller: their own key
+// (sent in the x-nvidia-key header) or the shared pool. Same origin lock and
+// sign-in as POST. Returns chat-capable model ids only.
+export async function onRequestGet(context: { request: Request; env: Env }): Promise<Response> {
+  const { request, env } = context;
+  const cors = corsFor(env, request);
+  if (!cors.ok) return json({ error: "Origin not allowed." }, 403, cors.headers);
+  const auth = request.headers.get("Authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!token) return json({ error: "Sign in required.", models: [] }, 401, cors.headers);
+  const supaUrl = (env.SUPABASE_URL || "https://wfpqesnttzarfdfsghzw.supabase.co").trim();
+  if (!(await verifyJwt(token, supaUrl))) return json({ error: "Session invalid or expired. Sign in again.", models: [] }, 401, cors.headers);
+  const raw = (request.headers.get("x-nvidia-key") || "").trim();
+  const own = raw.startsWith("nvapi-") && raw.length >= 20 ? raw : "";
+  const pool = [env.NVIDIA_API_KEY, env.NVIDIA_API_KEY_2, env.NVIDIA_API_KEY_3, env.NVIDIA_API_KEY_4, env.NVIDIA_API_KEY_5].filter((k) => k && k.trim()) as string[];
+  const key = own || pool[0] || "";
+  if (!key) return json({ error: "No NVIDIA key available.", models: [] }, 200, cors.headers);
+  const { ids, status } = await liveModelIds(key);
+  const models = ids.filter((i) => !NOT_CHAT.test(i));
+  return json({ models, source: own ? "own" : "shared", nvidiaStatus: status }, models.length ? 200 : 502,
+    { ...cors.headers, "Cache-Control": "private, max-age=300" });
 }
 
 export async function onRequestOptions(context: { request: Request; env: Env }): Promise<Response> {
