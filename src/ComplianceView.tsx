@@ -16,7 +16,12 @@ const KEY = "oiq-compliance-v1";
 function L({ label, children }: { label: string; children: React.ReactNode }) { return <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: V.text2, minWidth: 0 }}>{label}{children}</label>; }
 interface Store { entities: Entity[]; scope: Record<string, string[]>; states: States; sod: Record<string, Record<string, [string, string][]>>; custom: Control[]; fin: Record<string, { pbt: number; rev: number }>; review?: Record<string, Record<string, ReviewState>>; links?: Record<string, LinkState | null> }
 const newEntity = (n: number, name = "", country = "India"): Entity => ({ id: "e" + Date.now() + n, name: name || "Entity " + n, country, type: "Private", listedIn: [], turnoverCr: 0, borrowingsCr: 0, paidUpCr: 0, netWorthCr: 0, employees: 0, personalData: true, euData: false, ukBusiness: false, usNexus: false, govtDealings: false });
-const load = (company: string): Store => { try { const v = localStorage.getItem(KEY); if (v) return JSON.parse(v); } catch {} const e = newEntity(1, company || "My company"); return { entities: [e], scope: { [e.id]: PROCESSES.map((p) => p.id) }, states: {}, sod: {}, custom: [], fin: {} }; };
+// Saved data from before new areas existed: if an entity had every original area in scope, add the new ones too.
+const ORIGINAL_AREAS = ["p2p", "o2c", "r2r", "payroll", "te", "inv", "fa", "treasury", "itgc", "elc"];
+const migrate = (st: Store): Store => { const all = PROCESSES.map((p) => p.id); const scope: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(st.scope || {})) scope[k] = ORIGINAL_AREAS.every((a) => v.includes(a)) ? Array.from(new Set([...v, ...all])) : v;
+  return { ...st, scope }; };
+const load = (company: string): Store => { try { const v = localStorage.getItem(KEY); if (v) return migrate(JSON.parse(v)); } catch {} const e = newEntity(1, company || "My company"); return { entities: [e], scope: { [e.id]: PROCESSES.map((p) => p.id) }, states: {}, sod: {}, custom: [], fin: {} }; };
 
 export default function ComplianceView({ company = "", showToast, boardroomSessions = [], boardroomCurrent, location = "", onAskBoardroom }:
   { company?: string; showToast?: (m: string, k?: string) => void; boardroomSessions?: any[]; boardroomCurrent?: any; location?: string; onAskBoardroom?: (q: string) => void }) {
@@ -107,7 +112,7 @@ export default function ComplianceView({ company = "", showToast, boardroomSessi
             {["India", "US", "UK", "Japan", "China", "Australia", "Singapore"].map((x) => <label key={x}><input type="checkbox" checked={ent.listedIn.includes(x)} onChange={(e) => setEnt({ listedIn: e.target.checked ? [...ent.listedIn, x] : ent.listedIn.filter((y) => y !== x), type: e.target.checked ? "Listed" : ent.type })} /> {x}</label>)}
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", marginTop: 8, fontSize: 13, color: V.text2 }}>
-            {([["subsidiaryOfUSListed", "Subsidiary of a US-listed group"], ["accelerated", "US accelerated filer"], ["usNexus", "US business nexus"], ["ukBusiness", "Carries on business in the UK"], ["euData", "Processes EU/UK personal data"], ["personalData", "Processes personal data in India"], ["govtDealings", "Deals with government officials"]] as [keyof Entity, string][]).map(([k, l]) =>
+            {([["subsidiaryOfUSListed", "Subsidiary of a US-listed group"], ["accelerated", "US accelerated filer"], ["usNexus", "US business nexus"], ["ukBusiness", "Carries on business in the UK"], ["euData", "Processes EU/UK personal data"], ["personalData", "Processes personal data in India"], ["govtDealings", "Deals with government officials"], ["operatesSites", "Operates a factory, plant, warehouse or site"]] as [keyof Entity, string][]).map(([k, l]) =>
               <label key={k}><input type="checkbox" checked={!!ent[k]} onChange={(e) => setEnt({ [k]: e.target.checked } as any)} /> {l}</label>)}
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
