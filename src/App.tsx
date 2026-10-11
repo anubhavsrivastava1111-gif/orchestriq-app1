@@ -10444,7 +10444,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 
         {/* COMPLIANCE & CONTROLS - SOX / COSO / Companies Act IFC workbench (deterministic) */}
         {view==="compliance"&&(
-          <div style={{flex:1,overflowY:"auto"}}><ComplianceView company={co.name||""} showToast={showToast}/></div>
+          <div style={{flex:1,overflowY:"auto"}}><ComplianceView company={co.name||""} showToast={showToast} boardroomSessions={brSessions} boardroomCurrent={brCur} location={co.location||""} onAskBoardroom={(q:string)=>{setBrQ(q);setNTab("boardroom");setView("nerve");try{showToast("Question placed in the AI Boardroom. Review it and press Run when ready.","info");}catch{}}}/></div>
         )}
         {/* COST ARCHITECTURE */}
         {view==="costarch"&&(
