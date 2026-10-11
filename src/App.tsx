@@ -1,4 +1,5 @@
 import { GlobalTicker } from "./components/intelligence/GlobalTicker";
+import { RESEARCH_JSON_PROMPT } from "./lib/ProjectReportDocument";
 import { initA11y, announce, announceAIResponse, announceLoading, announceBoardroomPhase } from "./a11y";
 import VoiceEngine from "./VoiceEngine";
 import BoardroomView from "./BoardroomView";
@@ -5991,6 +5992,13 @@ const parseActionItemsResilient=(raw:string):ActionItem[]=>{
   const [brAutoRun,setBrAutoRun]=useState(false);
   useEffect(()=>{if(brAutoRun&&!brRun){setBrAutoRun(false);runBR();}},[brAutoRun,brRun,runBR]);
   const startBoardroom=useCallback((q:string,execs:string[])=>{setBrQ(q);if(brAg.length<2&&execs&&execs.length>=2)setBrAg(execs);setBrAutoRun(true);},[brAg]);
+  // BANK PROJECT REPORT research: the existing Research Desk gathers sourced findings, then one
+  // call structures them (compliance, developments, schemes). Only facts in the brief are used.
+  const researchProjectReport=useCallback(async(q:string)=>{
+    const rd:any=await runResearchDesk(ask,co,compData,q,showToast,keys);
+    const text=await ask(RESEARCH_JSON_PROMPT,[{role:"user",content:"RESEARCH BRIEF:\n\n"+String(rd.brief||"").slice(0,14000)}],3500);
+    return {text:String(text||""),grounded:!!rd.grounded};
+  },[ask,co,compData,showToast,keys]);
 
   // Continue a reopened/finished debate with a follow-up. Same executives respond
   // again using the prior debate + synthesis as context. Appends to the live debate.
@@ -9429,7 +9437,7 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
     exportVerbatimPDF={(title:string,md:string)=>generatePDFv2("detailed",title,md,co,cur)}
     researchPriorityGaps={researchPriorityGaps} brFreshResearch={brFreshResearch} setBrFreshResearch={setBrFreshResearch}
     saveCockpit={saveCockpit} addCockpitActions={addCockpitActions} openInTimeMachine={openInTimeMachine}
-    ledgerEntries={ledgerEntries} customAccounts={customAccounts} explainLevel={explainLevel} startBoardroom={startBoardroom}
+    ledgerEntries={ledgerEntries} customAccounts={customAccounts} explainLevel={explainLevel} startBoardroom={startBoardroom} researchProjectReport={researchProjectReport}
     brQ={brQ} setBrQ={setBrQ}
     brAg={brAg} setBrAg={setBrAg}
     brCur={brCur} brRun={brRun} brPh={brPh}
