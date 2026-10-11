@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { applicability, COSO_PRINCIPLES, type Entity, type Applies } from "./lib/compliance/Frameworks";
 import { PROCESSES, type Control, type Freq } from "./lib/compliance/ControlLibrary";
+import { StartHere, ProcessReview, RolesView, BoardroomLinkPanel, type ReviewState, type LinkState } from "./ComplianceReview";
+import type { ReviewProcess } from "./lib/compliance/ReviewGuide";
 import { TOD_QUESTIONS, MW_INDICATORS, controlStatus, programme, ownerScorecard, raci, sodConflicts, roadmap, buildRacmWorkbook, type States, type ControlState, type Overall } from "./lib/compliance/ControlEngine";
 
 // COMPLIANCE & CONTROLS - a Chief Compliance Officer / CFO / Internal Audit workbench.
@@ -12,13 +14,15 @@ const APPLY_COLOR: Record<Applies, string> = { REQUIRED: "#DC2626", LIKELY: "#D9
 const KEY = "oiq-compliance-v1";
 // Defined at module level so inputs keep focus while typing (a component created inside render remounts every keystroke).
 function L({ label, children }: { label: string; children: React.ReactNode }) { return <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 12, color: V.text2, minWidth: 0 }}>{label}{children}</label>; }
-interface Store { entities: Entity[]; scope: Record<string, string[]>; states: States; sod: Record<string, Record<string, [string, string][]>>; custom: Control[]; fin: Record<string, { pbt: number; rev: number }> }
+interface Store { entities: Entity[]; scope: Record<string, string[]>; states: States; sod: Record<string, Record<string, [string, string][]>>; custom: Control[]; fin: Record<string, { pbt: number; rev: number }>; review?: Record<string, Record<string, ReviewState>>; links?: Record<string, LinkState | null> }
 const newEntity = (n: number, name = "", country = "India"): Entity => ({ id: "e" + Date.now() + n, name: name || "Entity " + n, country, type: "Private", listedIn: [], turnoverCr: 0, borrowingsCr: 0, paidUpCr: 0, netWorthCr: 0, employees: 0, personalData: true, euData: false, ukBusiness: false, usNexus: false, govtDealings: false });
 const load = (company: string): Store => { try { const v = localStorage.getItem(KEY); if (v) return JSON.parse(v); } catch {} const e = newEntity(1, company || "My company"); return { entities: [e], scope: { [e.id]: PROCESSES.map((p) => p.id) }, states: {}, sod: {}, custom: [], fin: {} }; };
 
-export default function ComplianceView({ company = "", showToast }: { company?: string; showToast?: (m: string, k?: string) => void }) {
+export default function ComplianceView({ company = "", showToast, boardroomSessions = [], boardroomCurrent, location = "", onAskBoardroom }:
+  { company?: string; showToast?: (m: string, k?: string) => void; boardroomSessions?: any[]; boardroomCurrent?: any; location?: string; onAskBoardroom?: (q: string) => void }) {
   const [S, setS] = useState<Store>(() => load(company));
-  const [tab, setTab] = useState<"landscape" | "process" | "testing" | "owners" | "roadmap">("landscape");
+  const [tab, setTab] = useState<"start" | "review" | "roles" | "landscape" | "process" | "testing" | "owners" | "roadmap">("start");
+  const [rp, setRp] = useState<ReviewProcess>("te");
   const [eid, setEid] = useState<string>(() => S.entities[0]?.id || "");
   const [pid, setPid] = useState("p2p"); const [cid, setCid] = useState("P2P-01");
   useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} }, [S]);
@@ -48,24 +52,42 @@ export default function ComplianceView({ company = "", showToast }: { company?: 
     <div data-testid="compliance" style={{ padding: "18px 20px", maxWidth: 1240, margin: "0 auto", color: V.text }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <div><div style={{ fontSize: 20, fontWeight: 800 }}>Compliance & Controls</div>
-          <div style={{ fontSize: 13, color: V.text3 }}>SOX, COSO 2013, Companies Act IFC, CARO, SEBI LODR and global regimes — process maps, risk & control matrix, ownership and effectiveness testing.</div></div>
+          <div style={{ fontSize: 13, color: V.text3 }}>Review any process like an experienced controller: ask the right questions, prove with data that controls catch problems, and assign every fix — SOX, COSO 2013, Companies Act IFC, CARO and global regimes.</div></div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <select aria-label="Entity" value={ent.id} onChange={(e) => setEid(e.target.value)} style={{ ...inp, width: "auto" }}>{S.entities.map((e) => <option key={e.id} value={e.id}>{e.name} ({e.country})</option>)}</select>
           <button data-testid="cmp-export" onClick={exportXlsx} style={btn()}>Export RACM (Excel)</button>
         </div>
       </div>
-      <div role="tablist" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-        {([["landscape", "1. Landscape"], ["process", "2. Processes & controls"], ["testing", "3. Test a control"], ["owners", "4. Owners"], ["roadmap", "5. Implementation path"]] as const).map(([k, l]) =>
-          <button key={k} role="tab" aria-selected={tab === k} data-testid={"cmp-tab-" + k} onClick={() => setTab(k)} style={btn(tab === k)}>{l}</button>)}
+      <div role="tablist" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+        {([["start", "Start here"], ["review", "Review a process"], ["roles", "Who does what"], ["landscape", "Laws & entities"], ["process", "Control library & testing"]] as const).map(([k, l]) => { const on = tab === k || (k === "process" && ["process", "testing", "owners", "roadmap"].includes(tab));
+          return <button key={k} role="tab" aria-selected={on} data-testid={"cmp-tab-" + k} onClick={() => setTab(k)} style={btn(on)}>{l}</button>; })}
       </div>
+      {["process", "testing", "owners", "roadmap"].includes(tab) && <div role="tablist" aria-label="Control library" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14, paddingLeft: 10, borderLeft: "3px solid " + V.accent }}>
+        {([["process", "Process maps & control matrix"], ["testing", "Test a control"], ["owners", "Owner scorecard"], ["roadmap", "Implementation path"]] as const).map(([k, l]) =>
+          <button key={k} role="tab" aria-selected={tab === k} data-testid={"cmp-tab-" + k + (k === "process" ? "-sub" : "")} onClick={() => setTab(k)} style={{ ...btn(tab === k), fontSize: 12.5, minHeight: 34 }}>{l}</button>)}
+      </div>}
 
-      {/* Programme summary strip */}
-      <div data-testid="cmp-summary" style={{ ...card, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+      {tab === "start" && <StartHere onStart={(p) => { setRp(p); setTab("review"); }} />}
+      {tab === "review" && <>
+        <BoardroomLinkPanel sessions={boardroomSessions} current={boardroomCurrent} location={location} company={company} link={(S.links || {})[ent.id] || null}
+          onPlug={(sum, patch) => { setS((s) => ({ ...s, entities: s.entities.map((e) => (e.id === ent.id ? { ...e, ...patch } : e)), scope: { ...s.scope, [ent.id]: sum.suggested }, links: { ...(s.links || {}), [ent.id]: { id: sum.id, question: sum.question, date: sum.date, decision: sum.decision, risks: sum.risks } } })); toast("Linked to the Boardroom decision. Profile and scope carried over.", "success"); }}
+          onUnplug={() => { setS((s) => ({ ...s, links: { ...(s.links || {}), [ent.id]: null } })); toast("Unplugged. Values stay as they are and are now manual.", "info"); }} />
+        <ProcessReview p={rp} setP={setRp} entity={ent.name} link={(S.links || {})[ent.id] || null} risks={((S.links || {})[ent.id]?.risks) || []}
+          st={((S.review || {})[ent.id] || {})[rp] || { scope: {}, answers: {} }}
+          set={(patch) => setS((s) => { const all = { ...(s.review || {}) }; const mine = { ...(all[ent.id] || {}) }; mine[rp] = { ...(mine[rp] || { scope: {}, answers: {} }), ...patch }; all[ent.id] = mine; return { ...s, review: all }; })}
+          onRecord={(control, population, exceptions, test) => { setSt(control, { sample: population, exceptions, testDate: new Date().toISOString().slice(0, 10), notes: "From detection test: " + test }); toast("Recorded against " + control + ". Complete its design test under Control library → Test a control.", "success"); }}
+          onAsk={onAskBoardroom} owners={Object.fromEntries(Object.entries(S.states).filter(([k]) => k.startsWith(ent.id + ":")).map(([k, v]) => [k.split(":")[1], (v as ControlState).owner || ""]))}
+          setOwner={(c, n) => setSt(c, { owner: n })} />
+      </>}
+      {tab === "roles" && <RolesView names={Object.fromEntries(Object.entries(S.states).filter(([k]) => k.startsWith(ent.id + ":")).map(([k, v]) => [k.split(":")[1], [(v as ControlState).owner, (v as ControlState).performer].filter(Boolean) as string[]]))} />}
+
+      {/* Programme summary strip (library and laws views) */}
+      {!["start", "review", "roles"].includes(tab) && <div data-testid="cmp-summary" style={{ ...card, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
         {[["Controls in scope", prog.total + " (" + prog.key + " key)"], ["Owners named", prog.assigned + "%"], ["Design effective", prog.designed + "%"], ["Key controls effective", prog.keyEffective + "%"],
           ["Material weaknesses", String(prog.mw)], ["Significant deficiencies", String(prog.sd)], ["Overdue remediation", String(prog.overdue)]].map(([k, v]) =>
           <div key={k}><div style={{ fontSize: 11, color: V.text3 }}>{k}</div><div style={{ fontWeight: 800, fontSize: 16, color: (k.startsWith("Material") && v !== "0") || (k.startsWith("Overdue") && v !== "0") ? V.bad : V.text }}>{v}</div></div>)}
         <div style={{ gridColumn: "1 / -1", fontWeight: 800, color: prog.opinion.startsWith("EFFECTIVE") ? V.ok : prog.opinion.startsWith("NOT EFFECTIVE") ? V.bad : V.warn }}>Conclusion for {ent.name}: {prog.opinion}</div>
-      </div>
+      </div>}
 
       {tab === "landscape" && <>
         <div style={card}>
