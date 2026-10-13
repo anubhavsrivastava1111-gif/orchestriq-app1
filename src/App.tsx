@@ -1827,7 +1827,7 @@ async function callNvidia(sys,msgs,maxT,modelOverride?:string,task?:string,userK
     // Now it does, and it retries once with a model we know is current.
     if(r.status===404){
       if(!nvRetried){
-        const alt="openai/gpt-oss-120b";
+        const alt="nvidia/nemotron-3-super-120b-a12b"; // openai/gpt-oss-120b was retired by NVIDIA on 2026-09-03
         if(nvModel!==alt){
           console.warn("[OIQ] NVIDIA model "+nvModel+" returned 404 - retrying with "+alt);
           return await callNvidia(sys,msgs,maxT,alt,task,userKey,true);
@@ -2621,8 +2621,17 @@ async function callAI(provider,key,sys,rawMsgs,maxT=3500,enableSearch=false,mode
     timerId=setTimeout(()=>rej(new Error("Request timed out after "+(timeoutMs/1000)+"s. The AI provider may be busy — try switching to Gemini (free tier).")),timeoutMs);
   });
   const callP=(async()=>{
-    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT,enableSearch):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT,modelOverride):provider==="kimi"?await callKimi(key,sys,msgs,maxT):provider==="fal"?await(async()=>{const prompt=rawMsgs?.find((m:any)=>m.role==="user")?.content||"generate image";const url=await callFalImage(key,prompt);return{text:`🖼️ Image URL: ${url}`,truncated:false};})():provider==="nvidia"?{text:await callNvidia(sys,msgs,maxT,modelOverride,USAGE_CTX.feature,key),truncated:false}:Promise.reject(new Error("Unknown provider: "+provider));
-    if(raw&&typeof raw==="object"&&"text" in raw)return raw as {text:string;truncated:boolean};
+    const raw=provider==="claude"?await callClaude(key,sys,msgs,maxT,enableSearch,modelOverride):provider==="openai"?await callOpenAI(key,sys,msgs,maxT):provider==="gemini"?await callGemini(key,sys,msgs,maxT,enableSearch):provider==="groq"?await callGroq(key,sys,msgs,maxT):provider==="deepseek"?await callDeepSeek(key,sys,msgs,maxT,modelOverride):provider==="kimi"?await callKimi(key,sys,msgs,maxT):provider==="fal"?await(async()=>{const prompt=rawMsgs?.find((m:any)=>m.role==="user")?.content||"generate image";const url=await callFalImage(key,prompt);return{text:`🖼️ Image URL: ${url}`,truncated:false};})():provider==="nvidia"?await callNvidia(sys,msgs,maxT,modelOverride,USAGE_CTX.feature,key):Promise.reject(new Error("Unknown provider: "+provider));
+    // Normalise every provider to {text: string}. callNvidia started returning
+    // {text,truncated} on 5 Oct while this line still wrapped it again, so every
+    // NVIDIA answer site-wide rendered as "[object Object]". Unwrapping any
+    // nested {text} here means a provider changing its return shape can never
+    // break the text again.
+    if(raw&&typeof raw==="object"&&"text" in raw){
+      let t:any=(raw as any).text; let tr=!!(raw as any).truncated;
+      for(let i=0;i<3&&t&&typeof t==="object"&&"text" in t;i++){tr=tr||!!t.truncated;t=t.text;}
+      return {text:typeof t==="string"?t:String(t??""),truncated:tr};
+    }
     return {text:raw as string,truncated:false};
   })();
   try{
