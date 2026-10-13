@@ -644,9 +644,9 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
           {!!generateImage && (
             <div style={{ display:"flex", gap:6, marginBottom:8 }}>
               <button style={mode==="chat" ? { ...prim, fontSize:10, padding:"5px 11px" } : { ...btn, fontSize:10, padding:"5px 11px" }}
-                onClick={()=>setMode("chat")}>\uD83D\uDCAC Chat</button>
+                onClick={()=>setMode("chat")}>💬 Chat</button>
               <button style={mode==="image" ? { ...prim, fontSize:10, padding:"5px 11px" } : { ...btn, fontSize:10, padding:"5px 11px" }}
-                onClick={()=>setMode("image")}>\uD83D\uDDBC Image</button>
+                onClick={()=>setMode("image")}>🖼 Image</button>
               {mode==="image" && !!imageProviders?.length && (
                 <span style={{ fontSize:9, color:C.faint, alignSelf:"center" }}>
                   via {imageProviders.map(p=>p.label).join(", ")}
@@ -658,7 +658,7 @@ export default function Workspace({ ask, availableProviders, canUse, showToast, 
           {attachedText && (
             <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, fontSize:10,
               background:"rgba(20,184,166,0.08)", border:"1px solid rgba(20,184,166,0.25)", borderRadius:6, padding:"6px 10px" }}>
-              <span style={{ color:C.teal }}>\uD83D\uDCCE {attachedText.name}</span>
+              <span style={{ color:C.teal }}>📎 {attachedText.name}</span>
               <span style={{ color:C.faint }}>({attachedText.text.length.toLocaleString()} characters — sent with your next message)</span>
               <button onClick={()=>setAttachedText(null)} style={{ marginLeft:"auto", background:"none", border:"none", color:C.faint, cursor:"pointer", fontSize:12 }}>\u2715</button>
             </div>
