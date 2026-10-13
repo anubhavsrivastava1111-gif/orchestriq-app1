@@ -564,6 +564,37 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
     if (!upstream) return json({ error: "NVIDIA proxy: no key was available to try." }, 503, obs);
     (obs as any)["x-oiq-rejected"] = rejectedSlots.join(",") || "none";
 
+    // OWN KEY REFUSED -> USE THE PLATFORM'S SHARED KEYS. Previously a refused
+    // personal key ended the request even with five shared keys installed in
+    // Cloudflare, so one account-level NVIDIA problem (e.g. missing "Public API
+    // Endpoints" permission) took NVIDIA down for that user in EVERY module.
+    // Ordinary users are charged against the normal shared-tier window when this
+    // happens; the owner (super_admin) is exempt, as everywhere else.
+    let ownKeyRefused = false; let fallbackNotice = "";
+    if (userKey && (upstream.status === 401 || upstream.status === 403) && poolSlots.length) {
+      ownKeyRefused = true;
+      const admin = await isSuperAdmin(supaUrl, env.VITE_SUPABASE_ANON_KEY || "", token, user.sub);
+      const q = admin ? { ok: true } : await bumpRollingWindow(env.OIQ_QUOTA, "nvq:u:" + user.sub, perUser, windowMs);
+      if (q.ok) {
+        const start = Math.floor(Math.random() * poolSlots.length);
+        for (let k = 0; k < poolSlots.length; k++) {
+          if (Date.now() - loopStart > 40000) break;
+          const slot = poolSlots[(start + k) % poolSlots.length];
+          const r = await fetch(NVIDIA_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + slot.key },
+            body: JSON.stringify(payload), signal: AbortSignal.timeout(Math.max(15000, 70000 - (Date.now() - loopStart))) });
+          upstream = r; text = await r.text(); usedKey = slot.key;
+          if (r.status !== 401 && r.status !== 403) break;
+          rejectedSlots.push("shared key #" + slot.index);
+        }
+        (obs as any)["x-oiq-key"] = "shared-fallback";
+        (obs as any)["x-oiq-rejected"] = rejectedSlots.join(",");
+        if (upstream.ok || upstream.status === 404 || upstream.status === 410)
+          fallbackNotice = "Your own NVIDIA key was refused by NVIDIA, so this answer used the platform's shared NVIDIA keys.";
+      } else {
+        (obs as any)["x-oiq-fallback-error"] = "your shared-tier messages for this window are used up";
+      }
+    }
+
     // RETIRED OR MISSING MODEL: switch once to a model NVIDIA currently lists,
     // with the same key, instead of failing. The swap is reported in headers
     // (x-oiq-model, x-oiq-model-substituted) and in the response body.
@@ -592,7 +623,7 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
     // that waiting will not fix: rejected auth, missing/retired model, or an
     // NVIDIA server error.
     const nvFailedPermanently = !upstream.ok && [401, 403, 404, 410, 500, 502, 503].includes(upstream.status);
-    if (nvFailedPermanently && !userKey && env.GROQ_API_KEY) {
+    if (nvFailedPermanently && (!userKey || ownKeyRefused) && env.GROQ_API_KEY) {
       const groqModel = (env.GROQ_FALLBACK_MODEL || "openai/gpt-oss-120b").trim();
       try {
         const g = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -631,11 +662,14 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
         // Tell apart "the key is wrong" from "the key is fine but NVIDIA has not
         // given this account chat access": NVIDIA's model list accepts a valid key
         // even when chat is refused (missing "Public API Endpoints" permission).
-        const listStatus = (await liveModelIds(usedKey)).status;
+        // Diagnose the key the user is responsible for: their own when they have one.
+        const listStatus = (await liveModelIds(userKey || usedKey)).status;
         const accountBlock = listStatus === 200
           ? " Diagnosis: this key IS valid (NVIDIA lists models for it) but NVIDIA refuses chat for its account. NVIDIA reports this when the account or key lacks the \"Public API Endpoints\" permission. Fix on NVIDIA's side: at build.nvidia.com create a new key with Public API Endpoints included; if that option is not offered, request it on NVIDIA's Developer Forum (NIM > Access/Accounts)."
           : listStatus === 401 || listStatus === 403 ? " Diagnosis: NVIDIA does not accept this key at all (expired, revoked or mistyped). Generate a new key at build.nvidia.com." : "";
-        const who = userKey
+        const who = ownKeyRefused
+          ? "Your own NVIDIA key was refused, and so were the platform's shared keys that were tried (" + rejectedSlots.join(", ") + ")." + (accountBlock ? " About your own key:" + accountBlock.replace(/^ Diagnosis:/, "") : "") + " Owner action: the shared keys need the same NVIDIA permission fix, or add GROQ_API_KEY in Cloudflare as a backup."
+          : userKey
           ? "Your own NVIDIA key (saved in Settings) was refused." + (accountBlock || " Generate a fresh key at build.nvidia.com and paste it again, or clear it to use the shared free tier.")
           : (accountBlock ? "Shared key refused." + accountBlock + " Keys tried: " + rejectedSlots.join(", ") + ". " : "") + "Every shared key tried was rejected: " + rejectedSlots.join(", ") + ". Owner action: open build.nvidia.com with the account behind each listed key, generate a new key, and replace the matching Cloudflare variable (key #1 = NVIDIA_API_KEY, #2 = NVIDIA_API_KEY_2, and so on), then redeploy.";
         return json({ error: "NVIDIA refused authorization (HTTP " + upstream.status + ") for model \"" + requested + "\". " + who + " NVIDIA said: " + reason + "." + fallbackNote }, upstream.status, obs);
@@ -647,9 +681,11 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
       const d = JSON.parse(text);
       const ch = d?.choices?.[0];
       const content = ch?.message?.content || "";
-      if (substitutedFrom) {
-        d.oiq_notice = "NVIDIA has retired \"" + substitutedFrom + "\"; answered with \"" + servedModel + "\" instead.";
-        d.model = servedModel; text = JSON.stringify(d);
+      if (substitutedFrom || fallbackNotice) {
+        const notes = [fallbackNotice, substitutedFrom ? "NVIDIA has retired \"" + substitutedFrom + "\"; answered with \"" + servedModel + "\" instead." : ""].filter(Boolean);
+        d.oiq_notice = notes.join(" ");
+        if (substitutedFrom) d.model = servedModel;
+        text = JSON.stringify(d);
       }
       if (!String(content).trim()) {
         const reasoned = String(ch?.message?.reasoning_content || "").trim();
