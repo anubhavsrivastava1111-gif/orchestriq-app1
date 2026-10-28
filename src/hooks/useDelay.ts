@@ -13,7 +13,7 @@
 import { useEffect, useRef, useCallback } from "react";
 
 export function useDelay() {
-  const timerRef = useRef<number | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);   // correct timer type in every environment (type-only change)
 
   // Clear on unmount
   useEffect(() => {
