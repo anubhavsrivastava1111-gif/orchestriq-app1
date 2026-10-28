@@ -33,7 +33,8 @@ export function gridToSnapshot(wb: WorkbookGrid, id = "wb-" + Date.now()): any {
     for (const [ref, pattern] of Object.entries(s.formats || {})) { const rg = parseRange(ref); if (!rg || !pattern) continue; const sidStyle = styleId(pattern);
       for (let r = rg.r1; r <= rg.r2; r++) for (let c = rg.c1; c <= rg.c2; c++) { const row = (cellData[r] = cellData[r] || {}); row[c] = { ...(row[c] || {}), s: sidStyle }; } }
     const maxC = Math.max(0, ...s.rows.map((r) => r.length));
-    sheets[sid] = { id: sid, name: s.name || "Sheet" + (i + 1), rowCount: Math.max(100, s.rows.length + 50), columnCount: Math.max(26, maxC + 5), cellData };
+    // Room to work: at least 1,000 rows x 100 columns, or the data size plus 1,000 rows / 26 columns.
+    sheets[sid] = { id: sid, name: s.name || "Sheet" + (i + 1), rowCount: Math.max(1000, s.rows.length + 1000), columnCount: Math.max(100, maxC + 26), cellData };
   });
   return { id, name: wb.name, sheetOrder, sheets, locale: "enUS", styles };
 }
