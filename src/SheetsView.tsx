@@ -6,6 +6,7 @@ import "@univerjs/preset-sheets-core/lib/index.css";
 import { cockpitContext } from "./lib/DecisionExports";
 import { latestDecisionStage } from "./lib/DecisionExportActions";
 import { INPUT_LABEL } from "./lib/DecisionCockpit";
+import { AnalyzePanel, AskPanel, PivotPanel, ChartPanel, DataApp, type InsightCtx } from "./SheetsInsights";
 import { TEMPLATES, gridToSnapshot, snapshotToGrid, snapshotValues, parseCsv, gridToCsv, xlsxToGrid, gridToXlsx, ledgerToGrid, pairsToGrid, tableToGrid, buildContext, AI_SYSTEM, parsePlan, describeOp, expandWrites, highlightRows, sortRows, findErrors, parseRange, type Plan, type WorkbookGrid, type Cell } from "./lib/SheetsEngine";
 
 // OrchestrIQ SHEETS - an Excel-compatible spreadsheet (Univer, Apache-2.0 core) with AI
@@ -16,13 +17,23 @@ const inp: React.CSSProperties = { minHeight: 36, padding: "0 10px", borderRadiu
 const btn = (on = false): React.CSSProperties => ({ minHeight: 36, padding: "0 12px", borderRadius: 8, border: "1px solid " + (on ? V.accent : V.border), background: on ? V.accent : V.surface, color: on ? "#fff" : V.text, fontWeight: 700, fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap" });
 const KEY = "oiq-sheets-v1";
 interface Book { id: string; name: string; updatedAt: string }
-interface Store { books: Book[]; snaps: Record<string, any>; activeId: string }
+interface Store { books: Book[]; snaps: Record<string, any>; activeId: string }   // snaps: in-memory cache; persisted in IndexedDB
+// Large workbooks (14,000 x 200 is ~57 MB) do not fit browser localStorage (~5 MB), so workbook
+// contents live in IndexedDB; only the small list of workbook names stays in localStorage.
+const DB = "oiq-sheets", STORE = "snaps";
+const idb = (): Promise<IDBDatabase> => new Promise((res, rej) => { const r = indexedDB.open(DB, 1); r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains(STORE)) r.result.createObjectStore(STORE); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+async function idbGet(id: string): Promise<any> { const db = await idb(); return new Promise((res, rej) => { const q = db.transaction(STORE).objectStore(STORE).get(id); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+async function idbPut(id: string, v: any): Promise<void> { const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction(STORE, "readwrite"); tx.objectStore(STORE).put(v, id); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+async function idbDel(id: string): Promise<void> { const db = await idb(); return new Promise((res) => { const tx = db.transaction(STORE, "readwrite"); tx.objectStore(STORE).delete(id); tx.oncomplete = () => res(); tx.onerror = () => res(); }); }
 type Ask = (sys: string, msgs: { role: string; content: string }[], maxT?: number) => Promise<string>;
 export interface SheetsProps { ask?: Ask; showToast?: (m: string, k?: string) => void; ledgerEntries?: any[]; accountName?: (code: string) => string; boardroomCurrent?: any; location?: string }
 
 const uid = () => "wb-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 function initialStore(): Store {
-  try { const v = localStorage.getItem(KEY); if (v) { const s = JSON.parse(v); if (s?.books?.length) return s; } } catch {}
+  try { const v = localStorage.getItem(KEY); if (v) { const s = JSON.parse(v); if (s?.books?.length) {
+    // One-time move of workbooks saved by the earlier version (inside localStorage) into IndexedDB.
+    const old = s.snaps || {}; if (Object.keys(old).length) { Promise.all(Object.entries(old).map(([id, snap]) => idbPut(id, snap))).then(() => { try { localStorage.setItem(KEY, JSON.stringify({ books: s.books, activeId: s.activeId, snaps: {} })); } catch {} }).catch(() => {}); }
+    return { books: s.books, activeId: s.activeId, snaps: old }; } } } catch {}
   const t = TEMPLATES[0].build(); const id = uid();
   return { books: [{ id, name: t.name, updatedAt: new Date().toISOString() }], snaps: { [id]: gridToSnapshot(t, id) }, activeId: id };
 }
@@ -48,38 +59,52 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
   const [prompt, setPrompt] = useState(""); const [busy, setBusy] = useState(false);
   const [plan, setPlan] = useState<Plan | null>(null); const [note, setNote] = useState<{ kind: "ok" | "warn" | "bad"; text: string } | null>(null);
   const [backup, setBackup] = useState<any>(null);
+  const [loaded, setLoaded] = useState(false); const [sheetTick, setSheetTick] = useState(0);
+  const [tab, setTab] = useState<"ai" | "analyze" | "ask" | "pivot" | "chart">("ai"); const [appOpen, setAppOpen] = useState(false);
   const apiRef = useRef<any>(null); const hostId = useRef("oiq-sheets-host-" + Math.random().toString(36).slice(2, 8));
   const fileRef = useRef<HTMLInputElement>(null);
   const storeRef = useRef(S); storeRef.current = S;   // always the latest store (used in clean-up)
   const toast = (m: string, k = "info") => { try { showToast && showToast(m, k); } catch {} };
   const active = S.books.find((b) => b.id === S.activeId) || S.books[0];
 
-  const persist = (next: Store) => { try { localStorage.setItem(KEY, JSON.stringify(next)); setStatus("Saved"); return true; } catch { setStatus("Not saved: browser storage is full. Export to Excel to keep your work."); return false; } };
+  // The workbook list goes to localStorage (tiny); each workbook's contents go to IndexedDB (large).
+  const persist = (next: Store, snapId?: string) => { try { localStorage.setItem(KEY, JSON.stringify({ books: next.books, activeId: next.activeId, snaps: {} })); } catch {}
+    if (snapId && next.snaps[snapId]) idbPut(snapId, next.snaps[snapId]).then(() => setStatus("Saved")).catch(() => setStatus("Not saved: the browser refused to store this workbook. Download Excel to keep your work.")); else setStatus("Saved"); return true; };
   const saveNow = () => { const wb = apiRef.current?.getActiveWorkbook?.(); if (!wb || !active) return; const snap = wb.save();
-    setS((s) => { const next = { ...s, snaps: { ...s.snaps, [active.id]: snap }, books: s.books.map((b) => (b.id === active.id ? { ...b, updatedAt: new Date().toISOString() } : b)) }; persist(next); return next; }); };
+    setS((s) => { const next = { ...s, snaps: { ...s.snaps, [active.id]: snap }, books: s.books.map((b) => (b.id === active.id ? { ...b, updatedAt: new Date().toISOString() } : b)) }; persist(next, active.id); return next; }); };
 
   // Create the spreadsheet for the active workbook; re-created when switching workbooks.
   useEffect(() => {
-    if (!active) return; let disposed = false; let timer: any;
-    const { univerAPI } = createUniver({ locale: LocaleType.EN_US, locales: { [LocaleType.EN_US]: mergeLocales(sheetsEnUS) }, presets: [UniverSheetsCorePreset({ container: hostId.current })] });
-    try { univerAPI.toggleDarkMode(isDarkTheme()); } catch {}
-    univerAPI.createWorkbook(S.snaps[active.id] || gridToSnapshot({ name: active.name, sheets: [{ name: "Sheet1", rows: [] }] }, active.id));
-    apiRef.current = univerAPI;
+    if (!active) return; let disposed = false; let timer: any; let univerAPI: any = null; let sub: any = null;
+    (async () => {
+      let snap = S.snaps[active.id]; if (!snap) { try { snap = await idbGet(active.id); } catch {} }
+      if (disposed) return; setLoaded(true);
+      const created = createUniver({ locale: LocaleType.EN_US, locales: { [LocaleType.EN_US]: mergeLocales(sheetsEnUS) }, presets: [UniverSheetsCorePreset({ container: hostId.current })] });
+      univerAPI = created.univerAPI;
+      try { univerAPI.toggleDarkMode(isDarkTheme()); } catch {}
+      univerAPI.createWorkbook(snap || gridToSnapshot({ name: active.name, sheets: [{ name: "Sheet1", rows: [] }] }, active.id));
+      apiRef.current = univerAPI; setSheetTick((x) => x + 1);
     try { if ((window as any).__OIQ_TEST__) (window as any).__oiqSheets = univerAPI; } catch {}   // test hook only when a test harness opts in
-    let last = ""; timer = setInterval(() => { if (disposed) return; try { const snap = univerAPI.getActiveWorkbook()?.save(); const j = JSON.stringify(snap?.sheets || {}); if (last && j !== last) { setStatus("Saving…"); saveNow(); } last = j; } catch {} }, 4000);
-    return () => { disposed = true; clearInterval(timer); try { const snap = univerAPI.getActiveWorkbook()?.save(); const cur = storeRef.current; if (snap && cur.snaps[active.id]) persist({ ...cur, snaps: { ...cur.snaps, [active.id]: snap } }); } catch {} try { univerAPI.dispose(); } catch {} apiRef.current = null; };
+      // Save only after real edits (data-changing "mutations"), 3 s after the last one. The earlier
+      // version compared the whole workbook every 4 s, which freezes the page on large data.
+      try { sub = univerAPI.addEvent(univerAPI.Event.CommandExecuted, (ev: any) => { if (ev?.type !== 2) return; setStatus("Unsaved changes…"); clearTimeout(timer); timer = setTimeout(() => { if (!disposed) { setStatus("Saving…"); saveNow(); } }, 3000); }); } catch {}
+    })();
+    return () => { disposed = true; clearTimeout(timer); try { sub?.dispose?.(); } catch {}
+      try { const snap = univerAPI?.getActiveWorkbook()?.save(); const cur = storeRef.current; if (snap && cur.books.some((b) => b.id === active.id)) persist({ ...cur, snaps: { ...cur.snaps, [active.id]: snap } }, active.id); } catch {}
+      try { univerAPI?.dispose(); } catch {} apiRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id, mountKey]);
 
   const openBook = (id: string) => { saveNow(); setPlan(null); setNote(null); setBackup(null); setS((s) => { const n = { ...s, activeId: id }; persist(n); return n; }); };
   const addBook = (grid: WorkbookGrid) => { saveNow(); const id = uid(); const snap = gridToSnapshot(grid, id);
-    setS((s) => { const n = { books: [...s.books, { id, name: grid.name, updatedAt: new Date().toISOString() }], snaps: { ...s.snaps, [id]: snap }, activeId: id }; persist(n); return n; });
+    setS((s) => { const n = { books: [...s.books, { id, name: grid.name, updatedAt: new Date().toISOString() }], snaps: { ...s.snaps, [id]: snap }, activeId: id }; persist(n, id); return n; });
     setPlan(null); setNote(null); setBackup(null); toast("Opened \u201c" + grid.name + "\u201d.", "success"); };
   const rename = () => { const n = window.prompt("Workbook name", active?.name || ""); if (!n || !active) return; setS((s) => { const x = { ...s, books: s.books.map((b) => (b.id === active.id ? { ...b, name: n.slice(0, 80) } : b)) }; persist(x); return x; }); };
   const remove = () => { if (!active || !window.confirm("Delete \u201c" + active.name + "\u201d? Export it first if you need a copy.")) return;
+    idbDel(active.id);
     setS((s) => { const books = s.books.filter((b) => b.id !== active.id); const snaps = { ...s.snaps }; delete snaps[active.id];
       if (!books.length) { const t = { name: "Untitled", sheets: [{ name: "Sheet1", rows: [] }] }; const id = uid(); books.push({ id, name: t.name, updatedAt: new Date().toISOString() }); snaps[id] = gridToSnapshot(t, id); }
-      const n = { books, snaps, activeId: books[0].id }; persist(n); return n; }); };
+      const n = { books, snaps, activeId: books[0].id }; persist(n, books[0].id); return n; }); };
 
   const onImport = async (f?: File) => { if (!f) return; try {
       if (/\.csv$/i.test(f.name)) addBook({ name: f.name.replace(/\.csv$/i, ""), sheets: [{ name: "Sheet1", rows: parseCsv(await f.text()) }] });
@@ -124,8 +149,17 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
     setNote(errs.length ? { kind: "warn", text: "Applied, but " + errs.length + " cell(s) show errors: " + errs.slice(0, 8).map((e) => e.cell + " " + e.error).join(", ") + ". Review them, or click Revert." + (notes.length ? " " + notes.join(" ") : "") }
       : { kind: "ok", text: "Applied: " + (plan.summary || "changes made") + ". " + (touched.length ? touched.length + " cell(s) written; formulas checked, no errors. " : "") + notes.join(" ") });
     setPlan(null); saveNow(); };
-  const revert = () => { if (!backup || !active) return; setS((s) => { const n = { ...s, snaps: { ...s.snaps, [active.id]: backup } }; persist(n); return n; }); setBackup(null); setNote({ kind: "ok", text: "Reverted to the version before the last AI change." }); setMountKey((k) => k + 1); };
+  const revert = () => { if (!backup || !active) return; setS((s) => { const n = { ...s, snaps: { ...s.snaps, [active.id]: backup } }; persist(n, active.id); return n; }); setBackup(null); setNote({ kind: "ok", text: "Reverted to the version before the last AI change." }); setMountKey((k) => k + 1); };
   const changeOps = plan ? plan.ops.filter((o) => o.op !== "answer") : [];
+  const activeSheetName = (() => { try { return apiRef.current?.getActiveWorkbook?.()?.getActiveSheet?.()?.getSheetName?.() || "Sheet1"; } catch { return "Sheet1"; } })();
+  const ctx: InsightCtx = { sheetName: activeSheetName, version: sheetTick, workbookName: active?.name || "Workbook", ask, toast,
+    getValues: () => { const ws = apiRef.current?.getActiveWorkbook?.()?.getActiveSheet?.(); if (!ws) return []; const lr = ws.getLastRow(), lc = ws.getLastColumn(); return lr < 0 || lc < 0 ? [] : (ws.getRange(0, 0, lr + 1, lc + 1).getRawValues() as Cell[][]); },
+    addSheet: (name: string, rows: Cell[][]) => { const wb = apiRef.current?.getActiveWorkbook?.(); if (!wb) return; const names = new Set(wb.getSheets().map((x: any) => x.getSheetName())); let nm = (name || "Sheet").replace(/[\\/?*\[\]:']/g, "").slice(0, 28) || "Sheet", i = 2; const base = nm; while (names.has(nm)) nm = base + " " + i++;
+      const cellData: any = {}; rows.forEach((row, r) => row.forEach((v, c) => { if (v === null || v === undefined || v === "") return; (cellData[r] = cellData[r] || {})[c] = typeof v === "string" && v.startsWith("=") ? { f: v } : typeof v === "number" ? { v, t: 2 } : { v: String(v), t: 1 }; }));
+      const maxC = Math.max(1, ...rows.map((r) => r.length)); const sh = wb.insertSheet(nm, { sheet: { name: nm, rowCount: Math.max(1000, rows.length + 500), columnCount: Math.max(26, maxC + 10), cellData } });
+      try { wb.setActiveSheet(sh); } catch {} setSheetTick((x) => x + 1); setTimeout(saveNow, 300); } };
+  // The insight panels read the sheet that is active right now; re-read when the user switches tabs.
+  const switchTab = (k: typeof tab) => { setSheetTick((x) => x + 1); setTab(k); };
 
   return <div data-testid="sheets" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, color: V.text }}>
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "10px 14px", borderBottom: "1px solid " + V.border }}>
@@ -145,7 +179,17 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
     </div>
     <div style={{ display: "flex", flexWrap: "wrap", flex: 1, minHeight: 0 }}>
       <div key={mountKey + ":" + (active?.id || "")} id={hostId.current} data-testid="sh-grid" style={{ flex: "1 1 520px", minWidth: 0, minHeight: 460, height: "calc(100vh - 210px)" }} />
-      <aside data-testid="sh-ai" style={{ flex: "0 1 340px", minWidth: 280, borderLeft: "1px solid " + V.border, padding: "12px 14px", overflowY: "auto", maxHeight: "calc(100vh - 210px)", background: V.surface }}>
+      <aside data-testid="sh-ai" style={{ flex: "0 1 380px", minWidth: 290, borderLeft: "1px solid " + V.border, padding: "12px 14px", overflowY: "auto", maxHeight: "calc(100vh - 210px)", background: V.surface }}>
+        <div role="tablist" style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
+          {([["ai", "AI"], ["analyze", "Analyze"], ["ask", "Ask"], ["pivot", "Pivot"], ["chart", "Chart"]] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} data-testid={"sh-tab-" + k} onClick={() => switchTab(k)} style={{ ...btn(tab === k), minHeight: 30, fontSize: 12 }}>{l}</button>)}
+          <button data-testid="sh-tab-app" onClick={() => { setSheetTick((x) => x + 1); setAppOpen(true); }} style={{ ...btn(), minHeight: 30, fontSize: 12 }}>App ↗</button>
+        </div>
+        {!loaded && <div style={{ fontSize: 12.5, color: V.text3 }}>Opening workbook…</div>}
+        {loaded && tab === "analyze" && <AnalyzePanel key={ctx.sheetName + ":" + ctx.version} ctx={ctx} onOpenApp={() => setAppOpen(true)} />}
+        {loaded && tab === "ask" && <AskPanel ctx={ctx} />}
+        {loaded && tab === "pivot" && <PivotPanel key={ctx.sheetName + ":" + ctx.version} ctx={ctx} />}
+        {loaded && tab === "chart" && <ChartPanel key={ctx.sheetName + ":" + ctx.version} ctx={ctx} />}
+        {tab === "ai" && <>
         <div style={{ fontWeight: 800, marginBottom: 4 }}>AI automation</div>
         <div style={{ fontSize: 12.5, color: V.text3, marginBottom: 8 }}>Describe what you want. The AI proposes a plan of formulas and actions; nothing changes until you click Apply. The sheet's headers and first rows are sent to the AI to understand the request.</div>
         <textarea data-testid="sh-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} placeholder="e.g. Add a GST column at 18% of Amount" style={{ ...inp, width: "100%", minHeight: 72, padding: 8, resize: "vertical" }} />
@@ -163,7 +207,9 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
         {note && <div data-testid="sh-note" role="status" style={{ marginTop: 10, fontSize: 12.5, color: note.kind === "ok" ? V.ok : note.kind === "warn" ? V.warn : V.bad }}>{note.text}</div>}
         {backup && <button data-testid="sh-revert" onClick={revert} style={{ ...btn(), marginTop: 8, width: "100%" }}>Revert the last AI change</button>}
         <div style={{ fontSize: 11.5, color: V.text3, marginTop: 12 }}>Workbooks are saved in this browser. Download Excel to keep a copy or share it. Highlights are fixed colours based on today's values; sorting is allowed only on ranges without formulas.</div>
+        </>}
       </aside>
     </div>
+    {appOpen && <DataApp key={"app" + sheetTick} ctx={ctx} onClose={() => setAppOpen(false)} />}
   </div>;
 }
