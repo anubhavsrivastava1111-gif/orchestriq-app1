@@ -45,6 +45,8 @@ import { getDisclosure, trainingLabel, providersNeedingCaution, attributionLine 
 import CostArchitecture from "./CostArchitecture";
 import ShareButtons from "./ShareButtons";
 import { loadCostContext, getCostBrief, publishCostDiagnosis, clearCostContext } from "./lib/CostContext";
+// SHEETS is loaded only when opened (the spreadsheet engine is large), so the rest of the site stays as fast as before.
+const SheetsView = lazy(() => import("./SheetsView"));
 
 // Intelligence Engine — evidence audit line appended to final deliverables (no AI call, fail-safe)
 function ieEvidenceAudit(text:string):string{
@@ -150,7 +152,7 @@ import {
   type BenchmarkSession,
 } from "./lib/TokenCounter";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import {
   markProviderExhausted,
   getActiveProvider,
@@ -4524,6 +4526,7 @@ export default function App(){
     dispatch:"/pulse", actions:"/tasks", studio:"/studio", funding:"/funding",
     tokens:"/tokens", workspace:"/ai-workspace", liveboard:"/live-boardroom",
     account:"/account", admin:"/admin", servicedesk:"/support",
+    compliance:"/compliance", spendgov:"/spend-governance", sheets:"/sheets",
   };
   const PATH_TO_VIEW: Record<string,string> = Object.fromEntries(
     Object.entries(VIEW_TO_PATH).map(([v,p])=>[p,v])
@@ -9326,12 +9329,12 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           <button onClick={()=>setShowModules(v=>!v)}
             style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:"var(--oiq-sbBorder)",border:"1px solid var(--sb-bdr)",borderRadius:8,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}>
             <span style={{fontSize:15}}>{[["nerve","🧠"],["workflow","⚡"],["agentic","🔗"],["agents","🤖"],["p3","🤖"],["chat","💬"],["data","🗄️"],["ledger","📒"],["dispatch","📡"],["actions","✅"],["studio","🎨"],["funding","💰"],["tokens","🔢"]].find(([v])=>v===view)?.[1]||"🧠"}</span>
-            <span style={{flex:1,fontSize:11.5,fontWeight:700,color:"var(--oiq-sbText)",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.06em"}}>{[["nerve","Nerve Center"],["jarvis","JARVIS"],["workflow","Workflow"],["agentic","Agentic AI"],["agents","AI Agents"],["p3","Autopilot"],["chat","Chat"],["data","Data Hub"],["costarch","Cost Architecture"],["compliance","Compliance & Controls"],["spendgov","Spend Governance & Financial Control"],["home","Command Center"],["ledger","Ledger"],["finance","Finance"],["dispatch","Pulse"],["actions","Tasks"],["studio","Studio"],["funding","Funding"],["tokens","Tokens"],["workspace","AI Workspace"],["liveboard","Live Boardroom"],["account","My Account"],["admin","Admin Console"]].find(([v])=>v===view)?.[1]||"Nerve Center"}</span>
+            <span style={{flex:1,fontSize:11.5,fontWeight:700,color:"var(--oiq-sbText)",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.06em"}}>{[["nerve","Nerve Center"],["jarvis","JARVIS"],["workflow","Workflow"],["agentic","Agentic AI"],["agents","AI Agents"],["p3","Autopilot"],["chat","Chat"],["data","Data Hub"],["costarch","Cost Architecture"],["compliance","Compliance & Controls"],["spendgov","Spend Governance & Financial Control"],["sheets","Sheets"],["home","Command Center"],["ledger","Ledger"],["finance","Finance"],["dispatch","Pulse"],["actions","Tasks"],["studio","Studio"],["funding","Funding"],["tokens","Tokens"],["workspace","AI Workspace"],["liveboard","Live Boardroom"],["account","My Account"],["admin","Admin Console"]].find(([v])=>v===view)?.[1]||"Nerve Center"}</span>
             <span style={{fontSize:9,color:"var(--oiq-sbDim)",transition:"transform 0.2s",transform:showModules?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
           </button>
           {showModules&&(
             <div style={{position:"absolute",top:"calc(100% - 2px)",left:10,right:10,background:"var(--oiq-sbBg,var(--oiq-surface2,#0c1120))",backdropFilter:"none",border:"1px solid var(--sb-bdr)",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:7,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["home","🎛️","Command Center"],["jarvis","◈","JARVIS"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["compliance","🛡️","Compliance & Controls"],["spendgov","🏛️","Spend Governance"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["workspace","✳️","AI Workspace"],["liveboard","🗣️","Live Boardroom"],["account","👤","My Account"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="jarvis"||hasJarvisAccess).filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>{
+              {[["home","🎛️","Command Center"],["jarvis","◈","JARVIS"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["compliance","🛡️","Compliance & Controls"],["spendgov","🏛️","Spend Governance"],["sheets","📊","Sheets"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["workspace","✳️","AI Workspace"],["liveboard","🗣️","Live Boardroom"],["account","👤","My Account"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="jarvis"||hasJarvisAccess).filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>{
                 // WAS: modules the plan did not include were REMOVED from the
                 // menu entirely, so a user had no idea they existed or that
                 // upgrading would unlock them. A customer who cannot see what
@@ -10454,6 +10457,14 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 
         {/* COMPLIANCE & CONTROLS - SOX / COSO / Companies Act IFC workbench (deterministic) */}
         {/* SPEND GOVERNANCE & FINANCIAL CONTROL - teacher, executor, error checker, guide */}
+        {/* SHEETS - Excel-compatible spreadsheet with approve-before-apply AI automation (loaded on demand) */}
+        {view==="sheets"&&(
+          <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0,overflow:"hidden"}}>
+            <Suspense fallback={<div style={{padding:24,color:"var(--oiq-muted)"}}>Loading Sheets…</div>}>
+              <SheetsView ask={ask} showToast={showToast} ledgerEntries={ledgerEntries} accountName={(code:string)=>{try{const a=getAllAccounts(customAccounts).find((x:any)=>x.code===code);return a?a.name:code;}catch{return code;}}} boardroomCurrent={brCur} location={co.location||""}/>
+            </Suspense>
+          </div>
+        )}
         {view==="spendgov"&&(
           <div style={{flex:1,overflowY:"auto"}}><SpendGovernanceView/></div>
         )}
