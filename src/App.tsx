@@ -1,4 +1,5 @@
 import { GlobalTicker } from "./components/intelligence/GlobalTicker";
+import SpendGovernanceView from "./SpendGovernanceView";
 import ComplianceView from "./ComplianceView";
 import { RESEARCH_JSON_PROMPT } from "./lib/ProjectReportDocument";
 import { initA11y, announce, announceAIResponse, announceLoading, announceBoardroomPhase } from "./a11y";
@@ -9325,12 +9326,12 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
           <button onClick={()=>setShowModules(v=>!v)}
             style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:"var(--oiq-sbBorder)",border:"1px solid var(--sb-bdr)",borderRadius:8,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}>
             <span style={{fontSize:15}}>{[["nerve","🧠"],["workflow","⚡"],["agentic","🔗"],["agents","🤖"],["p3","🤖"],["chat","💬"],["data","🗄️"],["ledger","📒"],["dispatch","📡"],["actions","✅"],["studio","🎨"],["funding","💰"],["tokens","🔢"]].find(([v])=>v===view)?.[1]||"🧠"}</span>
-            <span style={{flex:1,fontSize:11.5,fontWeight:700,color:"var(--oiq-sbText)",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.06em"}}>{[["nerve","Nerve Center"],["jarvis","JARVIS"],["workflow","Workflow"],["agentic","Agentic AI"],["agents","AI Agents"],["p3","Autopilot"],["chat","Chat"],["data","Data Hub"],["costarch","Cost Architecture"],["compliance","Compliance & Controls"],["home","Command Center"],["ledger","Ledger"],["finance","Finance"],["dispatch","Pulse"],["actions","Tasks"],["studio","Studio"],["funding","Funding"],["tokens","Tokens"],["workspace","AI Workspace"],["liveboard","Live Boardroom"],["account","My Account"],["admin","Admin Console"]].find(([v])=>v===view)?.[1]||"Nerve Center"}</span>
+            <span style={{flex:1,fontSize:11.5,fontWeight:700,color:"var(--oiq-sbText)",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.06em"}}>{[["nerve","Nerve Center"],["jarvis","JARVIS"],["workflow","Workflow"],["agentic","Agentic AI"],["agents","AI Agents"],["p3","Autopilot"],["chat","Chat"],["data","Data Hub"],["costarch","Cost Architecture"],["compliance","Compliance & Controls"],["spendgov","Spend Governance & Financial Control"],["home","Command Center"],["ledger","Ledger"],["finance","Finance"],["dispatch","Pulse"],["actions","Tasks"],["studio","Studio"],["funding","Funding"],["tokens","Tokens"],["workspace","AI Workspace"],["liveboard","Live Boardroom"],["account","My Account"],["admin","Admin Console"]].find(([v])=>v===view)?.[1]||"Nerve Center"}</span>
             <span style={{fontSize:9,color:"var(--oiq-sbDim)",transition:"transform 0.2s",transform:showModules?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
           </button>
           {showModules&&(
             <div style={{position:"absolute",top:"calc(100% - 2px)",left:10,right:10,background:"var(--oiq-sbBg,var(--oiq-surface2,#0c1120))",backdropFilter:"none",border:"1px solid var(--sb-bdr)",maxHeight:"60vh",overflowY:"auto",borderRadius:10,zIndex:200,padding:7,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-              {[["home","🎛️","Command Center"],["jarvis","◈","JARVIS"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["compliance","🛡️","Compliance & Controls"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["workspace","✳️","AI Workspace"],["liveboard","🗣️","Live Boardroom"],["account","👤","My Account"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="jarvis"||hasJarvisAccess).filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>{
+              {[["home","🎛️","Command Center"],["jarvis","◈","JARVIS"],["nerve","🧠","Nerve Center"],["workflow","⚡","Workflow"],["agentic","🔗","Agentic AI"],["agents","🤖","AI Agents"],["p3","🤖","Autopilot"],["chat","💬","Chat"],["data","🗄️","Data Hub"],["costarch","🧮","Cost Architecture"],["compliance","🛡️","Compliance & Controls"],["spendgov","🏛️","Spend Governance"],["ledger","📒","Ledger"],["finance","🏦","Finance"],["dispatch","📡","Pulse"],["actions","✅","Tasks"],["studio","🎨","Studio"],["funding","💰","Funding"],["tokens","🔢","Tokens"],["workspace","✳️","AI Workspace"],["liveboard","🗣️","Live Boardroom"],["account","👤","My Account"],["admin","🛡️","Admin Console"]].filter(([v])=>v!=="tokens"||me.role==="super_admin").filter(([v])=>v!=="jarvis"||hasJarvisAccess).filter(([v])=>v!=="admin"||isAdmin).filter(([v])=>v!=="ledger"||adminConfig.ledgerEnabled).filter(([v])=>v!=="dispatch"||adminConfig.dispatchEnabled).filter(([v])=>v!=="actions"||adminConfig.actionsEnabled).map(([v,ic,lb])=>{
                 // WAS: modules the plan did not include were REMOVED from the
                 // menu entirely, so a user had no idea they existed or that
                 // upgrading would unlock them. A customer who cannot see what
@@ -10452,6 +10453,10 @@ showToast("Workspace loaded — all modules restored","success");}catch{showToas
 )}
 
         {/* COMPLIANCE & CONTROLS - SOX / COSO / Companies Act IFC workbench (deterministic) */}
+        {/* SPEND GOVERNANCE & FINANCIAL CONTROL - teacher, executor, error checker, guide */}
+        {view==="spendgov"&&(
+          <div style={{flex:1,overflowY:"auto"}}><SpendGovernanceView/></div>
+        )}
         {view==="compliance"&&(
           <div style={{flex:1,overflowY:"auto"}}><ComplianceView company={co.name||""} showToast={showToast} boardroomSessions={brSessions} boardroomCurrent={brCur} location={co.location||""} onAskBoardroom={(q:string)=>{setBrQ(q);setNTab("boardroom");setView("nerve");try{showToast("Question placed in the AI Boardroom. Review it and press Run when ready.","info");}catch{}}}/></div>
         )}
