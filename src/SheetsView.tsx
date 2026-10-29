@@ -6,7 +6,8 @@ import "@univerjs/preset-sheets-core/lib/index.css";
 import { cockpitContext } from "./lib/DecisionExports";
 import { latestDecisionStage } from "./lib/DecisionExportActions";
 import { INPUT_LABEL } from "./lib/DecisionCockpit";
-import { AnalyzePanel, AskPanel, PivotPanel, ChartPanel, DataApp, type InsightCtx } from "./SheetsInsights";
+import { SmartPanel, AnalyzePanel, AskPanel, PivotPanel, ChartPanel, DataApp, type InsightCtx, type SheetStyle, type BasketItem } from "./SheetsInsights";
+import { isoToSerial, DATE_PATTERN } from "./lib/SheetsEngine";
 import { TEMPLATES, gridToSnapshot, snapshotToGrid, snapshotValues, parseCsv, gridToCsv, xlsxToGrid, gridToXlsx, ledgerToGrid, pairsToGrid, tableToGrid, buildContext, AI_SYSTEM, parsePlan, describeOp, expandWrites, highlightRows, sortRows, findErrors, parseRange, type Plan, type WorkbookGrid, type Cell } from "./lib/SheetsEngine";
 
 // OrchestrIQ SHEETS - an Excel-compatible spreadsheet (Univer, Apache-2.0 core) with AI
@@ -60,7 +61,11 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
   const [plan, setPlan] = useState<Plan | null>(null); const [note, setNote] = useState<{ kind: "ok" | "warn" | "bad"; text: string } | null>(null);
   const [backup, setBackup] = useState<any>(null);
   const [loaded, setLoaded] = useState(false); const [sheetTick, setSheetTick] = useState(0);
-  const [tab, setTab] = useState<"ai" | "analyze" | "ask" | "pivot" | "chart">("ai"); const [appOpen, setAppOpen] = useState(false);
+  // Report basket (charts / pivots chosen for PDF, PowerPoint and email), saved per workbook.
+  const [basket, setBasketState] = useState<BasketItem[]>([]);
+  useEffect(() => { try { setBasketState(JSON.parse(localStorage.getItem("oiq-sheets-basket-" + (S.activeId || "")) || "[]")); } catch { setBasketState([]); } }, [S.activeId]);
+  const setBasket = (b: BasketItem[]) => { setBasketState(b); try { localStorage.setItem("oiq-sheets-basket-" + S.activeId, JSON.stringify(b)); } catch {} };
+  const [tab, setTab] = useState<"smart" | "ai" | "analyze" | "ask" | "pivot" | "chart">("smart"); const [appOpen, setAppOpen] = useState(false); const [appKey, setAppKey] = useState(0);   /* dashboard locks onto the data it was opened with */
   const apiRef = useRef<any>(null); const hostId = useRef("oiq-sheets-host-" + Math.random().toString(36).slice(2, 8));
   const fileRef = useRef<HTMLInputElement>(null);
   const storeRef = useRef(S); storeRef.current = S;   // always the latest store (used in clean-up)
@@ -152,12 +157,24 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
   const revert = () => { if (!backup || !active) return; setS((s) => { const n = { ...s, snaps: { ...s.snaps, [active.id]: backup } }; persist(n, active.id); return n; }); setBackup(null); setNote({ kind: "ok", text: "Reverted to the version before the last AI change." }); setMountKey((k) => k + 1); };
   const changeOps = plan ? plan.ops.filter((o) => o.op !== "answer") : [];
   const activeSheetName = (() => { try { return apiRef.current?.getActiveWorkbook?.()?.getActiveSheet?.()?.getSheetName?.() || "Sheet1"; } catch { return "Sheet1"; } })();
-  const ctx: InsightCtx = { sheetName: activeSheetName, version: sheetTick, workbookName: active?.name || "Workbook", ask, toast,
+  const ctx: InsightCtx = { sheetName: activeSheetName, version: sheetTick, workbookName: active?.name || "Workbook", ask, toast, basket, setBasket,
     getValues: () => { const ws = apiRef.current?.getActiveWorkbook?.()?.getActiveSheet?.(); if (!ws) return []; const lr = ws.getLastRow(), lc = ws.getLastColumn(); return lr < 0 || lc < 0 ? [] : (ws.getRange(0, 0, lr + 1, lc + 1).getRawValues() as Cell[][]); },
-    addSheet: (name: string, rows: Cell[][]) => { const wb = apiRef.current?.getActiveWorkbook?.(); if (!wb) return; const names = new Set(wb.getSheets().map((x: any) => x.getSheetName())); let nm = (name || "Sheet").replace(/[\\/?*\[\]:']/g, "").slice(0, 28) || "Sheet", i = 2; const base = nm; while (names.has(nm)) nm = base + " " + i++;
-      const cellData: any = {}; rows.forEach((row, r) => row.forEach((v, c) => { if (v === null || v === undefined || v === "") return; (cellData[r] = cellData[r] || {})[c] = typeof v === "string" && v.startsWith("=") ? { f: v } : typeof v === "number" ? { v, t: 2 } : { v: String(v), t: 1 }; }));
+    addSheet: (name: string, rows: Cell[][], style?: SheetStyle) => { const wb = apiRef.current?.getActiveWorkbook?.(); if (!wb) return; const names = new Set(wb.getSheets().map((x: any) => x.getSheetName())); let nm = (name || "Sheet").replace(/[\\/?*\[\]:']/g, "").slice(0, 28) || "Sheet", i = 2; const base = nm; while (names.has(nm)) nm = base + " " + i++;
+      // ISO dates ("2026-05-15") become real dates; their columns get a date format after insertion.
+      const dateCols = new Set<number>(); const cellData: any = {}; rows.forEach((row, r) => row.forEach((v, c) => { if (v === null || v === undefined || v === "") return; const ser = typeof v === "string" ? isoToSerial(v.trim()) : null; if (ser !== null) dateCols.add(c);
+        (cellData[r] = cellData[r] || {})[c] = typeof v === "string" && v.startsWith("=") ? { f: v } : ser !== null ? { v: ser, t: 2 } : typeof v === "number" ? { v, t: 2 } : { v: String(v), t: 1 }; }));
       const maxC = Math.max(1, ...rows.map((r) => r.length)); const sh = wb.insertSheet(nm, { sheet: { name: nm, rowCount: Math.max(1000, rows.length + 500), columnCount: Math.max(26, maxC + 10), cellData } });
-      try { wb.setActiveSheet(sh); } catch {} setSheetTick((x) => x + 1); setTimeout(saveNow, 300); } };
+      try { wb.setActiveSheet(sh); } catch {}
+      dateCols.forEach((c) => { try { (sh.getRange(0, c, rows.length, 1) as any).setNumberFormat(DATE_PATTERN); } catch {} });
+      // Professional formatting: title, navy header rows, bold totals, number formats, widths, frozen header.
+      if (style) { const nc = maxC; const each = (fn: () => void) => { try { fn(); } catch {} };
+        if (style.titleRow !== undefined) each(() => sh.getRange(style.titleRow!, 0).setFontWeight("bold").setFontSize(13));
+        (style.headerRows || []).forEach((r) => each(() => sh.getRange(r, 0, 1, nc).setFontWeight("bold").setBackgroundColor("#11264A").setFontColor("#FFFFFF")));
+        (style.totalRows || []).forEach((r) => each(() => sh.getRange(r, 0, 1, nc).setFontWeight("bold").setBackgroundColor("#E8EEF7")));
+        (style.numFmt || []).forEach((f) => each(() => (sh.getRange(f.r1, f.c1, f.r2 - f.r1 + 1, f.c2 - f.c1 + 1) as any).setNumberFormat(f.pattern)));
+        (style.widths || []).forEach((w, c) => each(() => sh.setColumnWidth(c, w)));
+        if (style.freezeRows) each(() => sh.setFrozenRows(style.freezeRows!)); }
+      setSheetTick((x) => x + 1); setTimeout(saveNow, 300); } };
   // The insight panels read the sheet that is active right now; re-read when the user switches tabs.
   const switchTab = (k: typeof tab) => { setSheetTick((x) => x + 1); setTab(k); };
 
@@ -179,13 +196,14 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
     </div>
     <div style={{ display: "flex", flexWrap: "wrap", flex: 1, minHeight: 0 }}>
       <div key={mountKey + ":" + (active?.id || "")} id={hostId.current} data-testid="sh-grid" style={{ flex: "1 1 520px", minWidth: 0, minHeight: 460, height: "calc(100vh - 210px)" }} />
-      <aside data-testid="sh-ai" style={{ flex: "0 1 380px", minWidth: 290, borderLeft: "1px solid " + V.border, padding: "12px 14px", overflowY: "auto", maxHeight: "calc(100vh - 210px)", background: V.surface }}>
+      <aside data-testid="sh-ai" style={{ flex: "0 1 420px", minWidth: 300, borderLeft: "1px solid " + V.border, padding: "12px 14px", overflowY: "auto", maxHeight: "calc(100vh - 210px)", background: V.surface }}>
         <div role="tablist" style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
-          {([["ai", "AI"], ["analyze", "Analyze"], ["ask", "Ask"], ["pivot", "Pivot"], ["chart", "Chart"]] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} data-testid={"sh-tab-" + k} onClick={() => switchTab(k)} style={{ ...btn(tab === k), minHeight: 30, fontSize: 12 }}>{l}</button>)}
-          <button data-testid="sh-tab-app" onClick={() => { setSheetTick((x) => x + 1); setAppOpen(true); }} style={{ ...btn(), minHeight: 30, fontSize: 12 }}>App ↗</button>
+          {([["smart", "✨ Smart"], ["ai", "AI"], ["analyze", "Analyze"], ["ask", "Ask"], ["pivot", "Pivot"], ["chart", "Chart"]] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} data-testid={"sh-tab-" + k} onClick={() => switchTab(k)} style={{ ...btn(tab === k), minHeight: 30, fontSize: 12 }}>{l}</button>)}
+          <button data-testid="sh-tab-app" onClick={() => { setSheetTick((x) => x + 1); setAppKey((k) => k + 1); setAppOpen(true); }} style={{ ...btn(), minHeight: 30, fontSize: 12 }}>App ↗</button>
         </div>
         {!loaded && <div style={{ fontSize: 12.5, color: V.text3 }}>Opening workbook…</div>}
-        {loaded && tab === "analyze" && <AnalyzePanel key={ctx.sheetName + ":" + ctx.version} ctx={ctx} onOpenApp={() => setAppOpen(true)} />}
+        {loaded && tab === "smart" && <SmartPanel key={ctx.sheetName + ":" + ctx.version} ctx={ctx} />}
+        {loaded && tab === "analyze" && <AnalyzePanel key={ctx.sheetName + ":" + ctx.version} ctx={ctx} onOpenApp={() => { setAppKey((k) => k + 1); setAppOpen(true); }} />}
         {loaded && tab === "ask" && <AskPanel ctx={ctx} />}
         {loaded && tab === "pivot" && <PivotPanel key={ctx.sheetName + ":" + ctx.version} ctx={ctx} />}
         {loaded && tab === "chart" && <ChartPanel key={ctx.sheetName + ":" + ctx.version} ctx={ctx} />}
@@ -210,6 +228,6 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
         </>}
       </aside>
     </div>
-    {appOpen && <DataApp key={"app" + sheetTick} ctx={ctx} onClose={() => setAppOpen(false)} />}
+    {appOpen && <DataApp key={"app" + appKey} ctx={ctx} onClose={() => setAppOpen(false)} />}
   </div>;
 }
