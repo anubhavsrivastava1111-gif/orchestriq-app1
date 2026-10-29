@@ -28,3 +28,12 @@ export async function chartPng(data: ChartData, type: ChartType, w = 900, h = 38
     const url = c.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: "#ffffff" }); c.dispose(); return url; }
   finally { div.remove(); }
 }
+
+// Any ECharts option (waterfalls, Benford comparison, etc.).
+export function EChartRaw({ option, height = 300, testid }: { option: any; height?: number; testid?: string }) {
+  const ref = useRef<HTMLDivElement>(null); const inst = useRef<any>(null);
+  useEffect(() => { if (!ref.current) return; const c = echarts.init(ref.current, undefined, { renderer: "canvas" }); inst.current = c; const ro = new ResizeObserver(() => { try { c.resize(); } catch {} }); ro.observe(ref.current); return () => { ro.disconnect(); try { c.dispose(); } catch {} inst.current = null; }; }, []);
+  useEffect(() => { inst.current?.setOption(option, true); }, [option]);
+  return <div ref={ref} data-testid={testid || "echart-raw"} style={{ width: "100%", height }} />;
+}
+export function themeInk() { return themeColors(); }

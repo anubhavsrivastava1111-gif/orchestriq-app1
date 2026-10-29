@@ -6,6 +6,7 @@ import "@univerjs/preset-sheets-core/lib/index.css";
 import { cockpitContext } from "./lib/DecisionExports";
 import { latestDecisionStage } from "./lib/DecisionExportActions";
 import { INPUT_LABEL } from "./lib/DecisionCockpit";
+import SheetsAutomate, { type AutomateCtx } from "./SheetsAutomate";
 import { SmartPanel, AnalyzePanel, AskPanel, PivotPanel, ChartPanel, DataApp, type InsightCtx, type SheetStyle, type BasketItem } from "./SheetsInsights";
 import { isoToSerial, DATE_PATTERN } from "./lib/SheetsEngine";
 import { TEMPLATES, gridToSnapshot, snapshotToGrid, snapshotValues, parseCsv, gridToCsv, xlsxToGrid, gridToXlsx, ledgerToGrid, pairsToGrid, tableToGrid, buildContext, AI_SYSTEM, parsePlan, describeOp, expandWrites, highlightRows, sortRows, findErrors, parseRange, type Plan, type WorkbookGrid, type Cell } from "./lib/SheetsEngine";
@@ -65,7 +66,7 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
   const [basket, setBasketState] = useState<BasketItem[]>([]);
   useEffect(() => { try { setBasketState(JSON.parse(localStorage.getItem("oiq-sheets-basket-" + (S.activeId || "")) || "[]")); } catch { setBasketState([]); } }, [S.activeId]);
   const setBasket = (b: BasketItem[]) => { setBasketState(b); try { localStorage.setItem("oiq-sheets-basket-" + S.activeId, JSON.stringify(b)); } catch {} };
-  const [tab, setTab] = useState<"smart" | "ai" | "analyze" | "ask" | "pivot" | "chart">("smart"); const [appOpen, setAppOpen] = useState(false); const [appKey, setAppKey] = useState(0);   /* dashboard locks onto the data it was opened with */
+  const [tab, setTab] = useState<"smart" | "ai" | "analyze" | "ask" | "pivot" | "chart">("smart"); const [appOpen, setAppOpen] = useState(false); const [appKey, setAppKey] = useState(0); const [autoOpen, setAutoOpen] = useState(false); const [autoKey, setAutoKey] = useState(0);   /* Automate stays mounted while open */   /* dashboard locks onto the data it was opened with */
   const apiRef = useRef<any>(null); const hostId = useRef("oiq-sheets-host-" + Math.random().toString(36).slice(2, 8));
   const fileRef = useRef<HTMLInputElement>(null);
   const storeRef = useRef(S); storeRef.current = S;   // always the latest store (used in clean-up)
@@ -177,6 +178,22 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
       setSheetTick((x) => x + 1); setTimeout(saveNow, 300); } };
   // The insight panels read the sheet that is active right now; re-read when the user switches tabs.
   const switchTab = (k: typeof tab) => { setSheetTick((x) => x + 1); setTab(k); };
+  // ⚡ Automate needs to read any sheet, rewrite cleaned values, and undo.
+  const sheetBy = (name?: string) => { const wb = apiRef.current?.getActiveWorkbook?.(); if (!wb) return null; return name ? wb.getSheetByName(name) : wb.getActiveSheet(); };
+  const rangeOf = (ws: any) => { const lr = ws.getLastRow(), lc = ws.getLastColumn(); return lr < 0 || lc < 0 ? null : ws.getRange(0, 0, lr + 1, lc + 1); };
+  const actx: AutomateCtx = { workbookName: active?.name || "Workbook", toast, addSheet: ctx.addSheet, canRevert: !!backup,
+    sheets: () => { try { return apiRef.current.getActiveWorkbook().getSheets().map((x: any) => x.getSheetName()); } catch { return []; } },
+    active: () => activeSheetName,
+    values: (name?: string) => { const ws = sheetBy(name); const rg = ws && rangeOf(ws); return rg ? (rg.getRawValues() as Cell[][]) : []; },
+    formulas: (name?: string) => { const ws = sheetBy(name); const rg = ws && rangeOf(ws); return rg ? (rg.getFormulas() as Cell[][]) : []; },
+    replaceValues: (name: string, rows: Cell[][]) => { const ws = sheetBy(name); if (!ws) return; const rg = rangeOf(ws); try { rg?.clear({ contentsOnly: true }); } catch {}
+      const w = Math.max(1, ...rows.map((r) => r.length)); const padded = rows.map((r) => Array.from({ length: w }, (_, i) => (r[i] === undefined ? null : r[i])));
+      if (padded.length) ws.getRange(0, 0, padded.length, w).setValues(padded as any); setSheetTick((x) => x + 1); setTimeout(saveNow, 300); },
+    backup: () => { try { setBackup(apiRef.current.getActiveWorkbook().save()); } catch {} },
+    revert: () => revert(),
+    importFile: async (f: File) => { try { const grid = /\.csv$/i.test(f.name) ? { name: f.name, sheets: [{ name: f.name.replace(/\.csv$/i, ""), rows: parseCsv(await f.text()) }] } : await xlsxToGrid((await import("exceljs")).default, await f.arrayBuffer(), f.name);
+      const before = new Set(actx.sheets()); grid.sheets.forEach((sh) => ctx.addSheet(sh.name.slice(0, 28), sh.rows)); return actx.sheets().filter((n) => !before.has(n)); } catch (e: any) { toast("Could not read " + f.name + ": " + (e?.message || e), "warning"); return []; } },
+    select: (name: string, a1: string) => { try { const wb = apiRef.current.getActiveWorkbook(); const ws = wb.getSheetByName(name); wb.setActiveSheet(ws); ws.getRange(a1).activate(); setAutoOpen(false); } catch {} } };
 
   return <div data-testid="sheets" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, color: V.text }}>
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "10px 14px", borderBottom: "1px solid " + V.border }}>
@@ -186,6 +203,7 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
         <option value="">+ New…</option><option value="blank">Blank workbook</option>{TEMPLATES.map((t) => <option key={t.id} value={t.id}>Template: {t.name}</option>)}</select>
       <select aria-label="Import from OrchestrIQ" data-testid="sh-module" value="" onChange={(e) => { if (e.target.value) importModule(e.target.value); }} style={{ ...inp, maxWidth: 220 }}>
         <option value="">Import from OrchestrIQ…</option><option value="ledger">Ledger journal entries</option><option value="boardroom">Latest Boardroom decision numbers</option><option value="spendgov">Spend Governance decision log</option><option value="compliance">Compliance control testing</option></select>
+      <button data-testid="sh-automate" onClick={() => { setSheetTick((x) => x + 1); setAutoKey((k) => k + 1); setAutoOpen(true); }} style={{ ...btn(true), fontSize: 13.5 }}>⚡ Automate</button>
       <button onClick={() => fileRef.current?.click()} style={btn()}>Open Excel / CSV</button>
       <input ref={fileRef} data-testid="sh-file" type="file" accept=".xlsx,.csv" style={{ display: "none" }} onChange={(e) => onImport(e.target.files?.[0])} />
       <button data-testid="sh-export" onClick={onExport} style={btn()}>Download Excel</button>
@@ -229,5 +247,6 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
       </aside>
     </div>
     {appOpen && <DataApp key={"app" + appKey} ctx={ctx} onClose={() => setAppOpen(false)} />}
+    {autoOpen && loaded && <SheetsAutomate key={"auto" + autoKey} ctx={actx} onClose={() => setAutoOpen(false)} />}
   </div>;
 }
