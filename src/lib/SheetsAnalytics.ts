@@ -30,7 +30,9 @@ export function toTable(values: Cell[][]): Table {
   const nonEmpty = values.slice(1).filter((r) => r && r.some((v) => !isBlank(v)));
   const rows = nonEmpty.filter((r) => !isTotalRow(r)).map((r) => Array.from({ length: width }, (_, i) => (r[i] === undefined ? null : r[i])));
   const excludedTotals = nonEmpty.length - rows.length;
-  const types = headers.map((_, c) => { let n = 0, d = 0, t = 0; for (const r of rows.slice(0, 2000)) { const v = r[c]; if (isBlank(v)) continue; if (toNum(v) !== null) n++; else if (toMonth(v)) d++; else t++; }
+  // Real spreadsheet dates arrive as serial numbers; a date-named column of serials is a date column.
+  const dateName = (h: string) => /date|day|month|period|time|dt\b|when/i.test(h);
+  const types = headers.map((h, c) => { let n = 0, d = 0, t = 0; const dn = dateName(h); for (const r of rows.slice(0, 2000)) { const v = r[c]; if (isBlank(v)) continue; if (dn && typeof v === "number" && v > 20000 && v < 80000) d++; else if (toNum(v) !== null) n++; else if (toMonth(v)) d++; else t++; }
     const tot = n + d + t; return !tot ? "empty" : d / tot >= 0.8 ? "date" : n / tot >= 0.8 ? "number" : "text"; }) as ColType[];
   return { headers, rows, types, excludedTotals };
 }

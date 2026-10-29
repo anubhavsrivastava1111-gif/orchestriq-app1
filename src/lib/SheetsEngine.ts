@@ -20,6 +20,11 @@ export function parseRange(a1: string): { r1: number; c1: number; r2: number; c2
   return { r1: Math.min(p.r, q.r), c1: Math.min(p.c, q.c), r2: Math.max(p.r, q.r), c2: Math.max(p.c, q.c) };
 }
 export const isFormula = (v: Cell) => typeof v === "string" && v.startsWith("=");
+// Dates: "2026-05-15" text becomes a real spreadsheet date (serial number shown as yyyy-mm-dd), like Excel.
+const ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
+export const DATE_PATTERN = "yyyy-mm-dd";
+export function isoToSerial(v: string): number | null { const m = v.match(ISO); if (!m) return null; const y = +m[1], mo = +m[2], d = +m[3]; if (mo < 1 || mo > 12 || d < 1 || d > 31) return null; const t = Date.UTC(y, mo - 1, d); const dt = new Date(t); if (dt.getUTCMonth() !== mo - 1) return null; return t / 864e5 + 25569; }
+export function serialToIso(n: number): string { return new Date(Math.round((n - 25569) * 864e5)).toISOString().slice(0, 10); }
 
 // ── Univer snapshot <-> grid ──
 export function gridToSnapshot(wb: WorkbookGrid, id = "wb-" + Date.now()): any {
@@ -28,7 +33,8 @@ export function gridToSnapshot(wb: WorkbookGrid, id = "wb-" + Date.now()): any {
     const sid = "sheet-" + (i + 1); sheetOrder.push(sid); const cellData: any = {};
     s.rows.forEach((row, r) => row.forEach((v, c) => {
       if (v === null || v === undefined || v === "") return;
-      (cellData[r] = cellData[r] || {})[c] = isFormula(v) ? { f: v } : typeof v === "number" ? { v, t: 2 } : typeof v === "boolean" ? { v, t: 3 } : { v: String(v), t: 1 };
+      const ser = typeof v === "string" ? isoToSerial(v.trim()) : null;
+      (cellData[r] = cellData[r] || {})[c] = isFormula(v) ? { f: v } : ser !== null ? { v: ser, t: 2, s: styleId(DATE_PATTERN) } : typeof v === "number" ? { v, t: 2 } : typeof v === "boolean" ? { v, t: 3 } : { v: String(v), t: 1 };
     }));
     for (const [ref, pattern] of Object.entries(s.formats || {})) { const rg = parseRange(ref); if (!rg || !pattern) continue; const sidStyle = styleId(pattern);
       for (let r = rg.r1; r <= rg.r2; r++) for (let c = rg.c1; c <= rg.c2; c++) { const row = (cellData[r] = cellData[r] || {}); row[c] = { ...(row[c] || {}), s: sidStyle }; } }
@@ -39,10 +45,12 @@ export function gridToSnapshot(wb: WorkbookGrid, id = "wb-" + Date.now()): any {
   return { id, name: wb.name, sheetOrder, sheets, locale: "enUS", styles };
 }
 export function snapshotToGrid(snap: any): WorkbookGrid {
-  const order: string[] = snap?.sheetOrder || Object.keys(snap?.sheets || {});
+  const order: string[] = snap?.sheetOrder || Object.keys(snap?.sheets || {}); const styles = snap?.styles || {};
+  const isDateCell = (cell: any) => { const st = typeof cell?.s === "string" ? styles[cell.s] : cell?.s; const pat = String(st?.n?.pattern || "").toLowerCase(); return /y/.test(pat) && /d/.test(pat) && !/h|s/.test(pat.replace(/[^a-z]/g, "").replace(/y|m|d/g, "")); };
   return { name: snap?.name || "Workbook", sheets: order.map((sid) => { const s = snap.sheets[sid] || {}; const rows: Cell[][] = [];
     for (const [rk, cols] of Object.entries<any>(s.cellData || {})) { const r = Number(rk); for (const [ck, cell] of Object.entries<any>(cols || {})) { const c = Number(ck); if (!cell) continue;
-      const v: Cell = cell.f ? String(cell.f) : cell.si && cell.f === undefined && cell.v !== undefined ? cell.v : cell.v === undefined ? null : cell.v;
+      let v: Cell = cell.f ? String(cell.f) : cell.si && cell.f === undefined && cell.v !== undefined ? cell.v : cell.v === undefined ? null : cell.v;
+      if (typeof v === "number" && !cell.f && isDateCell(cell)) v = serialToIso(v);   /* keep dates as dates on export */
       if (v === null || v === undefined || v === "") continue; while (rows.length <= r) rows.push([]); const row = rows[r]; while (row.length <= c) row.push(null); row[c] = v; } }
     return { name: s.name || sid, rows }; }) };
 }
@@ -92,6 +100,7 @@ export async function gridToXlsx(ExcelJS: any, wb: WorkbookGrid, values?: Cell[]
   wb.sheets.forEach((s, si) => { const ws = x.addWorksheet((s.name || "Sheet" + (si + 1)).slice(0, 31));
     s.rows.forEach((row, r) => row.forEach((v, c) => { if (v === null || v === undefined || v === "") return; const cell = ws.getCell(r + 1, c + 1);
       if (isFormula(v)) { const res = values?.[si]?.[r]?.[c]; cell.value = { formula: String(v).slice(1), result: res === null || res === undefined ? undefined : res }; }
+      else if (typeof v === "string" && isoToSerial(v) !== null) { cell.value = new Date(v + "T00:00:00Z"); cell.numFmt = DATE_PATTERN; }   /* real Excel date */
       else cell.value = v; }));
     ws.columns?.forEach((col: any) => { col.width = 16; }); });
   return await x.xlsx.writeBuffer();
