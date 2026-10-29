@@ -14,9 +14,10 @@ export interface Fact { id: string; text: string; nums: number[] }
 const isBlank = (v: Cell) => v === null || v === undefined || (typeof v === "string" && v.trim() === "");
 export const toNum = (v: Cell): number | null => { if (typeof v === "number") return isFinite(v) ? v : null; if (typeof v === "boolean" || v === null || v === undefined) return null;
   const s = String(v).trim().replace(/[,\u20b9$\u20ac\u00a3\s]/g, ""); if (!s || !/^[-+]?\d*\.?\d+(e[-+]?\d+)?%?$/i.test(s)) return null; const n = parseFloat(s); return s.endsWith("%") ? n / 100 : n; };
-const DATE_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})|^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/;
+// Dates and periods: 2026-08-15, 2026-08 (a month), 15/08/2026.
+const DATE_RE = /^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?(?:$|[T\s])|^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/;
 export const toMonth = (v: Cell): string | null => { if (typeof v === "number" && v > 20000 && v < 80000) { const d = new Date(Math.round((v - 25569) * 864e5)); return d.toISOString().slice(0, 7); }
-  const m = String(v ?? "").trim().match(DATE_RE); if (!m) return null; if (m[1]) return m[1] + "-" + m[2].padStart(2, "0"); return m[6] + "-" + m[5].padStart(2, "0"); };
+  const m = String(v ?? "").trim().match(DATE_RE); if (!m) return null; if (m[1]) { if (+m[2] < 1 || +m[2] > 12) return null; return m[1] + "-" + m[2].padStart(2, "0"); } return m[6] + "-" + m[5].padStart(2, "0"); };
 export const fmtNum = (n: number | null | undefined, dp = 2) => (n === null || n === undefined || !isFinite(n) ? "\u2014" : Math.abs(n) >= 1000 || Number.isInteger(n) ? Math.round(n).toLocaleString("en-IN") : n.toLocaleString("en-IN", { maximumFractionDigits: dp }));
 export const pct = (a: number, b: number) => (b ? (a / b) * 100 : 0);
 
