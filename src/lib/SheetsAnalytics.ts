@@ -4,45 +4,42 @@
 // slides). The AI only chooses what to compute (validated) and explains computed facts.
 import type { Cell, WorkbookGrid } from "./SheetsEngine";
 import { colToLetters } from "./SheetsEngine";
+import { understand, num as uNum, periodKey, isPeriodLabel, type ColSem, type Understanding } from "./SheetsUnderstand";
 
 export type ColType = "number" | "date" | "text" | "empty";
-export interface Table { headers: string[]; rows: Cell[][]; types: ColType[]; excludedTotals?: number }
-export interface ColProfile { name: string; index: number; type: ColType; count: number; blanks: number; distinct: number; sum?: number; mean?: number; min?: number; max?: number; median?: number; outliers?: number; top?: { value: string; count: number }[]; dateMin?: string; dateMax?: string }
+// sem: what each column means (role, aggregation, unit); und: the full reading of the sheet.
+export interface Table { headers: string[]; rows: Cell[][]; types: ColType[]; excludedTotals?: number; sem?: ColSem[]; und?: Understanding }
+export interface ColProfile { role?: ColSem["role"]; agg?: ColSem["agg"]; kind?: ColSem["kind"]; unit?: string; weightBy?: number; name: string; index: number; type: ColType; count: number; blanks: number; distinct: number; sum?: number; mean?: number; min?: number; max?: number; median?: number; outliers?: number; top?: { value: string; count: number }[]; dateMin?: string; dateMax?: string }
 export interface Profile { rows: number; cols: number; columns: ColProfile[]; duplicateRows: number }
 export interface Fact { id: string; text: string; nums: number[] }
 
 const isBlank = (v: Cell) => v === null || v === undefined || (typeof v === "string" && v.trim() === "");
-export const toNum = (v: Cell): number | null => { if (typeof v === "number") return isFinite(v) ? v : null; if (typeof v === "boolean" || v === null || v === undefined) return null;
-  const s = String(v).trim().replace(/[,\u20b9$\u20ac\u00a3\s]/g, ""); if (!s || !/^[-+]?\d*\.?\d+(e[-+]?\d+)?%?$/i.test(s)) return null; const n = parseFloat(s); return s.endsWith("%") ? n / 100 : n; };
+export const toNum = (v: Cell): number | null => uNum(v as any);   /* ₹1,200 · (1,200) · 12% · 1.5e3 */
 // Dates and periods: 2026-08-15, 2026-08 (a month), 15/08/2026.
 const DATE_RE = /^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?(?:$|[T\s])|^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/;
-export const toMonth = (v: Cell): string | null => { if (typeof v === "number" && v > 20000 && v < 80000) { const d = new Date(Math.round((v - 25569) * 864e5)); return d.toISOString().slice(0, 7); }
+const toMonthStrict = (v: Cell): string | null => { if (typeof v === "number" && v > 20000 && v < 80000) { const d = new Date(Math.round((v - 25569) * 864e5)); return d.toISOString().slice(0, 7); }
   const m = String(v ?? "").trim().match(DATE_RE); if (!m) return null; if (m[1]) { if (+m[2] < 1 || +m[2] > 12) return null; return m[1] + "-" + m[2].padStart(2, "0"); } return m[6] + "-" + m[5].padStart(2, "0"); };
+export const toMonth = (v: Cell): string | null => { const m = toMonthStrict(v); if (m) return m; return isPeriodLabel(v as any) ? periodKey(v as any) : null; };
 export const fmtNum = (n: number | null | undefined, dp = 2) => (n === null || n === undefined || !isFinite(n) ? "\u2014" : Math.abs(n) >= 1000 || Number.isInteger(n) ? Math.round(n).toLocaleString("en-IN") : n.toLocaleString("en-IN", { maximumFractionDigits: dp }));
 export const pct = (a: number, b: number) => (b ? (a / b) * 100 : 0);
 
 // ── Table from sheet values (row 1 = header) ──
 export function toTable(values: Cell[][]): Table {
-  const head = (values[0] || []).map((h, i) => (isBlank(h) ? "Column " + colToLetters(i) : String(h).trim()));
-  const width = Math.max(head.length, ...values.slice(1, 200).map((r) => (r || []).length));
-  const headers = Array.from({ length: width }, (_, i) => head[i] || "Column " + colToLetters(i));
-  // Total / subtotal rows would be double-counted by sums, pivots and charts, so they are excluded (and reported).
+  // Read the sheet like an analyst: find the real table (title rows, header row, two-row headers, notes, other
+  // tables), then decide what every column means. Types follow meaning: an Order No. or PIN code is never a number to add.
+  const u = understand(values as any);
   const isTotalRow = (r: Cell[]) => r.some((v) => typeof v === "string" && /^\s*(grand\s+)?(sub\s*-?\s*)?totals?\s*:?\s*$/i.test(v));
-  const nonEmpty = values.slice(1).filter((r) => r && r.some((v) => !isBlank(v)));
-  const rows = nonEmpty.filter((r) => !isTotalRow(r)).map((r) => Array.from({ length: width }, (_, i) => (r[i] === undefined ? null : r[i])));
-  const excludedTotals = nonEmpty.length - rows.length;
-  // Real spreadsheet dates arrive as serial numbers; a date-named column of serials is a date column.
-  const dateName = (h: string) => /date|day|month|period|time|dt\b|when/i.test(h);
-  const types = headers.map((h, c) => { let n = 0, d = 0, t = 0; const dn = dateName(h); for (const r of rows.slice(0, 2000)) { const v = r[c]; if (isBlank(v)) continue; if (dn && typeof v === "number" && v > 20000 && v < 80000) d++; else if (toNum(v) !== null) n++; else if (toMonth(v)) d++; else t++; }
-    const tot = n + d + t; return !tot ? "empty" : d / tot >= 0.8 ? "date" : n / tot >= 0.8 ? "number" : "text"; }) as ColType[];
-  return { headers, rows, types, excludedTotals };
+  const rows = (u.rows as Cell[][]).filter((r) => !isTotalRow(r));
+  const excludedTotals = u.layout.totalRows.length + (u.rows.length - rows.length);
+  const types = u.cols.map((c) => (c.kind === "empty" ? "empty" : c.role === "time" && c.kind !== "year" ? "date" : c.role === "measure" || c.role === "measure-avg" ? "number" : "text")) as ColType[];
+  return { headers: u.headers, rows, types, excludedTotals, sem: u.cols, und: u };
 }
 export function findCol(t: Table, name: string | null | undefined): number { if (!name) return -1; const n = String(name).trim().toLowerCase(); let i = t.headers.findIndex((h) => h.toLowerCase() === n); if (i < 0) i = t.headers.findIndex((h) => h.toLowerCase().includes(n)); return i; }
 
 // ── Profiling ──
 export function profile(t: Table): Profile {
   const columns: ColProfile[] = t.headers.map((name, c) => {
-    const vals = t.rows.map((r) => r[c]); const non = vals.filter((v) => !isBlank(v)); const p: ColProfile = { name, index: c, type: t.types[c], count: non.length, blanks: vals.length - non.length, distinct: new Set(non.map((v) => String(v).trim().toLowerCase())).size };
+    const vals = t.rows.map((r) => r[c]); const non = vals.filter((v) => !isBlank(v)); const sm = t.sem?.[c]; const p: ColProfile = { role: sm?.role, agg: sm?.agg, kind: sm?.kind, unit: sm?.unit, weightBy: sm?.weightBy, name, index: c, type: t.types[c], count: non.length, blanks: vals.length - non.length, distinct: new Set(non.map((v) => String(v).trim().toLowerCase())).size };
     if (t.types[c] === "number") { const nums = non.map(toNum).filter((x): x is number => x !== null).sort((a, b) => a - b);
       if (nums.length) { p.sum = nums.reduce((a, b) => a + b, 0); p.mean = p.sum / nums.length; p.min = nums[0]; p.max = nums[nums.length - 1]; p.median = nums[Math.floor(nums.length / 2)];
         const q1 = nums[Math.floor(nums.length * 0.25)], q3 = nums[Math.floor(nums.length * 0.75)], iqr = q3 - q1; p.outliers = iqr > 0 ? nums.filter((x) => x < q1 - 3 * iqr || x > q3 + 3 * iqr).length : 0; } }
@@ -52,12 +49,16 @@ export function profile(t: Table): Profile {
   const seen = new Set<string>(); let dup = 0; for (const r of t.rows) { const k = JSON.stringify(r); if (seen.has(k)) dup++; else seen.add(k); }
   return { rows: t.rows.length, cols: t.headers.length, columns, duplicateRows: dup };
 }
-export const numericCols = (p: Profile) => p.columns.filter((c) => c.type === "number" && c.sum !== undefined).sort((a, b) => Math.abs(b.sum!) - Math.abs(a.sum!));
+// Only quantities that may be added up (amounts, units). Percentages, prices and ratings are in avgCols.
+export const numericCols = (p: Profile) => p.columns.filter((c) => c.type === "number" && c.sum !== undefined && (!c.role || c.role === "measure")).sort((a, b) => Math.abs(b.sum!) - Math.abs(a.sum!));
 // Main dimension = what a person would pick: a column with 3-12 distinct values (e.g. Region),
 // earliest first; 2-value flags (Online/Store) and long lists (25 reps) rank after.
 export const categoryCols = (p: Profile) => p.columns.filter((c) => c.type === "text" && c.distinct >= 2 && c.distinct <= 50)
   .sort((a, b) => ((a.distinct >= 3 && a.distinct <= 12 ? 0 : 1) - (b.distinct >= 3 && b.distinct <= 12 ? 0 : 1)) || a.index - b.index);
 export const dateCol = (p: Profile) => p.columns.find((c) => c.type === "date");
+// Measures that must be averaged, never added: %, prices / rates (weighted by quantity when known), ratings.
+export const avgCols = (p: Profile) => p.columns.filter((c) => c.type === "number" && c.role === "measure-avg" && c.mean !== undefined);
+export function avgOf(t: Table, c: ColProfile, rows: Cell[][] = t.rows): number { let s = 0, w = 0; for (const r of rows) { const v = toNum(r[c.index]); if (v === null) continue; const wt = c.agg === "weighted-avg" && c.weightBy !== undefined ? toNum(r[c.weightBy]) ?? 0 : 1; s += v * wt; w += wt; } return w ? s / w : 0; }
 
 // ── Grouping (used by pivots, charts, queries, apps) ──
 export type Agg = "sum" | "count" | "avg" | "min" | "max";
@@ -75,6 +76,9 @@ export function facts(t: Table, p: Profile): Fact[] {
   F("size", p.rows.toLocaleString("en-IN") + " rows and " + p.cols + " columns" + (t.excludedTotals ? " (" + t.excludedTotals + " total row" + (t.excludedTotals > 1 ? "s" : "") + " excluded so nothing is counted twice)" : "") + ".", [p.rows, p.cols, t.excludedTotals || 0]);
   const nums = numericCols(p).slice(0, 6), cats = categoryCols(p), dc = dateCol(p);
   for (const c of nums) F("num-" + c.index, c.name + ": total " + fmtNum(c.sum) + ", average " + fmtNum(c.mean) + ", min " + fmtNum(c.min) + ", max " + fmtNum(c.max) + ".", [c.sum!, c.mean!, c.min!, c.max!]);
+  // Percentages, prices and ratings are averaged (prices weighted by quantity), never totalled.
+  for (const c of avgCols(p).slice(0, 4)) { const a = avgOf(t, c); const pct = c.kind === "percent" && (c.max ?? 0) <= 1.0001; const show = (x: number) => (pct ? (x * 100).toFixed(1) + "%" : fmtNum(x));
+    F("avg-" + c.index, c.name + ": " + (c.agg === "weighted-avg" ? "weighted average " : "average ") + show(a) + (c.agg === "weighted-avg" && c.weightBy !== undefined ? " (weighted by " + t.headers[c.weightBy] + ")" : "") + ", range " + show(c.min!) + " to " + show(c.max!) + ".", [a, c.min!, c.max!, pct ? +(a * 100).toFixed(1) : a]); }
   if (nums[0] && cats[0]) { const g = groupBy(t, cats[0].index, nums[0].index, "sum").sort((a, b) => b.value - a.value); const tot = g.reduce((a, b) => a + b.value, 0);
     g.slice(0, 3).forEach((x, i) => F("share-" + i, x.key + " has " + fmtNum(x.value) + " of " + nums[0].name + " (" + pct(x.value, tot).toFixed(1) + "% of " + fmtNum(tot) + ") by " + cats[0].name + ".", [x.value, +pct(x.value, tot).toFixed(1), tot]));
     const low = g[g.length - 1]; if (g.length > 3 && low) F("share-low", "Lowest " + cats[0].name + ": " + low.key + " with " + fmtNum(low.value) + " (" + pct(low.value, tot).toFixed(1) + "%).", [low.value, +pct(low.value, tot).toFixed(1)]); }
@@ -237,3 +241,22 @@ export function reportBlocks(title: string, model: AppModel, t: Table, insights:
   return { title, subtitle: "Prepared with OrchestrIQ Sheets \u2014 every figure computed from the data", meta: [["Rows analysed", model.matched.toLocaleString("en-IN")], ["Date", new Date().toLocaleDateString("en-IN")]] as [string, string][], blocks, toc: blocks.filter((b) => b.t === "h1").map((b) => b.text) };
 }
 export function workbookFromRows(name: string, sheetName: string, header: string[], rows: Cell[][]): WorkbookGrid { return { name, sheets: [{ name: sheetName, rows: [header, ...rows] }] }; }
+
+// ── Column-by-column insights: what an analyst notes when walking through each column ──
+export interface ColInsight { column: string; role: string; line: string; nums: number[] }
+export function columnInsights(t: Table, p: Profile): ColInsight[] {
+  const out: ColInsight[] = []; const total = t.rows.length;
+  for (const c of p.columns) { const sm = t.sem?.[c.index]; if (!sm || sm.role === "ignore") continue;
+    if (sm.role === "measure" && c.sum !== undefined) { const top10 = (() => { const v = t.rows.map((r) => toNum(r[c.index]) ?? 0).sort((a, b) => b - a); const k = Math.max(1, Math.ceil(v.length * 0.1)); const s = v.slice(0, k).reduce((a, b) => a + b, 0); return c.sum ? (s / c.sum) * 100 : 0; })();
+      out.push({ column: c.name, role: "measure", line: "Total " + fmtNum(c.sum) + (sm.unit ? " (" + sm.unit + ")" : "") + "; typical value " + fmtNum(c.median) + ", range " + fmtNum(c.min) + " to " + fmtNum(c.max) + ". The top 10% of rows hold " + top10.toFixed(0) + "% of the total" + (top10 > 50 ? ", so results are concentrated." : ".") + (c.outliers ? " " + c.outliers + " extreme value(s) to check." : ""), nums: [c.sum, c.median!, c.min!, c.max!, +top10.toFixed(0)] }); }
+    else if (sm.role === "measure-avg" && c.mean !== undefined) { const a = avgOf(t, c); const pct = c.kind === "percent" && (c.max ?? 0) <= 1.0001; const sh = (x: number) => (pct ? (x * 100).toFixed(1) + "%" : fmtNum(x));
+      out.push({ column: c.name, role: "average", line: (c.agg === "weighted-avg" ? "Weighted average " : "Average ") + sh(a) + ", from " + sh(c.min!) + " to " + sh(c.max!) + ". Averaged, not added up.", nums: [a, c.min!, c.max!, pct ? +(a * 100).toFixed(1) : a] }); }
+    else if (sm.role === "dimension") { const m = new Map<string, number>(); for (const r of t.rows) { const k = r[c.index] === null || r[c.index] === "" ? "(blank)" : String(r[c.index]).trim(); m.set(k, (m.get(k) || 0) + 1); } const top = [...m.entries()].sort((a, b) => b[1] - a[1]); const t3 = top.slice(0, 3).reduce((s, x) => s + x[1], 0);
+      out.push({ column: c.name, role: "dimension", line: m.size + " distinct values. Most common: " + top.slice(0, 3).map(([k, n]) => k + " (" + pct(n, total).toFixed(0) + "%)").join(", ") + ". " + (top.length > 3 ? "Top 3 cover " + pct(t3, total).toFixed(0) + "% of rows." : ""), nums: [m.size, ...top.slice(0, 3).map(([, n]) => +pct(n, total).toFixed(0)), +pct(t3, total).toFixed(0)] }); }
+    else if (sm.role === "time") { const ks = t.rows.map((r) => toMonth(r[c.index])).filter(Boolean).sort() as string[]; const uniq = Array.from(new Set(ks));
+      let gaps = 0; if (uniq.every((k) => /^\d{4}-\d{2}$/.test(k)) && uniq.length > 1) { const [y0, m0] = uniq[0].split("-").map(Number), [y1, m1] = uniq[uniq.length - 1].split("-").map(Number); gaps = (y1 * 12 + m1) - (y0 * 12 + m0) + 1 - uniq.length; }
+      out.push({ column: c.name, role: "time", line: uniq.length ? "From " + uniq[0] + " to " + uniq[uniq.length - 1] + " (" + uniq.length + " period" + (uniq.length > 1 ? "s" : "") + ")" + (gaps > 0 ? "; " + gaps + " month(s) missing in between, so trends may mislead." : ".") : "No readable dates.", nums: [uniq.length, gaps] }); }
+    else if (sm.role === "identifier") { const vals = t.rows.map((r) => r[c.index]).filter((v) => v !== null && v !== ""); const d = new Set(vals.map((v) => String(v).trim().toLowerCase())).size;
+      out.push({ column: c.name, role: "identifier", line: d.toLocaleString("en-IN") + " unique of " + vals.length.toLocaleString("en-IN") + (d < vals.length ? "; " + (vals.length - d) + " repeated, check for duplicates." : ", one row each."), nums: [d, vals.length, vals.length - d] }); } }
+  return out;
+}
