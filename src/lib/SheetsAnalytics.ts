@@ -8,7 +8,7 @@ import { understand, num as uNum, periodKey, isPeriodLabel, type ColSem, type Un
 
 export type ColType = "number" | "date" | "text" | "empty";
 // sem: what each column means (role, aggregation, unit); und: the full reading of the sheet.
-export interface Table { headers: string[]; rows: Cell[][]; types: ColType[]; excludedTotals?: number; sem?: ColSem[]; und?: Understanding }
+export interface Table { headers: string[]; rows: Cell[][]; types: ColType[]; excludedTotals?: number; sem?: ColSem[]; und?: Understanding; rowIdx?: number[] }
 export interface ColProfile { role?: ColSem["role"]; agg?: ColSem["agg"]; kind?: ColSem["kind"]; unit?: string; weightBy?: number; name: string; index: number; type: ColType; count: number; blanks: number; distinct: number; sum?: number; mean?: number; min?: number; max?: number; median?: number; outliers?: number; top?: { value: string; count: number }[]; dateMin?: string; dateMax?: string }
 export interface Profile { rows: number; cols: number; columns: ColProfile[]; duplicateRows: number }
 export interface Fact { id: string; text: string; nums: number[] }
@@ -29,10 +29,10 @@ export function toTable(values: Cell[][]): Table {
   // tables), then decide what every column means. Types follow meaning: an Order No. or PIN code is never a number to add.
   const u = understand(values as any);
   const isTotalRow = (r: Cell[]) => r.some((v) => typeof v === "string" && /^\s*(grand\s+)?(sub\s*-?\s*)?totals?\s*:?\s*$/i.test(v));
-  const rows = (u.rows as Cell[][]).filter((r) => !isTotalRow(r));
+  const keep = (u.rows as Cell[][]).map((r) => !isTotalRow(r)); const rows = (u.rows as Cell[][]).filter((_, i) => keep[i]); const rowIdx = u.rowIdx.filter((_, i) => keep[i]);
   const excludedTotals = u.layout.totalRows.length + (u.rows.length - rows.length);
   const types = u.cols.map((c) => (c.kind === "empty" ? "empty" : c.role === "time" && c.kind !== "year" ? "date" : c.role === "measure" || c.role === "measure-avg" ? "number" : "text")) as ColType[];
-  return { headers: u.headers, rows, types, excludedTotals, sem: u.cols, und: u };
+  return { headers: u.headers, rows, types, excludedTotals, sem: u.cols, und: u, rowIdx };
 }
 export function findCol(t: Table, name: string | null | undefined): number { if (!name) return -1; const n = String(name).trim().toLowerCase(); let i = t.headers.findIndex((h) => h.toLowerCase() === n); if (i < 0) i = t.headers.findIndex((h) => h.toLowerCase().includes(n)); return i; }
 
@@ -135,15 +135,22 @@ export function pivot(t: Table, s: PivotSpec): PivotResult | { error: string } {
 // Pivot as a new sheet. Live formulas (SUMIFS etc.) referencing the data sheet when practical;
 // otherwise the computed values, clearly labelled. Returns rows for SheetsEngine.
 export const LIVE_PIVOT_MAX_CELLS = 3000;
+// Where the data really sits on its sheet. Live formulas are only safe when the data rows are one
+// contiguous block with no total or blank rows inside (otherwise SUM would double-count a total).
+export function liveRange(t: Table, dataSheet: string): { ref: (c: number, abs?: boolean) => string; first: number; last: number } | null {
+  const idx = t.rowIdx; if (!idx || !idx.length) return null; const first = idx[0], last = idx[idx.length - 1]; if (last - first + 1 !== idx.length) return null;
+  const L = t.und?.layout; if (L && L.totalRows.some((r) => r > first && r < last)) return null; const off = L?.colStart || 0; const q = "'" + dataSheet.replace(/'/g, "''") + "'!";
+  return { first: first + 1, last: last + 1, ref: (c: number, abs = true) => { const C = colToLetters(c + off); return abs ? q + "$" + C + "$" + (first + 1) + ":$" + C + "$" + (last + 1) : q + C + (first + 1) + ":" + C + (last + 1); } };
+}
 export function pivotSheetRows(t: Table, s: PivotSpec, res: PivotResult, dataSheet: string): { rows: Cell[][]; live: boolean; note: string } {
-  const rc = findCol(t, s.rows), cc = s.cols ? findCol(t, s.cols) : -1, vc = s.value ? findCol(t, s.value) : -1; const n = t.rows.length + 1;
-  const ref = (c: number) => "'" + dataSheet.replace(/'/g, "''") + "'!$" + colToLetters(c) + "$2:$" + colToLetters(c) + "$" + n;
-  const live = !s.byMonth && res.rowKeys.length * Math.max(1, res.colKeys.length) <= LIVE_PIVOT_MAX_CELLS && t.types[rc] !== "date" && (cc < 0 || t.types[cc] !== "date");
+  const rc = findCol(t, s.rows), cc = s.cols ? findCol(t, s.cols) : -1, vc = s.value ? findCol(t, s.value) : -1;
+  const lr = liveRange(t, dataSheet); const ref = (c: number) => (lr ? lr.ref(c) : "");   /* follows the table's real rows and columns */
+  const live = !!lr && !s.byMonth && res.rowKeys.length * Math.max(1, res.colKeys.length) <= LIVE_PIVOT_MAX_CELLS && t.types[rc] !== "date" && (cc < 0 || t.types[cc] !== "date");
   const header: Cell[] = [res.title], colHead: Cell[] = [t.headers[rc] + (s.byMonth ? " (month)" : "")]; const rows: Cell[][] = [header, [], colHead];
   if (cc >= 0) res.colKeys.forEach((k) => colHead.push(k)); else colHead.push(aggName[s.agg] + (vc >= 0 ? " of " + t.headers[vc] : ""));
   colHead.push("Total");
   if (!live) { res.rowKeys.forEach((k, i) => rows.push([k, ...(cc >= 0 ? res.cells[i] : [res.cells[i][0]]), res.rowTotals[i]])); rows.push(["Total", ...(cc >= 0 ? res.colTotals : [res.grand]), res.grand]);
-    return { rows, live, note: "Values computed from " + t.rows.length.toLocaleString("en-IN") + " rows (too large or month-grouped for live formulas). Rebuild after the data changes." }; }
+    return { rows, live, note: "Values computed from " + t.rows.length.toLocaleString("en-IN") + " rows (" + (!lr ? "the data has total or blank rows inside it, so live formulas could double-count" : "too large or month-grouped for live formulas") + "). Rebuild after the data changes." }; }
   const lit = (k: string) => (k === "(blank)" ? "\"=\"" : null);
   const crit = (c: number, cellRef: string, key: string) => ref(c) + "," + (lit(key) || cellRef);
   const f = (args: string) => { const fn = s.agg === "sum" ? "SUMIFS(" + ref(vc) + "," : s.agg === "count" ? "COUNTIFS(" : s.agg === "avg" ? "AVERAGEIFS(" + ref(vc) + "," : s.agg === "min" ? "MINIFS(" + ref(vc) + "," : "MAXIFS(" + ref(vc) + ",";
@@ -188,7 +195,11 @@ export function runQuery(t: Table, q: Query): { title: string; rows: [string, nu
 
 // ── Analysis sheet (formulas referencing the data sheet) ──
 export function analysisSheetRows(t: Table, p: Profile, dataSheet: string): Cell[][] {
-  const n = t.rows.length + 1; const ref = (c: number) => "'" + dataSheet.replace(/'/g, "''") + "'!" + colToLetters(c) + "2:" + colToLetters(c) + n;
+  const lr = liveRange(t, dataSheet);
+  if (!lr) { // values instead of formulas when live references would be unsafe
+    const out: Cell[][] = [["Analysis of “" + dataSheet + "” (" + p.rows.toLocaleString("en-IN") + " rows). Values computed now (the sheet has total or blank rows inside the data); rebuild after changes."], [], ["Measure", "Total", "Average", "Minimum", "Maximum", "Count"]];
+    numericCols(p).slice(0, 12).forEach((c) => out.push([c.name, c.sum ?? 0, c.mean ?? 0, c.min ?? 0, c.max ?? 0, c.count])); return out; }
+  const ref = (c: number) => lr.ref(c, false);
   const rows: Cell[][] = [["Analysis of \u201c" + dataSheet + "\u201d (" + p.rows.toLocaleString("en-IN") + " rows). Formulas recalculate when the data changes."], [], ["Measure", "Total", "Average", "Minimum", "Maximum", "Count"]];
   numericCols(p).slice(0, 12).forEach((c) => rows.push([c.name, "=SUM(" + ref(c.index) + ")", "=IFERROR(AVERAGE(" + ref(c.index) + "),\"\")", "=MIN(" + ref(c.index) + ")", "=MAX(" + ref(c.index) + ")", "=COUNT(" + ref(c.index) + ")"]));
   const cat = categoryCols(p)[0], num = numericCols(p)[0];

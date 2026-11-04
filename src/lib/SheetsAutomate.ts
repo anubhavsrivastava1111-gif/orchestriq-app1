@@ -165,7 +165,9 @@ export function applyFixes(values: Cell[][], issues: HealthIssue[]): { values: C
 export interface FormulaRisk { kind: "hardcoded" | "inconsistent" | "error"; cell: string; formula: string; why: string }
 const REF = /(\$?)([A-Z]{1,3})(\$?)(\d{1,7})(?![\d(])/g;
 // Relative form of a formula (like Excel's R1C1) so copied formulas compare equal.
-export function relForm(f: string, r: number, c: number): string { return f.replace(/"[^"]*"/g, '""').replace(REF, (_m, cd, col, rd, row) => { let cc = 0; for (const ch of col) cc = cc * 26 + ch.charCodeAt(0) - 64; cc -= 1; const rr = +row - 1; return (cd ? "C" + cc : "C[" + (cc - c) + "]") + (rd ? "R" + rr : "R[" + (rr - r) + "]"); }); }
+// An error-guard around a formula (=IFERROR(x,0), =IFNA(x,"")) keeps the same calculation, so it compares as x.
+export function unguard(f: string): string { let s = f.trim(); for (let k = 0; k < 3; k++) { const m = s.match(/^=\s*(IFERROR|IFNA)\s*\(/i); if (!m) break; let depth = 0, cut = -1; for (let i = m[0].length - 1; i < s.length; i++) { const ch = s[i]; if (ch === "(") depth++; else if (ch === ")") { depth--; if (depth === 0) { if (i !== s.length - 1) cut = -2; break; } } else if (ch === "," && depth === 1 && cut === -1) cut = i; } if (cut < 0) break; s = "=" + s.slice(m[0].length, cut); } return s; }
+export function relForm(f: string, r: number, c: number): string { f = unguard(f); return f.replace(/"[^"]*"/g, '""').replace(REF, (_m, cd, col, rd, row) => { let cc = 0; for (const ch of col) cc = cc * 26 + ch.charCodeAt(0) - 64; cc -= 1; const rr = +row - 1; return (cd ? "C" + cc : "C[" + (cc - c) + "]") + (rd ? "R" + rr : "R[" + (rr - r) + "]"); }); }
 export function formulaRisks(formulas: Cell[][], values: Cell[][]): FormulaRisk[] {
   const out: FormulaRisk[] = []; const cols = Math.max(0, ...formulas.map((r) => (r || []).length));
   for (let r = 0; r < formulas.length; r++) for (let c = 0; c < (formulas[r] || []).length; c++) { const f = formulas[r][c]; if (typeof f !== "string" || !f.startsWith("=")) continue; const cell = colToLetters(c) + (r + 1);

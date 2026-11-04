@@ -14,7 +14,8 @@ export type AggRule = "sum" | "avg" | "weighted-avg" | "count" | "none";
 export interface ColSem { index: number; name: string; kind: Kind; role: Role; agg: AggRule; unit: string; scale: number; confidence: "high" | "medium" | "low"; reason: string; filled: number; valid: number; distinct: number; sample: string[]; meaning?: string; weightBy?: number }
 export interface Layout { headerRow: number; headerRows: number[]; dataStart: number; dataEnd: number; colStart: number; colEnd: number; titles: string[]; notes: string[]; totalRows: number[]; blankRows: number; otherTables: { headerRow: number; rows: number; headers: string[] }[]; findings: string[] }
 export interface Wide { idCols: number[]; periodCols: number[]; periodLabels: string[] }
-export interface Understanding { layout: Layout; headers: string[]; rows: Cell[][]; cols: ColSem[]; wide: Wide | null; quality: { score: number; grade: string; issues: string[] }; description: string; grain: string }
+export interface Understanding { layout: Layout; headers: string[]; rows: Cell[][]; rowIdx: number[];   /* sheet row (0-based) of each data row */
+  cols: ColSem[]; wide: Wide | null; quality: { score: number; grade: string; issues: string[] }; description: string; grain: string }
 
 // ── small helpers (local copies, no cross-module cycle) ──
 export const blank = (v: Cell) => v === null || v === undefined || (typeof v === "string" && v.trim() === "");
@@ -87,6 +88,7 @@ export function headerNames(values: Cell[][], L: Layout): string[] {
     const n = (seen.get(name.toLowerCase()) || 0) + 1; seen.set(name.toLowerCase(), n); if (n > 1) name = name + " (" + n + ")"; out.push(name); }
   return out;
 }
+export function dataRowIndexes(values: Cell[][], L: Layout): number[] { const out: number[] = []; for (let r = L.dataStart; r <= L.dataEnd; r++) { const src = values[r] || []; if (!src.some((v) => !blank(v)) || L.totalRows.includes(r)) continue; out.push(r); } return out; }
 export function dataRows(values: Cell[][], L: Layout): Cell[][] {
   const out: Cell[][] = []; for (let r = L.dataStart; r <= L.dataEnd; r++) { const src = values[r] || []; if (!src.some((v) => !blank(v))) continue; if (L.totalRows.includes(r)) continue; out.push(Array.from({ length: L.colEnd - L.colStart + 1 }, (_, i) => (src[L.colStart + i] === undefined ? null : src[L.colStart + i]))); } return out;
 }
@@ -180,7 +182,7 @@ export function getOverrides(headers: string[]): Record<string, Partial<Pick<Col
 const KIND_WORD: Record<Kind, string> = { id: "ID", date: "date", period: "period", year: "year", currency: "amount", quantity: "quantity", percent: "percentage", rate: "price / rate", score: "score", number: "number", category: "category", location: "location", entity: "name", boolean: "yes / no", email: "email", phone: "phone", postal: "PIN code", taxid: "tax ID", text: "text", empty: "empty" };
 export const kindWord = (k: Kind) => KIND_WORD[k];
 export function understand(values: Cell[][]): Understanding {
-  const layout = detectLayout(values); let headers = headerNames(values, layout); let rows = dataRows(values, layout);
+  const layout = detectLayout(values); let headers = headerNames(values, layout); let rows = dataRows(values, layout); const rowIdx = dataRowIndexes(values, layout);
   let cols = columnSemantics(headers, rows); const ov = getOverrides(headers);
   cols = cols.map((c) => { const o = ov[c.name]; return o ? { ...c, ...o, confidence: "high", reason: "Set by you. " + c.reason } : c; });
   const wide = detectWide(headers, rows); if (wide) layout.findings.push("Wide layout: " + wide.periodCols.length + " period columns across (" + wide.periodLabels.slice(0, 3).join(", ") + "…). Convert to long form to trend and compare periods.");
@@ -198,7 +200,7 @@ export function understand(values: Cell[][]): Understanding {
   const subject = /sale|revenue|order|invoice/i.test(headers.join(" ")) ? "Sales" : /expense|spend|cost|vendor|supplier|payable|ap\b/i.test(headers.join(" ")) ? "Spend / payables" : /salary|employee|emp|payroll|ctc|headcount/i.test(headers.join(" ")) ? "People / payroll" : /stock|inventory|warehouse|sku/i.test(headers.join(" ")) ? "Inventory" : /lead|campaign|click|conversion|visit/i.test(headers.join(" ")) ? "Marketing" : /ticket|sla|resolution|incident/i.test(headers.join(" ")) ? "Service / operations" : wide ? "Period-by-period (MIS / P&L style)" : "Business";
   let span = ""; if (time) { const ks = rows.map((r) => periodKey(r[time.index])).filter(Boolean).sort() as string[]; if (ks.length) span = ks[0] === ks[ks.length - 1] ? " for " + ks[0] : ", " + ks[0] + " to " + ks[ks.length - 1]; }
   const description = subject + " data" + (wide ? " in wide layout" : "") + ": " + rows.length.toLocaleString("en-IN") + " rows, " + grain + span + "." + (meas.length ? " Measures: " + meas.map((m) => m.name + (m.unit && !m.name.toLowerCase().includes(m.unit.replace("₹ ", "").toLowerCase()) && !m.name.includes(m.unit) ? " (" + m.unit + ")" : "")).join(", ") + "." : "") + (avgm.length ? " Averaged: " + avgm.map((m) => m.name).join(", ") + "." : "") + (dims.length ? " Broken down by " + dims.slice(0, 4).map((d) => d.name).join(", ") + "." : "");
-  return { layout, headers, rows, cols, wide, quality: { score, grade, issues }, description, grain };
+  return { layout, headers, rows, rowIdx, cols, wide, quality: { score, grade, issues }, description, grain };
 }
 
 // ════════════ AI enrichment (optional): names meanings, may only choose allowed roles ════════════
