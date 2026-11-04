@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { serialToIso, type Cell } from "./lib/SheetsEngine";
-import { toTable, profile, facts, numericCols, avgCols, categoryCols, dateCol, groupBy, pivot, pivotSheetRows, parseQuery, runQuery, parseNarrative, analysisSheetRows, buildApp, fmtNum, toMonth, ANALYSIS_SYSTEM, ASK_SYSTEM, type Table, type Agg, type PivotSpec, type Narrative } from "./lib/SheetsAnalytics";
+import { toTable, profile, facts, numericCols, avgCols, categoryCols, dateCol, groupBy, pivot, pivotSheetRows, parseQuery, runQuery, applyFilters, parseNarrative, analysisSheetRows, buildApp, fmtNum, toMonth, ANALYSIS_SYSTEM, ASK_SYSTEM, type Table, type Agg, type PivotSpec, type Narrative } from "./lib/SheetsAnalytics";
 import { suggest, computeChart, pivotView, chartTitle, draftEmail, emailPrompt, mergeAIEmail, allowedFacts, emailHtml, emailText, gmailUrl, outlookUrl, AUDIENCES, PURPOSES, EMAIL_SYSTEM, type ChartSpec, type ChartType, type ChartData, type ShowAs, type Audience, type Purpose, type Tone, type EmailContext } from "./lib/SheetsSmart";
 import { buildPdf, buildPpt, type Report } from "./lib/SheetsReport";
 import { EChart, chartPng } from "./SheetsCharts";
@@ -174,9 +174,11 @@ export function AskPanel({ ctx }: { ctx: InsightCtx }) {
     {out?.explain && <div style={{ fontSize: 13, color: V.text2, marginTop: 8, whiteSpace: "pre-wrap" }}>{out.explain}</div>}
     {out?.rows && <div data-testid="ask-out" style={{ marginTop: 8 }}>
       <div style={{ fontWeight: 800, fontSize: 13 }}>{out.title}</div><div data-testid="ask-summary" style={{ fontSize: 12.5, color: V.text2, margin: "2px 0 6px" }}>{out.summary}</div>
+      <div data-testid="ask-cite" style={{ fontSize: 11.5, color: V.text3, margin: "-2px 0 6px" }}>Calculated from {out.matched?.toLocaleString?.("en-IN")} rows{out.q?.filters?.length ? " where " + out.q.filters.map((f: any) => f.col + " " + ({ eq: "=", neq: "≠", gt: ">", lt: "<", contains: "contains" } as any)[f.op] + " " + f.value).join(", ") : ""}; {out.q?.agg === "avg" ? "averaged" : out.q?.agg === "count" ? "counted" : "summed"}{out.q?.value ? " over " + out.q.value : ""}{out.q?.groupBy ? ", grouped by " + out.q.groupBy : ""}.</div>
       {data && <div style={card}><EChart data={data} type={out.q?.byMonth ? "line" : "column"} height={240} testid="ask-chart" /></div>}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
         <button data-testid="ask-sheet" onClick={() => { const rows: Cell[][] = [[out.title], [], [out.q?.groupBy || "Item", (out.q?.agg || "value") + (out.q?.value ? " of " + out.q.value : "")], ...out.rows]; ctx.addSheet("Answer", rows, { titleRow: 0, headerRows: [2], widths: [200, 140], numFmt: [{ r1: 3, r2: rows.length - 1, c1: 1, c2: 1, pattern: "#,##0" }] }); ctx.toast("Answer copied to a new sheet.", "success"); }} style={btn()}>Copy to a new sheet</button>
+        <button data-testid="ask-rows" onClick={() => { const t = toTable(ctx.getValues()); const ft = applyFilters(t, out.q?.filters || []); ctx.addSheet("Source rows", [t.headers, ...ft.rows], { headerRows: [0], freezeRows: 1 }); ctx.toast("The " + ft.rows.length.toLocaleString("en-IN") + " rows behind this answer are in a new sheet.", "success"); }} style={btn()}>Show the {out.matched?.toLocaleString?.("en-IN") ?? ""} source rows</button>
         {data && <button data-testid="ask-add" onClick={() => { ctx.setBasket([...ctx.basket, { id: "ask-" + Date.now(), title: out.title, why: out.summary, type: out.q?.byMonth ? "line" : "column", data }]); ctx.toast("Answer chart added to the report.", "success"); }} style={btn()}>Add to report</button>}
       </div></div>}
   </div>;

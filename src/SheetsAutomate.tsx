@@ -5,6 +5,7 @@ import { suggest } from "./lib/SheetsSmart";
 import { guessRecon, reconcile, reconSheets, bridge, bridgeSheetRows, periodsOf, healthScan, applyFixes, benford, formulaRisks, snapshotFor, compareRuns, headerMatch, RECIPE_KEY, type Recipe, type ReconOptions, type ReconResult, type BridgeResult, type HealthIssue, type FormulaRisk } from "./lib/SheetsAutomate";
 import { EChartRaw, themeInk } from "./SheetsCharts";
 import { makeReport, downloadPdf, downloadPpt, type SheetStyle } from "./SheetsInsights";
+import { WhatIf, type WhatIfCtx } from "./SheetsAgentView";
 
 // ⚡ AUTOMATE: the analyst's monthly grind, inside Sheets. Every figure is computed by
 // SheetsAutomate; nothing here is written by an AI.
@@ -30,15 +31,16 @@ export interface AutomateCtx {
   backup: () => void; revert: () => void; canRevert: boolean; select: (sheet: string, a1: string) => void;
   toast: (m: string, k?: string) => void; workbookName: string; importFile: (f: File) => Promise<string[]>;
 }
-type Tool = "autopilot" | "bridge" | "recon" | "health";
+type Tool = "autopilot" | "bridge" | "recon" | "health" | "whatif";
 const TOOLS: { k: Tool; icon: string; name: string; line: string }[] = [
   { k: "autopilot", icon: "⚡", name: "Report Autopilot", line: "Build your monthly report once. Re-run it on next month’s file in one click." },
   { k: "bridge", icon: "≋", name: "Variance bridge", line: "Why did the number move? Waterfall, drivers, price · volume · mix." },
   { k: "recon", icon: "⇄", name: "Reconcile", line: "Match two sheets: bank vs ledger, AP vs statement, system A vs B." },
   { k: "health", icon: "✚", name: "Data health & risk", line: "Fix dirty data. Find risky formulas. Benford fraud check." },
+  { k: "whatif", icon: "◎", name: "What-if & goal seek", line: "Change an assumption, see the impact. Find the input that hits a target." },
 ];
 
-export default function SheetsAutomate({ ctx, onClose }: { ctx: AutomateCtx; onClose: () => void }) {
+export default function SheetsAutomate({ ctx, onClose, whatIf }: { ctx: AutomateCtx; onClose: () => void; whatIf?: WhatIfCtx }) {
   const [tool, setTool] = useState<Tool>("autopilot");
   return <div data-testid="automate" role="dialog" aria-label="Automate" style={{ position: "fixed", inset: 0, zIndex: 1000, background: "var(--oiq-bg)", color: V.text, display: "grid", gridTemplateColumns: "minmax(240px, 290px) 1fr", minHeight: 0 }}>
     <nav aria-label="Automation tools" style={{ borderRight: "1px solid " + V.border, padding: "18px 14px", background: V.surface, overflowY: "auto" }}>
@@ -55,6 +57,7 @@ export default function SheetsAutomate({ ctx, onClose }: { ctx: AutomateCtx; onC
       {tool === "bridge" && <Bridge ctx={ctx} />}
       {tool === "recon" && <Recon ctx={ctx} />}
       {tool === "health" && <Health ctx={ctx} />}
+      {tool === "whatif" && whatIf && <WhatIf ctx={whatIf} />}
     </main>
   </div>;
 }
