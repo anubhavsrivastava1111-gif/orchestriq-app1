@@ -1,3 +1,7 @@
+# OrchestrIQ
+
+> **Android & desktop apps:** see [APPS.md](APPS.md) for download, install and build instructions.
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

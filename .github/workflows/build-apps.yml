@@ -1,0 +1,114 @@
+# Builds the OrchestrIQ Android app and desktop installers.
+# Download results: GitHub → Actions → "Build apps" → latest run → Artifacts (bottom of page).
+name: Build apps
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "mobile/**"
+      - "desktop/**"
+      - ".github/workflows/build-apps.yml"
+
+concurrency:
+  group: build-apps-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      APP_VERSION_CODE: ${{ github.run_number }}
+      APP_VERSION_NAME: 1.0.${{ github.run_number }}
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install and sync Capacitor
+        run: |
+          npm ci
+          npx cap sync android
+
+      - name: Build debug APK (installable on any phone)
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          mkdir -p ../out
+          cp app/build/outputs/apk/debug/app-debug.apk "../out/OrchestrIQ-${APP_VERSION_NAME}-debug.apk"
+
+      - name: Build signed release APK + Play Store bundle
+        if: env.KEYSTORE_BASE64 != ''
+        working-directory: mobile/android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.jks"
+          ./gradlew assembleRelease bundleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk "../out/OrchestrIQ-${APP_VERSION_NAME}.apk"
+          cp app/build/outputs/bundle/release/app-release.aab "../out/OrchestrIQ-${APP_VERSION_NAME}.aab"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: OrchestrIQ-android
+          path: mobile/out/*
+          if-no-files-found: error
+
+  desktop:
+    name: Desktop (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Windows, os: windows-latest, script: dist:win, files: "desktop/release/*.exe" }
+          - { name: macOS, os: macos-latest, script: dist:mac, files: "desktop/release/*.dmg" }
+          - { name: Linux, os: ubuntu-latest, script: dist:linux, files: "desktop/release/*.AppImage" }
+    defaults:
+      run:
+        working-directory: desktop
+    env:
+      # No paid code-signing certificates yet; see APPS.md.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Set version from build number
+        shell: bash
+        run: npm version "1.0.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+
+      - name: Install
+        run: npm ci
+
+      - name: Build installer
+        run: npm run ${{ matrix.script }}
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: OrchestrIQ-${{ matrix.name }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error

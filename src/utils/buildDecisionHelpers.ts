@@ -28,9 +28,7 @@ export function saveDecisionRecord(rec: Omit<DecisionRecord, never>): void {
 // ── SNIPPET ────────────────────────────────────────────────────────────────────
 export function extractRecommendationSnippet(syn: string): string {
   try {
-    const m = (syn || "").match(/##\s*Quantified Recommendation\s*
-([\s\S]*?)(
-##|$)/i);
+    const m = (syn || "").match(/##\s*Quantified Recommendation\s*\n([\s\S]*?)(\n##|$)/i);
     const raw = (m ? m[1] : (syn || ""))
       .replace(/[#*|>\-]/g, " ")
       .replace(/\s+/g, " ")

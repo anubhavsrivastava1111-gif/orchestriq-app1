@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OrchestrIQ — Offline</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0C0F18; color: #E6E9F2;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { min-height: 100%; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; text-align: center; padding: 24px; box-sizing: border-box; }
+    h1 { font-size: 22px; margin: 16px 0 8px; }
+    p { color: #9AA3B8; max-width: 340px; line-height: 1.5; margin: 0 0 24px; }
+    button { background: #4F7CFF; color: #fff; border: 0; border-radius: 10px;
+      padding: 12px 28px; font-size: 16px; font-weight: 600; cursor: pointer; }
+    .logo { width: 64px; height: 64px; border-radius: 16px; background: #1A2033;
+      display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 800; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="logo">IQ</div>
+    <h1>You're offline</h1>
+    <p>OrchestrIQ needs an internet connection. Check your Wi-Fi or mobile data, then try again.</p>
+    <button onclick="location.href='https://orchestriq.gorakhai.com'">Try again</button>
+  </main>
+  <script>
+    // Reconnect automatically as soon as the device is back online.
+    window.addEventListener('online', function () { location.href = 'https://orchestriq.gorakhai.com'; });
+  </script>
+</body>
+</html>

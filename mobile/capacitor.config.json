@@ -1,0 +1,27 @@
+{
+  "appId": "com.gorakhai.orchestriq",
+  "appName": "OrchestrIQ",
+  "webDir": "www",
+  "server": {
+    "url": "https://orchestriq.gorakhai.com",
+    "cleartext": false,
+    "errorPath": "offline.html",
+    "allowNavigation": [
+      "orchestriq.gorakhai.com",
+      "*.supabase.co"
+    ]
+  },
+  "android": {
+    "backgroundColor": "#0C0F18",
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "native",
+      "initialViewportFitValueHint": "auto",
+      "style": "DARK"
+    }
+  }
+}
