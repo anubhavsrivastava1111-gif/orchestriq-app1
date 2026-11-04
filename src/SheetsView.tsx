@@ -7,6 +7,7 @@ import { cockpitContext } from "./lib/DecisionExports";
 import { latestDecisionStage } from "./lib/DecisionExportActions";
 import { INPUT_LABEL } from "./lib/DecisionCockpit";
 import SheetsAutomate, { type AutomateCtx } from "./SheetsAutomate";
+import UnderstandPanel from "./SheetsUnderstandView";
 import { SmartPanel, AnalyzePanel, AskPanel, PivotPanel, ChartPanel, DataApp, type InsightCtx, type SheetStyle, type BasketItem } from "./SheetsInsights";
 import { isoToSerial, DATE_PATTERN } from "./lib/SheetsEngine";
 import { TEMPLATES, gridToSnapshot, snapshotToGrid, snapshotValues, parseCsv, gridToCsv, xlsxToGrid, gridToXlsx, ledgerToGrid, pairsToGrid, tableToGrid, buildContext, AI_SYSTEM, parsePlan, describeOp, expandWrites, highlightRows, sortRows, findErrors, parseRange, type Plan, type WorkbookGrid, type Cell } from "./lib/SheetsEngine";
@@ -66,7 +67,7 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
   const [basket, setBasketState] = useState<BasketItem[]>([]);
   useEffect(() => { try { setBasketState(JSON.parse(localStorage.getItem("oiq-sheets-basket-" + (S.activeId || "")) || "[]")); } catch { setBasketState([]); } }, [S.activeId]);
   const setBasket = (b: BasketItem[]) => { setBasketState(b); try { localStorage.setItem("oiq-sheets-basket-" + S.activeId, JSON.stringify(b)); } catch {} };
-  const [tab, setTab] = useState<"smart" | "ai" | "analyze" | "ask" | "pivot" | "chart">("smart"); const [appOpen, setAppOpen] = useState(false); const [appKey, setAppKey] = useState(0); const [autoOpen, setAutoOpen] = useState(false); const [autoKey, setAutoKey] = useState(0);   /* Automate stays mounted while open */   /* dashboard locks onto the data it was opened with */
+  const [tab, setTab] = useState<"understand" | "smart" | "ai" | "analyze" | "ask" | "pivot" | "chart">("understand");   /* understand the data first */ const [appOpen, setAppOpen] = useState(false); const [appKey, setAppKey] = useState(0); const [autoOpen, setAutoOpen] = useState(false); const [autoKey, setAutoKey] = useState(0);   /* Automate stays mounted while open */   /* dashboard locks onto the data it was opened with */
   const apiRef = useRef<any>(null); const hostId = useRef("oiq-sheets-host-" + Math.random().toString(36).slice(2, 8));
   const fileRef = useRef<HTMLInputElement>(null);
   const storeRef = useRef(S); storeRef.current = S;   // always the latest store (used in clean-up)
@@ -216,10 +217,11 @@ export default function SheetsView({ ask, showToast, ledgerEntries = [], account
       <div key={mountKey + ":" + (active?.id || "")} id={hostId.current} data-testid="sh-grid" style={{ flex: "1 1 520px", minWidth: 0, minHeight: 460, height: "calc(100vh - 210px)" }} />
       <aside data-testid="sh-ai" style={{ flex: "0 1 420px", minWidth: 300, borderLeft: "1px solid " + V.border, padding: "12px 14px", overflowY: "auto", maxHeight: "calc(100vh - 210px)", background: V.surface }}>
         <div role="tablist" style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
-          {([["smart", "✨ Smart"], ["ai", "AI"], ["analyze", "Analyze"], ["ask", "Ask"], ["pivot", "Pivot"], ["chart", "Chart"]] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} data-testid={"sh-tab-" + k} onClick={() => switchTab(k)} style={{ ...btn(tab === k), minHeight: 30, fontSize: 12 }}>{l}</button>)}
+          {([["understand", "🔍 Understand"], ["smart", "✨ Smart"], ["ai", "AI"], ["analyze", "Analyze"], ["ask", "Ask"], ["pivot", "Pivot"], ["chart", "Chart"]] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} data-testid={"sh-tab-" + k} onClick={() => switchTab(k)} style={{ ...btn(tab === k), minHeight: 30, fontSize: 12 }}>{l}</button>)}
           <button data-testid="sh-tab-app" onClick={() => { setSheetTick((x) => x + 1); setAppKey((k) => k + 1); setAppOpen(true); }} style={{ ...btn(), minHeight: 30, fontSize: 12 }}>App ↗</button>
         </div>
         {!loaded && <div style={{ fontSize: 12.5, color: V.text3 }}>Opening workbook…</div>}
+        {loaded && tab === "understand" && <UnderstandPanel key={ctx.sheetName} ctx={{ getValues: ctx.getValues, version: ctx.version, sheetName: ctx.sheetName, ask, addSheet: ctx.addSheet, toast, refresh: () => setSheetTick((x) => x + 1), analyse: () => switchTab("smart") }} />}
         {loaded && tab === "smart" && <SmartPanel key={ctx.sheetName + ":" + ctx.version} ctx={ctx} />}
         {loaded && tab === "analyze" && <AnalyzePanel key={ctx.sheetName + ":" + ctx.version} ctx={ctx} onOpenApp={() => { setAppKey((k) => k + 1); setAppOpen(true); }} />}
         {loaded && tab === "ask" && <AskPanel ctx={ctx} />}

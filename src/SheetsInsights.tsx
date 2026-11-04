@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { serialToIso, type Cell } from "./lib/SheetsEngine";
-import { toTable, profile, facts, numericCols, categoryCols, dateCol, groupBy, pivot, pivotSheetRows, parseQuery, runQuery, parseNarrative, analysisSheetRows, buildApp, fmtNum, toMonth, ANALYSIS_SYSTEM, ASK_SYSTEM, type Table, type Agg, type PivotSpec, type Narrative } from "./lib/SheetsAnalytics";
+import { toTable, profile, facts, numericCols, avgCols, categoryCols, dateCol, groupBy, pivot, pivotSheetRows, parseQuery, runQuery, parseNarrative, analysisSheetRows, buildApp, fmtNum, toMonth, ANALYSIS_SYSTEM, ASK_SYSTEM, type Table, type Agg, type PivotSpec, type Narrative } from "./lib/SheetsAnalytics";
 import { suggest, computeChart, pivotView, chartTitle, draftEmail, emailPrompt, mergeAIEmail, allowedFacts, emailHtml, emailText, gmailUrl, outlookUrl, AUDIENCES, PURPOSES, EMAIL_SYSTEM, type ChartSpec, type ChartType, type ChartData, type ShowAs, type Audience, type Purpose, type Tone, type EmailContext } from "./lib/SheetsSmart";
 import { buildPdf, buildPpt, type Report } from "./lib/SheetsReport";
 import { EChart, chartPng } from "./SheetsCharts";
@@ -85,7 +85,7 @@ export function SmartPanel({ ctx }: { ctx: InsightCtx }) {
 
 // ── CHART builder ──
 export function ChartPanel({ ctx }: { ctx: InsightCtx }) {
-  const { t, p } = useData(ctx); const nums = numericCols(p);
+  const { t, p } = useData(ctx); const nums = [...numericCols(p), ...avgCols(p)]; const isAvg = (n: string | null) => !!n && avgCols(p).some((c) => c.name === n);
   const rec = useMemo(() => suggest(t, p).slice(0, 5), [t, p]);
   const [s, setS] = useState<ChartSpec>(() => rec[0]?.chart || { type: "column", x: categoryCols(p)[0]?.name || t.headers[0] || "", y: nums[0]?.name || null, agg: "sum" });
   const d = useMemo(() => computeChart(t, s), [t, s]); const id = "chart-" + s.type + "-" + chartTitle(s);
@@ -95,7 +95,7 @@ export function ChartPanel({ ctx }: { ctx: InsightCtx }) {
     <div role="group" aria-label="Chart type" style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>{TYPES.map((x) => <button key={x.k} data-testid={"ch-type-" + x.k} aria-pressed={s.type === x.k} title={x.label} onClick={() => setS({ ...s, type: x.k, split: x.k === "doughnut" || x.k === "combo" ? null : s.split, topN: x.k === "combo" ? s.topN || 10 : s.topN })} style={{ ...btn(s.type === x.k), minHeight: 30, fontSize: 11 }}>{x.icon} {x.label}</button>)}</div>
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
       <L label="Categories / dates (X)"><select data-testid="ch-x" value={s.x} onChange={(e) => setS({ ...s, x: e.target.value })} style={inp}>{t.headers.map((h) => <option key={h}>{h}</option>)}</select></L>
-      <L label="Values (Y)"><select data-testid="ch-y" value={s.y || ""} onChange={(e) => setS({ ...s, y: e.target.value || null })} style={inp}><option value="">Count of rows</option>{nums.map((c) => <option key={c.name}>{c.name}</option>)}</select></L>
+      <L label="Values (Y)"><select data-testid="ch-y" value={s.y || ""} onChange={(e) => setS({ ...s, y: e.target.value || null, agg: isAvg(e.target.value) ? "avg" : s.agg === "avg" ? "sum" : s.agg })} style={inp}><option value="">Count of rows</option>{nums.map((c) => <option key={c.name} value={c.name}>{c.name}{isAvg(c.name) ? " (averaged)" : ""}</option>)}</select></L>
       <L label="Summarise by"><select value={s.agg} onChange={(e) => setS({ ...s, agg: e.target.value as Agg })} style={inp}>{(["sum", "avg", "count", "min", "max"] as Agg[]).map((a) => <option key={a} value={a}>{({ sum: "Sum", avg: "Average", count: "Count", min: "Min", max: "Max" } as any)[a]}</option>)}</select></L>
       <L label="Split into series"><select data-testid="ch-split" value={s.split || ""} disabled={s.type === "doughnut" || s.type === "combo"} onChange={(e) => setS({ ...s, split: e.target.value || null })} style={inp}><option value="">(none)</option>{categoryCols(p).filter((c) => c.name !== s.x && c.distinct <= 8).map((c) => <option key={c.name}>{c.name}</option>)}</select></L>
       <L label="Show"><select value={String(s.topN || 0)} onChange={(e) => setS({ ...s, topN: Number(e.target.value) || undefined })} style={inp}><option value="0">All</option><option value="5">Top 5 + Others</option><option value="10">Top 10 + Others</option><option value="20">Top 20 + Others</option></select></L>
@@ -111,7 +111,7 @@ export function ChartPanel({ ctx }: { ctx: InsightCtx }) {
 
 // ── PIVOT builder ──
 export function PivotPanel({ ctx }: { ctx: InsightCtx }) {
-  const { t, p } = useData(ctx); const nums = numericCols(p); const sug = useMemo(() => suggest(t, p).find((x) => x.pivot && x.pivot.cols) || suggest(t, p).find((x) => x.pivot), [t, p]);
+  const { t, p } = useData(ctx); const nums = [...numericCols(p), ...avgCols(p)]; const isAvgP = (n: string) => avgCols(p).some((c) => c.name === n); const sug = useMemo(() => suggest(t, p).find((x) => x.pivot && x.pivot.cols) || suggest(t, p).find((x) => x.pivot), [t, p]);
   const [s, setS] = useState<PivotSpec>(() => ({ rows: sug?.pivot?.rows || categoryCols(p)[0]?.name || t.headers[0] || "", cols: sug?.pivot?.cols || "", value: sug?.pivot?.value || nums[0]?.name || "", agg: (sug?.pivot?.agg as Agg) || (nums[0] ? "sum" : "count"), byMonth: !!sug?.pivot?.byMonth }));
   const [showAs, setShowAs] = useState<ShowAs>("value"); const [topN, setTopN] = useState(0); const [sort, setSort] = useState<"value" | "label">("value");
   const res: any = useMemo(() => (s.rows ? pivot(t, { ...s, cols: s.cols || undefined, value: s.value || undefined }) : { error: "Choose rows." }), [t, s]);
@@ -130,7 +130,7 @@ export function PivotPanel({ ctx }: { ctx: InsightCtx }) {
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
       <L label="Rows"><select data-testid="pv-rows" value={s.rows} onChange={(e) => setS({ ...s, rows: e.target.value, byMonth: t.types[t.headers.indexOf(e.target.value)] === "date" })} style={inp}>{t.headers.map((h) => <option key={h}>{h}</option>)}</select></L>
       <L label="Columns"><select data-testid="pv-cols" value={s.cols} onChange={(e) => setS({ ...s, cols: e.target.value })} style={inp}><option value="">(none)</option>{t.headers.filter((h) => h !== s.rows).map((h) => <option key={h}>{h}</option>)}</select></L>
-      <L label="Values"><select data-testid="pv-value" value={s.value} onChange={(e) => setS({ ...s, value: e.target.value, agg: e.target.value ? (s.agg === "count" ? "sum" : s.agg) : "count" })} style={inp}><option value="">(count rows)</option>{nums.map((c) => <option key={c.name}>{c.name}</option>)}</select></L>
+      <L label="Values"><select data-testid="pv-value" value={s.value} onChange={(e) => setS({ ...s, value: e.target.value, agg: !e.target.value ? "count" : isAvgP(e.target.value) ? "avg" : s.agg === "count" || s.agg === "avg" ? "sum" : s.agg })} style={inp}><option value="">(count rows)</option>{nums.map((c) => <option key={c.name} value={c.name}>{c.name}{isAvgP(c.name) ? " (averaged)" : ""}</option>)}</select></L>
       <L label="Summarise by"><select data-testid="pv-agg" value={s.agg} onChange={(e) => setS({ ...s, agg: e.target.value as Agg })} style={inp}>{(["sum", "count", "avg", "min", "max"] as Agg[]).map((a) => <option key={a} value={a}>{({ sum: "Sum", count: "Count", avg: "Average", min: "Min", max: "Max" } as any)[a]}</option>)}</select></L>
       <L label="Show values as"><select data-testid="pv-showas" value={showAs} onChange={(e) => setShowAs(e.target.value as ShowAs)} style={inp}><option value="value">Values</option><option value="pctGrand">% of grand total</option><option value="pctRow">% of row total</option><option value="pctCol">% of column total</option></select></L>
       <L label="Rows to show"><select data-testid="pv-top" value={String(topN)} onChange={(e) => setTopN(Number(e.target.value))} style={inp}><option value="0">All</option><option value="5">Top 5 + Others</option><option value="10">Top 10 + Others</option><option value="20">Top 20 + Others</option></select></L>
@@ -186,7 +186,7 @@ export function AskPanel({ ctx }: { ctx: InsightCtx }) {
 export function AnalyzePanel({ ctx, onOpenApp }: { ctx: InsightCtx; onOpenApp: () => void }) {
   const { t, p } = useData(ctx); const fs = useMemo(() => facts(t, p), [t, p]);
   const [nar, setNar] = useState<Narrative | null>(null); const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
-  const runAI = async () => { if (!ctx.ask) return; setBusy(true); setErr(""); try { const r = await ctx.ask(ANALYSIS_SYSTEM, [{ role: "user", content: "Sheet: " + ctx.sheetName + "\nColumns: " + t.headers.join(", ") + "\nFACTS:\n" + fs.map((f) => "- " + f.text).join("\n") }], 1500); const n = parseNarrative(r, fs); if (!n) setErr("The AI's reply could not be read. Try again."); setNar(n); } catch (e: any) { setErr("AI request failed: " + (e?.message || e)); } setBusy(false); };
+  const runAI = async () => { if (!ctx.ask) return; setBusy(true); setErr(""); try { const r = await ctx.ask(ANALYSIS_SYSTEM, [{ role: "user", content: "Sheet: " + ctx.sheetName + "\nWhat the data is: " + (t.und?.description || "") + "\nColumns: " + (t.sem ? t.sem.filter((c) => c.role !== "ignore").map((c) => c.name + " [" + c.role + (c.unit ? ", " + c.unit : "") + "]").join(", ") : t.headers.join(", ")) + "\nFACTS:\n" + fs.map((f) => "- " + f.text).join("\n") }], 1500); const n = parseNarrative(r, fs); if (!n) setErr("The AI's reply could not be read. Try again."); setNar(n); } catch (e: any) { setErr("AI request failed: " + (e?.message || e)); } setBusy(false); };
   if (!p.rows) return <Note kind="info">This sheet has no data rows yet. Put a header row in row 1 and data below it.</Note>;
   return <div data-testid="an-panel">
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
