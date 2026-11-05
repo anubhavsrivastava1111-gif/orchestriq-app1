@@ -1,0 +1,17 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <!-- Only used to download test libraries (Robolectric + JUnit) into ./lib. See run-tests.sh. -->
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.orchestriq.lifeline</groupId>
+  <artifactId>native-tests</artifactId>
+  <version>1</version>
+  <dependencies>
+    <dependency><groupId>org.robolectric</groupId><artifactId>robolectric</artifactId><version>4.17</version>
+      <exclusions>
+        <exclusion><groupId>androidx.test</groupId><artifactId>*</artifactId></exclusion>
+        <exclusion><groupId>androidx.test.espresso</groupId><artifactId>*</artifactId></exclusion>
+        <exclusion><groupId>androidx.annotation</groupId><artifactId>*</artifactId></exclusion>
+      </exclusions>
+    </dependency>
+    <dependency><groupId>junit</groupId><artifactId>junit</artifactId><version>4.13.2</version></dependency>
+  </dependencies>
+</project>

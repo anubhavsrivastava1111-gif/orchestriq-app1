@@ -1,39 +1,84 @@
-// More — profile, security, help & protection, data.
-import { useRef } from "react";
+// More — profile, plan, security, connections, help & protection, data.
+import { useState } from "react";
 import { useApp } from "../context";
-import { EMPTY, demoState, exportJson, parseBackup } from "../store";
+import { demoState } from "../store";
 import { RED_FLAGS, RESOURCES } from "../resources";
-import { Card, Disclosure, Field, List, MoneyInput, Row, Screen, Section, Segmented, TextInput, Toggle } from "../components";
+import { planLabel } from "../entitlements";
+import * as vault from "../vault";
+import { bioDisable, bioEnable, bioStatus, isNative, nativeInfo, openExternal, pickTextFile } from "../native";
+import { Card, Disclosure, Field, List, MoneyInput, Pill, Row, Screen, Section, Segmented, TextInput, Toggle } from "../components";
 import { Icon } from "../icons";
 
+const LOCK_OPTIONS = [
+  { value: "0", label: "Instantly" }, { value: "30", label: "30 s" }, { value: "60", label: "1 min" }, { value: "300", label: "5 min" },
+];
+
 export default function More() {
-  const { state, update, replace, open, toast } = useApp();
-  const fileRef = useRef<HTMLInputElement>(null);
+  const { state, update, replace, open, go, toast, lockNow, resetApp } = useApp();
+  const [bio, setBio] = useState(bioStatus);
   const set = <K extends keyof typeof state.settings>(k: K, v: (typeof state.settings)[K]) => update(s => ({ ...s, settings: { ...s.settings, [k]: v } }));
-  const restore = async (f: File) => {
-    const parsed = parseBackup(await f.text());
-    if (!parsed) return toast("That file isn't a Lifeline backup");
-    replace(parsed); toast("Backup restored");
+  const info = nativeInfo();
+
+  const toggleBio = async (on: boolean) => {
+    if (!on) { bioDisable(); set("bioEnabled", false); setBio(bioStatus()); toast("Fingerprint unlock off"); return; }
+    const dek = vault.exportDekForBiometrics();
+    if (!dek) return;
+    try { await bioEnable(dek); set("bioEnabled", true); toast("Fingerprint unlock on"); }
+    catch { toast("Fingerprint wasn't confirmed"); }
+    setBio(bioStatus());
   };
+
+  const restore = async () => {
+    try { open({ kind: "restore", text: await pickTextFile() }); } catch { /* cancelled */ }
+  };
+
   return (
-    <Screen title="More" subtitle="Settings, help and your data">
+    <Screen title="More" subtitle="Settings, security, connections and help">
       <Card>
         <div className="profile-card">
           <span className="avatar">{(state.settings.name || "?").slice(0, 1).toUpperCase()}</span>
-          <Field label="Your name" hint="Used in greetings and lender letters.">{id => <TextInput id={id} value={state.settings.name} onChange={v => set("name", v)} placeholder="Your name" />}</Field>
+          <Field label="Your name" hint="Only used on this phone, in greetings and lender letters. Never sent to AI.">{id => <TextInput id={id} value={state.settings.name} onChange={v => set("name", v)} placeholder="Your name" />}</Field>
         </div>
       </Card>
 
-      <Section title="Security & privacy">
+      <Card onClick={() => open({ kind: "paywall" })} className="plan-card">
+        <div className="profile-sum">
+          <span className="action-icon brand"><Icon name="star" /></span>
+          <div><b>{planLabel(state)}</b><p>AI assistant, investments, forecasts, letters and encrypted backups</p></div>
+          <Icon name="chevron" size={18} />
+        </div>
+      </Card>
+
+      <Section title="Connected apps">
         <List>
-          <Row icon="lock" iconTone="brand" title="App lock (PIN)" subtitle={state.settings.pinHash ? "On: asked every time the app opens" : "Off"} onClick={() => open({ kind: "pin" })} />
-          <Toggle checked={state.settings.hideAmounts} onChange={v => set("hideAmounts", v)} label="Hide amounts" description="Masks every ₹ figure, useful in public" />
+          <Row icon="sparkle" iconTone="brand" title="AI assistant" subtitle="Gemini, ChatGPT, Claude, Perplexity, Copilot" onClick={() => go("ai")} />
+          <Row icon="transfer" iconTone="brand" title="Apps & data connections" subtitle="Notifications, calendar, market prices, UPI and broker apps" onClick={() => go("connect")} />
         </List>
       </Section>
 
-      <Section title="Reminders & alerts">
+      <Section title="Security & privacy">
+        <Card className="security-card">
+          <div className="sec-head"><Icon name="shield" /><div><b>Your data is encrypted</b><small>AES-256 · locked by your passcode{isNative ? " · bound to this phone's secure hardware" : ""}</small></div></div>
+        </Card>
         <List>
-          <Row icon="bell" iconTone="brand" title="EMI reminders" subtitle={`Fund ${state.settings.bufferDays} day(s) before · ${state.settings.calendarAdded ? "in calendar" : "not set up"}`} onClick={() => open({ kind: "reminders" })} />
+          <Row icon="lock" iconTone="brand" title="Change passcode" subtitle="6 digits; re-encrypts your data key" onClick={() => open({ kind: "passcode" })} />
+          {isNative && bio.supported && (
+            <Toggle checked={state.settings.bioEnabled && bio.enrolledHere} onChange={toggleBio} label="Fingerprint / face unlock"
+              description={bio.available ? "Hardware-backed. Turns off automatically if fingerprints change" : "Add a fingerprint in Android settings first"} />
+          )}
+          {isNative && <Toggle checked={state.settings.blockScreenshots} onChange={v => set("blockScreenshots", v)} label="Block screenshots & hide in recent apps" description="Recommended: stops other apps and screen recorders seeing your money" />}
+          <Toggle checked={state.settings.hideAmounts} onChange={v => set("hideAmounts", v)} label="Hide amounts" description="Masks every ₹ figure, useful in public" />
+          <div className="row seg-row">
+            <span className="row-main"><span className="row-title">Auto-lock</span><span className="row-sub">After leaving the app</span></span>
+          </div>
+        </List>
+        <Segmented label="Auto-lock" value={String(state.settings.autoLockSec)} onChange={v => set("autoLockSec", Number(v))} options={LOCK_OPTIONS} />
+        <List><Row icon="lock" title="Lock now" onClick={lockNow} /></List>
+      </Section>
+
+      <Section title="Reminders">
+        <List>
+          <Row icon="bell" iconTone="brand" title="EMI reminders" subtitle={`Fund ${state.settings.bufferDays} day(s) before each EMI`} onClick={() => open({ kind: "reminders" })} />
         </List>
         <Card>
           <Field label="Typical cost of one bounced EMI" hint="Bank and lender charges combined. Used to show what a bounce would cost you.">{id => (
@@ -58,7 +103,7 @@ export default function More() {
                 <div key={r.title} className="row resource">
                   <span className="row-main"><span className="row-title">{r.title}</span><span className="row-sub">{r.what}</span>
                     <span className="btn-row">
-                      {r.url && <a className="btn btn-secondary btn-sm" href={r.url} target="_blank" rel="noreferrer noopener">Open <Icon name="external" size={14} /></a>}
+                      {r.url && <button type="button" className="btn btn-secondary btn-sm" onClick={() => openExternal(r.url!)}>Open <Icon name="external" size={14} /></button>}
                       {r.phone && <a className="btn btn-primary btn-sm" href={"tel:" + r.phone}><Icon name="phone" size={14} /> Call {r.phone}</a>}
                     </span>
                   </span>
@@ -69,17 +114,16 @@ export default function More() {
         ))}
       </Section>
 
-      <Section title="Your data" hint="Stored only on this phone. Clearing browser data deletes it, so export a backup every month.">
+      <Section title="Your data" hint="Stored only on this phone, encrypted. Save an encrypted backup monthly so you can restore on a new phone.">
         <List>
-          <Row icon="download" iconTone="brand" title="Export backup" subtitle="Save a file you can restore later" onClick={() => exportJson(state)} />
-          <Row icon="upload" iconTone="brand" title="Restore backup" subtitle="From a Lifeline backup file" onClick={() => fileRef.current?.click()} />
-          <Row icon="sparkle" title="Load sample data" subtitle="Replaces your data, for exploring" onClick={() => { if (confirm("Replace your data with sample data?")) { replace(demoState()); toast("Sample data loaded"); } }} />
-          <Row icon="trash" iconTone="danger" title="Delete all data" subtitle="Cannot be undone" onClick={() => { if (confirm("Delete all Lifeline data from this phone? This cannot be undone.")) { replace(EMPTY); toast("All data deleted"); } }} />
+          <Row icon="download" iconTone="brand" title="Save encrypted backup" subtitle="Password-protected file" onClick={() => open({ kind: "backup" })} />
+          <Row icon="upload" iconTone="brand" title="Restore backup" subtitle="From a Lifeline backup file" onClick={restore} />
+          <Row icon="sparkle" title="Load sample data" subtitle="Replaces your data, for exploring" onClick={() => { if (confirm("Replace your data with sample data?")) { replace({ ...demoState(), settings: { ...demoState().settings, plan: state.settings.plan, bioEnabled: state.settings.bioEnabled } }); toast("Sample data loaded"); } }} />
+          <Row icon="trash" iconTone="danger" title="Erase Lifeline on this phone" subtitle="Deletes the vault, keys and reminders. Cannot be undone" onClick={() => { if (confirm("Erase all Lifeline data on this phone? This cannot be undone.")) resetApp(); }} />
         </List>
-        <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={e => { const f = e.target.files?.[0]; if (f) restore(f); e.target.value = ""; }} />
       </Section>
 
-      <p className="note center">Lifeline gives general guidance, not regulated financial advice. Part of <a href="/">OrchestrIQ</a>.</p>
+      <p className="note center">Lifeline {info ? `v${info.version} for Android` : "web"} · <Pill>{planLabel(state)}</Pill><br />General guidance, not regulated financial advice. Part of OrchestrIQ.</p>
     </Screen>
   );
 }

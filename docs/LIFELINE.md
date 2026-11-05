@@ -17,6 +17,33 @@ People under financial stress rarely fail because of one big problem. Usually fi
 | 4 | **Structure**: EMIs over 50% of income, or a deficit | Bounces will keep happening | FOIR (EMI ÷ income), deficit and stress score, refinancing and lender-negotiation steps |
 | 5 | **Income ceiling** | Cutting costs alone can't close the gap | Earning options ranked by speed, skills and hours, with a reality check on each |
 
+## 2a. What's new in v3 (Android app)
+
+- **Installable Android app** (`android/`, ~0.3 MB, Android 8+). Install it directly; Play Store needs the steps in `android/README.md`.
+- **Security:**
+  - AES-256 encrypted vault: passcode → PBKDF2 → data key, sealed again by a hardware Keystore key.
+  - 6-digit passcode with escalating lockouts.
+  - Fingerprint unlock; the key is invalidated if fingerprints change.
+  - Auto-lock, screenshot blocking, strict CSP, no backups.
+  - Private lock-screen notifications.
+  - Encrypted backup and restore.
+  - Earlier unencrypted data is migrated into the vault automatically.
+- **Native EMI reminders:** fund-by, due-day and salary-day notifications, re-armed after reboot.
+- **AI:**
+  - One-tap hand-off to Gemini, ChatGPT, Claude, Perplexity or Copilot with a privacy-filtered summary. It uses the person's own app and subscription; amounts can be rounded, exact or hidden.
+  - Built-in **Claude assistant** (bring-your-own key, streaming, refusal fallback on), with 8 ready-made money tasks.
+- **Investments:** mutual funds (live NAV via mfapi.in, fund search), stocks (Alpha Vantage key), FD, gold, PF, crypto. Portfolio value and gain/loss, allocation, plus an **"investments vs expensive debt"** check.
+- **Connected apps hub:** notifications, calendar, AI apps, Claude and Alpha Vantage keys, broker apps (Kite, Groww, Upstox, Angel One, INDmoney), UPI apps (GPay, PhonePe, Paytm, BHIM). The "Move money" cards can open the user's UPI app.
+- **Monetization scaffold:**
+  - Free core: EMIs, reminders, funding plan, security.
+  - **Pro** (₹149/month or ₹999/year): AI, investments, forecast, debt planner, letters, encrypted backups.
+  - Unlocked free during early access; Play Billing is the next step.
+
+**Concerns to note:**
+- No app can "control" Gemini or ChatGPT inside the phone. Android only allows handing them text, which is what Lifeline does. Direct API integrations need each user's own key, plus your server if you want to pay for usage yourself.
+- Stock prices on the free Alpha Vantage tier are limited to 25 lookups a day.
+- For a commercial launch, use a licensed market-data provider. For bank balances, use the Account Aggregator framework.
+
 ## 2. What's built (v2, premium redesign)
 
 **Navigation:** Home · Bills · **＋ Add** (centre) · Insights · Earn. Settings and help are behind the ☰ in the header. The eye icon hides every amount. The phone's Back button moves between tabs.

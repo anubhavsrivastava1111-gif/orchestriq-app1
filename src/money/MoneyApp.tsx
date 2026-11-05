@@ -1,17 +1,24 @@
-// Lifeline — app shell: header, bottom navigation, sheets, toasts, lock.
+// Lifeline — app shell: security gate, header, bottom navigation, sheets, toasts.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MoneyState } from "./types";
 import { Ctx, type AppCtx, type SheetState, type Tab } from "./context";
-import { EMPTY, useMoneyState } from "./store";
-import { fundingPlan, inr, setHideAmounts, upcomingDues, ymKey } from "./engine";
+import { EMPTY, clearLegacy, readLegacy } from "./store";
+import { setHideAmounts } from "./engine";
+import * as vault from "./vault";
+import { bioDisable, bioEnable, bioStatus, isNative, scheduleReminders, setNativeTheme, setSecureScreen, wipeNative } from "./native";
+import { buildReminders } from "./remindersPlan";
 import { SheetHost } from "./sheets";
 import { Icon } from "./icons";
-import Lock from "./Lock";
+import { BioOffer, CreatePasscode, LockScreen, Welcome } from "./Lock";
 import Home from "./screens/Home";
 import Bills from "./screens/Bills";
 import Insights from "./screens/Insights";
 import Earn from "./screens/Earn";
 import More from "./screens/More";
+import Ai from "./screens/Ai";
+import Connect from "./screens/Connect";
+
+type Phase = "welcome" | "create" | "bio-offer" | "locked" | "ready";
 
 const NAV: { id: Tab | "add"; label: string; icon: string }[] = [
   { id: "home", label: "Home", icon: "home" },
@@ -20,31 +27,39 @@ const NAV: { id: Tab | "add"; label: string; icon: string }[] = [
   { id: "insights", label: "Insights", icon: "chart" },
   { id: "earn", label: "Earn", icon: "grow" },
 ];
-const TABS: Tab[] = ["home", "bills", "insights", "earn", "more"];
+const TABS: Tab[] = ["home", "bills", "insights", "earn", "more", "ai", "connect"];
 
 function readHash(): { tab: Tab; sub: string } {
   const [t, s] = location.hash.slice(1).split("/");
   return { tab: TABS.includes(t as Tab) ? (t as Tab) : "home", sub: s ?? "" };
 }
 
+const prefersDark = () => typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches;
+
 export default function MoneyApp() {
-  const [state, setState] = useMoneyState();
+  const [phase, setPhase] = useState<Phase>(() => (vault.vaultExists() ? "locked" : "welcome"));
+  const [state, setState] = useState<MoneyState>(EMPTY);
   const [{ tab, sub }, setNav] = useState(readHash);
   const [sheet, setSheet] = useState<SheetState | null>(null);
   const [toastMsg, setToast] = useState<{ msg: string; undo?: () => void; id: number } | null>(null);
-  const [locked, setLocked] = useState(() => !!state.settings.pinHash);
+  const stateRef = useRef(state);
   const hiddenAt = useRef(0);
+  const sheetRef = useRef(sheet);
+  useEffect(() => { stateRef.current = state; }, [state]);
+  useEffect(() => { sheetRef.current = sheet; }, [sheet]);
+  const legacy = useMemo(() => (phase === "welcome" ? readLegacy() : null), [phase]);
 
   setHideAmounts(state.settings.hideAmounts); // must run before children render
 
-  // Theme
+  // ─── Theme (web + Android system bars) ────────────────────────────────────
   useEffect(() => {
     const t = state.settings.theme;
     if (t === "system") delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = t;
+    setNativeTheme(t === "dark" || (t === "system" && prefersDark()));
   }, [state.settings.theme]);
 
-  // Navigation <-> URL hash (Android back button works between tabs)
+  // ─── Navigation <-> URL hash ──────────────────────────────────────────────
   useEffect(() => {
     const onHash = () => { setNav(readHash()); window.scrollTo({ top: 0 }); };
     window.addEventListener("hashchange", onHash);
@@ -56,15 +71,67 @@ export default function MoneyApp() {
     window.scrollTo({ top: 0 });
   }, []);
 
-  // Re-lock after 60 s in the background
+  // ─── Encrypted auto-save ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (phase !== "ready") return;
+    const t = setTimeout(() => { vault.save(state); }, 250);
+    return () => clearTimeout(t);
+  }, [state, phase]);
+
+  const lockNow = useCallback(() => {
+    if (!vault.isUnlocked()) return;
+    vault.save(stateRef.current).finally(() => vault.lock());
+    setSheet(null);
+    setState(EMPTY);
+    setPhase("locked");
+  }, []);
+
+  const resetApp = useCallback(() => {
+    vault.wipeVault();
+    wipeNative();
+    clearLegacy();
+    setSheet(null);
+    setState(EMPTY);
+    setPhase("welcome");
+    location.hash = "home";
+  }, []);
+
+  // ─── Auto-lock when the app goes to the background ────────────────────────
   useEffect(() => {
     const onVis = () => {
-      if (document.hidden) hiddenAt.current = Date.now();
-      else if (state.settings.pinHash && Date.now() - hiddenAt.current > 60000 && hiddenAt.current) setLocked(true);
+      if (phase !== "ready") return;
+      const after = stateRef.current.settings.autoLockSec;
+      if (document.hidden) {
+        hiddenAt.current = Date.now();
+        if (after === 0) lockNow();
+      } else if (hiddenAt.current && Date.now() - hiddenAt.current >= after * 1000) {
+        lockNow();
+      }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [state.settings.pinHash]);
+  }, [phase, lockNow]);
+
+  // ─── Android: screenshot blocking + reminder notifications ────────────────
+  useEffect(() => {
+    if (phase === "ready") setSecureScreen(state.settings.blockScreenshots);
+  }, [phase, state.settings.blockScreenshots]);
+  useEffect(() => {
+    if (!isNative || phase !== "ready") return;
+    const t = setTimeout(() => scheduleReminders(buildReminders(state)), 1200);
+    return () => clearTimeout(t);
+  }, [phase, state.loans, state.accounts, state.incomes, state.settings.bufferDays]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Android back button ──────────────────────────────────────────────────
+  useEffect(() => {
+    window.LifelineOnBack = () => {
+      if (sheetRef.current) { setSheet(null); return true; }
+      const cur = readHash().tab;
+      if (phase === "ready" && cur !== "home") { go("home"); return true; }
+      return false;
+    };
+    return () => { window.LifelineOnBack = undefined; };
+  }, [phase, go]);
 
   const toast = useCallback((msg: string, undo?: () => void) => setToast({ msg, undo, id: Date.now() }), []);
   useEffect(() => {
@@ -80,13 +147,45 @@ export default function MoneyApp() {
     go, sub,
     open: s => setSheet(s),
     close: () => setSheet(null),
-    toast,
-  }), [state, setState, go, sub, toast]);
+    toast, lockNow, resetApp,
+  }), [state, go, sub, toast, lockNow, resetApp]);
 
-  useReminderNotifications(state, locked);
-
-  if (locked && state.settings.pinHash) {
-    return <Lock pinHash={state.settings.pinHash} onUnlock={() => setLocked(false)} onReset={() => { setState(EMPTY); setLocked(false); }} />;
+  // ─── Security gate ────────────────────────────────────────────────────────
+  if (phase === "welcome") return <Welcome hasLegacy={!!legacy} onStart={() => setPhase("create")} />;
+  if (phase === "create") {
+    return (
+      <CreatePasscode
+        onCancel={() => setPhase("welcome")}
+        onDone={async code => {
+          const initial = readLegacy() ?? EMPTY;
+          await vault.createVault(code, initial);
+          clearLegacy();
+          setState(initial);
+          const b = bioStatus();
+          setPhase(b.available ? "bio-offer" : "ready");
+        }}
+      />
+    );
+  }
+  if (phase === "bio-offer") {
+    return (
+      <BioOffer
+        onSkip={() => setPhase("ready")}
+        onEnable={async () => {
+          const dek = vault.exportDekForBiometrics();
+          if (!dek) return false;
+          try {
+            await bioEnable(dek);
+            setState(s => ({ ...s, settings: { ...s.settings, bioEnabled: true } }));
+            setPhase("ready");
+            return true;
+          } catch { bioDisable(); return false; }
+        }}
+      />
+    );
+  }
+  if (phase === "locked") {
+    return <LockScreen bioOn onUnlock={s => { setState(s); setPhase("ready"); }} onReset={resetApp} />;
   }
 
   const onboarding = !state.accounts.length && !state.loans.length;
@@ -100,11 +199,17 @@ export default function MoneyApp() {
             <span>Lifeline</span>
           </button>
           <div className="appbar-actions">
+            <button type="button" className={"icon-btn ai-btn" + (tab === "ai" ? " on" : "")} aria-label="AI assistant" onClick={() => go("ai")}>
+              <Icon name="sparkle" />
+            </button>
             <button type="button" className="icon-btn" aria-pressed={state.settings.hideAmounts} aria-label={state.settings.hideAmounts ? "Show amounts" : "Hide amounts"}
               onClick={() => setState(s => ({ ...s, settings: { ...s.settings, hideAmounts: !s.settings.hideAmounts } }))}>
               <Icon name={state.settings.hideAmounts ? "eyeOff" : "eye"} />
             </button>
-            <button type="button" className={"icon-btn" + (tab === "more" ? " on" : "")} aria-label="More: settings and help" onClick={() => go("more")}>
+            <button type="button" className="icon-btn" aria-label="Lock now" onClick={lockNow}>
+              <Icon name="lock" />
+            </button>
+            <button type="button" className={"icon-btn" + (tab === "more" || tab === "connect" ? " on" : "")} aria-label="More: settings and help" onClick={() => go("more")}>
               <Icon name="menu" />
             </button>
           </div>
@@ -116,6 +221,8 @@ export default function MoneyApp() {
           {tab === "insights" && <Insights />}
           {tab === "earn" && <Earn />}
           {tab === "more" && <More />}
+          {tab === "ai" && <Ai />}
+          {tab === "connect" && <Connect />}
         </main>
 
         {!onboarding && (
@@ -143,25 +250,4 @@ export default function MoneyApp() {
       </div>
     </Ctx.Provider>
   );
-}
-
-// In-app notification once a day when something needs action (calendar is the primary channel).
-function useReminderNotifications(state: MoneyState, locked: boolean) {
-  const done = useRef(false);
-  useEffect(() => {
-    if (locked || done.current || !state.settings.remindersOn || typeof Notification === "undefined" || Notification.permission !== "granted") return;
-    done.current = true;
-    const key = "lifeline-notified-" + new Date().toDateString();
-    try { if (localStorage.getItem(key)) return; localStorage.setItem(key, "1"); } catch { /* ignore */ }
-    const urgent = upcomingDues(state).filter(d => d.status === "fund-now" || d.status === "due-today");
-    const short = fundingPlan(state).filter(p => p.shortfall > 0);
-    if (!urgent.length && !short.length) return;
-    const body = short.length
-      ? short.map(p => `Add ${inr(p.shortfall)} to ${p.account.name}`).join(" · ")
-      : urgent.map(d => `${d.loan.name} ${inr(d.loan.emi)} on ${d.date.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`).join(" · ");
-    navigator.serviceWorker?.getRegistration("/money/").then(reg => {
-      if (reg) reg.showNotification("Lifeline: EMI action needed", { body, icon: "/icon-192.png", tag: "lifeline-" + ymKey(new Date()) });
-      else new Notification("Lifeline: EMI action needed", { body });
-    }).catch(() => { /* ignore */ });
-  }, [state, locked]);
 }

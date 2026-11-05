@@ -6,6 +6,8 @@ import { statusPill, useMarkPaid } from "../dues";
 import { Button, Card, Empty, ForecastChart, List, Pill, Ring, Row, Section } from "../components";
 import { Icon } from "../icons";
 import { demoState } from "../store";
+import { installedApps, isNative, notificationsEnabled, openApp } from "../native";
+import { UPI_APPS } from "../market";
 
 const fmt = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 
@@ -18,6 +20,7 @@ export default function Home() {
   const health = useMemo(() => healthScore(state), [state]);
   const dues = useMemo(() => upcomingDues(state, new Date(), 31), [state]);
   const markPaid = useMarkPaid();
+  const upi = useMemo(() => { const have = installedApps(UPI_APPS.map(a => a.pkg)); return UPI_APPS.find(a => have.has(a.pkg)); }, []);
 
   const hour = new Date().getHours();
   const greet = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
@@ -33,7 +36,7 @@ export default function Home() {
     { done: state.loans.length > 0, title: "Add your EMIs", sub: "Amount, date and account", act: () => open({ kind: "loan" }) },
     { done: state.incomes.some(i => i.day), title: "Add income and pay day", sub: "So we can count your salary", act: () => open({ kind: "income" }) },
     { done: state.expenses.length > 0, title: "Add monthly spends", sub: "Rough numbers are fine", act: () => open({ kind: "quick-spends" }) },
-    { done: state.settings.calendarAdded, title: "Turn on reminders", sub: "Your calendar alerts you", act: () => open({ kind: "reminders" }) },
+    { done: isNative ? notificationsEnabled() : state.settings.calendarAdded, title: "Turn on reminders", sub: "Alerts before every EMI", act: () => open({ kind: "reminders" }) },
   ];
   const doneCount = steps.filter(s => s.done).length;
 
@@ -121,6 +124,7 @@ export default function Home() {
                   <div className="btn-row">
                     <Button size="sm" variant="primary" icon="check" onClick={() => applyMove(m)}>Done</Button>
                     {!m.from && <Button size="sm" onClick={() => go("earn")}>Ways to raise it</Button>}
+                    {m.from && upi && <Button size="sm" icon="transfer" onClick={() => openApp(upi.pkg)}>Open {upi.name}</Button>}
                   </div>
                 </div>
               </div>
@@ -165,6 +169,14 @@ export default function Home() {
           <Card><ForecastChart points={fc} /></Card>
         </Section>
       )}
+
+      <Card className="ai-card" onClick={() => go("ai")}>
+        <div className="profile-sum">
+          <span className="action-icon ai"><Icon name="sparkle" /></span>
+          <div><b>Ask AI about your money</b><p>Gemini, ChatGPT, Claude or the built-in assistant, with your private summary</p></div>
+          <Icon name="chevron" size={18} />
+        </div>
+      </Card>
 
       <Section title="Financial health">
         <Card onClick={() => go("insights", "plan")}>

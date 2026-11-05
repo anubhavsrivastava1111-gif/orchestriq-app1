@@ -1,17 +1,21 @@
 // Lifeline — data-entry sheets. Every form: one screen, big tap targets, smart defaults,
 // optional details folded away, and a Save button that is always visible.
 import { useMemo, useState } from "react";
-import type { Account, Expense, ExpenseCategory, Freq, Income, IncomeKind, Loan, LoanType } from "./types";
+import type { Account, Expense, ExpenseCategory, Freq, Holding, HoldingKind, Income, IncomeKind, Loan, LoanType } from "./types";
 import { EXPENSE_ICON, ago } from "./labels";
-import { ESSENTIAL_DEFAULT, EXPENSE_LABEL, INCOME_LABEL, LOAN_TYPE_LABEL } from "./types";
+import { ESSENTIAL_DEFAULT, EXPENSE_LABEL, HOLDING_LABEL, INCOME_LABEL, LOAN_TYPE_LABEL } from "./types";
 import { useApp, type SheetState } from "./context";
-import { uid, download, hashPin } from "./store";
+import { uid, parsePlainBackup } from "./store";
 import { inr, inrRaw } from "./engine";
 import { buildIcs, googleCalendarLink } from "./calendar";
 import { buildLetter, LETTERS, type LetterKind } from "./letters";
 import { SKILL_TAGS } from "./opportunities";
 import { Button, ChoiceCards, ChoiceChips, DayPicker, Disclosure, Field, MoneyInput, NumberInput, Segmented, Sheet, Slider, TextInput, Toggle, Row, List } from "./components";
 import { Icon } from "./icons";
+import { isNative, notificationsEnabled, requestNotifications, saveTextFile, shareText, copyText } from "./native";
+import * as vault from "./vault";
+import { searchFunds, fundNav, type MfScheme } from "./market";
+import { FREE_FEATURES, PRICES, PRO_FEATURES } from "./entitlements";
 
 // ─── Shared option lists ────────────────────────────────────────────────────
 const LOAN_SHORT: Record<LoanType, string> = {
@@ -41,7 +45,11 @@ export function SheetHost({ sheet }: { sheet: SheetState }) {
     case "reminders": return <RemindersSheet />;
     case "letter": return <LetterSheet initial={sheet.letter} loanId={sheet.loanId} />;
     case "earn-profile": return <EarnProfileSheet />;
-    case "pin": return <PinSheet />;
+    case "passcode": return <PasscodeSheet />;
+    case "backup": return <BackupSheet />;
+    case "restore": return <RestoreSheet text={sheet.text} />;
+    case "holding": return <HoldingSheet item={sheet.item} />;
+    case "paywall": return <PaywallSheet />;
     case "bounced": return <BouncedSheet loanId={sheet.loanId} />;
   }
 }
@@ -327,27 +335,30 @@ function BalancesSheet() {
 // ─── Reminders ──────────────────────────────────────────────────────────────
 function RemindersSheet() {
   const { state, update, close, toast } = useApp();
-  const notif = typeof Notification !== "undefined";
-  const downloadAll = () => {
-    download(new Blob([buildIcs(state.loans, state.accounts, state.settings)], { type: "text/calendar" }), "emi-reminders.ics");
+  const [notif, setNotif] = useState(() => notificationsEnabled());
+  const downloadAll = async () => {
+    const ok = await saveTextFile("emi-reminders.ics", "text/calendar", buildIcs(state.loans, state.accounts, state.settings));
+    if (!ok) return;
     update(s => ({ ...s, settings: { ...s.settings, calendarAdded: true } }));
-    toast("Downloaded — open the file and choose your Calendar app");
-  };
-  const enableAlerts = async (on: boolean) => {
-    if (on && notif) { const p = await Notification.requestPermission(); on = p === "granted"; if (!on) toast("Notifications are blocked in your browser settings"); }
-    update(s => ({ ...s, settings: { ...s.settings, remindersOn: on } }));
+    toast(isNative ? "Saved. Open the file and choose your Calendar app" : "Downloaded. Open the file and choose your Calendar app");
   };
   return (
-    <Sheet title="EMI reminders" subtitle="Your phone's calendar will alert you even when Lifeline is closed" onClose={close}>
+    <Sheet title="EMI reminders" subtitle={isNative ? "Lifeline alerts you even when the app is closed" : "Your phone's calendar will alert you even when Lifeline is closed"} onClose={close}>
       <div className="steps-mini">
-        <div><span>1</span>“Fund your account” — {state.settings.bufferDays} day{state.settings.bufferDays > 1 ? "s" : ""} before each EMI</div>
-        <div><span>2</span>“EMI today” — on the due date</div>
+        <div><span>1</span>“Fund your account”: {state.settings.bufferDays} day{state.settings.bufferDays > 1 ? "s" : ""} before each EMI, 9 am</div>
+        <div><span>2</span>“EMI today”: on the due date, 8 am</div>
+        {isNative && <div><span>3</span>“Salary day”: update balances, plan the month</div>}
       </div>
       <Field label={`Remind me ${state.settings.bufferDays} day(s) before`}>{id => (
         <Slider id={id} value={state.settings.bufferDays} min={1} max={7} onChange={v => update(s => ({ ...s, settings: { ...s.settings, bufferDays: v } }))} />
       )}</Field>
-      <Button variant="primary" full icon="download" onClick={downloadAll} disabled={!state.loans.length}>Add all {state.loans.length} EMIs to my calendar</Button>
-      <p className="note">On Android: open the downloaded file → choose <b>Calendar</b> → <b>Save</b>. Re-download if you add or change an EMI.</p>
+      {isNative && (
+        notif
+          ? <div className="ok-banner"><Icon name="check" /> Phone notifications are on. Reminders update automatically when you change an EMI.</div>
+          : <Button variant="primary" full icon="bell" onClick={async () => { const ok = await requestNotifications(); setNotif(ok); toast(ok ? "Notifications on" : "Allow notifications in Android Settings → Apps → Lifeline"); }}>Allow phone notifications</Button>
+      )}
+      <Button variant={isNative ? "secondary" : "primary"} full icon="download" onClick={downloadAll} disabled={!state.loans.length}>Also add all {state.loans.length} EMIs to my calendar</Button>
+      <p className="note">Save the file, open it and choose <b>Calendar</b> → <b>Save</b>. Do this again if you add or change an EMI.</p>
       {state.loans.length > 0 && (
         <Disclosure summary={<b>Or add one at a time (Google Calendar)</b>}>
           <List>
@@ -364,7 +375,6 @@ function RemindersSheet() {
           </List>
         </Disclosure>
       )}
-      {notif && <Toggle checked={state.settings.remindersOn} onChange={enableAlerts} label="Alert me when I open Lifeline" description="A notification if an account needs money soon" />}
     </Sheet>
   );
 }
@@ -382,8 +392,8 @@ function LetterSheet({ initial, loanId }: { initial?: LetterKind; loanId?: strin
   if (!loan || !letter) return <Sheet title="Letter to lender" onClose={close}><p>Add an EMI first.</p></Sheet>;
   const text = `Subject: ${letter.subject}\n\n${letter.body}`;
   const saveName = () => { if (name !== state.settings.name) update(s => ({ ...s, settings: { ...s.settings, name } })); };
-  const copy = async () => { saveName(); try { await navigator.clipboard.writeText(text); toast("Letter copied"); } catch { toast("Couldn't copy — select the text and copy manually"); } };
-  const share = async () => { saveName(); if (navigator.share) { try { await navigator.share({ title: letter.subject, text }); } catch { /* cancelled */ } } else copy(); };
+  const copy = async () => { saveName(); toast((await copyText(text)) ? "Letter copied" : "Couldn't copy. Select the text and copy it manually"); };
+  const share = async () => { saveName(); const r = await shareText(text, letter.subject); if (r === "copied") toast("Letter copied. Paste it into your email"); };
   return (
     <Sheet title="Letter to lender" subtitle="Filled in for you — review, then send from your email" onClose={close}
       footer={<div className="savebar"><Button icon="copy" onClick={copy}>Copy</Button><Button variant="primary" full icon="share" onClick={share}>Share / send</Button></div>}>
@@ -424,29 +434,183 @@ function EarnProfileSheet() {
   );
 }
 
-// ─── PIN ────────────────────────────────────────────────────────────────────
-function PinSheet() {
-  const { state, update, close, toast } = useApp();
+// ─── Change passcode ────────────────────────────────────────────────────────
+function PasscodeSheet() {
+  const { close, toast } = useApp();
+  const [cur, setCur] = useState("");
   const [a, setA] = useState("");
   const [b, setB] = useState("");
   const [err, setErr] = useState("");
-  const has = !!state.settings.pinHash;
+  const [busy, setBusy] = useState(false);
   const save = async () => {
-    if (!/^\d{4}$/.test(a)) return setErr("PIN must be 4 digits.");
-    if (a !== b) return setErr("The two PINs don't match.");
-    const h = await hashPin(a);
-    update(s => ({ ...s, settings: { ...s.settings, pinHash: h } })); toast("App lock is on"); close();
+    if (!/^\d{6}$/.test(a)) return setErr("New passcode must be 6 digits.");
+    if (a !== b) return setErr("The new passcodes don't match.");
+    setBusy(true);
+    const ok = await vault.changePasscode(cur, a);
+    setBusy(false);
+    if (!ok) return setErr("Current passcode is wrong.");
+    toast("Passcode changed"); close();
   };
-  const remove = () => { update(s => ({ ...s, settings: { ...s.settings, pinHash: "" } })); toast("App lock removed"); close(); };
-  const pinInput = (id: string, v: string, set: (x: string) => void) => (
-    <input id={id} className="input pin-input" inputMode="numeric" type="password" maxLength={4} value={v} autoComplete="off" onChange={e => set(e.target.value.replace(/\D/g, ""))} />
+  const pin = (id: string, v: string, set: (x: string) => void, af = false) => (
+    <input id={id} className="input pin-input" inputMode="numeric" type="password" maxLength={6} value={v} autoComplete="off" onChange={e => set(e.target.value.replace(/\D/g, ""))} {...(af ? { "data-autofocus": true } : {})} />
   );
   return (
-    <Sheet title={has ? "Change app PIN" : "Set an app PIN"} subtitle="Asked every time Lifeline opens" onClose={close}
-      footer={<div className="savebar">{has && <Button variant="danger" onClick={remove}>Remove</Button>}<Button variant="primary" full onClick={save}>Save PIN</Button></div>}>
-      <Field label="New 4-digit PIN" error={err}>{id => pinInput(id, a, setA)}</Field>
-      <Field label="Repeat PIN">{id => pinInput(id, b, setB)}</Field>
-      <p className="note">If you forget the PIN, you'll need to reset the app, which deletes data on this phone. Export a backup first.</p>
+    <Sheet title="Change passcode" subtitle="Your data is re-locked with the new passcode" onClose={close} footer={<SaveBar onSave={save} label={busy ? "Saving…" : "Change passcode"} disabled={busy} />}>
+      <Field label="Current passcode" error={err}>{id => pin(id, cur, setCur, true)}</Field>
+      <Field label="New 6-digit passcode">{id => pin(id, a, setA)}</Field>
+      <Field label="Repeat new passcode">{id => pin(id, b, setB)}</Field>
+    </Sheet>
+  );
+}
+
+// ─── Encrypted backup ───────────────────────────────────────────────────────
+function BackupSheet() {
+  const { state, close, toast } = useApp();
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (pw.length < 8) return setErr("Use at least 8 characters. A short sentence is best.");
+    if (pw !== pw2) return setErr("The passwords don't match.");
+    setBusy(true);
+    const text = await vault.makeBackup(state, pw);
+    const ok = await saveTextFile(`lifeline-backup-${new Date().toISOString().slice(0, 10)}.json`, "application/json", text);
+    setBusy(false);
+    if (ok) { toast("Encrypted backup saved"); close(); }
+  };
+  return (
+    <Sheet title="Encrypted backup" subtitle="Restore it on a new phone with this password" onClose={close} footer={<SaveBar onSave={save} label={busy ? "Encrypting…" : "Save backup"} disabled={busy} />}>
+      <div className="ok-banner"><Icon name="shield" /> The file is AES-256 encrypted. Without the password it's unreadable, even to us.</div>
+      <Field label="Backup password" error={err} hint="Different from your passcode. Write it down somewhere safe. It can't be recovered.">{id => (
+        <input id={id} className="input" type="password" autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} data-autofocus />
+      )}</Field>
+      <Field label="Repeat password">{id => <input id={id} className="input" type="password" autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)} />}</Field>
+    </Sheet>
+  );
+}
+
+function RestoreSheet({ text }: { text: string }) {
+  const { replace, close, toast } = useApp();
+  const encrypted = vault.isEncryptedBackup(text);
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const restore = async () => {
+    setBusy(true);
+    const s = encrypted ? await vault.readBackup(text, pw) : parsePlainBackup(text);
+    setBusy(false);
+    if (!s) return setErr(encrypted ? "Wrong password, or the file is damaged." : "This isn't a Lifeline backup.");
+    if (!confirm("Replace everything in Lifeline with this backup?")) return;
+    replace(s); toast("Backup restored"); close();
+  };
+  return (
+    <Sheet title="Restore backup" subtitle={encrypted ? "Enter the backup's password" : "Older unencrypted backup"} onClose={close} footer={<SaveBar onSave={restore} label={busy ? "Decrypting…" : "Restore"} disabled={busy} />}>
+      {encrypted
+        ? <Field label="Backup password" error={err}>{id => <input id={id} className="input" type="password" value={pw} onChange={e => setPw(e.target.value)} data-autofocus />}</Field>
+        : <p className="field-error">{err || "This file isn't encrypted. After restoring, save a new encrypted backup and delete the old file."}</p>}
+    </Sheet>
+  );
+}
+
+// ─── Investment ─────────────────────────────────────────────────────────────
+const PRICED: HoldingKind[] = ["stock", "mf", "crypto"];
+function HoldingSheet({ item }: { item?: Holding }) {
+  const { update, close, toast } = useApp();
+  const [kind, setKind] = useState<HoldingKind>(item?.kind ?? "mf");
+  const [name, setName] = useState(item?.name ?? "");
+  const [symbol, setSymbol] = useState(item?.symbol ?? "");
+  const [code, setCode] = useState(item?.schemeCode ?? "");
+  const [units, setUnits] = useState(str(item?.units));
+  const [avg, setAvg] = useState(str(item?.avgPrice));
+  const [cur, setCur] = useState(str(item?.manualValue ?? item?.lastPrice));
+  const [liquid, setLiquid] = useState(item?.liquid ?? true);
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<MfScheme[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [err, setErr] = useState("");
+  const priced = PRICED.includes(kind);
+
+  const search = async () => {
+    setSearching(true); setErr("");
+    try { setResults(await searchFunds(q)); } catch { setErr("Couldn't search right now. Check your internet."); }
+    setSearching(false);
+  };
+  const pickFund = async (f: MfScheme) => {
+    setName(f.schemeName); setCode(String(f.schemeCode)); setResults([]); setQ("");
+    try { const n = await fundNav(String(f.schemeCode)); setCur(String(n.nav)); } catch { /* price later */ }
+  };
+  const save = () => {
+    if (!name.trim()) return setErr("Give this investment a name.");
+    const u = priced ? num(units) : 1;
+    const a = num(avg);
+    if (!(u > 0) || !(a >= 0) || Number.isNaN(a)) return setErr(priced ? "Enter units and average buy price." : "Enter the amount invested.");
+    const c = num(cur);
+    const rec: Holding = {
+      id: item?.id ?? uid(), kind, name: name.trim(), units: u, avgPrice: a, liquid,
+      symbol: kind === "stock" ? symbol.trim().toUpperCase() || undefined : undefined,
+      schemeCode: kind === "mf" ? code || undefined : undefined,
+      lastPrice: priced && c > 0 ? c : undefined, priceAt: priced && c > 0 ? new Date().toISOString() : undefined,
+      manualValue: !priced && c > 0 ? c : undefined,
+    };
+    update(s => ({ ...s, holdings: item ? s.holdings.map(h => (h.id === item.id ? rec : h)) : [...s.holdings, rec] }));
+    toast(item ? "Investment updated" : "Investment added"); close();
+  };
+  const del = item ? () => { if (confirm(`Remove ${item.name}?`)) { update(s => ({ ...s, holdings: s.holdings.filter(h => h.id !== item.id) })); close(); } } : undefined;
+  return (
+    <Sheet title={item ? "Edit investment" : "Add investment"} subtitle="Mutual fund prices update automatically" onClose={close} footer={<SaveBar onSave={save} onDelete={del} />}>
+      <Field label="Type">{() => <ChoiceChips value={kind} options={(Object.keys(HOLDING_LABEL) as HoldingKind[]).map(k => ({ value: k, label: HOLDING_LABEL[k] }))} onChange={k => { setKind(k); setLiquid(k !== "epf"); }} />}</Field>
+      {kind === "mf" && !item && (
+        <Field label="Find your fund" hint="Type at least 3 letters of the fund name.">{id => (
+          <>
+            <div className="key-input">
+              <input id={id} className="input" value={q} onChange={e => setQ(e.target.value)} placeholder="e.g. Parag Parikh Flexi" onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); search(); } }} />
+              <Button size="sm" onClick={search} disabled={searching || q.trim().length < 3}>{searching ? "…" : "Search"}</Button>
+            </div>
+            {results.length > 0 && <div className="results">{results.map(f => <button key={f.schemeCode} type="button" className="result" onClick={() => pickFund(f)}>{f.schemeName}</button>)}</div>}
+          </>
+        )}</Field>
+      )}
+      <Field label="Name" error={err}>{id => <TextInput id={id} value={name} onChange={setName} placeholder={kind === "stock" ? "e.g. Reliance Industries" : kind === "fd" ? "e.g. SBI FD" : "Name"} maxLength={120} />}</Field>
+      {kind === "stock" && <Field label="Symbol" optional hint="For live prices: RELIANCE.BSE, TCS.BSE, or US tickers like AAPL.">{id => <TextInput id={id} value={symbol} onChange={setSymbol} placeholder="RELIANCE.BSE" />}</Field>}
+      {priced ? (
+        <>
+          <Field label="Units / quantity">{id => <NumberInput id={id} value={units} onChange={setUnits} placeholder="0" />}</Field>
+          <Field label="Average buy price per unit">{id => <MoneyInput id={id} value={avg} onChange={setAvg} />}</Field>
+          <Field label="Current price per unit" optional hint={kind === "mf" ? "Filled automatically from the latest NAV." : "Updated when you tap Prices."}>{id => <MoneyInput id={id} value={cur} onChange={setCur} />}</Field>
+        </>
+      ) : (
+        <>
+          <Field label="Amount invested">{id => <MoneyInput id={id} value={avg} onChange={setAvg} large />}</Field>
+          <Field label="Current value" optional>{id => <MoneyInput id={id} value={cur} onChange={setCur} />}</Field>
+        </>
+      )}
+      <Toggle checked={liquid} onChange={setLiquid} label="Can be withdrawn within a week" description="Used to check if investments should repay expensive debt" />
+    </Sheet>
+  );
+}
+
+// ─── Plans ──────────────────────────────────────────────────────────────────
+function PaywallSheet() {
+  const { state, update, close, toast } = useApp();
+  return (
+    <Sheet title="Lifeline Pro" subtitle="Everything you need to get out of money stress" onClose={close}
+      footer={<Button variant="primary" full onClick={() => { update(s => ({ ...s, settings: { ...s.settings, plan: s.settings.plan === "free" ? "early-access" : s.settings.plan } })); toast("Pro unlocked. Free during early access"); close(); }}>
+        {state.settings.plan === "free" ? "Unlock Pro free (early access)" : "You have Pro"}
+      </Button>}>
+      <div className="plan-hero">
+        <span className="pill pill-good">Early access: free</span>
+        <div className="plan-price"><b>{PRICES.currency}{PRICES.yearly}</b><span>/year after launch</span></div>
+        <p>or {PRICES.currency}{PRICES.monthly}/month. Less than one bounced-EMI charge.</p>
+      </div>
+      <div className="plan-list">
+        {PRO_FEATURES.map(f => (
+          <div key={f.id} className="plan-item"><span className="action-icon brand"><Icon name={f.icon} /></span><div><b>{f.title}</b><small>{f.detail}</small></div></div>
+        ))}
+      </div>
+      <Disclosure summary={<b>Always free</b>}>
+        <ul className="flags">{FREE_FEATURES.map(f => <li key={f}>{f}</li>)}</ul>
+      </Disclosure>
     </Sheet>
   );
 }

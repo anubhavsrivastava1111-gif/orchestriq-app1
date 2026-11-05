@@ -1,9 +1,10 @@
-// Lifeline — local storage. Financial data never leaves the phone unless the user exports it.
-import { useEffect, useState } from "react";
+// Lifeline — app data defaults, legacy migration and sample data.
+// Persistence is handled by vault.ts (encrypted); nothing here writes to storage.
 import type { MoneyState } from "./types";
 import { ymKey } from "./engine";
 
-const KEY = "lifeline-money-v1";
+/** Pre-encryption storage key from v1/v2 builds; migrated into the vault and then deleted. */
+export const LEGACY_KEY = "lifeline-money-v1";
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
@@ -14,34 +15,44 @@ export const EMPTY: MoneyState = {
   incomes: [],
   expenses: [],
   profile: { skills: [], hoursPerWeek: 8, urgency: "this-month", languages: "Hindi, English", shortlist: [] },
-  settings: { bufferDays: 2, bounceFee: 1000, remindersOn: false, name: "", hideAmounts: false, theme: "system", pinHash: "", setupDismissed: false, calendarAdded: false },
+  settings: {
+    bufferDays: 2, bounceFee: 1000, remindersOn: false, name: "", hideAmounts: false, theme: "system",
+    setupDismissed: false, calendarAdded: false, autoLockSec: 30, blockScreenshots: true, bioEnabled: false,
+    plan: "early-access", aiShare: "rounded",
+  },
+  holdings: [],
+  integrations: { anthropicKey: "", alphaVantageKey: "" },
 };
 
-function load(): MoneyState {
+/** Fills in fields added by newer versions so older saved data keeps working. */
+export function normalize(p: Partial<MoneyState> | null | undefined): MoneyState {
+  if (!p) return EMPTY;
+  return {
+    ...EMPTY, ...p,
+    settings: { ...EMPTY.settings, ...p.settings },
+    profile: { ...EMPTY.profile, ...p.profile },
+    integrations: { ...EMPTY.integrations, ...p.integrations },
+    holdings: Array.isArray(p.holdings) ? p.holdings : [],
+  };
+}
+
+/** Reads data saved by the earlier unencrypted build, if any. */
+export function readLegacy(): MoneyState | null {
   try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return EMPTY;
-    const parsed = JSON.parse(raw) as Partial<MoneyState>;
-    return { ...EMPTY, ...parsed, settings: { ...EMPTY.settings, ...parsed.settings }, profile: { ...EMPTY.profile, ...parsed.profile } };
-  } catch { return EMPTY; }
+    const raw = localStorage.getItem(LEGACY_KEY);
+    return raw ? normalize(JSON.parse(raw)) : null;
+  } catch { return null; }
 }
 
-export function useMoneyState() {
-  const [state, setState] = useState<MoneyState>(load);
-  useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* storage blocked/full */ } }, [state]);
-  return [state, setState] as const;
+export function clearLegacy() {
+  try { localStorage.removeItem(LEGACY_KEY); } catch { /* ignore */ }
 }
 
-export function exportJson(state: MoneyState) {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-  download(blob, `lifeline-backup-${new Date().toISOString().slice(0, 10)}.json`);
-}
-
-export function parseBackup(text: string): MoneyState | null {
+/** Accepts an unencrypted backup from older versions. */
+export function parsePlainBackup(text: string): MoneyState | null {
   try {
     const p = JSON.parse(text);
-    if (p && p.version === 1 && Array.isArray(p.loans) && Array.isArray(p.accounts))
-      return { ...EMPTY, ...p, settings: { ...EMPTY.settings, ...p.settings }, profile: { ...EMPTY.profile, ...p.profile } };
+    if (p && p.version === 1 && Array.isArray(p.loans) && Array.isArray(p.accounts)) return normalize(p);
   } catch { /* invalid */ }
   return null;
 }
@@ -87,12 +98,12 @@ export function demoState(): MoneyState {
       { id: uid(), name: "Health insurance", category: "insurance", amount: 9600, freq: "yearly", essential: true },
     ],
     profile: { skills: ["teaching", "english", "excel"], hoursPerWeek: 8, urgency: "this-month", languages: "Hindi, English", shortlist: [] },
+    holdings: [
+      { id: uid(), kind: "mf", name: "Parag Parikh Flexi Cap Fund - Direct Growth", schemeCode: "122639", units: 210.5, avgPrice: 62, lastPrice: 88.4, priceAt: new Date().toISOString(), liquid: true },
+      { id: uid(), kind: "stock", name: "Reliance Industries", symbol: "RELIANCE.BSE", units: 12, avgPrice: 2450, lastPrice: 2890, priceAt: new Date().toISOString(), liquid: true },
+      { id: uid(), kind: "fd", name: "SBI fixed deposit", units: 1, avgPrice: 25000, manualValue: 26400, liquid: true },
+      { id: uid(), kind: "epf", name: "EPF balance", units: 1, avgPrice: 180000, manualValue: 212000, liquid: false },
+    ],
     settings: { ...EMPTY.settings, name: "Rahul" },
   };
-}
-
-/** SHA-256 hex of the PIN. A lock screen deters casual access; it is not encryption. */
-export async function hashPin(pin: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("lifeline:" + pin));
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
 }

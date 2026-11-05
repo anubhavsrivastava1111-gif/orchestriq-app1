@@ -365,6 +365,21 @@ export function insights(state: MoneyState, today = new Date()): Insight[] {
     });
   }
 
+  // 4b. Liquid investments while paying expensive interest
+  const liquid = (state.holdings ?? []).filter(h => h.liquid).reduce((sum, h) => sum + (h.lastPrice !== undefined && (h.kind === "stock" || h.kind === "mf" || h.kind === "crypto") ? h.units * h.lastPrice : h.manualValue ?? h.units * h.avgPrice), 0);
+  if (costly.length && liquid > 0) {
+    const owed = costly.reduce((sum, l) => sum + l.outstanding, 0);
+    const use = Math.min(liquid, owed);
+    const avgRate = costly.reduce((sum, l) => sum + l.ratePct * l.outstanding, 0) / owed;
+    out.push({
+      id: "invest-vs-debt", severity: "high",
+      title: `Use up to ${inr(use)} of investments to clear ${avgRate.toFixed(0)}% debt`,
+      detail: `You hold ${inr(liquid)} in liquid investments while paying ~${avgRate.toFixed(0)}% on ${inr(owed)} of debt. Few investments reliably beat that. Keep 3 months of essentials as an emergency fund, then repay the costliest debt first. Check exit loads and tax before redeeming.`,
+      monthlyImpact: (use * Math.max(0, avgRate - 12)) / 1200,
+      action: { label: "See investments", tab: "insights" },
+    });
+  }
+
   // 5. Over-leveraged
   if (cf.foir > 0.5) {
     out.push({

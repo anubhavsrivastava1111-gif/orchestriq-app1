@@ -68,9 +68,37 @@ export interface Settings {
   name: string;          // used for greeting and lender letters
   hideAmounts: boolean;  // privacy mode
   theme: "system" | "light" | "dark";
-  pinHash: string;       // SHA-256 of app PIN ("" = no lock)
   setupDismissed: boolean;
   calendarAdded: boolean;  // user downloaded/added calendar reminders
+  autoLockSec: number;     // lock after this many seconds in background (0 = immediately)
+  blockScreenshots: boolean; // Android: hide from recents and block screenshots
+  bioEnabled: boolean;     // Android: fingerprint / face unlock
+  plan: Plan;
+  aiShare: "exact" | "rounded" | "none"; // how amounts appear in summaries shared with AI apps
+}
+
+export type Plan = "free" | "early-access" | "pro";
+
+/** Keys for services the user connects. Stored inside the encrypted vault only. */
+export interface Integrations {
+  anthropicKey: string;    // Claude API key for the built-in assistant
+  alphaVantageKey: string; // free stock-price key from alphavantage.co
+}
+
+export type HoldingKind = "stock" | "mf" | "fd" | "gold" | "epf" | "crypto" | "other";
+
+export interface Holding {
+  id: string;
+  kind: HoldingKind;
+  name: string;
+  symbol?: string;       // stocks: e.g. RELIANCE.BSE or AAPL (Alpha Vantage format)
+  schemeCode?: string;   // mutual funds: AMFI scheme code (from mfapi.in)
+  units: number;         // stocks/MF/crypto units; 1 for amount-based assets
+  avgPrice: number;      // cost per unit (or amount invested for FD/gold/EPF)
+  lastPrice?: number;    // latest market price per unit
+  priceAt?: string;      // ISO time of lastPrice
+  manualValue?: number;  // current value for assets without live prices
+  liquid: boolean;       // can be withdrawn within a few days without heavy penalty
 }
 
 export interface MoneyState {
@@ -81,7 +109,13 @@ export interface MoneyState {
   expenses: Expense[];
   profile: EarnProfile;
   settings: Settings;
+  holdings: Holding[];
+  integrations: Integrations;
 }
+
+export const HOLDING_LABEL: Record<HoldingKind, string> = {
+  stock: "Stock", mf: "Mutual fund", fd: "Fixed deposit", gold: "Gold", epf: "PF / PPF / NPS", crypto: "Crypto", other: "Other",
+};
 
 export const LOAN_TYPE_LABEL: Record<LoanType, string> = {
   home: "Home loan", personal: "Personal loan", car: "Car loan", "two-wheeler": "Two-wheeler loan",
