@@ -2,7 +2,7 @@
    - Page: network-first, cached copy used only when offline.
    - Hashed build files (/assets/...): cache-first (names change every deploy, so never stale).
    - No user data is ever stored here; it lives in the page's localStorage only. */
-const VERSION = "lifeline-sw-v1";
+const VERSION = "lifeline-sw-v2";
 const PAGE = "/money/";
 
 self.addEventListener("install", (e) => {
@@ -39,6 +39,6 @@ self.addEventListener("notificationclick", (e) => {
   e.notification.close();
   e.waitUntil(self.clients.matchAll({ type: "window" }).then((list) => {
     const open = list.find((c) => c.url.includes("/money/"));
-    return open ? open.focus() : self.clients.openWindow("/money/#today");
+    return open ? open.focus() : self.clients.openWindow("/money/#home");
   }));
 });

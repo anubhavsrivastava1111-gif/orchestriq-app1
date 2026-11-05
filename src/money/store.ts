@@ -13,8 +13,8 @@ export const EMPTY: MoneyState = {
   loans: [],
   incomes: [],
   expenses: [],
-  profile: { skills: [], hoursPerWeek: 8, urgency: "this-month", languages: "Hindi, English" },
-  settings: { bufferDays: 2, bounceFee: 1000, remindersOn: false },
+  profile: { skills: [], hoursPerWeek: 8, urgency: "this-month", languages: "Hindi, English", shortlist: [] },
+  settings: { bufferDays: 2, bounceFee: 1000, remindersOn: false, name: "", hideAmounts: false, theme: "system", pinHash: "", setupDismissed: false, calendarAdded: false },
 };
 
 function load(): MoneyState {
@@ -40,7 +40,8 @@ export function exportJson(state: MoneyState) {
 export function parseBackup(text: string): MoneyState | null {
   try {
     const p = JSON.parse(text);
-    if (p && p.version === 1 && Array.isArray(p.loans) && Array.isArray(p.accounts)) return { ...EMPTY, ...p };
+    if (p && p.version === 1 && Array.isArray(p.loans) && Array.isArray(p.accounts))
+      return { ...EMPTY, ...p, settings: { ...EMPTY.settings, ...p.settings }, profile: { ...EMPTY.profile, ...p.profile } };
   } catch { /* invalid */ }
   return null;
 }
@@ -85,6 +86,13 @@ export function demoState(): MoneyState {
       { id: uid(), name: "Online shopping", category: "shopping", amount: 2000, freq: "monthly", essential: false },
       { id: uid(), name: "Health insurance", category: "insurance", amount: 9600, freq: "yearly", essential: true },
     ],
-    profile: { skills: ["teaching", "english", "excel"], hoursPerWeek: 8, urgency: "this-month", languages: "Hindi, English" },
+    profile: { skills: ["teaching", "english", "excel"], hoursPerWeek: 8, urgency: "this-month", languages: "Hindi, English", shortlist: [] },
+    settings: { ...EMPTY.settings, name: "Rahul" },
   };
+}
+
+/** SHA-256 hex of the PIN. A lock screen deters casual access; it is not encryption. */
+export async function hashPin(pin: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("lifeline:" + pin));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
 }

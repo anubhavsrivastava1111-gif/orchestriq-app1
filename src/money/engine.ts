@@ -26,8 +26,14 @@ export function monthly(amount: number, freq: Freq): number {
   }
 }
 
-export const inr = (n: number) =>
+/** Exact amount, always visible (used for exports like calendar files). */
+export const inrRaw = (n: number) =>
   (n < 0 ? "−" : "") + "₹" + Math.round(Math.abs(n)).toLocaleString("en-IN");
+
+// Privacy mode: every on-screen amount (including text built here) is masked.
+let HIDE = false;
+export const setHideAmounts = (on: boolean) => { HIDE = on; };
+export const inr = (n: number) => (HIDE ? "₹ ••••" : inrRaw(n));
 
 // ─── Upcoming EMIs ──────────────────────────────────────────────────────────
 export type DueStatus = "paid" | "confirm" | "due-today" | "fund-now" | "upcoming";
@@ -83,6 +89,8 @@ export interface AccountPlan {
   shortfall: number;        // how much to add (0 if fine)
   fundBy: Date | null;      // latest safe date to add the money
   firstFailing: DueItem | null; // the first EMI that would bounce
+  lowest: number;           // lowest projected spare balance in the window (negative = short)
+  timeline: { date: Date; delta: number }[]; // dated credits (+) and EMIs (−)
 }
 
 /**
@@ -123,9 +131,78 @@ export function fundingPlan(state: MoneyState, today = new Date(), horizonDays =
       totalDue: mine.reduce((s, d) => s + d.loan.emi, 0),
       available, shortfall: Math.max(0, -lowest),
       fundBy: firstFailing ? firstFailing.fundBy : null,
-      firstFailing,
+      firstFailing, lowest,
+      timeline: events.map(e => ({ date: e.date, delta: e.delta })),
     };
   });
+}
+
+// ─── Premium: forecast, transfers, safe-to-spend ────────────────────────────
+export interface ForecastPoint { date: Date; total: number }
+
+/** Projected spare money across all accounts for each of the next `days` days (EMIs + dated income only). */
+export function forecast(state: MoneyState, today = new Date(), days = 30): ForecastPoint[] {
+  const plans = fundingPlan(state, today, days);
+  const t = startOfDay(today);
+  let total = plans.reduce((s, p) => s + p.available, 0);
+  const all = plans.flatMap(p => p.timeline);
+  const out: ForecastPoint[] = [];
+  for (let i = 0; i <= days; i++) {
+    const d = addDays(t, i);
+    for (const ev of all) if (daysBetween(ev.date, d) === 0) total += ev.delta;
+    out.push({ date: d, total });
+  }
+  return out;
+}
+
+export interface Transfer { from: Account | null; to: Account; amount: number; by: Date | null }
+
+/**
+ * Cover each account's shortfall from other accounts' spare money first;
+ * only the rest needs fresh money ("from" = null).
+ */
+export function transferPlan(plans: AccountPlan[]): Transfer[] {
+  const spare = new Map(plans.map(p => [p.account.id, Math.max(0, Math.floor(p.lowest / 100) * 100)]));
+  const out: Transfer[] = [];
+  for (const need of plans.filter(p => p.shortfall > 0).sort((a, b) => (a.fundBy?.getTime() ?? 0) - (b.fundBy?.getTime() ?? 0))) {
+    let left = need.shortfall;
+    for (const donor of plans) {
+      if (donor === need || left <= 0) continue;
+      const avail = spare.get(donor.account.id) || 0;
+      if (avail <= 0) continue;
+      const amt = Math.min(avail, Math.ceil(left / 100) * 100);
+      spare.set(donor.account.id, avail - amt);
+      left -= amt;
+      out.push({ from: donor.account, to: need.account, amount: amt, by: need.fundBy });
+    }
+    if (left > 0) out.push({ from: null, to: need.account, amount: Math.ceil(left / 100) * 100, by: need.fundBy });
+  }
+  return out;
+}
+
+export interface SafeToSpend { perDay: number; total: number; until: Date; days: number; committed: number }
+
+/**
+ * What can be spent per day until the next income without endangering EMIs or essentials.
+ * total = spare money − EMIs due before next income − essentials for those days − any shortfall.
+ */
+export function safeToSpend(state: MoneyState, today = new Date()): SafeToSpend {
+  const t = startOfDay(today);
+  const plans = fundingPlan(state, today, 31);
+  const nextIncome = plans.flatMap(p => p.credits).map(c => c.date).sort((a, b) => a.getTime() - b.getTime())[0];
+  const until = nextIncome ?? addDays(t, 30);
+  const days = Math.max(1, daysBetween(t, until));
+  const spare = plans.reduce((s, p) => s + Math.max(0, p.available), 0);
+  const emis = plans.flatMap(p => p.dues).filter(d => d.date < until || daysBetween(d.date, until) === 0).reduce((s, d) => s + d.loan.emi, 0);
+  const essentials = state.expenses.filter(e => e.essential).reduce((s, e) => s + monthly(e.amount, e.freq), 0) * (days / 30);
+  const committed = emis + essentials;
+  const total = Math.max(0, spare - committed);
+  return { perDay: total / days, total, until, days, committed };
+}
+
+/** Month the last loan closes, following the chosen plan. */
+export function debtFreeDate(months: number, today = new Date()): Date {
+  return new Date(today.getFullYear(), today.getMonth() + months, 1);
 }
 
 /** EMIs whose debit account no longer exists (e.g. deleted account) — they can't be planned. */
@@ -201,6 +278,7 @@ export interface PayoffResult {
   months: number;
   totalInterest: number;
   order: string[];         // loan names in the order they get cleared
+  cleared: { name: string; month: number }[]; // month (from now) each loan closes
   capped: boolean;         // true if it never finishes within 50 years (EMI too low for the interest)
 }
 
@@ -210,6 +288,7 @@ export function simulatePayoff(loans: Loan[], extraPerMonth: number, strategy: "
     .filter(l => l.outstanding > 0)
     .map(l => ({ name: l.name, bal: l.outstanding, r: l.ratePct / 1200, min: l.emi }));
   const order: string[] = [];
+  const cleared: { name: string; month: number }[] = [];
   let months = 0, totalInterest = 0;
   const budget = live.reduce((s, l) => s + l.min, 0) + Math.max(0, extraPerMonth);
   while (live.some(l => l.bal > 0.5) && months < 600) {
@@ -221,9 +300,9 @@ export function simulatePayoff(loans: Loan[], extraPerMonth: number, strategy: "
     const targets = live.filter(l => l.bal > 0.5).sort((a, b) =>
       strategy === "avalanche" ? b.r - a.r || a.bal - b.bal : a.bal - b.bal || b.r - a.r);
     for (const tgt of targets) { if (pool <= 0) break; const p = Math.min(pool, tgt.bal); tgt.bal -= p; pool -= p; }
-    for (const l of live) if (l.bal <= 0.5 && !order.includes(l.name)) { l.bal = 0; order.push(l.name); }
+    for (const l of live) if (l.bal <= 0.5 && !order.includes(l.name)) { l.bal = 0; order.push(l.name); cleared.push({ name: l.name, month: months }); }
   }
-  return { months, totalInterest, order, capped: months >= 600 };
+  return { months, totalInterest, order, cleared, capped: months >= 600 };
 }
 
 // ─── Savings & action insights (rule based) ─────────────────────────────────

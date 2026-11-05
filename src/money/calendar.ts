@@ -1,7 +1,7 @@
 // Lifeline — reminders that work on any Android phone today, without a server:
 // recurring calendar events (Google Calendar / Samsung Calendar ring like alarms).
 import type { Account, Loan, Settings } from "./types";
-import { inr } from "./engine";
+import { inrRaw as inr } from "./engine";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const stamp = (d: Date, h = 9, m = 0) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(h)}${pad(m)}00`;

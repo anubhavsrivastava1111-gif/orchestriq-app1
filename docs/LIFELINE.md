@@ -17,18 +17,25 @@ People under financial stress rarely fail because of one big problem. Usually fi
 | 4 | **Structure**: EMIs over 50% of income, or a deficit | Bounces will keep happening | FOIR (EMI ÷ income), deficit and stress score, refinancing and lender-negotiation steps |
 | 5 | **Income ceiling** | Cutting costs alone can't close the gap | Earning options ranked by speed, skills and hours, with a reality check on each |
 
-## 2. What's built (MVP, in this repo)
+## 2. What's built (v2, premium redesign)
 
-| Tab | Features |
+**Navigation:** Home · Bills · **＋ Add** (centre) · Insights · Earn. Settings and help are behind the ☰ in the header. The eye icon hides every amount. The phone's Back button moves between tabs.
+
+| Screen | What it does |
 |---|---|
-| **Today** | Per-account funding gap and "top up by" date (counts expected salary). EMIs for the next 3 weeks with status: fund now / debits today / did it go through? / paid. Top 3 actions. Stress score with reasons |
-| **EMIs** | Accounts (balance and minimum balance) and loans (EMI, due day, debit account, amount owed, rate). Reminders: a one-tap `.ics` download of all EMIs, or one Google Calendar link per EMI. In-app alerts when the app opens |
-| **Money flow** | Income sources against spending, essential and non-essential, EMI share of income, and the monthly surplus or gap |
-| **Save** | Rule-based action plan, each with an estimated ₹/month impact: bounce prevention, aligning EMI dates, merging debit accounts, refinancing high-interest debt, trimming non-essentials, a subscription audit, an emergency buffer, prepayment. A debt-free planner compares "EMIs only", highest-interest-first (avalanche) and smallest-loan-first (snowball) |
-| **Earn** | 21 curated options in 10 categories (quick cash, teaching, freelancing, AI training work, gig, local, selling, content, free skilling, jobs and government schemes), with links. Ranked by skills, hours per week and urgency. Shows the ₹/hour needed to close your gap. Every option has a reality check, for example that YouTube needs 1,000 subscribers plus 4,000 watch hours before it pays |
-| **Help** | Red flags (loan apps, OTP and task scams, recovery-agent rules). Lender-first steps. Free credit reports (CIBIL, Experian, CRIF). RBI ombudsman (CMS), RBI Sachet, cyber helpline 1930, Tele-MANAS 14416. Settings. Backup, restore and delete |
+| **Home** | **Safe-to-spend per day** until next salary. Status: EMIs covered / action needed. **"Do this now"** cards: *Move ₹X from account A to B by date* (uses spare money in your other accounts before asking for fresh money), *Did this EMI go through?* (Yes / It bounced → recovery steps). Setup checklist with progress. Upcoming EMIs with one-tap **Paid** (with Undo). **30-day balance forecast** chart with the danger zone. Health score ring |
+| **Bills** | **Calendar** (month grid with coloured status dots, tap a day). **Loans** (totals strip: monthly EMI, total owed, average rate). **Accounts** ("Update all balances" in one screen; flags balances older than 7 days). Reminders and lender letters |
+| **Insights** | **Cash flow**: in vs out, a stacked income-allocation bar, an EMI-to-income meter with the 40% and 50% bank thresholds, spend by category. **Action plan**: numbered, severity-tagged savings actions with ₹/month impact and "Why and how" expanders. **Debt-free**: debt-free month and year, an extra-payment slider, avalanche vs snowball, order-to-clear timeline, comparison vs EMIs-only |
+| **Earn** | Gap hero (₹/hour needed). Profile summary. **My plan** shortlist (★). Category filter. Cards with first-income speed, earnings, upfront cost, why it matches, and a reality check with links |
+| **More** | Name, **PIN app lock** (re-locks after 60 s in background), hide amounts, theme (auto/light/dark), reminders, bounce-cost setting, help and protection resources, backup / restore / delete |
 
-Code: `src/money/` — `engine.ts` (all calculations, pure functions), `opportunities.ts` (directory and ranking), `resources.ts`, `calendar.ts` (ICS and Google Calendar), `MoneyApp.tsx` (UI). Entry point: `money/index.html`. PWA files: `public/money/`.
+**Data entry (all forms):** bottom sheet. The **Save button is always visible**: header and footer are fixed, only the middle scrolls, and it resizes above the keyboard. Big ₹ inputs show "9.8 thousand / 2.1 lakh" as you type. **Tap-to-pick day grid** instead of typing dates. Loan type chips pre-fill the name and a typical interest rate. Choose the debit account from cards, or **create a new account inside the EMI form**. Optional fields fold under "More details". Inline validation messages. **Monthly spends in one screen** (10 common categories). **Update all balances in one screen.**
+
+**Premium tools:** **letters to your lender**, pre-filled with your loan data (change EMI date, lower EMI or restructuring, statement and foreclosure, recovery-agent complaint). Copy, or share to email or WhatsApp. **Bounced-EMI recovery steps.** Calendar reminders.
+
+**Quality checks run:** at 360×740 (small Android) every screen and form has no horizontal overflow and no clipped content, and Save is always on-screen. Strict TypeScript and ESLint are clean.
+
+Code: `src/money/` — `engine.ts` (calculations), `components.tsx` (design system), `sheets.tsx` (forms), `screens/*` (Home, Bills, Insights, Earn, More), `letters.ts`, `opportunities.ts`, `resources.ts`, `calendar.ts`, `Lock.tsx`, `MoneyApp.tsx` (shell).
 
 **Design choices and why:**
 - **Calendar reminders, not push notifications.** A web app can't reliably schedule notifications on Android when it's closed. Calendar events ring every time, with no server and no cost. Native notifications come in Phase 2.

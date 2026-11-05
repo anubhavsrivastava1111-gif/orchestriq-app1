@@ -3,12 +3,12 @@
   "short_name": "Lifeline",
   "description": "Never miss an EMI. Cash flow, savings and earning opportunities for people under financial stress.",
   "id": "/money/",
-  "start_url": "/money/#today",
+  "start_url": "/money/#home",
   "scope": "/money/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f6f7f9",
-  "theme_color": "#0f766e",
+  "background_color": "#f3f5f9",
+  "theme_color": "#1b3f8f",
   "categories": ["finance", "productivity"],
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
@@ -16,7 +16,8 @@
     { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "Today's EMIs", "url": "/money/#today" },
+    { "name": "Today", "url": "/money/#home" },
+    { "name": "EMI calendar", "url": "/money/#bills/calendar" },
     { "name": "Earn more", "url": "/money/#earn" }
   ]
 }

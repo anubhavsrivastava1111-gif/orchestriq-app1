@@ -58,12 +58,19 @@ export interface EarnProfile {
   hoursPerWeek: number;
   urgency: "this-month" | "3-months" | "long-term";
   languages: string;     // free text, e.g. "Hindi, English"
+  shortlist: string[];   // opportunity ids the user wants to try
 }
 
 export interface Settings {
   bufferDays: number;    // fund the account this many days before the due date
   bounceFee: number;     // typical bounce/NACH-return charge per failed EMI (incl. GST)
   remindersOn: boolean;
+  name: string;          // used for greeting and lender letters
+  hideAmounts: boolean;  // privacy mode
+  theme: "system" | "light" | "dark";
+  pinHash: string;       // SHA-256 of app PIN ("" = no lock)
+  setupDismissed: boolean;
+  calendarAdded: boolean;  // user downloaded/added calendar reminders
 }
 
 export interface MoneyState {
