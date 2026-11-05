@@ -17,6 +17,8 @@ import Earn from "./screens/Earn";
 import More from "./screens/More";
 import Ai from "./screens/Ai";
 import Connect from "./screens/Connect";
+import CardDetail from "./screens/CardDetail";
+import { rollAllCards } from "./cards";
 
 type Phase = "welcome" | "create" | "bio-offer" | "locked" | "ready";
 
@@ -27,7 +29,7 @@ const NAV: { id: Tab | "add"; label: string; icon: string }[] = [
   { id: "insights", label: "Insights", icon: "chart" },
   { id: "earn", label: "Earn", icon: "grow" },
 ];
-const TABS: Tab[] = ["home", "bills", "insights", "earn", "more", "ai", "connect"];
+const TABS: Tab[] = ["home", "bills", "insights", "earn", "more", "ai", "connect", "card"];
 
 function readHash(): { tab: Tab; sub: string } {
   const [t, s] = location.hash.slice(1).split("/");
@@ -120,7 +122,7 @@ export default function MoneyApp() {
     if (!isNative || phase !== "ready") return;
     const t = setTimeout(() => scheduleReminders(buildReminders(state)), 1200);
     return () => clearTimeout(t);
-  }, [phase, state.loans, state.accounts, state.incomes, state.settings.bufferDays]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [phase, state.loans, state.cards, state.accounts, state.incomes, state.settings.bufferDays]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Android back button ──────────────────────────────────────────────────
   useEffect(() => {
@@ -185,10 +187,11 @@ export default function MoneyApp() {
     );
   }
   if (phase === "locked") {
-    return <LockScreen bioOn onUnlock={s => { setState(s); setPhase("ready"); }} onReset={resetApp} />;
+    // Credit cards: statements that came due while the app was closed are generated on unlock.
+    return <LockScreen bioOn onUnlock={s => { setState(rollAllCards(s)); setPhase("ready"); }} onReset={resetApp} />;
   }
 
-  const onboarding = !state.accounts.length && !state.loans.length;
+  const onboarding = !state.accounts.length && !state.loans.length && !state.cards.length;
 
   return (
     <Ctx.Provider value={ctx}>
@@ -223,6 +226,7 @@ export default function MoneyApp() {
           {tab === "more" && <More />}
           {tab === "ai" && <Ai />}
           {tab === "connect" && <Connect />}
+          {tab === "card" && <CardDetail />}
         </main>
 
         {!onboarding && (

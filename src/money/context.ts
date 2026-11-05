@@ -1,9 +1,9 @@
 // Lifeline — app-wide context: state, navigation, sheets, toasts.
 import { createContext, useContext } from "react";
-import type { Account, Expense, Holding, Income, Loan, MoneyState } from "./types";
+import type { Account, CardCashOut, CardEmi, CreditCard, Expense, Holding, Income, Loan, MoneyState } from "./types";
 import type { LetterKind } from "./letters";
 
-export type Tab = "home" | "bills" | "insights" | "earn" | "more" | "ai" | "connect";
+export type Tab = "home" | "bills" | "insights" | "earn" | "more" | "ai" | "connect" | "card";
 
 export type SheetState =
   | { kind: "quick-add" }
@@ -21,7 +21,12 @@ export type SheetState =
   | { kind: "restore"; text: string }
   | { kind: "holding"; item?: Holding }
   | { kind: "paywall"; feature?: string }
-  | { kind: "bounced"; loanId: string };
+  | { kind: "bounced"; loanId: string }
+  | { kind: "card"; item?: CreditCard; fromLoan?: Loan }
+  | { kind: "card-emi"; cardId: string; item?: CardEmi }
+  | { kind: "card-emi-detail"; cardId: string; emiId: string }
+  | { kind: "card-cash"; cardId: string; item?: CardCashOut }
+  | { kind: "card-pay"; cardId: string };
 
 export interface AppCtx {
   state: MoneyState;

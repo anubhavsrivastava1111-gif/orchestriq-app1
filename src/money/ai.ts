@@ -5,6 +5,7 @@
 import type { MoneyState } from "./types";
 import { EXPENSE_LABEL, HOLDING_LABEL, INCOME_LABEL, LOAN_TYPE_LABEL } from "./types";
 import { cashFlow, fundingPlan, healthScore, inrRaw, insights, monthly } from "./engine";
+import { estimateStatement, recentCardCash } from "./cards";
 import { holdingValue } from "./market";
 
 export interface AiApp { id: string; name: string; pkg: string; web: string; prefill: boolean; color: string }
@@ -62,6 +63,13 @@ export function buildContext(state: MoneyState, mode: Mode = state.settings.aiSh
     lines.push("Loans:");
     for (const l of state.loans) lines.push(`- ${LOAN_TYPE_LABEL[l.type]}: EMI ${amt(l.emi, mode)} on day ${l.dueDay}, ${l.ratePct}% a year, ${amt(l.outstanding, mode)} still owed.`);
   }
+  for (const c of state.cards) {
+    const e = estimateStatement(c);
+    lines.push(`Credit card (${c.bank || "card"}): limit ${amt(c.limit, mode)}, ${Math.round(e.utilization * 100)}% used, interest ${c.monthlyRatePct}%/month. Next statement est. total ${amt(e.tad, mode)}, minimum ${amt(e.mad, mode)}; paying ${c.plan === "full" ? "in full" : c.plan === "minimum" ? "only the minimum" : "a fixed amount"}. Carried balance ${amt(e.carried, mode)}.`);
+    for (const x of c.emis) lines.push(`  - Card EMI: ${amt(x.principal, mode)} at ${x.ratePct}% for ${x.tenure} months, processing fee ${amt(x.processingFee, mode)} + GST.`);
+  }
+  const rc = recentCardCash(state);
+  if (rc.amount > 0) lines.push(`Took ${amt(rc.amount, mode)} out via credit card in the last month (fees/interest ${amt(rc.cost, mode)}, ~${rc.annualPct.toFixed(0)}% a year), used to pay EMIs.`);
   if (state.accounts.length) {
     lines.push(`Bank accounts: ${state.accounts.length}. Spare money in the next 31 days after EMIs (lowest point): ${plans.map(p => amt(p.lowest, mode)).join(", ")}.`);
   }

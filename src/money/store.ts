@@ -2,6 +2,7 @@
 // Persistence is handled by vault.ts (encrypted); nothing here writes to storage.
 import type { MoneyState } from "./types";
 import { ymKey } from "./engine";
+import { DEFAULT_CARD, lastStatementDate, nextStatementDate, ymAdd, ymOf } from "./cards";
 
 /** Pre-encryption storage key from v1/v2 builds; migrated into the vault and then deleted. */
 export const LEGACY_KEY = "lifeline-money-v1";
@@ -22,6 +23,7 @@ export const EMPTY: MoneyState = {
   },
   holdings: [],
   integrations: { anthropicKey: "", alphaVantageKey: "" },
+  cards: [],
 };
 
 /** Fills in fields added by newer versions so older saved data keeps working. */
@@ -33,6 +35,7 @@ export function normalize(p: Partial<MoneyState> | null | undefined): MoneyState
     profile: { ...EMPTY.profile, ...p.profile },
     integrations: { ...EMPTY.integrations, ...p.integrations },
     holdings: Array.isArray(p.holdings) ? p.holdings : [],
+    cards: Array.isArray(p.cards) ? p.cards : [],
   };
 }
 
@@ -79,7 +82,6 @@ export function demoState(): MoneyState {
       { id: uid(), name: "Bike loan", lender: "Bajaj Finance", type: "two-wheeler", emi: 3400, dueDay: 3, accountId: sav, outstanding: 52000, ratePct: 14, paidMonths: [prev] },
       { id: uid(), name: "Phone EMI", lender: "Home Credit", type: "consumer-durable", emi: 2100, dueDay: 7, accountId: sav, outstanding: 12600, ratePct: 26, paidMonths: [prev] },
       { id: uid(), name: "Personal loan", lender: "HDFC Bank", type: "personal", emi: 9800, dueDay: 5, accountId: sal, outstanding: 210000, ratePct: 15.5, paidMonths: [prev] },
-      { id: uid(), name: "Credit card", lender: "ICICI", type: "credit-card", emi: 4000, dueDay: 18, accountId: sal, outstanding: 64000, ratePct: 42, paidMonths: [prev] },
       { id: uid(), name: "Instant loan app", lender: "BNPL app", type: "bnpl", emi: 2500, dueDay: 22, accountId: sav, outstanding: 9000, ratePct: 36, paidMonths: [prev] },
     ],
     incomes: [
@@ -104,6 +106,23 @@ export function demoState(): MoneyState {
       { id: uid(), kind: "fd", name: "SBI fixed deposit", units: 1, avgPrice: 25000, manualValue: 26400, liquid: true },
       { id: uid(), kind: "epf", name: "EPF balance", units: 1, avgPrice: 180000, manualValue: 212000, liquid: false },
     ],
+    cards: [demoCard(sal)],
     settings: { ...EMPTY.settings, name: "Rahul" },
+  };
+}
+
+function demoCard(accountId: string) {
+  const base = { statementDay: 12 };
+  const nextYm = ymOf(nextStatementDate(base));
+  const sixDaysAgo = new Date(Date.now() - 6 * 86400000).toISOString();
+  return {
+    ...DEFAULT_CARD, id: uid(), name: "ICICI Coral", bank: "ICICI Bank", accountId,
+    limit: 120000, statementDay: 12, dueDay: 2, monthlyRatePct: 3.75, plan: "minimum" as const,
+    revolving: 38000, unbilled: 6500, cycleYm: ymOf(lastStatementDate(base)),
+    emis: [
+      { id: uid(), label: "Phone on EMI", principal: 45000, ratePct: 16, tenure: 12, processingFee: 199, startYm: ymAdd(nextYm, -3) },
+      { id: uid(), label: "Balance converted to EMI", principal: 20000, ratePct: 15, tenure: 6, processingFee: 200, startYm: ymAdd(nextYm, -1) },
+    ],
+    cashOuts: [{ id: uid(), date: sixDaysAgo, amount: 10000, method: "app" as const, feePct: 2.5, feeIncludesGst: false, note: "Paid bike loan EMI via app" }],
   };
 }

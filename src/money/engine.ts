@@ -1,5 +1,6 @@
 // Lifeline — calculation engine. Pure functions, no network, no AI.
 import type { Account, Freq, Loan, MoneyState } from "./types";
+import { cardLoans, estimateStatement, minimumTrap, recentCardCash } from "./cards";
 
 // ─── Dates ──────────────────────────────────────────────────────────────────
 export const ymKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -35,6 +36,9 @@ let HIDE = false;
 export const setHideAmounts = (on: boolean) => { HIDE = on; };
 export const inr = (n: number) => (HIDE ? "₹ ••••" : inrRaw(n));
 
+/** Every monthly repayment: loans/EMIs plus one payment per detailed credit card. */
+export const loansOf = (s: MoneyState, today = new Date()): Loan[] => [...s.loans, ...cardLoans(s, today)];
+
 // ─── Upcoming EMIs ──────────────────────────────────────────────────────────
 export type DueStatus = "paid" | "confirm" | "due-today" | "fund-now" | "upcoming";
 
@@ -56,7 +60,7 @@ export function upcomingDues(state: MoneyState, today = new Date(), horizonDays 
   const out: DueItem[] = [];
   const t = startOfDay(today);
   const end = addDays(t, horizonDays);
-  for (const loan of state.loans) {
+  for (const loan of loansOf(state, today)) {
     for (let k = 0; k < 3; k++) {
       const y = t.getFullYear(), m = t.getMonth() + k;
       const date = dueDateIn(loan, y + Math.floor(m / 12), m % 12);
@@ -206,7 +210,7 @@ export function debtFreeDate(months: number, today = new Date()): Date {
 }
 
 /** EMIs whose debit account no longer exists (e.g. deleted account) — they can't be planned. */
-export const unassignedLoans = (s: MoneyState) => s.loans.filter(l => !s.accounts.some(a => a.id === l.accountId));
+export const unassignedLoans = (s: MoneyState) => loansOf(s).filter(l => !s.accounts.some(a => a.id === l.accountId));
 
 // ─── Cash flow ──────────────────────────────────────────────────────────────
 export interface CashFlow {
@@ -222,7 +226,7 @@ export interface CashFlow {
 
 export function cashFlow(state: MoneyState): CashFlow {
   const income = state.incomes.reduce((s, i) => s + monthly(i.amount, i.freq), 0);
-  const emi = state.loans.reduce((s, l) => s + l.emi, 0);
+  const emi = loansOf(state).reduce((s, l) => s + (l.monthlyCost ?? l.emi), 0);
   let essentials = 0, discretionary = 0;
   const spend = new Map<string, { value: number; essential: boolean }>();
   for (const e of state.expenses) {
@@ -262,7 +266,7 @@ export function healthScore(state: MoneyState, today = new Date()): Health {
   const short = plans.filter(p => p.shortfall > 0);
   if (short.length) { score -= 15; reasons.push(`${short.length} account(s) don't have enough money for upcoming EMIs.`); }
 
-  const costly = state.loans.filter(l => l.ratePct >= 24 && l.outstanding > 0);
+  const costly = loansOf(state, today).filter(l => l.ratePct >= 24 && l.outstanding > 0);
   if (costly.length) { score -= 10; reasons.push(`${costly.length} high-cost debt(s) at 24%+ interest.`); }
 
   const unconfirmed = upcomingDues(state, today).filter(d => d.status === "confirm");
@@ -332,9 +336,10 @@ export function insights(state: MoneyState, today = new Date()): Insight[] {
   }
 
   // 2. Scattered due dates
-  const days = [...new Set(state.loans.map(l => l.dueDay))];
+  const all = loansOf(state, today);
+  const days = [...new Set(all.map(l => l.dueDay))];
   const salaryDay = state.incomes.find(i => i.kind === "salary" && i.day)?.day;
-  if (state.loans.length >= 2 && days.length >= 2) {
+  if (all.length >= 2 && days.length >= 2) {
     out.push({
       id: "align-dates", severity: "high",
       title: "Move all EMI dates to 2–5 days after your income arrives",
@@ -343,7 +348,7 @@ export function insights(state: MoneyState, today = new Date()): Insight[] {
   }
 
   // 3. Spread across accounts
-  const acctsUsed = new Set(state.loans.map(l => l.accountId));
+  const acctsUsed = new Set(all.map(l => l.accountId));
   if (acctsUsed.size >= 3) {
     out.push({
       id: "consolidate-accounts", severity: "medium",
@@ -353,7 +358,7 @@ export function insights(state: MoneyState, today = new Date()): Insight[] {
   }
 
   // 4. High-cost debt
-  const costly = state.loans.filter(l => l.ratePct >= 24 && l.outstanding > 0).sort((a, b) => b.ratePct - a.ratePct);
+  const costly = all.filter(l => l.ratePct >= 24 && l.outstanding > 0).sort((a, b) => b.ratePct - a.ratePct);
   if (costly.length) {
     const interestNow = costly.reduce((s, l) => s + (l.outstanding * l.ratePct) / 1200, 0);
     const interestAt12 = costly.reduce((s, l) => s + (l.outstanding * 12) / 1200, 0);
@@ -362,6 +367,37 @@ export function insights(state: MoneyState, today = new Date()): Insight[] {
       title: `Replace ${costly.length} high-interest debt(s) — ${costly.map(l => `${l.name} @ ${l.ratePct}%`).join(", ")}`,
       detail: `You pay about ${inr(interestNow)} a month in interest on these. Cheaper, regulated options to refinance: a loan against your fixed deposit, a gold loan from a bank, a top-up on your home loan, or a personal loan from your own bank (typically 9–16%). At ~12% the interest would be about ${inr(interestAt12)}. Close the credit card/BNPL after transfer, or the debt usually comes back.`,
       monthlyImpact: Math.max(0, interestNow - interestAt12),
+    });
+  }
+
+  // 4a. Credit-card specific
+  for (const card of state.cards ?? []) {
+    const est = estimateStatement(card, today);
+    if (card.plan === "minimum" && est.nonEmiPrincipal > 1000) {
+      const trap = minimumTrap(card, est.nonEmiPrincipal);
+      out.push({
+        id: "card-min-" + card.id, severity: "high",
+        title: `Paying only the minimum on ${card.name} costs ~${inr(trap.nextMonthInterest)} interest a month`,
+        detail: `At ${card.monthlyRatePct}% a month (${(card.monthlyRatePct * 12).toFixed(0)}% a year + GST), the ${inr(est.nonEmiPrincipal)} balance would take ${trap.capped ? "forever" : Math.ceil(trap.months / 12) + " years"} and ~${inr(trap.interest)} in interest to clear by paying the minimum. Move it to a cheaper loan, or pay a fixed amount above the minimum every month.`,
+        monthlyImpact: trap.nextMonthInterest,
+        action: { label: "Open card", tab: "bills" },
+      });
+    }
+    if (est.utilization > 0.7) {
+      out.push({
+        id: "card-util-" + card.id, severity: "medium",
+        title: `${card.name} is ${Math.round(est.utilization * 100)}% used, which lowers your credit score`,
+        detail: "Lenders and credit bureaus prefer card usage under 30% of the limit. Paying part of the balance before the statement date lowers the usage reported to CIBIL.",
+      });
+    }
+  }
+  const rc = recentCardCash(state, today);
+  if (rc.amount > 0) {
+    out.push({
+      id: "card-cash", severity: rc.annualPct > 30 ? "high" : "medium",
+      title: `${inr(rc.amount)} taken out via credit card recently cost ${inr(rc.cost)} (~${rc.annualPct.toFixed(0)}% a year)`,
+      detail: "Using the card to pay EMIs or withdraw cash keeps the gap hidden, and it gets costlier every month. For a gap that repeats, a personal loan (~12–16%) or a bank gold loan (~9–11%) is far cheaper. Ask your bank about converting the card balance to EMI as well.",
+      monthlyImpact: rc.cost,
     });
   }
 
@@ -432,7 +468,7 @@ export function insights(state: MoneyState, today = new Date()): Insight[] {
   }
 
   // 10. Prepayment check
-  const floating = state.loans.filter(l => ["home", "personal", "car", "education"].includes(l.type) && l.outstanding > 0);
+  const floating = all.filter(l => ["home", "personal", "car", "education"].includes(l.type) && l.outstanding > 0);
   if (floating.length && cf.surplus > 0 && !costly.length) {
     out.push({
       id: "prepay", severity: "tip",

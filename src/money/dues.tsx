@@ -6,8 +6,14 @@ import { Pill } from "./components";
 const fmt = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 
 export function useMarkPaid() {
-  const { update, toast } = useApp();
+  const { update, toast, open } = useApp();
   return (d: DueItem, paid: boolean) => {
+    if (d.loan.cardId) {
+      // Card bills vary each month: record the actual amount paid.
+      if (paid) open({ kind: "card-pay", cardId: d.loan.cardId });
+      else update(s => ({ ...s, cards: s.cards.map(c => (c.id !== d.loan.cardId ? c : { ...c, paidMonths: c.paidMonths.filter(m => m !== d.ym) })) }));
+      return;
+    }
     const apply = (on: boolean) => update(s => ({
       ...s,
       loans: s.loans.map(l => (l.id !== d.loan.id ? l : { ...l, paidMonths: on ? [...new Set([...l.paidMonths, d.ym])] : l.paidMonths.filter(m => m !== d.ym) })),

@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { useApp, type Tab } from "../context";
 import { cashFlow, debtFreeDate, inr, insights, monthly, simulatePayoff, type Insight } from "../engine";
+import { payoffDebts } from "../cards";
 import { EXPENSE_LABEL, INCOME_LABEL, type ExpenseCategory } from "../types";
 import { Button, Card, Disclosure, Empty, List, MeterBar, Pill, Row, Screen, Section, Segmented, Slider, StackBar } from "../components";
 import { Icon } from "../icons";
@@ -135,7 +136,7 @@ function Plan() {
             <Disclosure summary={<span>Why and how</span>}><p>{i.detail}</p></Disclosure>
             {(i.action?.tab || letter) && (
               <div className="btn-row">
-                {i.action?.tab && <Button size="sm" variant="primary" onClick={() => go((i.action!.tab === "save" ? "insights" : i.action!.tab) as Tab, i.action!.tab === "save" ? "debt" : i.id === "invest-vs-debt" ? "invest" : undefined)}>{i.action.label}</Button>}
+                {i.action?.tab && <Button size="sm" variant="primary" onClick={() => go((i.action!.tab === "save" ? "insights" : i.action!.tab) as Tab, i.action!.tab === "save" ? "debt" : i.id === "invest-vs-debt" ? "invest" : i.id.startsWith("card-") ? "cards" : undefined)}>{i.action.label}</Button>}
                 {letter && <Button size="sm" icon="doc" onClick={() => open({ kind: "letter", letter })}>Draft the letter</Button>}
               </div>
             )}
@@ -151,9 +152,10 @@ function DebtFree() {
   const cf = cashFlow(state);
   const [extra, setExtra] = useState(() => Math.max(0, Math.round(Math.min(Math.max(cf.surplus, 0), 10000) / 500) * 500));
   const [strategy, setStrategy] = useState<"avalanche" | "snowball">("avalanche");
-  const base = useMemo(() => simulatePayoff(state.loans, 0, "avalanche", false), [state.loans]);
-  const plan = useMemo(() => simulatePayoff(state.loans, extra, strategy), [state.loans, extra, strategy]);
-  if (!state.loans.some(l => l.outstanding > 0)) return <Empty icon="card" title="Add how much you still owe" text="Open each loan in Bills → Loans and fill “Amount still owed” to see your debt-free date." action={<Button size="sm" onClick={() => open({ kind: "loan", item: state.loans[0] })} disabled={!state.loans.length}>Edit a loan</Button>} />;
+  const debts = useMemo(() => [...state.loans, ...payoffDebts(state)], [state]);  
+  const base = useMemo(() => simulatePayoff(debts, 0, "avalanche", false), [debts]);
+  const plan = useMemo(() => simulatePayoff(debts, extra, strategy), [debts, extra, strategy]);
+  if (!debts.some(l => l.outstanding > 0)) return <Empty icon="card" title="Add how much you still owe" text="Open each loan in Bills → Loans and fill “Amount still owed” to see your debt-free date." action={<Button size="sm" onClick={() => open({ kind: "loan", item: state.loans[0] })} disabled={!state.loans.length}>Edit a loan</Button>} />;
   const yrs = (m: number) => (m >= 12 ? `${Math.floor(m / 12)} yr ${m % 12} mo` : `${m} mo`);
   const when = (m: number) => debtFreeDate(m).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
   const savedI = Math.max(0, base.totalInterest - plan.totalInterest);

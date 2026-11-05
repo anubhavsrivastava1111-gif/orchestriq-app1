@@ -1,7 +1,7 @@
 // Home — "Am I safe this month, and what must I do today?"
 import { useMemo } from "react";
 import { useApp } from "../context";
-import { fundingPlan, forecast, healthScore, inr, safeToSpend, transferPlan, upcomingDues, type Transfer } from "../engine";
+import { fundingPlan, forecast, healthScore, inr, safeToSpend, transferPlan, unassignedLoans, upcomingDues, type Transfer } from "../engine";
 import { statusPill, useMarkPaid } from "../dues";
 import { Button, Card, Empty, ForecastChart, List, Pill, Ring, Row, Section } from "../components";
 import { Icon } from "../icons";
@@ -24,7 +24,7 @@ export default function Home() {
 
   const hour = new Date().getHours();
   const greet = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-  const isEmpty = !state.accounts.length && !state.loans.length;
+  const isEmpty = !state.accounts.length && !state.loans.length && !state.cards.length;
   const confirmItems = dues.filter(d => d.status === "confirm");
   const next = dues.filter(d => d.status !== "confirm").slice(0, 5);
   const shortTotal = plans.reduce((s, p) => s + p.shortfall, 0);
@@ -33,7 +33,7 @@ export default function Home() {
 
   const steps = [
     { done: state.accounts.length > 0, title: "Add your bank accounts", sub: "With today's balance", act: () => open({ kind: "account" }) },
-    { done: state.loans.length > 0, title: "Add your EMIs", sub: "Amount, date and account", act: () => open({ kind: "loan" }) },
+    { done: state.loans.length + state.cards.length > 0, title: "Add your EMIs", sub: "Amount, date and account", act: () => open({ kind: "loan" }) },
     { done: state.incomes.some(i => i.day), title: "Add income and pay day", sub: "So we can count your salary", act: () => open({ kind: "income" }) },
     { done: state.expenses.length > 0, title: "Add monthly spends", sub: "Rough numbers are fine", act: () => open({ kind: "quick-spends" }) },
     { done: isNative ? notificationsEnabled() : state.settings.calendarAdded, title: "Turn on reminders", sub: "Alerts before every EMI", act: () => open({ kind: "reminders" }) },
@@ -191,7 +191,7 @@ export default function Home() {
         </Card>
       </Section>
 
-      {state.loans.some(l => !state.accounts.some(a => a.id === l.accountId)) && (
+      {unassignedLoans(state).length > 0 && (
         <Card tone="danger"><p>Some EMIs aren't linked to an account. Open each one in <b>Bills</b> and choose an account.</p></Card>
       )}
     </div>

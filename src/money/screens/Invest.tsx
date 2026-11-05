@@ -1,7 +1,7 @@
 // Investments — portfolio with live prices, set against the user's debts.
 import { useState } from "react";
 import { useApp } from "../context";
-import { inr } from "../engine";
+import { inr, loansOf } from "../engine";
 import { HOLDING_LABEL, type HoldingKind } from "../types";
 import { holdingInvested, holdingValue, isPriced, portfolio, refreshPrices } from "../market";
 import { isPro } from "../entitlements";
@@ -15,7 +15,7 @@ export default function Invest() {
   const { state, update, open, toast, go } = useApp();
   const [busy, setBusy] = useState(false);
   const p = portfolio(state.holdings);
-  const costly = state.loans.filter(l => l.ratePct >= 18 && l.outstanding > 0);
+  const costly = loansOf(state).filter(l => l.ratePct >= 18 && l.outstanding > 0);
   const costlyOwed = costly.reduce((s, l) => s + l.outstanding, 0);
   const pricedCount = state.holdings.filter(isPriced).length;
 

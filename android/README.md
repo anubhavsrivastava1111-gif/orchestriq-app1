@@ -20,6 +20,19 @@ A native Android app (package `com.orchestriq.lifeline`) that hosts the Lifeline
 
 To **update**, install a newer `Lifeline.apk` over the old one. Your data stays, as long as the new APK is signed with the **same key** (see "Signing key").
 
+## Updating to a new version (keeps all your data)
+
+1. **Save an encrypted backup first** (More → Save encrypted backup). It isn't required, but it's good practice before any update.
+2. Open the new `Lifeline-x.y.z.apk` on the phone and tap **Update**. Do **not** uninstall the old app first: uninstalling deletes its data.
+3. Open Lifeline and unlock with your usual passcode. Everything is still there.
+
+This works because every release is signed with the same key and has a higher version number. Android then replaces the app but keeps its private storage (the encrypted vault and the hardware key).
+
+| Version | Code | What's new |
+|---|---|---|
+| 1.0.0 | 1 | First Android release |
+| 1.1.0 | 2 | Detailed credit cards: EMIs on the card (principal, interest, GST, processing fee), automatic statement and minimum due, card cash (ATM / app transfers) cost calculator, one-tap upgrade of old credit-card entries |
+
 ## Security model
 
 | Layer | What protects you |
