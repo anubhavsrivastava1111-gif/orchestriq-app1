@@ -7,22 +7,20 @@ import { EXPENSE_LABEL, INCOME_LABEL, type ExpenseCategory } from "../types";
 import { Button, Card, Disclosure, Empty, List, MeterBar, Pill, Row, Screen, Section, Segmented, Slider, StackBar } from "../components";
 import { Icon } from "../icons";
 import { EXPENSE_ICON } from "../labels";
-import Invest from "./Invest";
 
-type Sub = "overview" | "plan" | "debt" | "invest";
+type Sub = "overview" | "plan" | "debt";
 
 export default function Insights() {
   const { sub, go } = useApp();
-  const view: Sub = (["overview", "plan", "debt", "invest"] as Sub[]).includes(sub as Sub) ? (sub as Sub) : "overview";
+  const view: Sub = (["overview", "plan", "debt"] as Sub[]).includes(sub as Sub) ? (sub as Sub) : "overview";
   return (
     <Screen title="Insights" subtitle="Where money goes and how to keep more of it">
       <Segmented label="Insights view" value={view} onChange={v => go("insights", v)} options={[
-        { value: "overview", label: "Cash flow" }, { value: "plan", label: "Plan" }, { value: "debt", label: "Debt-free" }, { value: "invest", label: "Invest" },
+        { value: "overview", label: "Cash flow" }, { value: "plan", label: "Plan" }, { value: "debt", label: "Debt-free" },
       ]} />
       {view === "overview" && <Overview />}
       {view === "plan" && <Plan />}
       {view === "debt" && <DebtFree />}
-      {view === "invest" && <Invest />}
     </Screen>
   );
 }
@@ -136,7 +134,7 @@ function Plan() {
             <Disclosure summary={<span>Why and how</span>}><p>{i.detail}</p></Disclosure>
             {(i.action?.tab || letter) && (
               <div className="btn-row">
-                {i.action?.tab && <Button size="sm" variant="primary" onClick={() => go((i.action!.tab === "save" ? "insights" : i.action!.tab) as Tab, i.action!.tab === "save" ? "debt" : i.id === "invest-vs-debt" ? "invest" : i.id.startsWith("card-") ? "cards" : undefined)}>{i.action.label}</Button>}
+                {i.action?.tab && <Button size="sm" variant="primary" onClick={() => go((i.action!.tab === "save" ? "insights" : i.action!.tab) as Tab, i.action!.tab === "save" ? "debt" : i.id === "invest-vs-debt" ? "invest" : i.id === "deficit" ? "earn" : i.id.startsWith("card-") ? "cards" : undefined)}>{i.action.label}</Button>}
                 {letter && <Button size="sm" icon="doc" onClick={() => open({ kind: "letter", letter })}>Draft the letter</Button>}
               </div>
             )}

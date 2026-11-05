@@ -58,7 +58,7 @@ export default function More() {
 
       <Section title="Security & privacy">
         <Card className="security-card">
-          <div className="sec-head"><Icon name="shield" /><div><b>Your data is encrypted</b><small>AES-256 · locked by your passcode{isNative ? " · bound to this phone's secure hardware" : ""}</small></div></div>
+          <div className="sec-head"><Icon name="shield" /><div><b>Your data is encrypted</b><small>AES-256 · locked by your passcode{isNative ? " · bound to this phone's secure hardware" : ""}</small><small>Wrong passcode attempts are reported to you at the next unlock. Research and market data requests never include your personal data.</small></div></div>
         </Card>
         <List>
           <Row icon="lock" iconTone="brand" title="Change passcode" subtitle="6 digits; re-encrypts your data key" onClick={() => open({ kind: "passcode" })} />

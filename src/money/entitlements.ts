@@ -16,13 +16,14 @@ export const FREE_FEATURES = [
 export const PRO_FEATURES: { id: ProFeature; title: string; detail: string; icon: string }[] = [
   { id: "ai", title: "AI money assistant", detail: "Ask anything about your money; share a private summary with Gemini, ChatGPT or Claude", icon: "sparkle" },
   { id: "invest", title: "Investments with live prices", detail: "Mutual-fund NAVs and stock prices, portfolio vs debt analysis", icon: "chart" },
+  { id: "goals", title: "Goal planner & market research", detail: "Car, trip, home goals with inflation and 2,000-scenario success odds; fund and stock analysis with backtests", icon: "grow" },
   { id: "forecast", title: "30-day cash forecast & safe-to-spend", detail: "Know your lowest balance before it happens", icon: "grow" },
   { id: "debt", title: "Debt-free planner", detail: "Avalanche vs snowball, debt-free date, interest saved", icon: "card" },
   { id: "letters", title: "Letters to lenders", detail: "EMI date change, restructuring, harassment complaints", icon: "doc" },
   { id: "backup", title: "Encrypted backups", detail: "Password-protected backup you can restore on a new phone", icon: "shield" },
 ];
 
-export type ProFeature = "ai" | "invest" | "forecast" | "debt" | "letters" | "backup";
+export type ProFeature = "ai" | "invest" | "goals" | "forecast" | "debt" | "letters" | "backup";
 
 export const isPro = (s: MoneyState) => s.settings.plan !== "free";
 export const planLabel = (s: MoneyState) => (s.settings.plan === "pro" ? "Pro" : s.settings.plan === "early-access" ? "Pro · Early access" : "Free");

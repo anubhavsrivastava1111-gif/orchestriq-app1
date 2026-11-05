@@ -6,6 +6,7 @@ import type { MoneyState } from "./types";
 import { EXPENSE_LABEL, HOLDING_LABEL, INCOME_LABEL, LOAN_TYPE_LABEL } from "./types";
 import { cashFlow, fundingPlan, healthScore, inrRaw, insights, monthly } from "./engine";
 import { estimateStatement, recentCardCash } from "./cards";
+import { GOAL_KINDS, planGoal } from "./wealth";
 import { holdingValue } from "./market";
 
 export interface AiApp { id: string; name: string; pkg: string; web: string; prefill: boolean; color: string }
@@ -31,6 +32,8 @@ export const AI_TASKS: AiTask[] = [
     prompt: "Look at my spending and suggest realistic cuts that would close my monthly gap, without touching essentials like rent, food or medicine. Give a weekly limit for each non-essential category." },
   { id: "invest", title: "Analyse my investments", subtitle: "Risk, liquidity, debt vs invest", icon: "chart",
     prompt: "Analyse my investments against my debts. Should I use any liquid investments to repay high-interest debt? Comment on risk, diversification and emergency liquidity. Do not recommend specific stocks." },
+  { id: "goals", title: "Plan investments for my goals", subtitle: "Order, amounts, where to invest", icon: "grow",
+    prompt: "Using my goals, debts and risk profile below, tell me in which order to fund things, how much per month for each goal, and which investment categories (FD/RD, debt fund, index fund, gold, etc.) suit each goal's time horizon. Respect that expensive debt should usually be cleared first. Explain risks plainly; no guaranteed returns and no specific stock tips." },
   { id: "earn", title: "Earning plan for my skills", subtitle: "Close the gap faster", icon: "grow",
     prompt: "Based on my monthly gap and skills, give me a realistic 30-day plan to earn extra income in India. Prioritise options that pay within weeks. Include exact first steps." },
   { id: "negotiate", title: "Talk to my lender", subtitle: "Call script + email", icon: "phone",
@@ -75,6 +78,11 @@ export function buildContext(state: MoneyState, mode: Mode = state.settings.aiSh
   }
   if (cf.bySpend.length) lines.push("Spending by category (monthly): " + cf.bySpend.map(s => `${EXPENSE_LABEL[s.label as keyof typeof EXPENSE_LABEL] ?? s.label} ${amt(s.value, mode)}${s.essential ? "" : " (non-essential)"}`).join("; ") + ".");
   if (state.holdings.length) lines.push("Investments: " + state.holdings.map(x => `${HOLDING_LABEL[x.kind]} ${amt(holdingValue(x), mode)}${x.liquid ? " (liquid)" : ""}`).join("; ") + ".");
+  if (state.wealth.risk) lines.push(`Risk profile: ${state.wealth.risk}.`);
+  for (const g of state.goals) {
+    const p = planGoal(g);
+    lines.push(`Goal: ${GOAL_KINDS[g.kind].label} by ${g.targetYm}, needs ${amt(p.futureCost, mode)} (today ${amt(g.costToday, mode)}), saved ${amt(g.saved, mode)}, investing ${amt(g.monthly, mode)}/month in a ${g.profile} mix${p.chosen ? `, ${p.chosen.sim.successPct.toFixed(0)}% chance on track` : ""}.`);
+  }
   if (state.profile.skills.length) lines.push(`Skills: ${state.profile.skills.join(", ")}. Can work ${state.profile.hoursPerWeek} extra hours/week.`);
   lines.push(`Financial stress score: ${h.score}/100 (${h.label}).`);
   const top = insights(state).slice(0, 4).map(i => i.title);
@@ -93,4 +101,5 @@ Priorities: never miss an EMI; avoid new high-cost debt (never suggest instant-l
 Prefer regulated, low-cost options (talking to the lender, restructuring, loan against FD, bank gold loan, balance transfer).
 Be concise: short paragraphs or numbered steps, under 250 words unless asked for more. Use ₹ and Indian number formatting.
 You give general guidance, not regulated investment, tax or legal advice; say so briefly when the question needs a professional.
+For investing: explain options by category and time horizon (FD/RD and debt funds for short goals; diversified low-cost index funds for 5+ years), show ranges and risks, never promise returns or give "sure-shot" tips, and suggest a SEBI-registered investment adviser for personalised advice.
 If the user seems in crisis or mentions self-harm, gently share India's Tele-MANAS helpline: 14416.`;

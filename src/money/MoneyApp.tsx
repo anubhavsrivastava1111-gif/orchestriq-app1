@@ -13,7 +13,7 @@ import { BioOffer, CreatePasscode, LockScreen, Welcome } from "./Lock";
 import Home from "./screens/Home";
 import Bills from "./screens/Bills";
 import Insights from "./screens/Insights";
-import Earn from "./screens/Earn";
+import Grow from "./screens/Grow";
 import More from "./screens/More";
 import Ai from "./screens/Ai";
 import Connect from "./screens/Connect";
@@ -27,7 +27,7 @@ const NAV: { id: Tab | "add"; label: string; icon: string }[] = [
   { id: "bills", label: "Bills", icon: "calendar" },
   { id: "add", label: "Add", icon: "plus" },
   { id: "insights", label: "Insights", icon: "chart" },
-  { id: "earn", label: "Earn", icon: "grow" },
+  { id: "earn", label: "Grow", icon: "grow" },
 ];
 const TABS: Tab[] = ["home", "bills", "insights", "earn", "more", "ai", "connect", "card"];
 
@@ -188,7 +188,12 @@ export default function MoneyApp() {
   }
   if (phase === "locked") {
     // Credit cards: statements that came due while the app was closed are generated on unlock.
-    return <LockScreen bioOn onUnlock={s => { setState(rollAllCards(s)); setPhase("ready"); }} onReset={resetApp} />;
+    return <LockScreen bioOn onUnlock={s => {
+      setState(rollAllCards(s)); setPhase("ready");
+      // Security: tell the owner if someone tried wrong passcodes since the last unlock.
+      const rep = vault.takeUnlockReport();
+      if (rep && rep.fails > 0) setTimeout(() => toast(`⚠ ${rep.fails} wrong passcode attempt${rep.fails > 1 ? "s" : ""} since your last unlock`), 400);
+    }} onReset={resetApp} />;
   }
 
   const onboarding = !state.accounts.length && !state.loans.length && !state.cards.length;
@@ -222,7 +227,7 @@ export default function MoneyApp() {
           {tab === "home" && <Home />}
           {tab === "bills" && <Bills />}
           {tab === "insights" && <Insights />}
-          {tab === "earn" && <Earn />}
+          {tab === "earn" && <Grow />}
           {tab === "more" && <More />}
           {tab === "ai" && <Ai />}
           {tab === "connect" && <Connect />}

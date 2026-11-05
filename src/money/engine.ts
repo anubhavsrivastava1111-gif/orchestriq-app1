@@ -412,7 +412,7 @@ export function insights(state: MoneyState, today = new Date()): Insight[] {
       title: `Use up to ${inr(use)} of investments to clear ${avgRate.toFixed(0)}% debt`,
       detail: `You hold ${inr(liquid)} in liquid investments while paying ~${avgRate.toFixed(0)}% on ${inr(owed)} of debt. Few investments reliably beat that. Keep 3 months of essentials as an emergency fund, then repay the costliest debt first. Check exit loads and tax before redeeming.`,
       monthlyImpact: (use * Math.max(0, avgRate - 12)) / 1200,
-      action: { label: "See investments", tab: "insights" },
+      action: { label: "See investments", tab: "earn" },
     });
   }
 

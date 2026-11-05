@@ -24,6 +24,9 @@ export const EMPTY: MoneyState = {
   holdings: [],
   integrations: { anthropicKey: "", alphaVantageKey: "" },
   cards: [],
+  goals: [],
+  watchlist: [],
+  wealth: { risk: null, riskScore: 0, inflationPct: 6, taxpayer: true },
 };
 
 /** Fills in fields added by newer versions so older saved data keeps working. */
@@ -36,6 +39,9 @@ export function normalize(p: Partial<MoneyState> | null | undefined): MoneyState
     integrations: { ...EMPTY.integrations, ...p.integrations },
     holdings: Array.isArray(p.holdings) ? p.holdings : [],
     cards: Array.isArray(p.cards) ? p.cards : [],
+    goals: Array.isArray(p.goals) ? p.goals : [],
+    watchlist: Array.isArray(p.watchlist) ? p.watchlist : [],
+    wealth: { ...EMPTY.wealth, ...p.wealth },
   };
 }
 

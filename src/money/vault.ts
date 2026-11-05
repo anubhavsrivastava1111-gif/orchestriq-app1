@@ -76,12 +76,23 @@ export function lock() {
 }
 
 // ─── Brute-force guard ──────────────────────────────────────────────────────
-interface Guard { fails: number; until: number }
+interface Guard { fails: number; until: number; lastUnlock?: number }
 function guard(): Guard { try { return JSON.parse(localStorage.getItem(GUARD_KEY) || "") as Guard; } catch { return { fails: 0, until: 0 }; } }
 function setGuard(g: Guard) { localStorage.setItem(GUARD_KEY, JSON.stringify(g)); }
 /** Seconds the user must wait before the next attempt (0 = can try now). */
 export function lockoutRemaining(): number { return Math.max(0, Math.ceil((guard().until - Date.now()) / 1000)); }
 export const FREE_ATTEMPTS = 5;
+
+// Intrusion report: wrong attempts that happened before this successful unlock.
+let report: { fails: number; prevUnlock: number } | null = null;
+function unlocked() {
+  const g = guard();
+  report = { fails: g.fails, prevUnlock: g.lastUnlock ?? 0 };
+  setGuard({ fails: 0, until: 0, lastUnlock: Date.now() });
+}
+/** Returns (once) how many wrong attempts happened since the previous unlock. */
+export function takeUnlockReport() { const r = report; report = null; return r; }
+export function lastUnlockAt(): number { return guard().lastUnlock ?? 0; }
 
 // ─── Lifecycle ──────────────────────────────────────────────────────────────
 export async function createVault(passcode: string, state: MoneyState): Promise<void> {
@@ -109,7 +120,7 @@ export async function unlockWithPasscode(passcode: string): Promise<MoneyState> 
     const kek = await kekFrom(passcode, unb64(file.kdf.salt), file.kdf.iter);
     const raw = await open(kek, wrap);
     const state = await unlockWithDekRaw(raw, file);
-    setGuard({ fails: 0, until: 0 });
+    unlocked();
     return state;
   } catch (e) {
     if (e instanceof WrongPasscode) throw e;
@@ -117,7 +128,7 @@ export async function unlockWithPasscode(passcode: string): Promise<MoneyState> 
     const fails = g.fails + 1;
     // After 5 wrong tries: 30 s, then doubling, capped at 1 hour.
     const lockSec = fails >= FREE_ATTEMPTS ? Math.min(3600, 30 * 2 ** (fails - FREE_ATTEMPTS)) : 0;
-    setGuard({ fails, until: Date.now() + lockSec * 1000 });
+    setGuard({ fails, until: Date.now() + lockSec * 1000, lastUnlock: g.lastUnlock });
     throw new WrongPasscode(lockSec, Math.max(0, FREE_ATTEMPTS - fails));
   }
 }
@@ -127,7 +138,7 @@ export async function unlockWithDek(dekB64: string): Promise<MoneyState> {
   const file = readFile();
   if (!file) throw new Error("no-vault");
   const state = await unlockWithDekRaw(unb64(dekB64), file);
-  setGuard({ fails: 0, until: 0 });
+  unlocked();
   return state;
 }
 

@@ -123,7 +123,7 @@ export default function Home() {
                   <p>{m.from ? <>From <b>{m.from.name}</b> to <b>{m.to.name}</b>. That account has spare money after its own EMIs.</> : <>to <b>{m.to.name}</b> from salary, savings or another source.</>}</p>
                   <div className="btn-row">
                     <Button size="sm" variant="primary" icon="check" onClick={() => applyMove(m)}>Done</Button>
-                    {!m.from && <Button size="sm" onClick={() => go("earn")}>Ways to raise it</Button>}
+                    {!m.from && <Button size="sm" onClick={() => go("earn", "earn")}>Ways to raise it</Button>}
                     {m.from && upi && <Button size="sm" icon="transfer" onClick={() => openApp(upi.pkg)}>Open {upi.name}</Button>}
                   </div>
                 </div>

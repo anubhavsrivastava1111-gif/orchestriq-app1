@@ -170,6 +170,51 @@ export interface MoneyState {
   holdings: Holding[];
   integrations: Integrations;
   cards: CreditCard[];
+  goals: Goal[];
+  watchlist: WatchItem[];
+  wealth: WealthSettings;
+}
+
+// ─── Wealth: goals, risk profile, research ──────────────────────────────────
+export type RiskProfile = "conservative" | "balanced" | "growth";
+export type GoalKind = "emergency" | "car" | "trip" | "home" | "education" | "wedding" | "gadget" | "retirement" | "debt-free" | "other";
+
+export interface Goal {
+  id: string;
+  name: string;
+  kind: GoalKind;
+  costToday: number;     // what it costs in today's money
+  targetYm: string;      // when you want it, "YYYY-MM"
+  inflationPct: number;  // yearly price rise for this kind of goal
+  saved: number;         // already set aside for it
+  profile: RiskProfile;  // chosen plan
+  monthly: number;       // monthly amount the user commits (0 = not decided)
+  createdAt: string;
+}
+
+export interface FundMetrics {
+  asOf: string; last: number;
+  cagr1?: number; cagr3?: number; cagr5?: number; cagr10?: number;
+  vol: number; maxDrawdown: number; worstYear: number; bestYear: number;
+  rolling3: { min: number; median: number; max: number; pctBeatFd: number } | null;
+  years: number;
+}
+
+export interface WatchItem {
+  id: string;
+  kind: "mf" | "stock";
+  code: string;          // AMFI scheme code or stock symbol
+  name: string;
+  category?: string;
+  metrics?: FundMetrics; // cached results (no personal data)
+  addedAt: string;
+}
+
+export interface WealthSettings {
+  risk: RiskProfile | null;  // from the quiz
+  riskScore: number;
+  inflationPct: number;      // general inflation assumption
+  taxpayer: boolean;
 }
 
 export const HOLDING_LABEL: Record<HoldingKind, string> = {

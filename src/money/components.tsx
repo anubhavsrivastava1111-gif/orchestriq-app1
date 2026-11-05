@@ -309,3 +309,43 @@ export function StackBar({ parts }: { parts: { label: string; value: number; cls
 export function MeterBar({ value, max, cls = "fill-brand" }: { value: number; max: number; cls?: string }) {
   return <div className="meter"><span className={cls} style={{ width: Math.max(2, Math.min(100, (value / (max || 1)) * 100)) + "%" }} /></div>;
 }
+
+/** Simple price line (oldest → newest) with first/last labels. */
+export function LineChart({ values, labels, height = 140, tone = "brand" }: { values: number[]; labels?: [string, string]; height?: number; tone?: "brand" | "good" | "danger" }) {
+  if (values.length < 2) return null;
+  const W = 320, H = height, pad = 6;
+  const max = Math.max(...values), min = Math.min(...values), span = max - min || 1;
+  const x = (i: number) => pad + (i / (values.length - 1)) * (W - pad * 2);
+  const y = (v: number) => pad + ((max - v) / span) * (H - pad * 2);
+  const d = values.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  return (
+    <figure className={"linechart tone-" + tone}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Price history chart">
+        <path d={`${d}L${x(values.length - 1)},${H}L${x(0)},${H}Z`} className="lc-area" />
+        <path d={d} className="lc-line" vectorEffect="non-scaling-stroke" />
+      </svg>
+      {labels && <figcaption><span>{labels[0]}</span><span>{labels[1]}</span></figcaption>}
+    </figure>
+  );
+}
+
+/** Range of outcomes over time: shaded 10–90% band with the middle (50%) line and an optional target line. */
+export function FanChart({ p10, p50, p90, target, height = 150 }: { p10: number[]; p50: number[]; p90: number[]; target?: number; height?: number }) {
+  if (p50.length < 2) return null;
+  const W = 320, H = height, pad = 6;
+  const max = Math.max(...p90, target ?? 0) * 1.05, min = 0;
+  const x = (i: number) => pad + (i / (p50.length - 1)) * (W - pad * 2);
+  const y = (v: number) => pad + ((max - v) / (max - min || 1)) * (H - pad * 2);
+  const band = p90.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("") + p10.map((_, i) => { const j = p10.length - 1 - i; return `L${x(j).toFixed(1)},${y(p10[j]).toFixed(1)}`; }).join("") + "Z";
+  const mid = p50.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  return (
+    <figure className="fanchart">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Range of possible outcomes">
+        <path d={band} className="fan-band" />
+        <path d={mid} className="fan-mid" vectorEffect="non-scaling-stroke" />
+        {target !== undefined && <line x1={0} x2={W} y1={y(target)} y2={y(target)} className="fan-target" vectorEffect="non-scaling-stroke" />}
+      </svg>
+      <figcaption><span><i className="fan-key band" />Likely range (10–90%)</span><span><i className="fan-key mid" />Middle outcome</span>{target !== undefined && <span><i className="fan-key target" />Goal</span>}</figcaption>
+    </figure>
+  );
+}

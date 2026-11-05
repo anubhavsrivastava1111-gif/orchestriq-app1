@@ -576,3 +576,62 @@ button.row:active { background: var(--surface-2); }
   .sched-row { grid-template-columns: 18px 38px 1fr 1fr 0.7fr 1fr; font-size: 11.5px; padding: 8px 6px; }
   .inline-2 { grid-template-columns: 1fr; }
 }
+
+/* ─── v1.2: grow — goals, research ─────────────────────────────────────── */
+.h-small { font-size: 20px !important; line-height: 1.25; }
+.ladder { display: flex; flex-direction: column; gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 14px; box-shadow: var(--shadow); }
+.ladder-step { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); position: relative; }
+.ladder-step:last-child { border-bottom: 0; }
+.ladder-dot { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; font-weight: 700; font-size: 13px; background: var(--surface-2); color: var(--text-3); border: 1.5px solid var(--line-strong); }
+.ladder-step.done .ladder-dot { background: var(--good-soft); color: var(--good); border-color: var(--good); }
+.ladder-step.now .ladder-dot { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+.ladder-step.later { opacity: .72; }
+.ladder-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ladder-body p { font-size: 13.5px; color: var(--text-2); }
+.ladder-body .btn { align-self: flex-start; margin-top: 4px; }
+.ladder-head { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.ladder-ret { font-size: 12px; font-weight: 700; color: var(--good); }
+.goal-card { display: flex !important; flex-direction: column; gap: 10px; }
+.goal-top { display: flex; gap: 12px; align-items: center; }
+.goal-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.goal-title small { color: var(--text-3); font-size: 12.5px; }
+.goal-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--text-2); }
+.mix-ex { display: block; color: var(--text-3); font-size: 12px; margin-top: 4px; }
+.plans { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.plan-opt { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 12px 14px; border-radius: 14px; border: 1.5px solid var(--line); background: var(--surface); cursor: pointer; }
+.plan-opt.on { border-color: var(--brand); background: var(--brand-soft); }
+.plan-opt.unsuitable { opacity: .75; }
+.plan-opt small { color: var(--text-3); font-size: 12.5px; }
+.plan-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.plan-amt { font-size: 22px; font-weight: 800; }
+.plan-amt small { font-size: 13px; font-weight: 600; }
+.scenarios { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.scenarios .note { grid-column: 1 / -1; }
+.sc { padding: 10px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sc small { font-size: 11.5px; color: var(--text-3); line-height: 1.25; }
+.sc b { font-size: 15px; overflow-wrap: anywhere; }
+.sc span { font-size: 11px; color: var(--text-3); }
+.sc.bad b { color: var(--danger); } .sc.good b { color: var(--good); } .sc.mid { border-color: var(--brand-2); }
+.metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 8px; }
+.metric-grid small { display: block; font-size: 11.5px; color: var(--text-3); line-height: 1.25; min-height: 28px; }
+.metric-grid b { font-size: 15px; }
+.bt { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.bt small { display: block; font-size: 12px; color: var(--text-3); }
+.bt b { font-size: 16px; overflow-wrap: anywhere; }
+.linechart, .fanchart { margin: 12px 0 0; }
+.linechart svg, .fanchart svg { width: 100%; height: 140px; display: block; overflow: visible; }
+.lc-area { fill: color-mix(in srgb, var(--brand-2) 14%, transparent); }
+.lc-line { fill: none; stroke: var(--brand-2); stroke-width: 2; }
+.linechart.tone-good .lc-line { stroke: var(--good); } .linechart.tone-good .lc-area { fill: color-mix(in srgb, var(--good) 12%, transparent); }
+.linechart.tone-danger .lc-line { stroke: var(--danger); } .linechart.tone-danger .lc-area { fill: color-mix(in srgb, var(--danger) 10%, transparent); }
+.linechart figcaption, .fanchart figcaption { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: var(--text-3); margin-top: 6px; }
+.fan-band { fill: color-mix(in srgb, var(--brand-2) 18%, transparent); }
+.fan-mid { fill: none; stroke: var(--brand-2); stroke-width: 2.2; }
+.fan-target { stroke: var(--good); stroke-dasharray: 5 4; stroke-width: 1.5; }
+.fan-key { display: inline-block; width: 12px; height: 8px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
+.fan-key.band { background: color-mix(in srgb, var(--brand-2) 30%, transparent); } .fan-key.mid { background: var(--brand-2); height: 3px; } .fan-key.target { background: var(--good); height: 2px; }
+.sec-head small + small { margin-top: 4px; }
+@media (max-width: 360px) {
+  .metric-grid { grid-template-columns: repeat(2, 1fr); }
+  .sc b { font-size: 13.5px; } .sc small { font-size: 10.5px; }
+}

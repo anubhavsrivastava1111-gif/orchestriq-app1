@@ -1,7 +1,7 @@
 // Lifeline — data-entry sheets. Every form: one screen, big tap targets, smart defaults,
 // optional details folded away, and a Save button that is always visible.
 import { useMemo, useState } from "react";
-import type { Account, CardCashOut, CardEmi, CreditCard, Expense, ExpenseCategory, Freq, Holding, HoldingKind, Income, IncomeKind, Loan, LoanType } from "./types";
+import type { Account, CardCashOut, CardEmi, CreditCard, Expense, ExpenseCategory, Freq, Goal, GoalKind, Holding, HoldingKind, Income, IncomeKind, Loan, LoanType, RiskProfile } from "./types";
 import { EXPENSE_ICON, ago } from "./labels";
 import { ESSENTIAL_DEFAULT, EXPENSE_LABEL, HOLDING_LABEL, INCOME_LABEL, LOAN_TYPE_LABEL } from "./types";
 import { useApp, type SheetState } from "./context";
@@ -10,7 +10,8 @@ import { inr, inrRaw } from "./engine";
 import { buildIcs, googleCalendarLink } from "./calendar";
 import { buildLetter, LETTERS, type LetterKind } from "./letters";
 import { SKILL_TAGS } from "./opportunities";
-import { Button, ChoiceCards, ChoiceChips, DayPicker, Disclosure, Field, MoneyInput, NumberInput, Segmented, Sheet, Slider, TextInput, Toggle, Row, List } from "./components";
+import { Button, ChoiceCards, ChoiceChips, DayPicker, Disclosure, FanChart, Field, MoneyInput, NumberInput, Pill, Segmented, Sheet, Slider, TextInput, Toggle, Row, List } from "./components";
+import { GOAL_KINDS, PROFILES, RISK_QUESTIONS, goalMonthlyTotal, nextRupeeLadder, planGoal, riskFromScore } from "./wealth";
 import { Icon } from "./icons";
 import { isNative, notificationsEnabled, requestNotifications, saveTextFile, shareText, copyText } from "./native";
 import * as vault from "./vault";
@@ -56,6 +57,8 @@ export function SheetHost({ sheet }: { sheet: SheetState }) {
     case "card-emi-detail": return <CardEmiDetailSheet cardId={sheet.cardId} emiId={sheet.emiId} />;
     case "card-cash": return <CardCashSheet cardId={sheet.cardId} item={sheet.item} />;
     case "card-pay": return <CardPaySheet cardId={sheet.cardId} />;
+    case "goal": return <GoalSheet item={sheet.item} preset={sheet.preset} />;
+    case "risk-quiz": return <RiskQuizSheet />;
     case "bounced": return <BouncedSheet loanId={sheet.loanId} />;
   }
 }
@@ -952,6 +955,114 @@ function CardPaySheet({ cardId }: { cardId: string }) {
         </>
       )}</Field>
       <p className="note">Deducted from {acct?.name ?? "your account"} in Lifeline. Whatever stays unpaid carries over with interest, and Lifeline adds it to the next bill automatically.</p>
+    </Sheet>
+  );
+}
+
+// ─── Goal planner ───────────────────────────────────────────────────────────
+function GoalSheet({ item, preset }: { item?: Goal; preset?: GoalKind }) {
+  const { state, update, close, toast } = useApp();
+  const startKind: GoalKind = item?.kind ?? preset ?? "trip";
+  const defYm = () => { const d = new Date(); d.setFullYear(d.getFullYear() + (startKind === "emergency" ? 1 : 3)); return ymOf(d); };
+  const [kind, setKind] = useState<GoalKind>(startKind);
+  const [name, setName] = useState(item?.name ?? (preset ? GOAL_KINDS[preset].label : ""));
+  const [cost, setCost] = useState(str(item?.costToday ?? (startKind === "emergency" ? Math.round(nextRupeeLadder(state).steps.find(s => s.id === "emergency")?.amount ?? 0) || undefined : undefined)));
+  const [ym, setYm] = useState(item?.targetYm ?? defYm());
+  const [infl, setInfl] = useState(str(item?.inflationPct ?? GOAL_KINDS[startKind].inflation));
+  const [saved, setSaved] = useState(str(item?.saved ?? 0));
+  const [profile, setProfile] = useState<RiskProfile>(item?.profile ?? state.wealth.risk ?? "balanced");
+  const [monthlyAmt, setMonthlyAmt] = useState(str(item?.monthly ?? 0));
+  const [err, setErr] = useState("");
+  const draft: Goal = { id: item?.id ?? "draft", name: name || GOAL_KINDS[kind].label, kind, costToday: num(cost) || 0, targetYm: ym, inflationPct: Number.isNaN(num(infl)) ? 6 : num(infl), saved: num(saved) || 0, profile, monthly: num(monthlyAmt) || 0, createdAt: item?.createdAt ?? new Date().toISOString() };
+  const plan = useMemo(() => (draft.costToday > 0 ? planGoal(draft) : null), [draft.costToday, draft.targetYm, draft.inflationPct, draft.saved, draft.profile, draft.monthly]); // eslint-disable-line react-hooks/exhaustive-deps
+  const free = nextRupeeLadder(state).investable - goalMonthlyTotal(state) + (item?.monthly ?? 0);
+  const pickKind = (k: GoalKind) => { setKind(k); if (!name || Object.values(GOAL_KINDS).some(g => g.label === name)) setName(GOAL_KINDS[k].label); setInfl(String(GOAL_KINDS[k].inflation)); };
+  const yearsChips = [1, 2, 3, 5, 7, 10].map(y => { const d = new Date(); d.setFullYear(d.getFullYear() + y); return { value: ymOf(d), label: `${y} yr${y > 1 ? "s" : ""}` }; });
+  const save = () => {
+    if (!(draft.costToday > 0)) return setErr("Enter what it costs today.");
+    const rec = { ...draft, id: item?.id ?? uid(), name: draft.name.trim() };
+    update(s => ({ ...s, goals: item ? s.goals.map(g => (g.id === item.id ? rec : g)) : [...s.goals, rec] }));
+    toast(item ? "Goal updated" : "Goal added"); close();
+  };
+  const del = item ? () => { if (confirm(`Delete goal “${item.name}”?`)) { update(s => ({ ...s, goals: s.goals.filter(g => g.id !== item.id) })); close(); } } : undefined;
+  return (
+    <Sheet title={item ? "Goal plan" : "New goal"} subtitle="Inflation and market ups and downs are built in" onClose={close} footer={<SaveBar onSave={save} onDelete={del} label={item ? "Save plan" : "Add goal"} />}>
+      <Field label="Goal">{() => <ChoiceChips value={kind} options={(Object.keys(GOAL_KINDS) as GoalKind[]).map(k => ({ value: k, label: GOAL_KINDS[k].label }))} onChange={pickKind} />}</Field>
+      <Field label="Name">{id => <TextInput id={id} value={name} onChange={setName} placeholder="e.g. Goa trip with family" />}</Field>
+      <Field label="What it costs today" error={err} hint={kind === "emergency" ? "Suggested: 3 months of essentials and EMIs." : undefined}>{id => <MoneyInput id={id} value={cost} onChange={setCost} large />}</Field>
+      <Field label="When do you want it?">{id => (
+        <>
+          <ChoiceChips value={ym} options={yearsChips} onChange={setYm} />
+          <input id={id} className="input" type="month" value={ym} min={ymOf(new Date())} onChange={e => e.target.value && setYm(e.target.value)} />
+        </>
+      )}</Field>
+      <div className="inline-2">
+        <Field label="Already saved">{id => <MoneyInput id={id} value={saved} onChange={setSaved} />}</Field>
+        <Field label="Price rise / year">{id => <NumberInput id={id} value={infl} onChange={setInfl} suffix="%" />}</Field>
+      </div>
+      {plan && (
+        <>
+          <div className="quote">
+            <div className="quote-head"><span>It will cost about</span><b>{inr(plan.futureCost)}</b><small>in {plan.years < 1 ? `${plan.months} months` : `${plan.years.toFixed(1)} years`}, after {draft.inflationPct}% yearly price rise</small></div>
+          </div>
+          <Field label="Choose a plan" hint="Monthly amount for an 80% chance of reaching the goal (2,000 simulated markets). The plain average needs less, but fails about half the time.">{() => (
+            <div className="plans">
+              {plan.plans.map(pl => (
+                <button key={pl.profile.id} type="button" className={"plan-opt" + (profile === pl.profile.id ? " on" : "") + (pl.suitable ? "" : " unsuitable")} aria-pressed={profile === pl.profile.id}
+                  onClick={() => { setProfile(pl.profile.id); setMonthlyAmt(String(Math.ceil(pl.sipFor80 / 100) * 100)); }}>
+                  <span className="plan-top"><b>{pl.profile.label}</b>{plan.recommended === pl.profile.id && <Pill tone="good">Best fit</Pill>}</span>
+                  <span className="plan-amt">{inr(Math.ceil(pl.sipFor80 / 100) * 100)}<small>/month</small></span>
+                  <small>~{pl.profile.expected}%/yr expected · bad year {pl.profile.worstYear}%</small>
+                  {!pl.suitable && <small className="neg">{pl.why}</small>}
+                </button>
+              ))}
+            </div>
+          )}</Field>
+          <Field label="I'll invest each month" hint={free > 0 ? `You have about ${inr(free)} a month free for goals.` : "Your budget shows no free money yet. Close the gap or clear costly debt first."}>{id => <MoneyInput id={id} value={monthlyAmt} onChange={setMonthlyAmt} />}</Field>
+          {plan.chosen && (
+            <div className="quote">
+              <div className="quote-head"><span>Chance of reaching {inr(plan.futureCost)}</span><b className={plan.chosen.sim.successPct >= 75 ? "pos" : plan.chosen.sim.successPct >= 50 ? "" : "neg"}>{plan.chosen.sim.successPct.toFixed(0)}%</b><small>with {inr(draft.monthly)}/month in a {PROFILES[profile].label.toLowerCase()} mix</small></div>
+              <FanChart p10={plan.chosen.sim.path10} p50={plan.chosen.sim.path50} p90={plan.chosen.sim.path90} target={plan.futureCost} />
+              <div className="scenarios">
+                <div className="sc bad"><small>Tough markets</small><b>{inr(plan.chosen.sim.p10)}</b></div>
+                <div className="sc mid"><small>Middle</small><b>{inr(plan.chosen.sim.p50)}</b></div>
+                <div className="sc good"><small>Good markets</small><b>{inr(plan.chosen.sim.p90)}</b></div>
+              </div>
+              {draft.monthly > free && free >= 0 && <p className="field-error">That's more than your free monthly money ({inr(Math.max(0, free))}). Push the date out, pick a cheaper target, or earn a little more.</p>}
+            </div>
+          )}
+          <p className="note">Where to put it: {PROFILES[profile].mix.map(m => `${m.pct}% ${m.label.toLowerCase()}`).join(", ")}. Educational projection, not investment advice.</p>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+// ─── Risk quiz ──────────────────────────────────────────────────────────────
+function RiskQuizSheet() {
+  const { state, update, close, toast } = useApp();
+  const [ans, setAns] = useState<number[]>(() => RISK_QUESTIONS.map(() => -1));
+  const done = ans.every(a => a >= 0);
+  const score = ans.reduce((s, a, i) => s + (a >= 0 ? RISK_QUESTIONS[i].options[a].points : 0), 0);
+  const result = done ? riskFromScore(score, state) : null;
+  const save = () => {
+    if (!result) return;
+    update(s => ({ ...s, wealth: { ...s.wealth, risk: result.profile, riskScore: score } }));
+    toast(`You're a ${PROFILES[result.profile].label.toLowerCase()} investor`); close();
+  };
+  return (
+    <Sheet title="Your risk profile" subtitle="5 quick questions, no right answers" onClose={close} footer={<SaveBar onSave={save} label={result ? `Save: ${PROFILES[result.profile].label}` : "Answer all 5"} disabled={!done} />}>
+      {RISK_QUESTIONS.map((q, i) => (
+        <Field key={i} label={`${i + 1}. ${q.q}`}>{() => (
+          <ChoiceCards value={String(ans[i])} onChange={v => setAns(a => a.map((x, j) => (j === i ? Number(v) : x)))} options={q.options.map((o, k) => ({ value: String(k), title: o.label }))} />
+        )}</Field>
+      ))}
+      {result && (
+        <div className="quote">
+          <div className="quote-head"><span>Your profile</span><b>{PROFILES[result.profile].label}</b><small>{PROFILES[result.profile].tagline} · ~{PROFILES[result.profile].expected}% a year expected, bad years down to {PROFILES[result.profile].worstYear}%</small></div>
+          {result.capped && <p className="field-error">Your answers suggest Growth, but your EMIs are high right now, so we've set Balanced until your debt is lower. A market crash shouldn't force you to sell to pay EMIs.</p>}
+        </div>
+      )}
     </Sheet>
   );
 }

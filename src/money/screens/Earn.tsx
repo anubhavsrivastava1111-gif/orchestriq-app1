@@ -13,6 +13,11 @@ const CAT_ICON: Record<Category, string> = {
 const SPEED_TONE = { days: "good", weeks: "good", months: "warn", "6+ months": "danger" } as const;
 
 export default function Earn() {
+  return <Screen title="Earn more" subtitle="Matched to your skills, time and urgency"><EarnContent /></Screen>;
+}
+
+/** Earning opportunities (used inside the Grow tab). */
+export function EarnContent() {
   const { state, open, update } = useApp();
   const cf = cashFlow(state);
   const gap = Math.max(0, -cf.surplus);
@@ -25,7 +30,7 @@ export default function Earn() {
   const skillNames = p.skills.map(id => SKILL_TAGS.find(s => s.id === id)?.label).filter(Boolean);
 
   return (
-    <Screen title="Earn more" subtitle="Matched to your skills, time and urgency">
+    <>
       <div className="hero hero-calm">
         <div className="hero-top"><span>{gap > 0 ? "Monthly gap to close" : "No monthly gap"}</span><Pill tone={gap > 0 ? "danger" : "good"}>{gap > 0 ? "Earn or cut" : "Extra goes to debt"}</Pill></div>
         <div className="hero-amount">{inr(gap)}</div>
@@ -58,7 +63,7 @@ export default function Earn() {
 
       {list.map((m, i) => <OppCard key={m.opp.id} m={m} rank={cat === "best" ? i + 1 : undefined} starred={p.shortlist.includes(m.opp.id)} onStar={() => toggleStar(m.opp.id)} />)}
       <p className="note center">Lifeline earns nothing from these links. Earnings are indicative ranges, so check each platform's current terms. Never pay to get work.</p>
-    </Screen>
+    </>
   );
 }
 
