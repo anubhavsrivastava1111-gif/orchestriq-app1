@@ -24,6 +24,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;          // Supabase, fonts, AI providers: untouched
   if (url.pathname.startsWith("/api/")) return;              // AI and server functions: never cached
+  if (url.pathname.startsWith("/money/")) return;            // Lifeline has its own service worker
 
   if (req.mode === "navigate") {                             // pages: newest first, cache only offline
     event.respondWith(fetch(req).then((res) => {

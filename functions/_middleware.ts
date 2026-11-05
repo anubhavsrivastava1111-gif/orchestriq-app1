@@ -111,6 +111,11 @@ const MODULE_META: Record<string, { title: string; description: string; image: s
     description: "Ask anything — business, code, writing, or planning — with any AI model.",
     image: SITE + "/og-ai-workspace.png",
   },
+  "/money/": {
+    title: "Lifeline — EMI & Money Rescue",
+    description: "Never miss an EMI: know how much to put in which account and when, find savings, and realistic ways to earn more.",
+    image: SITE + "/og-finance.png",
+  },
   "/live-boardroom": {
     title: "OrchestrIQ — Live AI Boardroom",
     description: "A live, reactive executive debate that challenges itself and reaches a real decision.",
@@ -139,7 +144,7 @@ export async function onRequest(context: { request: Request; next: () => Promise
   }
 
   const url = new URL(request.url);
-  const meta = MODULE_META[url.pathname] || MODULE_META["/"];
+  const meta = MODULE_META[url.pathname] || (url.pathname.startsWith("/money") ? MODULE_META["/money/"] : MODULE_META["/"]);
 
   // Fetch the real page exactly as it would normally be served, then only
   // swap the meta tag VALUES - nothing else about the page is touched, so

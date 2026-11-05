@@ -14,4 +14,7 @@
 # normally BEFORE this catch-all rule is ever reached - this does not
 # change how any existing file on the site is served.
 # ═══════════════════════════════════════════════════════════════════════════
+# Lifeline (EMI & money rescue app) is its own page with its own install/offline setup.
+/money     /money/              301
+/money/*   /money/index.html    200
 /*    /index.html   200
