@@ -380,7 +380,7 @@ export function insights(state: MoneyState, today = new Date()): Insight[] {
         title: `Paying only the minimum on ${card.name} costs ~${inr(trap.nextMonthInterest)} interest a month`,
         detail: `At ${card.monthlyRatePct}% a month (${(card.monthlyRatePct * 12).toFixed(0)}% a year + GST), the ${inr(est.nonEmiPrincipal)} balance would take ${trap.capped ? "forever" : Math.ceil(trap.months / 12) + " years"} and ~${inr(trap.interest)} in interest to clear by paying the minimum. Move it to a cheaper loan, or pay a fixed amount above the minimum every month.`,
         monthlyImpact: trap.nextMonthInterest,
-        action: { label: "Open card", tab: "bills" },
+        action: { label: "Open card", tab: "cards" },
       });
     }
     if (est.utilization > 0.7) {

@@ -17,3 +17,8 @@ export function ago(iso: string): string {
 }
 
 export const isStale = (iso: string, days = 7) => Date.now() - new Date(iso).getTime() > days * 86400000;
+
+export const NETWORKS: { value: import("./types").CardNetwork; label: string }[] = [
+  { value: "visa", label: "Visa" }, { value: "mastercard", label: "Mastercard" }, { value: "rupay", label: "RuPay" },
+  { value: "amex", label: "Amex" }, { value: "diners", label: "Diners" },
+];

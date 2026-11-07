@@ -1,28 +1,26 @@
-// Bills — calendar, loans, accounts.
+// Loans tab — EMI calendar, loans, bank accounts. (Credit cards have their own tab.)
 import { useMemo, useState } from "react";
 import { useApp } from "../context";
 import { dueDateIn, inr, loansOf, upcomingDues, ymKey, type DueItem } from "../engine";
-import { estimateStatement, nextPayment } from "../cards";
 import { LOAN_TYPE_LABEL } from "../types";
 import { Button, Card, Empty, List, Row, Screen, Section, Segmented } from "../components";
 import { Icon } from "../icons";
 import { LOAN_ICON, ago, isStale } from "../labels";
 import { statusPill, useMarkPaid } from "../dues";
 
-type Sub = "calendar" | "loans" | "cards" | "accounts";
+type Sub = "calendar" | "loans" | "accounts";
 
 export default function Bills() {
   const { sub, go, open, state } = useApp();
-  const view: Sub = (["calendar", "loans", "cards", "accounts"] as Sub[]).includes(sub as Sub) ? (sub as Sub) : "calendar";
+  const view: Sub = (["calendar", "loans", "accounts"] as Sub[]).includes(sub as Sub) ? (sub as Sub) : "calendar";
   return (
-    <Screen title="Bills & accounts" subtitle={`${state.loans.length} EMIs · ${state.cards.length} cards · ${state.accounts.length} accounts`}
+    <Screen title="Loans & banks" subtitle={`${state.loans.length} EMIs · ${state.cards.length} cards · ${state.accounts.length} accounts`}
       action={<button className="icon-btn" aria-label="Reminders" onClick={() => open({ kind: "reminders" })}><Icon name="bell" /></button>}>
       <Segmented label="Bills view" value={view} onChange={v => go("bills", v)} options={[
-        { value: "calendar", label: "Calendar" }, { value: "loans", label: "Loans" }, { value: "cards", label: "Cards" }, { value: "accounts", label: "Banks" },
+        { value: "calendar", label: "Calendar" }, { value: "loans", label: "Loans" }, { value: "accounts", label: "Banks" },
       ]} />
       {view === "calendar" && <CalendarView />}
       {view === "loans" && <LoansView />}
-      {view === "cards" && <CardsView />}
       {view === "accounts" && <AccountsView />}
     </Screen>
   );
@@ -156,50 +154,6 @@ function AccountsView() {
             })}
           </List>
         )}
-      </Section>
-    </>
-  );
-}
-
-function CardsView() {
-  const { state, open, go } = useApp();
-  const legacy = state.loans.filter(l => l.type === "credit-card");
-  return (
-    <>
-      {legacy.length > 0 && (
-        <Card tone="warn">
-          <div className="action">
-            <span className="action-icon warn"><Icon name="card" /></span>
-            <div className="action-body">
-              <b>Upgrade {legacy.length === 1 ? `“${legacy[0].name}”` : `${legacy.length} cards`} to detailed tracking</b>
-              <p>Adds EMIs on the card, processing fees, GST, card cash and automatic minimum-due calculation. Your existing details are carried over.</p>
-              <div className="btn-row wrap">{legacy.map(l => <Button key={l.id} size="sm" variant="primary" onClick={() => open({ kind: "card", fromLoan: l })}>Upgrade {l.name}</Button>)}</div>
-            </div>
-          </div>
-        </Card>
-      )}
-      <Section title="Credit cards" action={<Button size="sm" variant="primary" icon="plus" onClick={() => open({ kind: "card" })}>Add card</Button>}>
-        {state.cards.length === 0 ? (
-          <Empty icon="card" title="No credit cards yet" text="Add a card once. Lifeline then works out every statement's total and minimum due, EMI splits, fees and GST for you." />
-        ) : state.cards.map(c => {
-          const est = estimateStatement(c);
-          const p = nextPayment(c);
-          const pct = Math.min(100, Math.round(est.utilization * 100));
-          return (
-            <button key={c.id} type="button" className="cc" onClick={() => go("card", c.id)}>
-              <div className="cc-top"><span className="cc-bank">{c.bank || "Credit card"}</span><span className="cc-chip" aria-hidden /></div>
-              <div className="cc-name">{c.name}</div>
-              <div className="cc-limit"><span>Used {inr(est.used)} of {inr(c.limit)}</span><span>{pct}%</span></div>
-              <div className="cc-bar"><span className={pct > 70 ? "hot" : ""} style={{ width: pct + "%" }} /></div>
-              <div className="cc-due">
-                <div><small>{p.source === "statement" ? "Statement due" : "Next bill (estimate)"}</small><b>{inr(p.tad)}</b></div>
-                <div><small>Minimum</small><b>{inr(p.mad)}</b></div>
-                <div><small>Due</small><b>{p.date.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</b></div>
-              </div>
-              {(c.emis.length > 0 || c.cashOuts.length > 0) && <div className="cc-tags">{c.emis.length > 0 && <span>{c.emis.length} EMI{c.emis.length > 1 ? "s" : ""}</span>}{c.cashOuts.length > 0 && <span>Card cash used</span>}</div>}
-            </button>
-          );
-        })}
       </Section>
     </>
   );

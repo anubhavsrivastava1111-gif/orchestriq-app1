@@ -1,107 +1,142 @@
-// Payment Plan — this month's step-by-step plan, the cheapest way to cover a gap, the next 12 months, and fixes.
+// Payment Plan (opened on request, after balances are confirmed): before salary, after salary, then optional detail.
 import { useMemo } from "react";
 import { useApp } from "../context";
 import { inr, loansOf } from "../engine";
-import { buildPayPlan, glidePath, monthName, monthsLeft } from "../payplan";
+import { buildCyclePlan, glidePath, monthName, monthsLeft, type PayPlan } from "../payplan";
+import { ago } from "../labels";
 import { emiAmount } from "../cards";
 import { RIGHTS } from "../rights";
 import type { LetterKind } from "../letters";
-import { Button, Card, Disclosure, Empty, MeterBar, Pill, Section } from "../components";
+import { Button, Card, Disclosure, Empty, MeterBar, Pill } from "../components";
 import { Icon } from "../icons";
 import { StepRow } from "../planUi";
 
+const fmt = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+
+function statusOf(plan: PayPlan) {
+  return plan.mode === "clear" ? { tone: "good" as const, text: "Covered" }
+    : plan.mode === "rotate" ? { tone: "warn" as const, text: `Covered with a card draw · ${inr(plan.cost)} fee` }
+    : plan.mode === "carry" ? { tone: "warn" as const, text: `Covered by part-paying a card · ~${inr(plan.cost)}` }
+    : { tone: "danger" as const, text: `${inr(plan.shortfall)} short` };
+}
+
+function Phase({ n, title, plan, inLabel }: { n: number; title: string; plan: PayPlan; inLabel: string }) {
+  const st = statusOf(plan);
+  const gap = Math.max(0, plan.needed - plan.available);
+  return (
+    <section className={"phase" + (plan.mode === "short" ? " short" : "")} aria-label={title}>
+      <header className="phase-head">
+        <span className="phase-n">{n}</span>
+        <div><b>{title}</b><small>{fmt(plan.start)} to {fmt(plan.end)}</small></div>
+        <Pill tone={st.tone}>{st.text}</Pill>
+      </header>
+      <div className="phase-flow">
+        <div><small>Money you'll have</small><b>{inr(plan.available)}</b><span>{inLabel}{plan.incomeIn > 0 ? ` + income ${inr(plan.incomeIn)}` : ""}</span></div>
+        <Icon name="arrowRight" />
+        <div><small>To pay</small><b>{inr(plan.needed)}</b><span>{plan.loanDue > 0 ? `EMIs ${inr(plan.loanDue)}` : "No EMIs"}{plan.cardFull > 0 ? ` · cards ${inr(plan.cardFull)}` : ""}</span></div>
+      </div>
+      {plan.mode === "clear"
+        ? <p className="phase-note good">{plan.steps.length ? `All covered. ${inr(plan.leftover)} spare after these payments.` : "Nothing is due in this period."}</p>
+        : <p className="phase-note">Gap of {inr(gap)}. The steps below cover it the cheapest way and keep every EMI and card minimum safe.</p>}
+      {plan.steps.length > 0 && <div className="steps">{plan.steps.map(s => <StepRow key={s.key} step={s} />)}</div>}
+      {plan.options.length > 0 && (
+        <Disclosure summary={<b>Ways to cover the gap, compared</b>}>
+          {plan.options.map(o => (
+            <div key={o.id} className={"opt" + (o.best ? " best" : "") + (o.feasible ? "" : " off")}>
+              <div className="opt-head"><b>{o.title}</b><span>{inr(o.cost)}{o.best ? <Pill tone="good">Cheapest</Pill> : !o.feasible ? <Pill>Not enough room</Pill> : null}</span></div>
+              <p>{o.note}</p>
+            </div>
+          ))}
+        </Disclosure>
+      )}
+    </section>
+  );
+}
+
 export default function PayPlan() {
   const { state, go, open } = useApp();
-  const plan = useMemo(() => buildPayPlan(state), [state]);
+  const cycle = useMemo(() => buildCyclePlan(state), [state]);
   const glide = useMemo(() => glidePath(state), [state]);
   const nothing = !state.loans.length && !state.cards.length;
   if (nothing) return <Empty icon="calendar" title="Nothing to plan yet" text="Add your loans and credit cards. Lifeline then plans every payment for you." action={<Button variant="primary" onClick={() => open({ kind: "quick-add" })}>Add</Button>} />;
 
-  const status = plan.mode === "clear" ? { tone: "good", text: "Everything is covered" } : plan.mode === "rotate" ? { tone: "warn", text: `Covered with a card draw · costs ${inr(plan.cost)}` } : plan.mode === "carry" ? { tone: "warn", text: `Covered by paying part of the card · costs ~${inr(plan.cost)}` } : { tone: "danger", text: `${inr(plan.shortfall)} short: act now` };
-  const fixes = buildFixes(state, plan, glide);
+  const { before, after, nextSalary } = cycle;
+  const bank = state.accounts.reduce((s, a) => s + a.balance, 0);
+  const kept = state.accounts.reduce((s, a) => s + a.minBalance, 0);
+  const worst = [before, after].filter((p): p is PayPlan => !!p).some(p => p.mode === "short") ? "danger" : [before, after].some(p => p && p.mode !== "clear") ? "warn" : "good";
+  const fixes = buildFixes(state, after && after.mode !== "clear" ? after : before, glide);
+  const oldest = cycle.asOf;
 
   return (
     <div className="screen">
       <div className="screen-head">
         <button type="button" className="icon-btn" aria-label="Back" onClick={() => go("home")}><Icon name="back" /></button>
-        <div className="screen-titles" style={{ flex: 1 }}><h1>Payment plan</h1><p>{plan.start.toLocaleDateString("en-IN", { day: "numeric", month: "short" })} to {plan.end.toLocaleDateString("en-IN", { day: "numeric", month: "short" })} · this pay cycle</p></div>
+        <div className="screen-titles" style={{ flex: 1 }}><h1>Your payment plan</h1><p>Step 2 of 2 · {nextSalary ? `until ${fmt(after?.end ?? nextSalary)}` : "next 30 days"}</p></div>
       </div>
 
-      <div className={"hero" + (plan.mode === "short" ? " hero-alert" : "")}>
-        <div className="hero-top"><span>This cycle</span><Pill tone={status.tone as "good"}>{status.text}</Pill></div>
-        <div className="plan-flow">
-          <div><small>Money in</small><b>{inr(plan.available)}</b><span>bank {inr(plan.cashNow)} + income {inr(plan.incomeIn)}</span></div>
-          <Icon name="arrowRight" />
-          <div><small>To pay</small><b>{inr(plan.needed)}</b><span>EMIs {inr(plan.loanDue)} + cards {inr(plan.cardFull)}</span></div>
+      <Card className="basis">
+        <div className="basis-row">
+          <div><small>Starting from your balances</small><b>{inr(bank)}</b><span>{kept > 0 ? `${inr(kept)} kept aside as minimum balance · ` : ""}checked {oldest ? ago(oldest.toISOString()) : "—"}</span></div>
+          <Button size="sm" icon="refresh" onClick={() => open({ kind: "plan-start" })}>Change</Button>
         </div>
-        {plan.mode === "clear" && <p className="hero-sub">{inr(plan.leftover)} left after every payment.</p>}
-        {plan.mode !== "clear" && <p className="hero-sub">Gap {inr(Math.max(0, plan.needed - plan.available))}. The steps below cover it the cheapest way and keep every EMI and card minimum safe.</p>}
-      </div>
+        {cycle.stale.length > 0 && <p className="hint-warn">{cycle.stale.join(", ")} {cycle.stale.length > 1 ? "were" : "was"} last updated over a day ago. Update to make the plan exact.</p>}
+        <div className={"basis-verdict t-" + worst}>
+          <Icon name={worst === "good" ? "check" : "alert"} size={18} />
+          <span>{worst === "good" ? "Every EMI and card bill is covered." : worst === "warn" ? "Covered, with a small cost. Follow the steps in order." : "Money runs short. Follow the steps and use the fixes below."}</span>
+        </div>
+      </Card>
 
-      <Section title="Step by step" hint="Tap the button when each step is done. Balances and the plan update instantly.">
-        {plan.steps.length === 0 ? <Card><p>Nothing due in this cycle.</p></Card> : <div className="steps">{plan.steps.map(s => <StepRow key={s.key} step={s} />)}</div>}
-      </Section>
+      <Phase n={1} title={nextSalary ? "Before your salary" : "Next 30 days"} plan={before} inLabel={`in banks ${inr(before.cashNow)}`} />
+      {after && <Phase n={2} title={`After salary on ${fmt(nextSalary!)}`} plan={after} inLabel={`left over ${inr(after.cashNow)}`} />}
+      {!nextSalary && <p className="note">Add your salary and pay day (+ → Add income) to see the plan split around pay day.</p>}
+      <p className="note center">Tap each step's button when it's done. Balances update and the plan recalculates.</p>
 
-      {plan.options.length > 0 && (
-        <Section title="Ways to cover the gap, compared" hint="Monthly cost of each option for this cycle.">
-          {plan.options.map(o => (
-            <Card key={o.id} className={"opt" + (o.best ? " best" : "") + (o.feasible ? "" : " off")}>
-              <div className="opt-head"><b>{o.title}</b><span>{inr(o.cost)}{o.best ? <Pill tone="good">Cheapest</Pill> : !o.feasible ? <Pill>Not enough room</Pill> : null}</span></div>
-              <p>{o.note}</p>
-            </Card>
+      <Disclosure summary={<span><b>Next 12 months</b> <small>· {glide.fitsFrom ? `payments fit income from ${monthName(glide.fitsFrom)}` : "payments don't fit income yet"}</small></span>}>
+        <div className="glide-head"><div><small>Card fees over 12 months</small><b className={glide.totalFees > 0 ? "neg" : "pos"}>{inr(glide.totalFees)}</b></div><div><small>Biggest monthly draw</small><b>{inr(glide.peakRotation)}</b></div></div>
+        <div className="glide">
+          {glide.months.map(m => (
+            <div key={m.ym} className="glide-row">
+              <span className="g-month">{monthName(m.ym).replace(" 20", " '")}</span>
+              <div className="g-bar"><MeterBar value={Math.min(m.outgo, m.income * 1.6)} max={m.income * 1.6 || 1} cls={m.rotation > 0.5 || m.short > 0.5 ? "fill-danger" : "fill-good"} /><i style={{ left: `${(1 / 1.6) * 100}%` }} /></div>
+              <span className={"g-val" + (m.rotation > 0.5 ? " neg" : "")}>{m.short > 0.5 ? `short ${inr(m.short)}` : m.rotation > 0.5 ? `draw ${inr(m.rotation)}` : "fits"}</span>
+              {m.events.length > 0 && <span className="g-event">{m.events.join(" · ")}</span>}
+            </div>
           ))}
-        </Section>
-      )}
-
-      <Section title="Next 12 months" hint={glide.fitsFrom ? `Your payments fit your income from ${monthName(glide.fitsFrom)}.` : "At today's EMIs, payments don't fit your income within 12 months. The fixes below change that."}>
-        <Card>
-          <div className="glide-head"><div><small>Card fees over 12 months</small><b className={glide.totalFees > 0 ? "neg" : "pos"}>{inr(glide.totalFees)}</b></div><div><small>Biggest monthly draw</small><b>{inr(glide.peakRotation)}</b></div></div>
-          <div className="glide">
-            {glide.months.map(m => (
-              <div key={m.ym} className="glide-row">
-                <span className="g-month">{monthName(m.ym).replace(" 20", " '")}</span>
-                <div className="g-bar"><MeterBar value={Math.min(m.outgo, m.income * 1.6)} max={m.income * 1.6 || 1} cls={m.rotation > 0.5 || m.short > 0.5 ? "fill-danger" : "fill-good"} /><i style={{ left: `${(1 / 1.6) * 100}%` }} /></div>
-                <span className={"g-val" + (m.rotation > 0.5 ? " neg" : "")}>{m.short > 0.5 ? `short ${inr(m.short)}` : m.rotation > 0.5 ? `draw ${inr(m.rotation)}` : "fits"}</span>
-                {m.events.length > 0 && <span className="g-event">{m.events.join(" · ")}</span>}
-              </div>
-            ))}
-          </div>
-          <p className="note">Bar = what goes out vs income (the line). Red months need money drawn from a card; it's repaid with the next bill, plus fees.</p>
-        </Card>
-      </Section>
+        </div>
+        <p className="note">Bar = what goes out vs income (the line). Red months need money drawn from a card. It's repaid with the next bill, plus fees.</p>
+      </Disclosure>
 
       {fixes.length > 0 && (
-        <Section title="Ways to lighten the load" hint="Ordered by how much they save each month.">
+        <Disclosure summary={<span><b>Ways to lighten the load</b> <small>· {fixes.length} idea{fixes.length > 1 ? "s" : ""}</small></span>}>
           {fixes.map(f => (
-            <Card key={f.id}>
+            <div key={f.id} className="fix">
               <div className="opt-head"><b>{f.title}</b>{f.saves > 0 && <span className="impact">saves ~{inr(f.saves)}/mo</span>}</div>
               <p>{f.detail}</p>
               <div className="btn-row wrap">
                 {f.letter && <Button size="sm" icon="doc" onClick={() => open({ kind: "letter", letter: f.letter, loanId: f.loanId })}>Draft the email</Button>}
                 {f.go && <Button size="sm" onClick={() => go(f.go!.tab as "earn", f.go!.sub)}>{f.go.label}</Button>}
               </div>
-            </Card>
+            </div>
           ))}
-        </Section>
+        </Disclosure>
       )}
 
-      <Section title="Your rights (RBI rules)">
+      <Disclosure summary={<b>Your rights (RBI rules)</b>}>
         {RIGHTS.slice(0, 5).map(r => (
-          <Disclosure key={r.id} summary={<b>{r.title}</b>}>
-            <p>{r.rule}</p><p><b>Use it:</b> {r.use}</p><small className="note">{r.source}</small>
+          <div key={r.id} className="fix">
+            <b>{r.title}</b><p>{r.rule}</p><p><b>Use it:</b> {r.use}</p><small className="note">{r.source}</small>
             {r.letter && <Button size="sm" icon="doc" onClick={() => open({ kind: "letter", letter: r.letter })}>Draft the email</Button>}
-          </Disclosure>
+          </div>
         ))}
-        <Button size="sm" variant="ghost" onClick={() => go("more")}>All rights and help →</Button>
-      </Section>
-      <p className="note">Card draws and part-payments are short-term bridges. They cost money every month. The aim is to reach a month where payments fit your income.</p>
+      </Disclosure>
+      <p className="note">Card draws and part-payments are short-term bridges and cost money every month. The aim is to reach a month where payments fit your income.</p>
     </div>
   );
 }
 
 interface Fix { id: string; title: string; detail: string; saves: number; letter?: LetterKind; loanId?: string; go?: { tab: string; sub?: string; label: string } }
 
-function buildFixes(state: ReturnType<typeof useApp>["state"], plan: ReturnType<typeof buildPayPlan>, glide: ReturnType<typeof glidePath>): Fix[] {
+function buildFixes(state: ReturnType<typeof useApp>["state"], plan: PayPlan, glide: ReturnType<typeof glidePath>): Fix[] {
   const out: Fix[] = [];
   const rot = glide.peakRotation;
   const monthlyFee = glide.totalFees / 12;

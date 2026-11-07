@@ -10,7 +10,7 @@
 //      ("rotation", one-time fee), or carrying part of the card balance (monthly interest), whichever costs less.
 import type { CardCashOut, CreditCard, Loan, MoneyState } from "./types";
 import { addDays, cashFlow, daysBetween, dueDateIn, inr, upcomingDues, ymKey } from "./engine";
-import { GST, emiAmount, emiRowFor, estimateStatement, nextPayment, ymAdd, ymOf } from "./cards";
+import { GST, emiAmount, logCard, emiRowFor, estimateStatement, nextPayment, ymAdd, ymOf } from "./cards";
 
 const WINDOW_DAYS = 35;
 export const DEFAULT_DRAW_FEE = 3;
@@ -36,6 +36,44 @@ export interface PayPlan {
   carry: { amount: number; interest: number } | null;
   shortfall: number; cost: number; leftover: number;
   steps: PlanStep[]; options: Option[]; cards: CardDecision[];
+  endBalances: Map<string, number>;
+}
+
+/** Card bills falling in [from, to]: the current bill (overdue ones count from today) and, if it's a pending statement, the next estimated bill. */
+function cardDuesBetween(card: CreditCard, from: Date, to: Date, today: Date): CardDecision[] {
+  const out: CardDecision[] = [];
+  const now = sod(today);
+  const add = (tad: number, mad: number, due: Date) => {
+    const ym = ymOf(due);
+    if (tad < 1 || card.paidMonths.includes(ym)) return;
+    const inWindow = due >= from && due <= to;
+    const overdueNow = due < now && from.getTime() === now.getTime();
+    if (!inWindow && !overdueNow) return;
+    out.push({ card, tad, mad, pay: tad, due, ym });
+  };
+  const p = nextPayment(card, today);
+  add(Math.max(0, p.tad - p.paidSoFar), Math.max(0, p.mad - p.paidSoFar), p.date);
+  if (p.source === "statement") {
+    const est = estimateStatement(card, today);
+    if (ymOf(est.due) !== ymOf(p.date)) add(est.tad, est.mad, est.due);
+  }
+  return out;
+}
+
+// ─── Two-part plan: before the next salary, and after it ────────────────────
+export interface CyclePlan { nextSalary: Date | null; salaryAmount: number; before: PayPlan; after: PayPlan | null; stale: string[]; asOf: Date | null }
+
+export function buildCyclePlan(state: MoneyState, today = new Date()): CyclePlan {
+  const now = sod(today);
+  const { list, following } = credits(state, today);
+  const salaryIds = new Set(state.incomes.filter(i => i.kind === "salary").map(i => i.id));
+  const sal = list.find(c => !c.pending && salaryIds.has(c.incomeId)) ?? list.find(c => !c.pending);
+  const nextSalary = sal?.date ?? null;
+  const before = buildPayPlan(state, { today, from: now, to: nextSalary ? addDays(nextSalary, -1) : addDays(now, 30) });
+  const after = nextSalary ? buildPayPlan(state, { today, from: nextSalary, to: following ? addDays(following, -1) : addDays(nextSalary, 30), balances: before.endBalances }) : null;
+  const stale = state.accounts.filter(a => now.getTime() - new Date(a.updatedAt).getTime() > 86400000).map(a => a.name);
+  const times = state.accounts.map(a => new Date(a.updatedAt).getTime());
+  return { nextSalary, salaryAmount: sal?.amount ?? 0, before, after, stale, asOf: times.length ? new Date(Math.min(...times)) : null };
 }
 
 interface Credit { date: Date; amount: number; accountId: string; incomeId: string; source: string; pending: boolean }
@@ -64,30 +102,30 @@ function credits(state: MoneyState, today: Date): { list: Credit[]; following: D
   return { list: out.sort((a, b) => a.date.getTime() - b.date.getTime()), following };
 }
 
-export interface PlanOptions { extraCash?: number; today?: Date }
+export interface PlanOptions {
+  extraCash?: number; today?: Date;
+  from?: Date; to?: Date;                 // plan only this window (default: now → day before next-but-one pay day)
+  balances?: Map<string, number>;         // starting spare money per account (default: balances you entered)
+}
 
 export function buildPayPlan(state: MoneyState, opts: PlanOptions = {}): PayPlan {
   const today = opts.today ?? new Date();
-  const t = sod(today);
-  const { list: inc, following } = credits(state, today);
-  const end = following ? new Date(Math.min(addDays(t, WINDOW_DAYS).getTime(), addDays(following, -1).getTime())) : addDays(t, WINDOW_DAYS);
-  const spare = new Map(state.accounts.map(a => [a.id, a.balance - a.minBalance]));
+  const now = sod(today);
+  const t = sod(opts.from ?? today); // window start
+  const { list: allInc, following } = credits(state, today);
+  const end = opts.to ? sod(opts.to) : following ? new Date(Math.min(addDays(t, WINDOW_DAYS).getTime(), addDays(following, -1).getTime())) : addDays(t, WINDOW_DAYS);
+  const startsNow = t.getTime() === now.getTime();
+  const inc = allInc.filter(c => (c.pending ? startsNow : c.date >= t && c.date <= end));
+  const spare = opts.balances ? new Map(opts.balances) : new Map(state.accounts.map(a => [a.id, a.balance - a.minBalance]));
   const cashNow = [...spare.values()].reduce((s, v) => s + Math.max(0, v), 0) - (opts.extraCash ?? 0);
   const incomeIn = inc.reduce((s, c) => s + c.amount, 0);
   const available = cashNow + incomeIn;
 
-  const loanDues = upcomingDues({ ...state, cards: [] }, today, daysBetween(t, end))
-    .filter(d => (d.status === "upcoming" || d.status === "fund-now" || d.status === "due-today") && d.date <= end);
+  const loanDues = upcomingDues({ ...state, cards: [] }, today, daysBetween(now, end))
+    .filter(d => (d.status === "upcoming" || d.status === "fund-now" || d.status === "due-today") && d.date >= t && d.date <= end);
   const loanDue = loanDues.reduce((s, d) => s + d.loan.emi, 0);
 
-  const cards: CardDecision[] = [];
-  for (const card of state.cards) {
-    const p = nextPayment(card, today);
-    if (card.paidMonths.includes(p.ym) || p.date > end) continue;
-    const tad = Math.max(0, p.tad - p.paidSoFar), mad = Math.max(0, p.mad - p.paidSoFar);
-    if (tad < 1) continue;
-    cards.push({ card, tad, mad, pay: tad, due: p.date, ym: p.ym });
-  }
+  const cards: CardDecision[] = state.cards.flatMap(card => cardDuesBetween(card, t, end, today));
   const cardFull = cards.reduce((s, c) => s + c.tad, 0);
   const cardMin = cards.reduce((s, c) => s + c.mad, 0);
   const needed = loanDue + cardFull;
@@ -148,7 +186,7 @@ export function buildPayPlan(state: MoneyState, opts: PlanOptions = {}): PayPlan
   const take = (acct: string, amt: number) => bal.set(acct, (bal.get(acct) ?? 0) - amt);
   const give = (acct: string, amt: number) => bal.set(acct, (bal.get(acct) ?? 0) + amt);
   const name = (id?: string) => state.accounts.find(a => a.id === id)?.name ?? "your account";
-  const late = (d: Date) => d < t;
+  const late = (d: Date) => d < now;
   const firstIncome = inc[0]?.date;
   const ensure = (acct: string, amt: number, by: Date, why: string) => {
     let need = amt - (bal.get(acct) ?? 0);
@@ -203,7 +241,7 @@ export function buildPayPlan(state: MoneyState, opts: PlanOptions = {}): PayPlan
 
   const cost = (rotation?.fee ?? 0) + (carry?.interest ?? 0);
   const leftover = Math.max(0, available + (rotation?.amount ?? 0) - loanDue - cards.reduce((s, c) => s + c.pay, 0));
-  return { start: t, end, cashNow, incomeIn, available, loanDue, cardFull, cardMin, needed, mode, rotation, carry, shortfall, cost, leftover, steps, options, cards };
+  return { start: t, end, cashNow, incomeIn, available, loanDue, cardFull, cardMin, needed, mode, rotation, carry, shortfall, cost, leftover, steps, options, cards, endBalances: bal };
 }
 const order = (k: StepKind) => ({ income: 0, transfer: 1, "pay-card": 2, "card-draw": 3, warn: 4, emi: 5 }[k]);
 
@@ -323,7 +361,7 @@ export function applyDraw(state: MoneyState, step: PlanStep, uidFn: () => string
   const tx: CardCashOut = { id: uidFn(), date: new Date().toISOString(), amount: step.amount, method: "app", feePct: drawFeePct(card), feeIncludesGst: !!card.drawFeeIncludesGst, note: "Moved to bank to cover EMIs (Lifeline plan)" };
   return {
     ...state,
-    cards: state.cards.map(c => (c.id === card.id ? { ...c, cashOuts: [...c.cashOuts, tx] } : c)),
+    cards: state.cards.map(c => (c.id === card.id ? logCard({ ...c, cashOuts: [...c.cashOuts, tx] }, { kind: "cash", label: "Moved to bank (plan step)", amount: step.amount }) : c)),
     accounts: state.accounts.map(a => (a.id === step.toId ? { ...a, balance: a.balance + step.amount, updatedAt: new Date().toISOString() } : a)),
   };
 }

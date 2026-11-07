@@ -3,7 +3,7 @@ import { createContext, useContext } from "react";
 import type { Account, CardCashOut, CardEmi, CreditCard, Expense, Goal, GoalKind, Holding, Income, Loan, MoneyState } from "./types";
 import type { LetterKind } from "./letters";
 
-export type Tab = "home" | "bills" | "insights" | "earn" | "more" | "ai" | "connect" | "card" | "payplan";
+export type Tab = "home" | "bills" | "insights" | "earn" | "more" | "ai" | "connect" | "card" | "cards" | "payplan";
 
 export type SheetState =
   | { kind: "quick-add" }
@@ -13,6 +13,7 @@ export type SheetState =
   | { kind: "expense"; item?: Expense }
   | { kind: "quick-spends" }
   | { kind: "balances" }
+  | { kind: "plan-start" }
   | { kind: "reminders" }
   | { kind: "letter"; letter?: LetterKind; loanId?: string }
   | { kind: "earn-profile" }

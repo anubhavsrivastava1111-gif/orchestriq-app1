@@ -17,7 +17,7 @@ import Grow from "./screens/Grow";
 import More from "./screens/More";
 import Ai from "./screens/Ai";
 import Connect from "./screens/Connect";
-import CardDetail from "./screens/CardDetail";
+import Cards from "./screens/Cards";
 import PayPlan from "./screens/PayPlan";
 import { rollAllCards } from "./cards";
 
@@ -25,15 +25,18 @@ type Phase = "welcome" | "create" | "bio-offer" | "locked" | "ready";
 
 const NAV: { id: Tab | "add"; label: string; icon: string }[] = [
   { id: "home", label: "Home", icon: "home" },
-  { id: "bills", label: "Bills", icon: "calendar" },
+  { id: "cards", label: "Cards", icon: "card" },
   { id: "add", label: "Add", icon: "plus" },
-  { id: "insights", label: "Insights", icon: "chart" },
+  { id: "bills", label: "Loans", icon: "calendar" },
   { id: "earn", label: "Grow", icon: "grow" },
 ];
-const TABS: Tab[] = ["home", "bills", "insights", "earn", "more", "ai", "connect", "card", "payplan"];
+const TABS: Tab[] = ["home", "bills", "insights", "earn", "more", "ai", "connect", "card", "cards", "payplan"];
 
 function readHash(): { tab: Tab; sub: string } {
   const [t, s] = location.hash.slice(1).split("/");
+  // Older links: #card/<id> and #bills/cards now live on the Cards tab.
+  if (t === "card") return { tab: "cards", sub: s ?? "" };
+  if (t === "bills" && s === "cards") return { tab: "cards", sub: "" };
   return { tab: TABS.includes(t as Tab) ? (t as Tab) : "home", sub: s ?? "" };
 }
 
@@ -68,7 +71,8 @@ export default function MoneyApp() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
-  const go = useCallback((t: Tab, s?: string) => {
+  const go = useCallback((tab0: Tab, s0?: string) => {
+    const [t, s] = tab0 === "card" ? ["cards" as Tab, s0] : tab0 === "bills" && s0 === "cards" ? ["cards" as Tab, undefined] : [tab0, s0];
     const h = "#" + t + (s ? "/" + s : "");
     if (location.hash !== h) location.hash = h; else setNav({ tab: t, sub: s ?? "" });
     window.scrollTo({ top: 0 });
@@ -218,7 +222,7 @@ export default function MoneyApp() {
             <button type="button" className="icon-btn" aria-label="Lock now" onClick={lockNow}>
               <Icon name="lock" />
             </button>
-            <button type="button" className={"icon-btn" + (tab === "more" || tab === "connect" ? " on" : "")} aria-label="More: settings and help" onClick={() => go("more")}>
+            <button type="button" className={"icon-btn" + (tab === "more" || tab === "connect" || tab === "insights" ? " on" : "")} aria-label="More: settings and help" onClick={() => go("more")}>
               <Icon name="menu" />
             </button>
           </div>
@@ -232,7 +236,7 @@ export default function MoneyApp() {
           {tab === "more" && <More />}
           {tab === "ai" && <Ai />}
           {tab === "connect" && <Connect />}
-          {tab === "card" && <CardDetail />}
+          {(tab === "cards" || tab === "card") && <Cards />}
           {tab === "payplan" && <PayPlan />}
         </main>
 

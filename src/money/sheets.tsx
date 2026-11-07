@@ -1,8 +1,8 @@
 // Lifeline — data-entry sheets. Every form: one screen, big tap targets, smart defaults,
 // optional details folded away, and a Save button that is always visible.
 import { useMemo, useState } from "react";
-import type { Account, CardCashOut, CardEmi, CreditCard, Expense, ExpenseCategory, Freq, Goal, GoalKind, Holding, HoldingKind, Income, IncomeKind, Loan, LoanType, RiskProfile } from "./types";
-import { EXPENSE_ICON, ago } from "./labels";
+import type { Account, CardCashOut, CardEmi, CardNetwork, CreditCard, Expense, ExpenseCategory, Freq, Goal, GoalKind, Holding, HoldingKind, Income, IncomeKind, Loan, LoanType, RiskProfile } from "./types";
+import { EXPENSE_ICON, NETWORKS, ago } from "./labels";
 import { ESSENTIAL_DEFAULT, EXPENSE_LABEL, HOLDING_LABEL, INCOME_LABEL, LOAN_TYPE_LABEL } from "./types";
 import { useApp, type SheetState } from "./context";
 import { uid, parsePlainBackup } from "./store";
@@ -17,8 +17,9 @@ import { isNative, notificationsEnabled, requestNotifications, saveTextFile, sha
 import * as vault from "./vault";
 import { searchFunds, fundNav, type MfScheme } from "./market";
 import { FREE_FEATURES, PRICES, PRO_FEATURES } from "./entitlements";
-import { DEFAULT_CARD, alternativeCost, applyPayment, cashCost, dueAfter, emiQuote, emiRemaining, emiRowFor, emiSchedule, estimateStatement, lastStatementDate, nextPayment, nextStatementDate, ymAdd, ymOf } from "./cards";
+import { DEFAULT_CARD, alternativeCost, applyPayment, logCard, cashCost, dueAfter, emiQuote, emiRemaining, emiRowFor, emiSchedule, estimateStatement, lastStatementDate, nextPayment, nextStatementDate, ymAdd, ymOf } from "./cards";
 import { checkPurchase, monthName, type PayMode } from "./payplan";
+import { CardFace } from "./cardFace";
 
 // ─── Shared option lists ────────────────────────────────────────────────────
 const LOAN_SHORT: Record<LoanType, string> = {
@@ -45,6 +46,7 @@ export function SheetHost({ sheet }: { sheet: SheetState }) {
     case "expense": return <ExpenseSheet item={sheet.item} />;
     case "quick-spends": return <QuickSpendsSheet />;
     case "balances": return <BalancesSheet />;
+    case "plan-start": return <PlanStartSheet />;
     case "reminders": return <RemindersSheet />;
     case "letter": return <LetterSheet initial={sheet.letter} loanId={sheet.loanId} />;
     case "earn-profile": return <EarnProfileSheet />;
@@ -659,8 +661,12 @@ function CardSheet({ item, fromLoan }: { item?: CreditCard; fromLoan?: Loan }) {
   const { state, update, close, toast, go } = useApp();
   const base = item ?? { ...DEFAULT_CARD, id: "", name: fromLoan?.name ?? "", bank: fromLoan?.lender ?? "", accountId: fromLoan?.accountId ?? state.accounts[0]?.id ?? "",
     dueDay: fromLoan?.dueDay ?? DEFAULT_CARD.dueDay, monthlyRatePct: fromLoan && fromLoan.ratePct > 0 ? Math.round((fromLoan.ratePct / 12) * 100) / 100 : DEFAULT_CARD.monthlyRatePct };
+  const wizard = !item;
+  const [step, setStep] = useState(0);
   const [name, setName] = useState(base.name);
   const [bank, setBank] = useState(base.bank);
+  const [last4, setLast4] = useState(item?.last4 ?? "");
+  const [network, setNetwork] = useState<CardNetwork | "">(item?.network ?? "");
   const [limit, setLimit] = useState(str(item ? item.limit : undefined));
   const [stDay, setStDay] = useState<number | null>(item ? item.statementDay : null);
   const [dueDay, setDueDay] = useState<number | null>(item || fromLoan ? base.dueDay : null);
@@ -682,17 +688,32 @@ function CardSheet({ item, fromLoan }: { item?: CreditCard; fromLoan?: Loan }) {
   const [spends, setSpends] = useState("");
   const [err, setErr] = useState<Record<string, string>>({});
 
-  const save = () => {
+  // Validation per wizard step (all steps at once when editing).
+  const check = (steps: number[]) => {
     const e: Record<string, string> = {};
-    if (!name.trim()) e.name = "Name the card, e.g. “SBI SimplyCLICK”.";
-    if (!(num(limit) > 0)) e.limit = "Enter the credit limit (on the card app or statement).";
-    if (!stDay) e.st = "Tap the day your statement is generated.";
-    if (!dueDay) e.due = "Tap the payment due day.";
-    if (!acct) e.acct = "Choose the bank account you pay the bill from (add one in Bills → Banks first).";
-    if (!item && stStatus !== "none" && !(num(tad) > 0)) e.tad = "Enter the statement's total due.";
-    setErr(e); if (Object.keys(e).length) return;
+    if (steps.includes(0)) {
+      if (!name.trim()) e.name = "Name the card, e.g. “SBI SimplyCLICK”.";
+      if (last4 && !/^\d{4}$/.test(last4)) e.last4 = "Exactly 4 digits, or leave it blank.";
+      if (!(num(limit) > 0)) e.limit = "Enter the credit limit (on the card app or statement).";
+    }
+    if (steps.includes(1)) {
+      if (!stDay) e.st = "Tap the day your statement is generated.";
+      if (!dueDay) e.due = "Tap the payment due day.";
+      if (!acct) e.acct = "Choose the bank account you pay the bill from (add one first).";
+    }
+    if (steps.includes(2) && stStatus !== "none" && !(num(tad) > 0)) e.tad = "Enter the statement's total due.";
+    setErr(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const save = () => {
+    if (!check(wizard ? [0, 1, 2, 3] : [0, 1, 3])) {
+      if (wizard) setStep(s => (err.name || err.limit || err.last4 ? 0 : s));
+      return;
+    }
     const terms = {
-      name: name.trim(), bank: bank.trim(), limit: num(limit), statementDay: stDay!, dueDay: dueDay!, accountId: acct, plan, customPay: num(custom) || 0,
+      name: name.trim(), bank: bank.trim(), last4: last4 || undefined, network: network || undefined,
+      limit: num(limit), statementDay: stDay!, dueDay: dueDay!, accountId: acct, plan, customPay: num(custom) || 0,
       monthlyRatePct: num(rate) || 3.6, minPct: num(minPct) || 5, minFloor: Number.isNaN(num(minFloor)) ? 200 : num(minFloor),
       atmFeePct: num(atmPct) || 2.5, atmMinFee: num(atmMin) || 0, lateFee: num(late) || 0, drawFeePct: Number.isNaN(num(drawPct)) ? 3 : num(drawPct),
     };
@@ -700,76 +721,156 @@ function CardSheet({ item, fromLoan }: { item?: CreditCard; fromLoan?: Loan }) {
       update(s => ({ ...s, cards: s.cards.map(c => (c.id === item.id ? { ...c, ...terms } : c)) }));
       toast("Card updated"); close(); return;
     }
-    const draft: CreditCard = { ...DEFAULT_CARD, id: uid(), ...terms, unbilled: num(spends) || 0, paidMonths: fromLoan?.paidMonths ?? [] };
+    let draft: CreditCard = { ...DEFAULT_CARD, id: uid(), ...terms, unbilled: num(spends) || 0, paidMonths: fromLoan?.paidMonths ?? [], history: [] };
     const lsDate = lastStatementDate(draft);
     draft.cycleYm = ymOf(lsDate);
     if (stStatus !== "none") {
       const t = num(tad);
       const m = num(mad) > 0 ? num(mad) : Math.min(t, Math.max(draft.minFloor, t * draft.minPct / 100));
       draft.lastStatement = { ym: ymOf(lsDate), date: lsDate.toISOString(), due: dueAfter(draft, lsDate).toISOString(), tad: t, mad: m, paidAmount: stStatus === "part" ? num(paidPart) || 0 : 0, estimated: false };
+      draft = logCard(draft, { kind: "statement", label: "Statement (entered by you)", amount: t, date: lsDate.toISOString() });
     }
     update(s => ({ ...s, cards: [...s.cards, draft], loans: fromLoan ? s.loans.filter(l => l.id !== fromLoan.id) : s.loans }));
     toast(fromLoan ? "Card upgraded. Everything carried over" : "Card added. Bills are now calculated automatically");
-    close(); go("card", draft.id);
+    close(); go("cards", draft.id);
   };
   const del = item ? () => {
     if (!confirm(`Delete ${item.name} and its EMIs?`)) return;
-    update(s => ({ ...s, cards: s.cards.filter(c => c.id !== item.id) })); toast("Card deleted"); close(); go("bills", "cards");
+    update(s => ({ ...s, cards: s.cards.filter(c => c.id !== item.id) })); toast("Card deleted"); close(); go("cards");
   } : undefined;
 
-  return (
-    <Sheet title={item ? "Card settings" : fromLoan ? "Upgrade to detailed card" : "Add credit card"} subtitle="Takes a minute. Lifeline then calculates every bill for you" onClose={close} footer={<SaveBar onSave={save} onDelete={del} label={item ? "Save" : "Add card"} />}>
+  const cardPart = (
+    <>
+      <CardFace card={{ id: item?.id ?? "new", bank, name, last4, network: network || undefined }} />
       {!item && <Field label="Bank">{() => <ChoiceChips value={BANKS.includes(bank) ? bank : ""} options={BANKS.map(b => ({ value: b, label: b }))} onChange={b => { setBank(b === "Other" ? "" : b); if (!name) setName(b === "Other" ? "" : `${b} credit card`); }} />}</Field>}
+      {item && <Field label="Bank">{id => <TextInput id={id} value={bank} onChange={setBank} />}</Field>}
       <Field label="Card name" error={err.name}>{id => <TextInput id={id} value={name} onChange={setName} placeholder="e.g. HDFC Millennia" />}</Field>
-      <Field label="Credit limit" error={err.limit}>{id => <MoneyInput id={id} value={limit} onChange={setLimit} large />}</Field>
+      <div className="inline-2">
+        <Field label="Last 4 digits" optional error={err.last4} hint="Only to tell cards apart.">{id => <input id={id} className="input" inputMode="numeric" maxLength={4} value={last4} onChange={e => setLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="1234" />}</Field>
+        <Field label="Credit limit" error={err.limit}>{id => <MoneyInput id={id} value={limit} onChange={setLimit} />}</Field>
+      </div>
+      <Field label="Network" optional>{() => <ChoiceChips value={network} options={NETWORKS} onChange={v => setNetwork(v === network ? "" : v)} />}</Field>
+    </>
+  );
+  const datesPart = (
+    <>
       <Field label="Statement generated on day" error={err.st} hint="Printed on your statement as “Statement date”.">{() => <DayPicker value={stDay} onChange={d => { setStDay(d); if (!dueDay && d) setDueDay(((d + 19) % 28) + 1); }} />}</Field>
-      <Field label="Payment due on day" error={err.due} hint="Usually 15 to 20 days after the statement.">{() => <DayPicker value={dueDay} onChange={setDueDay} />}</Field>
+      <Field label="Payment due on day" error={err.due} hint={stDay && dueDay ? `${(dueDay - stDay + 31) % 31 || 31} days to pay after each statement.` : "Usually 15 to 20 days after the statement."}>{() => <DayPicker value={dueDay} onChange={setDueDay} />}</Field>
       <Field label="Bill paid from" error={err.acct}>{() => (
-        state.accounts.length ? <ChoiceCards value={acct} onChange={setAcct} options={state.accounts.map(a => ({ value: a.id, title: a.name, subtitle: `Balance ${inr(a.balance)}`, icon: "bank" }))} /> : <p className="field-error">Add a bank account first (Bills → Banks).</p>
+        state.accounts.length ? <ChoiceCards value={acct} onChange={setAcct} options={state.accounts.map(a => ({ value: a.id, title: a.name, subtitle: `Balance ${inr(a.balance)}`, icon: "bank" }))} /> : <p className="field-error">Add a bank account first (Loans → Banks).</p>
       )}</Field>
       <Field label="How do you usually pay?">{() => (
         <Segmented label="Payment plan" value={plan} onChange={setPlan} options={[{ value: "full", label: "In full" }, { value: "minimum", label: "Minimum" }, { value: "custom", label: "Fixed ₹" }]} />
       )}</Field>
       {plan === "custom" && <Field label="Amount you pay each month">{id => <MoneyInput id={id} value={custom} onChange={setCustom} />}</Field>}
-
-      {!item && (
-        <div className="inline-group">
-          <b>Your latest statement</b>
-          <Segmented label="Statement status" value={stStatus} onChange={setStStatus} options={[{ value: "none", label: "Paid in full" }, { value: "unpaid", label: "Not paid yet" }, { value: "part", label: "Part paid" }]} />
-          {stStatus !== "none" && (
-            <>
-              <Field label="Total amount due" error={err.tad}>{id => <MoneyInput id={id} value={tad} onChange={setTad} />}</Field>
-              <Field label="Minimum amount due" optional hint="Leave blank and Lifeline will calculate it.">{id => <MoneyInput id={id} value={mad} onChange={setMad} />}</Field>
-              {stStatus === "part" && <Field label="Already paid">{id => <MoneyInput id={id} value={paidPart} onChange={setPaidPart} />}</Field>}
-            </>
-          )}
-          <Field label="Spent since that statement" optional hint="From your card app's “unbilled” amount.">{id => <MoneyInput id={id} value={spends} onChange={setSpends} />}</Field>
-          <p className="note">Converted EMIs and card cash are added on the card screen next.</p>
-        </div>
+    </>
+  );
+  const billPart = (
+    <>
+      <Field label="Your latest statement">{() => (
+        <Segmented label="Statement status" value={stStatus} onChange={setStStatus} options={[{ value: "none", label: "Paid in full" }, { value: "unpaid", label: "Not paid yet" }, { value: "part", label: "Part paid" }]} />
+      )}</Field>
+      {stStatus !== "none" && (
+        <>
+          <Field label="Total amount due" error={err.tad}>{id => <MoneyInput id={id} value={tad} onChange={setTad} large />}</Field>
+          <Field label="Minimum amount due" optional hint="Leave blank and Lifeline will calculate it.">{id => <MoneyInput id={id} value={mad} onChange={setMad} />}</Field>
+          {stStatus === "part" && <Field label="Already paid">{id => <MoneyInput id={id} value={paidPart} onChange={setPaidPart} />}</Field>}
+        </>
       )}
+      <Field label="Spent since that statement" optional hint="Your card app shows this as “unbilled”.">{id => <MoneyInput id={id} value={spends} onChange={setSpends} />}</Field>
+      <p className="note">EMIs on the card and card cash are added on the card screen after this.</p>
+    </>
+  );
+  const chargesPart = (
+    <>
+      <Field label="Interest (finance charge) per month">{id => (
+        <>
+          <NumberInput id={id} value={rate} onChange={setRate} suffix={`% a month = ${((num(rate) || 0) * 12).toFixed(1)}% a year`} />
+          <ChoiceChips value={rate} options={RATE_CHIPS.map(r => ({ value: r, label: r + "%" }))} onChange={setRate} />
+        </>
+      )}</Field>
+      <div className="inline-2">
+        <Field label="Minimum due %">{id => <NumberInput id={id} value={minPct} onChange={setMinPct} suffix="%" />}</Field>
+        <Field label="…but at least">{id => <MoneyInput id={id} value={minFloor} onChange={setMinFloor} />}</Field>
+      </div>
+      <div className="inline-2">
+        <Field label="ATM cash fee">{id => <NumberInput id={id} value={atmPct} onChange={setAtmPct} suffix="%" />}</Field>
+        <Field label="…minimum">{id => <MoneyInput id={id} value={atmMin} onChange={setAtmMin} />}</Field>
+      </div>
+      <Field label="Late payment fee">{id => <MoneyInput id={id} value={late} onChange={setLate} />}</Field>
+      <Field label="Fee to move card money to your bank" hint="What your app charges for card-to-bank / rent / EMI payments. Used when the plan needs a card draw.">{id => <NumberInput id={id} value={drawPct} onChange={setDrawPct} suffix="% + GST" />}</Field>
+      <p className="note">18% GST is added to interest and all fees automatically. Exact figures are in your card's “Most Important Terms & Conditions”.</p>
+    </>
+  );
 
-      <Disclosure summary={<span><b>Card charges</b> <small>· pre-filled with typical Indian rates</small></span>}>
-        <Field label="Interest (finance charge) per month">{id => (
-          <>
-            <NumberInput id={id} value={rate} onChange={setRate} suffix={`% a month = ${((num(rate) || 0) * 12).toFixed(1)}% a year`} />
-            <ChoiceChips value={rate} options={RATE_CHIPS.map(r => ({ value: r, label: r + "%" }))} onChange={setRate} />
-          </>
-        )}</Field>
-        <div className="inline-2">
-          <Field label="Minimum due %">{id => <NumberInput id={id} value={minPct} onChange={setMinPct} suffix="%" />}</Field>
-          <Field label="…but at least">{id => <MoneyInput id={id} value={minFloor} onChange={setMinFloor} />}</Field>
+  if (!wizard) {
+    return (
+      <Sheet title="Card settings" subtitle={item!.name} onClose={close} footer={<SaveBar onSave={save} onDelete={del} />}>
+        {cardPart}
+        <div className="form-group-title">Dates and payment</div>
+        {datesPart}
+        <Disclosure summary={<span><b>Card charges</b> <small>· interest, minimum, fees</small></span>}>{chargesPart}</Disclosure>
+      </Sheet>
+    );
+  }
+
+  const STEPS = [
+    { title: "The card", sub: "Which card is it?", body: cardPart },
+    { title: "Dates", sub: "When the bill comes and when it's due", body: datesPart },
+    { title: "Current bill", sub: "Where this card stands today", body: billPart },
+    { title: "Charges", sub: "Pre-filled with typical Indian rates. Change only what's different", body: chargesPart },
+  ];
+  const s = STEPS[step];
+  const last = step === STEPS.length - 1;
+  const next = () => { if (check([step])) setStep(step + 1); };
+  return (
+    <Sheet title={fromLoan ? "Upgrade to detailed card" : "Add credit card"} subtitle={`Step ${step + 1} of ${STEPS.length} · ${s.sub}`} onClose={close}
+      footer={
+        <div className="wizard-foot">
+          <div className="wizard-dots" aria-hidden>{STEPS.map((x, i) => <i key={x.title} className={i === step ? "on" : i < step ? "done" : ""} />)}</div>
+          <div className="savebar">
+            {step > 0 && <Button onClick={() => setStep(step - 1)}>Back</Button>}
+            <Button variant="primary" full onClick={last ? save : next}>{last ? (fromLoan ? "Upgrade card" : "Add card") : `Next: ${STEPS[step + 1].title}`}</Button>
+          </div>
         </div>
-        <div className="inline-2">
-          <Field label="ATM cash fee">{id => <NumberInput id={id} value={atmPct} onChange={setAtmPct} suffix="%" />}</Field>
-          <Field label="…minimum">{id => <MoneyInput id={id} value={atmMin} onChange={setAtmMin} />}</Field>
-        </div>
-        <Field label="Late payment fee">{id => <MoneyInput id={id} value={late} onChange={setLate} />}</Field>
-        <Field label="Fee to move card money to your bank" hint="What your app charges for card-to-bank / rent / EMI payments. Used when the plan needs a card draw.">{id => <NumberInput id={id} value={drawPct} onChange={setDrawPct} suffix="% + GST" />}</Field>
-        <p className="note">18% GST is added to interest and all fees automatically. Exact figures are in your card's “Most Important Terms & Conditions”.</p>
-      </Disclosure>
+      }>
+      <div className="wizard-title"><b>{s.title}</b></div>
+      {s.body}
     </Sheet>
   );
 }
+
+// ─── Plan: step 1, confirm balances ─────────────────────────────────────────
+function PlanStartSheet() {
+  const { state, update, close, go } = useApp();
+  const [vals, setVals] = useState<Record<string, string>>(() => Object.fromEntries(state.accounts.map(a => [a.id, String(a.balance)])));
+  const total = state.accounts.reduce((s, a) => s + (vals[a.id] === "" || vals[a.id] === undefined ? a.balance : Number(vals[a.id])), 0);
+  const estCards = state.cards.filter(c => nextPayment(c).source === "estimate" || c.lastStatement?.estimated);
+  const confirmAll = () => {
+    const now = new Date().toISOString();
+    update(s => ({ ...s, accounts: s.accounts.map(a => ({ ...a, balance: vals[a.id] !== undefined && vals[a.id] !== "" ? Number(vals[a.id]) : a.balance, updatedAt: now })) }));
+    close(); go("payplan");
+  };
+  if (!state.accounts.length) {
+    return (
+      <Sheet title="Plan my payments" onClose={close}>
+        <p>Add the bank account your EMIs and card bills are paid from. The plan starts from its balance.</p>
+      </Sheet>
+    );
+  }
+  return (
+    <Sheet title="First, check your balances" subtitle="Step 1 of 2 · The plan starts from these numbers" onClose={close}
+      footer={<div className="savebar"><Button variant="primary" full icon="check" onClick={confirmAll}>Balances are right · show my plan</Button></div>}>
+      <p className="note">Open your bank app and correct any balance that has changed. Nothing else is needed.</p>
+      {state.accounts.map((a, i) => (
+        <Field key={a.id} label={a.name} hint={<span className={isStaleIso(a.updatedAt) ? "neg" : ""}>Last updated {ago(a.updatedAt)}</span>}>{id => <MoneyInput id={id} value={vals[a.id] ?? ""} onChange={v => setVals(p => ({ ...p, [a.id]: v }))} large autoFocus={i === 0} />}</Field>
+      ))}
+      <div className="plan-start-total"><span>Total in your accounts</span><b>{inr(total)}</b></div>
+      {estCards.length > 0 && <p className="note">Card bills for {estCards.map(c => c.name).join(", ")} are Lifeline's estimates. If a statement has arrived, enter it on the Cards tab for exact figures.</p>}
+    </Sheet>
+  );
+}
+const isStaleIso = (iso: string) => Date.now() - new Date(iso).getTime() > 86400000;
 
 // ─── EMI on a card ──────────────────────────────────────────────────────────
 function CardEmiSheet({ cardId, item }: { cardId: string; item?: CardEmi }) {
@@ -793,7 +894,11 @@ function CardEmiSheet({ cardId, item }: { cardId: string; item?: CardEmi }) {
     if (!label.trim()) return setErr("Name this EMI, e.g. “Phone” or “Balance conversion”.");
     if (!(P > 0) || !(N > 0)) return setErr("Enter the amount and number of months.");
     const rec: CardEmi = { id: item?.id ?? uid(), label: label.trim(), principal: P, ratePct: R, tenure: N, processingFee: Math.round(feeAmt * 100) / 100, startYm: ymAdd(nextYm, -Math.max(0, Math.round(num(billed) || 0))) };
-    update(s => ({ ...s, cards: s.cards.map(c => (c.id !== cardId ? c : { ...c, emis: item ? c.emis.map(e => (e.id === item.id ? rec : e)) : [...c.emis, rec] })) }));
+    update(s => ({ ...s, cards: s.cards.map(c => {
+      if (c.id !== cardId) return c;
+      const next = { ...c, emis: item ? c.emis.map(e => (e.id === item.id ? rec : e)) : [...c.emis, rec] };
+      return item ? next : logCard(next, { kind: "emi", label: `EMI started: ${rec.label}`, amount: rec.principal });
+    }) }));
     toast(item ? "EMI updated" : "EMI added. It's now in every bill"); close();
   };
   const del = item ? () => { if (confirm(`Remove ${item.label}?`)) { update(s => ({ ...s, cards: s.cards.map(c => (c.id !== cardId ? c : { ...c, emis: c.emis.filter(e => e.id !== item.id) })) })); close(); } } : undefined;
@@ -890,7 +995,11 @@ function CardCashSheet({ cardId, item }: { cardId: string; item?: CardCashOut })
   const save = () => {
     if (!(a > 0)) return;
     const rec: CardCashOut = { id: item?.id ?? uid(), ...tx, note: note.trim() };
-    update(s => ({ ...s, cards: s.cards.map(c => (c.id !== cardId ? c : { ...c, cashOuts: item ? c.cashOuts.map(x => (x.id === item.id ? rec : x)) : [...c.cashOuts, rec] })) }));
+    update(s => ({ ...s, cards: s.cards.map(c => {
+      if (c.id !== cardId) return c;
+      const next = { ...c, cashOuts: item ? c.cashOuts.map(x => (x.id === item.id ? rec : x)) : [...c.cashOuts, rec] };
+      return item ? next : logCard(next, { kind: "cash", label: rec.note || (rec.method === "atm" ? "ATM cash" : "Card to bank"), amount: rec.amount, date: rec.date });
+    }) }));
     toast("Added to the card's next bill"); close();
   };
   const del = item ? () => { update(s => ({ ...s, cards: s.cards.map(c => (c.id !== cardId ? c : { ...c, cashOuts: c.cashOuts.filter(x => x.id !== item.id) })) })); close(); } : undefined;
@@ -1094,6 +1203,7 @@ function CardStatementSheet({ cardId }: { cardId: string }) {
       ...c, cycleYm: ymOf(stmt), revolving: 0, cashOuts: c.cashOuts.filter(x => new Date(x.date) > stmt),
       unbilled: ls ? c.unbilled : 0,
       lastStatement: { ym: ymOf(stmt), date: stmt.toISOString(), due: due.toISOString(), tad: t, mad: minDue, paidAmount: num(paid) || 0, estimated: false },
+      history: [{ kind: "statement" as const, label: "Statement (entered by you)", amount: t, date: stmt.toISOString() }, ...(c.history ?? []).filter(h => !(h.kind === "statement" && h.date.slice(0, 10) === stmt.toISOString().slice(0, 10)))].slice(0, 50),
     })) }));
     toast("Statement saved. Reminders and plan updated"); close();
   };

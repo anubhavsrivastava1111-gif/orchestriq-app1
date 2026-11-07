@@ -7,7 +7,7 @@
 //   Minimum due = max(floor, min% × non-EMI principal) + 100% of EMI instalments + all interest, fees and GST + over-limit
 //
 // All figures are estimates from the card's terms; banks' exact daily-balance methods differ slightly.
-import type { CardEmi, CardCashOut, CardStatement, CreditCard, Loan, MoneyState } from "./types";
+import type { CardEmi, CardCashOut, CardEvent, CardStatement, CreditCard, Loan, MoneyState } from "./types";
 
 export const GST = 0.18;
 
@@ -280,7 +280,8 @@ export function rollCard(card: CreditCard, today = new Date()): CreditCard {
     const dayBefore = new Date(dayIn(prevStmt.getFullYear(), prevStmt.getMonth() + 1, c.statementDay).getTime() - 86400000);
     const est = estimateStatement(c, dayBefore);
     const stmt: CardStatement = { ym: est.ym, date: est.date.toISOString(), due: est.due.toISOString(), tad: est.tad, mad: est.mad, paidAmount: 0, estimated: true };
-    c = { ...c, lastStatement: stmt, revolving: 0, unbilled: 0, cashOuts: [], cycleYm: est.ym };
+    c = logCard({ ...c, lastStatement: stmt, revolving: 0, unbilled: 0, cashOuts: [], cycleYm: est.ym },
+      { kind: "statement", label: "Statement (calculated by Lifeline)", amount: est.tad, date: est.date.toISOString() });
   }
   return c;
 }
@@ -291,8 +292,17 @@ export function rollAllCards(state: MoneyState, today = new Date()): MoneyState 
   return changed ? { ...state, cards } : state;
 }
 
+// ─── Activity log ───────────────────────────────────────────────────────────
+export function logCard(card: CreditCard, ev: Omit<CardEvent, "date"> & { date?: string }): CreditCard {
+  const e: CardEvent = { ...ev, date: ev.date ?? new Date().toISOString() };
+  return { ...card, history: [e, ...(card.history ?? [])].slice(0, 50) };
+}
+
 // ─── Recording a payment ────────────────────────────────────────────────────
 export function applyPayment(card: CreditCard, amount: number, today = new Date()): CreditCard {
+  return logCard(applyPaymentRaw(card, amount, today), { kind: "payment", label: "Payment", amount, date: today.toISOString() });
+}
+function applyPaymentRaw(card: CreditCard, amount: number, today: Date): CreditCard {
   const p = nextPayment(card, today);
   const paidMonths = amount + p.paidSoFar >= Math.min(p.amount + p.paidSoFar, p.tad) - 0.5 ? [...new Set([...card.paidMonths, p.ym])] : card.paidMonths;
   if (p.source === "statement" && card.lastStatement) {

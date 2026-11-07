@@ -134,7 +134,7 @@ function Plan() {
             <Disclosure summary={<span>Why and how</span>}><p>{i.detail}</p></Disclosure>
             {(i.action?.tab || letter) && (
               <div className="btn-row">
-                {i.action?.tab && <Button size="sm" variant="primary" onClick={() => go((i.action!.tab === "save" ? "insights" : i.action!.tab) as Tab, i.action!.tab === "save" ? "debt" : i.id === "invest-vs-debt" ? "invest" : i.id === "deficit" ? "earn" : i.id.startsWith("card-") ? "cards" : undefined)}>{i.action.label}</Button>}
+                {i.action?.tab && <Button size="sm" variant="primary" onClick={() => go((i.action!.tab === "save" ? "insights" : i.action!.tab) as Tab, i.action!.tab === "save" ? "debt" : i.id === "invest-vs-debt" ? "invest" : i.id === "deficit" ? "earn" : undefined)}>{i.action.label}</Button>}
                 {letter && <Button size="sm" icon="doc" onClick={() => open({ kind: "letter", letter })}>Draft the letter</Button>}
               </div>
             )}
