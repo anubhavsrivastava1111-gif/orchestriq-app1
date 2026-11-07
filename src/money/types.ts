@@ -78,6 +78,8 @@ export interface CreditCard {
   lateFee: number;
   atmFeePct: number;
   atmMinFee: number;
+  drawFeePct?: number;          // fee for moving card money to the bank via apps (default 3%)
+  drawFeeIncludesGst?: boolean;
   emis: CardEmi[];
   cashOuts: CardCashOut[];
   paidMonths: string[];

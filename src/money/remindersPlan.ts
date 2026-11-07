@@ -1,6 +1,7 @@
 // Lifeline — builds the list of phone notifications for the next few months.
 import type { MoneyState } from "./types";
 import { addDays, dueDateIn, inrRaw, loansOf, ymKey } from "./engine";
+import { dueAfter, estimateStatement, nextPayment } from "./cards";
 import type { NativeReminder } from "./native";
 
 const MONTHS_AHEAD = 4;
@@ -34,6 +35,27 @@ export function buildReminders(state: MoneyState, now = new Date()): NativeRemin
         id: hashId(`due:${loan.id}:${ym}`), at: dueAt.getTime(),
         title: loan.cardId ? `${loan.name} bill due today` : `EMI today: ${loan.name}`,
         body: `${inrRaw(loan.emi)} from ${acct}. Open Lifeline and mark it paid once it goes through.`,
+      });
+    }
+  }
+  // Credit cards: statement-day summary and a 3-day warning before the due date.
+  for (const card of state.cards) {
+    const acct = state.accounts.find(a => a.id === card.accountId)?.name ?? "your account";
+    const p = nextPayment(card, now);
+    for (let k = 0; k <= MONTHS_AHEAD; k++) {
+      const m = now.getMonth() + k;
+      const stmt = dueDateIn({ dueDay: card.statementDay }, now.getFullYear() + Math.floor(m / 12), m % 12);
+      stmt.setHours(10, 0, 0, 0);
+      const due = dueAfter(card, stmt);
+      const est = k === 0 || p.source === "estimate" ? estimateStatement(card, new Date(stmt.getTime() - 86400000)) : null;
+      if (stmt.getTime() > nowMs) out.push({
+        id: hashId(`stmt:${card.id}:${ymKey(stmt)}`), at: stmt.getTime(), title: `${card.name}: statement today`,
+        body: est ? `About ${inrRaw(est.tad)} total, ${inrRaw(est.mad)} minimum, due ${due.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}. Enter the exact figures in Lifeline.` : `Due ${due.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}. Enter the amounts in Lifeline.`,
+      });
+      const warn = addDays(due, -3); warn.setHours(9, 30, 0, 0);
+      if (warn.getTime() > nowMs && !card.paidMonths.includes(ymKey(due))) out.push({
+        id: hashId(`cardwarn:${card.id}:${ymKey(due)}`), at: warn.getTime(), title: `${card.name} due in 3 days`,
+        body: `Keep ${inrRaw(p.ym === ymKey(due) ? p.amount : est?.tad ?? p.amount)} in ${acct}. Paying at least the minimum avoids a late fee and a credit-report mark.`,
       });
     }
   }

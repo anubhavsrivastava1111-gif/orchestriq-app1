@@ -2,6 +2,7 @@
 // Only the fund code / stock symbol is sent to the data source. No personal data ever leaves the vault.
 import type { FundMetrics } from "./types";
 import { httpGetJson } from "./native";
+import { searchFunds } from "./market";
 
 export interface Point { t: number; v: number } // t = ms timestamp, v = price / NAV
 export interface History { name: string; category: string; house: string; points: Point[] } // oldest → newest
@@ -144,11 +145,32 @@ export const RESEARCH_SITES = (kind: "mf" | "stock", code: string, name: string)
       { label: "Morningstar India", url: `https://www.morningstar.in/search.aspx?q=${q}` },
       { label: "AMFI (official NAVs)", url: "https://www.amfiindia.com/net-asset-value" },
       { label: "MF Central (invest/track)", url: "https://app.mfcentral.com" },
+      { label: "Moneycontrol MF", url: "https://www.moneycontrol.com/mutual-funds/" },
+      { label: "SEBI investor portal", url: "https://investor.sebi.gov.in" },
     ]
     : [
       { label: "Screener.in", url: `https://www.screener.in/company/${encodeURIComponent(base)}/` },
       { label: "Tickertape", url: `https://www.tickertape.in/search?text=${encodeURIComponent(base)}` },
       { label: "NSE India", url: `https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(base)}` },
       { label: "BSE India", url: "https://www.bseindia.com" },
+      { label: "Trendlyne", url: `https://trendlyne.com/equity/search/?q=${encodeURIComponent(base)}` },
+      { label: "Moneycontrol", url: "https://www.moneycontrol.com/markets/" },
+      { label: "ET Markets", url: "https://economictimes.indiatimes.com/markets" },
+      { label: "SEBI investor portal", url: "https://investor.sebi.gov.in" },
     ];
 };
+
+// ─── Benchmark: a low-cost Nifty 50 index fund (what most people should beat) ─
+let benchCache: Promise<{ name: string; metrics: FundMetrics }> | null = null;
+export function nifty50Benchmark(): Promise<{ name: string; metrics: FundMetrics }> {
+  if (!benchCache) {
+    benchCache = (async () => {
+      const found = await searchFunds("UTI Nifty 50 Index Fund Direct Growth");
+      const pick = found.find(f => /nifty 50 index/i.test(f.schemeName) && /direct/i.test(f.schemeName) && /growth/i.test(f.schemeName)) ?? found[0];
+      if (!pick) throw new Error("benchmark not found");
+      const h = await fundHistory(String(pick.schemeCode));
+      return { name: h.name, metrics: analyse(h.points) };
+    })().catch(e => { benchCache = null; throw e; });
+  }
+  return benchCache;
+}

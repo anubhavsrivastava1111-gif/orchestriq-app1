@@ -22,6 +22,8 @@ export const AI_APPS: AiApp[] = [
 export interface AiTask { id: string; title: string; subtitle: string; icon: string; prompt: string; needsInput?: string }
 
 export const AI_TASKS: AiTask[] = [
+  { id: "organise", title: "Plan my payments this month", subtitle: "What to pay first, no bounces", icon: "calendar",
+    prompt: "Using my income dates, loan EMIs and credit card dues below, give me a dated plan for this month: what to pay first, from which account, and how to cover any shortfall at the lowest cost without any EMI bouncing or missing a card minimum due. Compare paying the card in full then moving money back to the bank (about 3% + GST fee) with paying only part of the card. Then list 3 steps to make payments fit my income within 6 months." },
   { id: "review", title: "Review my month", subtitle: "3 most important actions", icon: "sparkle",
     prompt: "Review my finances below. Tell me the 3 most important actions for the next 30 days, in order, with amounts and dates. Be specific and practical." },
   { id: "debt", title: "Plan to clear expensive debt", subtitle: "Month-by-month", icon: "card",
@@ -101,5 +103,6 @@ Priorities: never miss an EMI; avoid new high-cost debt (never suggest instant-l
 Prefer regulated, low-cost options (talking to the lender, restructuring, loan against FD, bank gold loan, balance transfer).
 Be concise: short paragraphs or numbered steps, under 250 words unless asked for more. Use ₹ and Indian number formatting.
 You give general guidance, not regulated investment, tax or legal advice; say so briefly when the question needs a professional.
+For payments under stress: protect auto-debit EMIs first, then every card's minimum due, then pay cards in full where possible; compare the cost of card-to-bank transfers (fee + GST) against revolving card interest; point out RBI rights (billing-cycle change, 3-day grace before past-due reporting, tenure options on floating-rate loans) where they help.
 For investing: explain options by category and time horizon (FD/RD and debt funds for short goals; diversified low-cost index funds for 5+ years), show ranges and risks, never promise returns or give "sure-shot" tips, and suggest a SEBI-registered investment adviser for personalised advice.
 If the user seems in crisis or mentions self-harm, gently share India's Tele-MANAS helpline: 14416.`;

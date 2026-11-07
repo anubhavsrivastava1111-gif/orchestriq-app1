@@ -31,6 +31,7 @@ This works because every release is signed with the same key and has a higher ve
 | Version | Code | What's new |
 |---|---|---|
 | 1.0.0 | 1 | First Android release |
+| 1.3.0 | 4 | Payment Organizer: dated step-by-step plan each pay cycle (EMIs never bounce, card minimums protected, gap covered by the cheaper of card-to-bank draw or part-payment), 12-month view with total card fees and the month payments fit income, ways to lighten the load with ready emails, "Can I afford this?", simpler card screen (total/minimum/statement/due/days left, enter statement, overdue shown), card EMI payoff dates and interest left, card statement and due reminders, RBI rights, Nifty 50 comparison in research |
 | 1.2.0 | 3 | Grow tab: goal planner (inflation, 3 plans, 80%-confidence amounts from 2,000 simulated markets), "next rupee" priority ladder, risk quiz (capped under debt stress), fund/stock research (returns over 1/3/5/10 years, biggest fall, rolling returns, SIP backtest, scenarios from the fund's own history), watchlist, research-site links, AI analysis; wrong-passcode alert at unlock |
 | 1.1.0 | 2 | Detailed credit cards: EMIs on the card (principal, interest, GST, processing fee), automatic statement and minimum due, card cash (ATM / app transfers) cost calculator, one-tap upgrade of old credit-card entries |
 

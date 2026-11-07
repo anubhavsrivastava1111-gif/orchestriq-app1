@@ -1,9 +1,9 @@
 // Research — analyse any mutual fund (AMFI NAV history) or stock (Alpha Vantage) from its real price history.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../context";
 import { inr } from "../engine";
 import { searchFunds, type MfScheme } from "../market";
-import { RESEARCH_SITES, analyse, fundHistory, monthly, projectFromHistory, sipBacktest, stockHistory, verdict, type History } from "../research";
+import { RESEARCH_SITES, analyse, fundHistory, monthly, nifty50Benchmark, projectFromHistory, sipBacktest, stockHistory, verdict, type History } from "../research";
 import { copyText, isNative, openExternal, shareText } from "../native";
 import type { FundMetrics, WatchItem } from "../types";
 import { uid } from "../store";
@@ -95,6 +95,9 @@ function Analysis({ sel, onBack, onWatch }: { sel: { item: Omit<WatchItem, "id" 
   const infl = state.wealth.inflationPct;
   const real = (x: number) => x / Math.pow(1 + infl / 100, Number(ahead));
   const sites = RESEARCH_SITES(sel.item.kind, sel.item.code, sel.item.name);
+  const [bench, setBench] = useState<{ name: string; metrics: FundMetrics } | null>(null);
+  useEffect(() => { let alive = true; nifty50Benchmark().then(b => { if (alive) setBench(b); }).catch(() => { /* offline: skip comparison */ }); return () => { alive = false; }; }, []);
+  const isBench = bench && bench.name === sel.item.name;
 
   const aiPrompt = `Analyse this ${sel.item.kind === "mf" ? "mutual fund" : "stock"} for an Indian retail investor. Explain strengths, risks and what kind of investor and time horizon it suits. Compare with a low-cost Nifty 50 index fund and a 7% FD. Do not promise returns.\n\nName: ${sel.item.name}\nCategory: ${sel.item.category}\nHistory: ${mt.years.toFixed(1)} years (to ${new Date(mt.asOf).toLocaleDateString("en-IN")})\nReturns a year: 1y ${fmtPct(mt.cagr1)}, 3y ${fmtPct(mt.cagr3)}, 5y ${fmtPct(mt.cagr5)}, 10y ${fmtPct(mt.cagr10)}\nVolatility: ${mt.vol.toFixed(1)}% a year; biggest fall ${mt.maxDrawdown.toFixed(0)}%; worst 12 months ${mt.worstYear.toFixed(0)}%; best 12 months ${mt.bestYear.toFixed(0)}%\n${mt.rolling3 ? `Rolling 3-year returns: min ${mt.rolling3.min.toFixed(1)}%, median ${mt.rolling3.median.toFixed(1)}%, max ${mt.rolling3.max.toFixed(1)}%; beat a 7% FD in ${mt.rolling3.pctBeatFd.toFixed(0)}% of periods` : ""}\nMy risk profile: ${state.wealth.risk ?? "not set"}.`;
   const askAi = async () => {
@@ -136,6 +139,21 @@ function Analysis({ sel, onBack, onWatch }: { sel: { item: Omit<WatchItem, "id" 
           <ul className="flags">{v.lines.map(l => <li key={l}>{l}</li>)}</ul>
         </Card>
       </Section>
+
+      {bench && !isBench && (
+        <Section title="Compared with the Nifty 50" hint="A low-cost Nifty 50 index fund is the simplest choice. Anything else should beat it, or be less risky.">
+          <Card>
+            <div className="vs">
+              <div className="vs-head"><span /><b>This</b><b>Nifty 50</b></div>
+              {([["3-yr return/yr", mt.cagr3, bench.metrics.cagr3, true], ["5-yr return/yr", mt.cagr5, bench.metrics.cagr5, true], ["Biggest fall", mt.maxDrawdown, bench.metrics.maxDrawdown, true], ["Swings/yr", mt.vol, bench.metrics.vol, false]] as [string, number | undefined, number | undefined, boolean][]).map(([label, a, b, higherBetter]) => {
+                const better = a !== undefined && b !== undefined && (higherBetter ? a > b : a < b);
+                return <div key={label} className="vs-row"><span>{label}</span><b className={a === undefined || b === undefined ? "" : better ? "pos" : "neg"}>{fmtPct(a)}</b><b>{fmtPct(b)}</b></div>;
+              })}
+            </div>
+            <p className="note">{mt.cagr5 !== undefined && bench.metrics.cagr5 !== undefined ? (mt.cagr5 > bench.metrics.cagr5 ? `Beat the Nifty 50 by ${(mt.cagr5 - bench.metrics.cagr5).toFixed(1)}% a year over 5 years${mt.maxDrawdown < bench.metrics.maxDrawdown ? ", but with deeper falls" : ""}.` : `Trailed the Nifty 50 by ${(bench.metrics.cagr5 - mt.cagr5).toFixed(1)}% a year over 5 years. The index fund would have done better.`) : "Not enough shared history to compare 5-year returns."}</p>
+          </Card>
+        </Section>
+      )}
 
       <Section title="If you had invested monthly">
         <Card>

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useApp } from "../context";
 import { demoState } from "../store";
 import { RED_FLAGS, RESOURCES } from "../resources";
+import { RIGHTS } from "../rights";
 import { planLabel } from "../entitlements";
 import * as vault from "../vault";
 import { bioDisable, bioEnable, bioStatus, isNative, nativeInfo, openExternal, pickTextFile } from "../native";
@@ -96,6 +97,15 @@ export default function More() {
           <div className="flags-head"><Icon name="shield" /> <b>Stay safe</b></div>
           <ul className="flags">{RED_FLAGS.map(r => <li key={r}>{r}</li>)}</ul>
         </Card>
+        <Disclosure summary={<b>Your rights under RBI rules</b>}>
+          {RIGHTS.map(r => (
+            <div key={r.id} className="right">
+              <b>{r.title}</b><p>{r.rule}</p><p><b>Use it:</b> {r.use}</p><small className="muted">{r.source}</small>
+              {r.letter && <div className="btn-row"><button type="button" className="btn btn-secondary btn-sm" onClick={() => open({ kind: "letter", letter: r.letter })}>Draft the email</button></div>}
+            </div>
+          ))}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => openExternal("https://www.rbi.org.in/commonperson/English/Scripts/Notification.aspx")}>Check the latest RBI rules <Icon name="external" size={14} /></button>
+        </Disclosure>
         {RESOURCES.map(g => (
           <Disclosure key={g.id} summary={<b>{g.title}</b>}>
             <List>

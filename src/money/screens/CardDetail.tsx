@@ -1,20 +1,19 @@
-// One credit card in detail: next bill (estimated), EMIs on the card, card cash, and settings.
-import { useState } from "react";
+// One credit card, simply: what's due, by when, what's inside the bill, and every EMI's payoff.
 import { useApp } from "../context";
-import { inr } from "../engine";
-import { cashCost, emiRemaining, emiRowFor, estimateStatement, minimumTrap, nextPayment, planAmount, ymOf } from "../cards";
+import { daysBetween, inr } from "../engine";
+import { emiRemaining, emiRowFor, emiSchedule, estimateStatement, minimumTrap, nextPayment, nextStatementDate, planAmount, ymOf } from "../cards";
+import { drawFeePct } from "../payplan";
 import type { CreditCard } from "../types";
-import { Button, Card, Empty, Field, List, MoneyInput, Pill, Row, Section, Segmented } from "../components";
+import { Button, Card, Empty, List, MeterBar, Pill, Row, Section, Segmented, StackBar } from "../components";
 import { Icon } from "../icons";
 
 const fmt = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+const monthYear = (ym: string) => new Date(ym + "-01T00:00:00").toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 
 export default function CardDetail() {
   const { state, sub, go } = useApp();
   const card = state.cards.find(c => c.id === sub);
-  if (!card) {
-    return <Empty icon="card" title="Card not found" action={<Button onClick={() => go("bills", "cards")}>Back to cards</Button>} />;
-  }
+  if (!card) return <Empty icon="card" title="Card not found" action={<Button onClick={() => go("bills", "cards")}>Back to cards</Button>} />;
   return <CardView card={card} />;
 }
 
@@ -22,171 +21,137 @@ function CardView({ card }: { card: CreditCard }) {
   const { update, open, go } = useApp();
   const est = estimateStatement(card);
   const pay = nextPayment(card);
-  const trap = minimumTrap(card, est.nonEmiPrincipal);
-  const pct = Math.min(100, Math.round(est.utilization * 100));
   const setCard = (patch: Partial<CreditCard>) => update(s => ({ ...s, cards: s.cards.map(c => (c.id === card.id ? { ...c, ...patch } : c)) }));
+  const stmtDate = pay.source === "statement" && card.lastStatement ? new Date(card.lastStatement.date) : est.date;
+  const daysLeft = daysBetween(new Date(), pay.date);
+  const cycleDays = daysBetween(est.date, est.due);
+  const remaining = Math.max(0, pay.tad - pay.paidSoFar);
+  const planned = planAmount(card, pay.tad, pay.mad);
+  const trap = card.plan === "minimum" && est.nonEmiPrincipal > 1000 ? minimumTrap(card, est.nonEmiPrincipal) : null;
+  const sourceLabel = pay.source === "statement" ? (card.lastStatement?.estimated ? "Calculated by Lifeline" : "From your statement") : "Next bill · estimated";
   const ym = est.ym;
+
+  // What's inside the next bill, in four plain groups
+  const parts = [
+    { label: "Spends & balance", value: est.carried + est.newSpends + est.cash, cls: "c-ess" },
+    { label: "EMI instalments", value: est.emiPrincipal + est.emiInterest + est.procFee, cls: "c-emi" },
+    { label: "Interest & fees", value: est.carriedInterest + est.spendInterest + est.cashInterest + est.cashFees + est.lateFee, cls: "c-gap" },
+    { label: "GST", value: est.interestGst + est.cashGst + est.emiGst + est.procGst + est.lateGst, cls: "c-non" },
+  ];
+
+  const emis = card.emis.map(e => {
+    const rows = emiSchedule(e);
+    const row = emiRowFor(e, ym);
+    const k = row ? row.k : Math.max(0, Math.min(e.tenure, Math.round((Number(ym.slice(0, 4)) - Number(e.startYm.slice(0, 4))) * 12 + Number(ym.slice(5)) - Number(e.startYm.slice(5)) + 1)));
+    const future = rows.filter(r => r.ym >= ym);
+    return { e, row, k, left: emiRemaining(e, ym) + (row?.principal ?? 0), interestLeft: future.reduce((s, r) => s + r.interest + r.gst, 0), endYm: rows[rows.length - 1].ym, done: future.length === 0 };
+  });
+  const lastEnd = emis.filter(x => !x.done).map(x => x.endYm).sort().pop();
 
   return (
     <div className="screen">
       <div className="screen-head">
         <button type="button" className="icon-btn" aria-label="Back to cards" onClick={() => go("bills", "cards")}><Icon name="back" /></button>
-        <div className="screen-titles" style={{ flex: 1 }}>
-          <h1>{card.name}</h1>
-          <p>{card.bank} · statement on {card.statementDay}, due on {card.dueDay}</p>
-        </div>
+        <div className="screen-titles" style={{ flex: 1 }}><h1 className="h-small">{card.name}</h1><p>{card.bank}</p></div>
         <button type="button" className="icon-btn" aria-label="Card settings" onClick={() => open({ kind: "card", item: card })}><Icon name="edit" /></button>
       </div>
 
-      <div className="cc cc-big">
-        <div className="cc-top"><span className="cc-bank">{card.bank || "Credit card"}</span><span className="cc-chip" aria-hidden /></div>
-        <div className="cc-limit"><span>Available {inr(est.available)}</span><span>Limit {inr(card.limit)}</span></div>
-        <div className="cc-bar"><span className={pct > 70 ? "hot" : ""} style={{ width: pct + "%" }} /></div>
-        <div className="cc-due">
-          <div><small>Used</small><b>{inr(est.used)}</b></div>
-          <div><small>Usage</small><b>{pct}%</b></div>
-          <div><small>Interest</small><b>{card.monthlyRatePct}%/mo</b></div>
+      {/* ─── The bill ─── */}
+      <div className="due-hero">
+        <div className="dh-top"><span>{pay.source === "statement" ? (daysLeft < 0 ? "Overdue bill" : "Current bill") : "Next bill"}</span><span className="dh-src">{sourceLabel}</span></div>
+        {pay.source === "statement" && daysLeft < 0 && <p className="dh-overdue">Due {fmt(pay.date)}. Pay at least the minimum today. Within 3 days of the due date it isn't reported late; after that, late fees and a credit-report mark apply.</p>}
+        <div className="dh-amounts">
+          <div><small>Total due</small><b>{inr(remaining)}</b></div>
+          <div><small>Minimum due</small><b>{inr(Math.max(0, pay.mad - pay.paidSoFar))}</b></div>
         </div>
-        {est.overLimit > 0 && <p className="cc-warn">Over limit by {inr(est.overLimit)}. That amount is added to the minimum due.</p>}
+        <div className="dh-dates">
+          <div><small>Statement</small><b>{fmt(stmtDate)}</b></div>
+          <div><small>Pay by</small><b>{fmt(pay.date)}</b></div>
+          <div><small>Days left</small><b className={daysLeft <= 3 ? "dh-hot" : ""}>{daysLeft < 0 ? "Overdue" : daysLeft}</b></div>
+        </div>
+        <p className="dh-cycle">Every month: statement on the {card.statementDay}{suffix(card.statementDay)}, due on the {card.dueDay}{suffix(card.dueDay)} ({cycleDays} days to pay). You'll get reminders on statement day and before the due date.</p>
+        {pay.paidSoFar > 0 && <p className="dh-cycle">Already paid {inr(pay.paidSoFar)} this cycle.</p>}
       </div>
 
-      {/* ─── Next payment ─── */}
-      <Section title={pay.source === "statement" ? "Statement to pay" : "Next bill (estimated)"}
-        hint={pay.source === "statement" ? `Generated ${card.lastStatement?.estimated ? "by Lifeline" : "from your statement"}` : `Statement on ${fmt(est.date)} · due ${fmt(est.due)}. Calculated from your card's terms. No statement needed.`}>
-        <Card>
-          <div className="kpi-row">
-            <div><small>Total due</small><b>{inr(pay.tad)}</b></div>
-            <div><small>Minimum due</small><b>{inr(pay.mad)}</b></div>
-            <div><small>Pay by</small><b>{fmt(pay.date)}</b></div>
+      <Card>
+        <div className="field"><label>I'll pay</label>
+          <Segmented label="Payment plan" value={card.plan} onChange={v => setCard({ plan: v })} options={[{ value: "full", label: "Full amount" }, { value: "minimum", label: "Minimum" }, { value: "custom", label: "Fixed ₹" }]} />
+        </div>
+        {card.plan === "custom" && (
+          <div className="key-input" style={{ marginTop: 10 }}>
+            <input className="input" inputMode="numeric" aria-label="Fixed monthly payment" value={String(card.customPay || "")} onChange={e => setCard({ customPay: Number(e.target.value.replace(/\D/g, "")) || 0 })} placeholder="Amount each month" />
           </div>
-          <Field label="How will you pay?">{() => (
-            <Segmented label="Payment plan" value={card.plan} onChange={v => setCard({ plan: v })} options={[
-              { value: "full", label: "In full" }, { value: "minimum", label: "Minimum" }, { value: "custom", label: "Fixed ₹" },
-            ]} />
-          )}</Field>
-          {card.plan === "custom" && (
-            <Field label="Amount I'll pay each month">{id => <MoneyInput id={id} value={String(card.customPay || "")} onChange={v => setCard({ customPay: Number(v) || 0 })} />}</Field>
-          )}
-          <div className="plan-line">
-            <span>Lifeline will remind you to keep</span><b>{inr(pay.amount)}</b>
-          </div>
-          {card.plan !== "full" && pay.tad - planAmount(card, pay.tad, pay.mad) > 1 && (
-            <p className="field-error">Anything unpaid ({inr(pay.tad - planAmount(card, pay.tad, pay.mad))}) carries over at {card.monthlyRatePct}%/month + GST, and new spends lose the interest-free period.</p>
-          )}
-          {card.plan === "custom" && card.customPay < pay.mad && <p className="field-error">This is below the minimum due. That means a late fee of about {inr(card.lateFee * 1.18)} and a late mark on your credit report.</p>}
-          <div className="btn-row">
-            <Button variant="primary" icon="check" onClick={() => open({ kind: "card-pay", cardId: card.id })}>Record a payment</Button>
-          </div>
-        </Card>
-      </Section>
+        )}
+        <div className="plan-line"><span>Keep ready by {fmt(pay.date)}</span><b>{inr(Math.max(0, planned - pay.paidSoFar))}</b></div>
+        {card.plan !== "full" && <p className="hint-warn">The unpaid {inr(Math.max(0, pay.tad - planned))} attracts {card.monthlyRatePct}%/month + GST, and new spends lose the interest-free period.{trap ? ` Paying only the minimum: ~${inr(trap.nextMonthInterest)} interest next month; clearing it takes ${trap.capped ? "forever" : `${Math.floor(trap.months / 12)} yr ${trap.months % 12} mo`}.` : ""}</p>}
+        <div className="btn-row">
+          <Button variant="primary" icon="check" onClick={() => open({ kind: "card-pay", cardId: card.id })}>Record payment</Button>
+          <Button icon="doc" onClick={() => open({ kind: "card-statement", cardId: card.id })}>Enter statement</Button>
+        </div>
+      </Card>
 
-      {est.lines.length > 0 && (
-        <Section title={pay.source === "estimate" ? "How the bill adds up" : "Your next statement (building up)"} hint={pay.source === "estimate" ? undefined : `Statement on ${fmt(est.date)} · due ${fmt(est.due)}. Assumes you pay the statement above as planned.`}>
+      {/* ─── Inside the next bill ─── */}
+      {est.tad > 0.5 && (
+        <Section title={`Inside the ${pay.source === "statement" ? "next" : ""} bill · ${fmt(est.date)}`.replace("  ", " ")} hint={`Estimate: ${inr(est.tad)} total, ${inr(est.mad)} minimum, due ${fmt(est.due)}.`}>
           <Card>
-            <div className="breakdown">
-              {est.lines.map(l => (
-                <div key={l.label} className={"bd-row bd-" + l.kind}><span>{l.label}</span><b>{inr(l.amount)}</b></div>
-              ))}
-              <div className="bd-row bd-total"><span>Total due</span><b>{inr(est.tad)}</b></div>
-              <div className="bd-row bd-min"><span>Minimum due</span><b>{inr(est.mad)}</b></div>
-            </div>
-            <p className="note">Minimum = {card.minPct}% of the non-EMI balance (at least {inr(card.minFloor)}) + the full EMI instalments + all interest, fees and GST{est.overLimit > 0 ? " + over-limit amount" : ""}.</p>
+            <StackBar parts={parts} />
+            <details className="disclosure"><summary>Line by line<Icon name="chevron" size={16} /></summary>
+              <div className="disclosure-body breakdown">
+                {est.lines.map(l => <div key={l.label} className={"bd-row bd-" + l.kind}><span>{l.label}</span><b>{inr(l.amount)}</b></div>)}
+                <div className="bd-row bd-total"><span>Total due</span><b>{inr(est.tad)}</b></div>
+                <div className="bd-row bd-min"><span>Minimum due</span><b>{inr(est.mad)}</b></div>
+                <p className="note">Minimum = {card.minPct}% of balance (at least {inr(card.minFloor)}) + full EMI instalments + interest, fees and GST.</p>
+              </div>
+            </details>
           </Card>
         </Section>
       )}
 
-      {est.nonEmiPrincipal > 1000 && (
-        <Card tone={card.plan === "minimum" ? "danger" : "warn"}>
-          <div className="action">
-            <span className={"action-icon " + (card.plan === "minimum" ? "danger" : "warn")}><Icon name="alert" /></span>
-            <div className="action-body">
-              <b>If you pay only the minimum</b>
-              <p>Interest next month: about <b>{inr(trap.nextMonthInterest)}</b>. Clearing {inr(est.nonEmiPrincipal)} would take <b>{trap.capped ? "forever" : `${Math.floor(trap.months / 12)} yr ${trap.months % 12} mo`}</b> and cost about <b>{inr(trap.interest)}</b> in interest + GST.</p>
-              <div className="btn-row wrap">
-                <Button size="sm" onClick={() => open({ kind: "card-emi", cardId: card.id })}>Convert balance to EMI</Button>
-                <Button size="sm" icon="sparkle" onClick={() => go("ai")}>Ask AI for a plan</Button>
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
-
       {/* ─── EMIs ─── */}
-      <Section title="EMIs on this card" action={<Button size="sm" variant="primary" icon="plus" onClick={() => open({ kind: "card-emi", cardId: card.id })}>Add</Button>}>
-        {card.emis.length === 0 ? (
-          <Empty icon="calendar" title="No EMIs on this card" text="Add purchases or balances you converted to EMI. Lifeline splits each month into principal, interest and GST, and adds the processing fee." />
-        ) : (
-          <List>
-            {card.emis.map(e => {
-              const row = emiRowFor(e, ym);
-              const k = row ? row.k : 0;
-              const left = emiRemaining(e, ym) + (row?.principal ?? 0);
-              const done = !row && left < 1;
-              return (
-                <Row key={e.id} icon="calendar" iconTone={done ? "good" : "brand"} title={e.label}
-                  subtitle={done ? "Fully paid" : row ? `Instalment ${k} of ${e.tenure} · ${inr(row.principal)} principal + ${inr(row.interest)} interest + ${inr(row.gst)} GST${row.fee ? ` + fee ${inr(row.fee + row.feeGst)}` : ""}` : `Starts ${e.startYm} · ${inr(left)} principal`}
-                  value={row ? inr(row.billed) : "–"} onClick={() => open({ kind: "card-emi-detail", cardId: card.id, emiId: e.id })} />
-              );
-            })}
-          </List>
-        )}
+      <Section title="EMIs on this card" hint={lastEnd ? `All EMIs on this card end by ${monthYear(lastEnd)}.` : undefined} action={<Button size="sm" variant="primary" icon="plus" onClick={() => open({ kind: "card-emi", cardId: card.id })}>Add EMI</Button>}>
+        {emis.length === 0 ? (
+          <Empty icon="calendar" title="No EMIs on this card" text="Converted a purchase or the balance to EMI? Add it with the amount, rate, months and processing fee. Lifeline then works out every instalment and the payoff date." />
+        ) : emis.map(x => (
+          <Card key={x.e.id} className="emi-card" onClick={() => open({ kind: "card-emi-detail", cardId: card.id, emiId: x.e.id })}>
+            <div className="emi-top">
+              <b>{x.e.label}</b>
+              {x.done ? <Pill tone="good">Paid off</Pill> : <span className="emi-amt">{inr(x.row?.billed ?? 0)}<small>/mo</small></span>}
+            </div>
+            <MeterBar value={x.done ? x.e.tenure : Math.max(0, x.k - 1)} max={x.e.tenure} cls="fill-good" />
+            <div className="emi-meta">
+              <span>{x.done ? `${x.e.tenure} of ${x.e.tenure} paid` : `${Math.max(0, x.k - 1)} of ${x.e.tenure} paid · ends ${monthYear(x.endYm)}`}</span>
+              {!x.done && <span>Left: {inr(x.left)} + {inr(x.interestLeft)} interest</span>}
+            </div>
+            <small className="emi-terms">{inr(x.e.principal)} at {x.e.ratePct}% for {x.e.tenure} months · fee {inr(x.e.processingFee)}</small>
+          </Card>
+        ))}
       </Section>
 
       {/* ─── Card cash ─── */}
-      <Section title="Cash taken via this card" hint="ATM withdrawals, or paying rent, EMIs or wallets through an app for a fee." action={<Button size="sm" icon="plus" onClick={() => open({ kind: "card-cash", cardId: card.id })}>Add</Button>}>
-        {card.cashOuts.length === 0 ? (
-          <Card onClick={() => open({ kind: "card-cash", cardId: card.id })}>
-            <div className="profile-sum"><span className="action-icon warn"><Icon name="wallet" /></span><div><b>Check the real cost before you do it</b><p>Enter the amount and fee. Lifeline shows the fee, GST, interest and the yearly cost, compared with a personal or gold loan.</p></div><Icon name="chevron" size={18} /></div>
-          </Card>
-        ) : (
+      <Section title="Money moved out of this card" hint={`ATM cash or card-to-bank transfers (your fee: ${drawFeePct(card)}%). Added to the next bill automatically.`} action={<Button size="sm" icon="plus" onClick={() => open({ kind: "card-cash", cardId: card.id })}>Add</Button>}>
+        {card.cashOuts.length > 0 && (
           <List>
-            {card.cashOuts.map(c => {
-              const k = cashCost(card, c);
-              return (
-                <Row key={c.id} icon={c.method === "atm" ? "bank" : "transfer"} iconTone="warn" title={c.note || (c.method === "atm" ? "ATM withdrawal" : "Paid via app")}
-                  subtitle={`${new Date(c.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} · cost ${inr(k.total)} (~${k.annualPct.toFixed(0)}%/yr)`}
-                  value={inr(c.amount)} onClick={() => open({ kind: "card-cash", cardId: card.id, item: c })} />
-              );
-            })}
+            {card.cashOuts.map(c => (
+              <Row key={c.id} icon={c.method === "atm" ? "bank" : "transfer"} iconTone="warn" title={c.note || (c.method === "atm" ? "ATM withdrawal" : "Card to bank")}
+                subtitle={`${new Date(c.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} · fee ${c.feePct}%`} value={inr(c.amount)} onClick={() => open({ kind: "card-cash", cardId: card.id, item: c })} />
+            ))}
           </List>
         )}
       </Section>
 
-      <BalanceEditor card={card} onSave={patch => setCard(patch)} />
+      {/* ─── Limit ─── */}
+      <Card>
+        <div className="cat-bar-head"><span>Limit used</span><b>{inr(est.used)} of {inr(card.limit)}</b></div>
+        <MeterBar value={est.used} max={card.limit} cls={est.utilization > 0.7 ? "fill-danger" : "fill-brand"} />
+        <p className="note">{inr(est.available)} free after this bill is paid as planned.{est.utilization > 0.3 ? " Keeping usage under 30% helps your credit score." : ""}</p>
+      </Card>
 
-      <Section title="Card terms Lifeline uses">
-        <Card onClick={() => open({ kind: "card", item: card })}>
-          <div className="terms">
-            <span>Interest <b>{card.monthlyRatePct}%/mo</b></span>
-            <span>Minimum <b>{card.minPct}% (≥{inr(card.minFloor)})</b></span>
-            <span>ATM fee <b>{card.atmFeePct}% (≥{inr(card.atmMinFee)})</b></span>
-            <span>Late fee <b>{inr(card.lateFee)}</b></span>
-            <span>GST <b>18%</b></span>
-          </div>
-          <p className="note">Tap to change. Find these in your card's “Most Important Terms & Conditions” (MITC) on the bank's website.</p>
-        </Card>
-      </Section>
-      <p className="note center">Statement month {ymOf(est.date)} · figures are estimates from your card's terms. Banks calculate interest on daily balances, so small differences are normal.</p>
+      <List>
+        <Row icon="edit" iconTone="brand" title="Card settings & charges" subtitle={`${card.monthlyRatePct}%/month interest · minimum ${card.minPct}% · next statement ${fmt(nextStatementDate(card))}`} onClick={() => open({ kind: "card", item: card })} />
+      </List>
+      <p className="note center">Statement month {ymOf(est.date)}. Amounts are calculated from your card's terms. Use “Enter statement” to switch to the bank's exact figures.</p>
     </div>
   );
 }
 
-function BalanceEditor({ card, onSave }: { card: CreditCard; onSave: (p: Partial<CreditCard>) => void }) {
-  const { toast } = useApp();
-  const [carried, setCarried] = useState(String(card.revolving));
-  const [spends, setSpends] = useState(String(card.unbilled));
-  return (
-    <Section title="Keep it accurate" hint="Optional: update spends since the last statement from your card app. Lifeline handles everything else.">
-      <Card>
-        <div className="inline-2">
-          <Field label="New spends this cycle">{id => <MoneyInput id={id} value={spends} onChange={setSpends} />}</Field>
-          <Field label="Older unpaid balance" hint="Usually 0">{id => <MoneyInput id={id} value={carried} onChange={setCarried} />}</Field>
-        </div>
-        <Button size="sm" variant="primary" onClick={() => { onSave({ unbilled: Number(spends) || 0, revolving: Number(carried) || 0 }); toast("Card updated. Bill recalculated"); }}>Update</Button>
-        {card.lastStatement && (
-          <p className="note">Last statement {card.lastStatement.ym}: total {inr(card.lastStatement.tad)}, minimum {inr(card.lastStatement.mad)}, paid {inr(card.lastStatement.paidAmount)} <Pill tone={card.lastStatement.paidAmount >= card.lastStatement.tad - 1 ? "good" : card.lastStatement.paidAmount >= card.lastStatement.mad - 1 ? "warn" : "danger"}>{card.lastStatement.paidAmount >= card.lastStatement.tad - 1 ? "Paid" : card.lastStatement.paidAmount >= card.lastStatement.mad - 1 ? "Part paid" : "Unpaid"}</Pill></p>
-        )}
-      </Card>
-    </Section>
-  );
-}
+const suffix = (n: number) => (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");

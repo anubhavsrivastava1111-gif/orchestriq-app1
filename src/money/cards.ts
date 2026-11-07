@@ -231,7 +231,8 @@ export function estimateStatement(card: CreditCard, today = new Date()): Stateme
 export interface CardPayment { date: Date; ym: string; tad: number; mad: number; amount: number; source: "statement" | "estimate"; paidSoFar: number }
 export function nextPayment(card: CreditCard, today = new Date()): CardPayment {
   const ls = card.lastStatement;
-  if (ls && sod(new Date(ls.due)) >= sod(today) && ls.paidAmount < planAmount(card, ls.tad, ls.mad) - 0.5) {
+  // An unpaid statement stays the next payment, even after its due date (then it's overdue), until it's paid.
+  if (ls && ls.paidAmount < planAmount(card, ls.tad, ls.mad) - 0.5) {
     const due = new Date(ls.due);
     return { date: due, ym: ymOf(due), tad: ls.tad, mad: ls.mad, amount: Math.max(0, planAmount(card, ls.tad, ls.mad) - ls.paidAmount), source: "statement", paidSoFar: ls.paidAmount };
   }

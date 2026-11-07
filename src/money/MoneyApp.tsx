@@ -18,6 +18,7 @@ import More from "./screens/More";
 import Ai from "./screens/Ai";
 import Connect from "./screens/Connect";
 import CardDetail from "./screens/CardDetail";
+import PayPlan from "./screens/PayPlan";
 import { rollAllCards } from "./cards";
 
 type Phase = "welcome" | "create" | "bio-offer" | "locked" | "ready";
@@ -29,7 +30,7 @@ const NAV: { id: Tab | "add"; label: string; icon: string }[] = [
   { id: "insights", label: "Insights", icon: "chart" },
   { id: "earn", label: "Grow", icon: "grow" },
 ];
-const TABS: Tab[] = ["home", "bills", "insights", "earn", "more", "ai", "connect", "card"];
+const TABS: Tab[] = ["home", "bills", "insights", "earn", "more", "ai", "connect", "card", "payplan"];
 
 function readHash(): { tab: Tab; sub: string } {
   const [t, s] = location.hash.slice(1).split("/");
@@ -232,6 +233,7 @@ export default function MoneyApp() {
           {tab === "ai" && <Ai />}
           {tab === "connect" && <Connect />}
           {tab === "card" && <CardDetail />}
+          {tab === "payplan" && <PayPlan />}
         </main>
 
         {!onboarding && (

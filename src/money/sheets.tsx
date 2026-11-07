@@ -6,7 +6,7 @@ import { EXPENSE_ICON, ago } from "./labels";
 import { ESSENTIAL_DEFAULT, EXPENSE_LABEL, HOLDING_LABEL, INCOME_LABEL, LOAN_TYPE_LABEL } from "./types";
 import { useApp, type SheetState } from "./context";
 import { uid, parsePlainBackup } from "./store";
-import { inr, inrRaw } from "./engine";
+import { inr, inrRaw, loansOf } from "./engine";
 import { buildIcs, googleCalendarLink } from "./calendar";
 import { buildLetter, LETTERS, type LetterKind } from "./letters";
 import { SKILL_TAGS } from "./opportunities";
@@ -17,7 +17,8 @@ import { isNative, notificationsEnabled, requestNotifications, saveTextFile, sha
 import * as vault from "./vault";
 import { searchFunds, fundNav, type MfScheme } from "./market";
 import { FREE_FEATURES, PRICES, PRO_FEATURES } from "./entitlements";
-import { DEFAULT_CARD, alternativeCost, applyPayment, cashCost, dueAfter, emiQuote, emiRemaining, emiRowFor, emiSchedule, lastStatementDate, nextPayment, nextStatementDate, ymAdd, ymOf } from "./cards";
+import { DEFAULT_CARD, alternativeCost, applyPayment, cashCost, dueAfter, emiQuote, emiRemaining, emiRowFor, emiSchedule, estimateStatement, lastStatementDate, nextPayment, nextStatementDate, ymAdd, ymOf } from "./cards";
+import { checkPurchase, monthName, type PayMode } from "./payplan";
 
 // ─── Shared option lists ────────────────────────────────────────────────────
 const LOAN_SHORT: Record<LoanType, string> = {
@@ -56,7 +57,9 @@ export function SheetHost({ sheet }: { sheet: SheetState }) {
     case "card-emi": return <CardEmiSheet cardId={sheet.cardId} item={sheet.item} />;
     case "card-emi-detail": return <CardEmiDetailSheet cardId={sheet.cardId} emiId={sheet.emiId} />;
     case "card-cash": return <CardCashSheet cardId={sheet.cardId} item={sheet.item} />;
-    case "card-pay": return <CardPaySheet cardId={sheet.cardId} />;
+    case "card-pay": return <CardPaySheet cardId={sheet.cardId} amount={sheet.amount} />;
+    case "card-statement": return <CardStatementSheet cardId={sheet.cardId} />;
+    case "afford": return <AffordSheet />;
     case "goal": return <GoalSheet item={sheet.item} preset={sheet.preset} />;
     case "risk-quiz": return <RiskQuizSheet />;
     case "bounced": return <BouncedSheet loanId={sheet.loanId} />;
@@ -82,7 +85,8 @@ function QuickAddSheet() {
     { icon: "bank", title: "Add bank account", sub: "Where EMIs debit", go: { kind: "account" } },
     { icon: "income", title: "Add income", sub: "Salary, side income", go: { kind: "income" } },
     { icon: "spend", title: "Add a spend", sub: "Rent, bills, food…", go: { kind: "expense" } },
-    { icon: "doc", title: "Letter to lender", sub: "Ready to send", go: { kind: "letter" }, disabled: !state.loans.length },
+    { icon: "doc", title: "Letter to lender", sub: "Ready to send", go: { kind: "letter" }, disabled: !state.loans.length && !state.cards.length },
+    { icon: "wallet", title: "Can I afford this?", sub: "Check before you buy", go: { kind: "afford" } },
   ];
   return (
     <Sheet title="What would you like to add?" onClose={close}>
@@ -397,11 +401,11 @@ function RemindersSheet() {
 function LetterSheet({ initial, loanId }: { initial?: LetterKind; loanId?: string }) {
   const { state, close, toast, update } = useApp();
   const [kind, setKind] = useState<LetterKind>(initial ?? "date-change");
-  const [lid, setLid] = useState(loanId ?? state.loans[0]?.id ?? "");
+  const [lid, setLid] = useState(loanId ?? loansOf(state)[0]?.id ?? "");
   const [newDay, setNewDay] = useState<number | null>(null);
   const [reason, setReason] = useState("");
   const [name, setName] = useState(state.settings.name);
-  const loan = state.loans.find(l => l.id === lid);
+  const loan = loansOf(state).find(l => l.id === lid);
   const letter = useMemo(() => (loan ? buildLetter(kind, loan, { ...state, settings: { ...state.settings, name } }, { newDay: newDay ?? undefined, reason }) : null), [kind, loan, state, newDay, reason, name]);
   if (!loan || !letter) return <Sheet title="Letter to lender" onClose={close}><p>Add an EMI first.</p></Sheet>;
   const text = `Subject: ${letter.subject}\n\n${letter.body}`;
@@ -412,10 +416,10 @@ function LetterSheet({ initial, loanId }: { initial?: LetterKind; loanId?: strin
     <Sheet title="Letter to lender" subtitle="Filled in for you — review, then send from your email" onClose={close}
       footer={<div className="savebar"><Button icon="copy" onClick={copy}>Copy</Button><Button variant="primary" full icon="share" onClick={share}>Share / send</Button></div>}>
       <Field label="What do you need?">{() => <ChoiceCards value={kind} onChange={v => setKind(v as LetterKind)} options={LETTERS.map(l => ({ value: l.id, title: l.title, subtitle: l.when }))} />}</Field>
-      <Field label="Which loan?">{() => <ChoiceChips value={lid} options={state.loans.map(l => ({ value: l.id, label: l.name }))} onChange={setLid} />}</Field>
+      <Field label="Which loan?">{() => <ChoiceChips value={lid} options={loansOf(state).map(l => ({ value: l.id, label: l.name }))} onChange={setLid} />}</Field>
       <Field label="Your full name">{id => <TextInput id={id} value={name} onChange={setName} placeholder="As on your loan account" />}</Field>
-      {kind === "date-change" && <Field label="New EMI date you want" hint="2–5 days after your salary is ideal.">{() => <DayPicker value={newDay} onChange={setNewDay} />}</Field>}
-      {(kind === "restructure" || kind === "harassment") && (
+      {(kind === "date-change" || kind === "card-billing-cycle") && <Field label={kind === "card-billing-cycle" ? "New due date you want" : "New EMI date you want"} hint="2–5 days after your salary is ideal.">{() => <DayPicker value={newDay} onChange={setNewDay} />}</Field>}
+      {(kind === "restructure" || kind === "harassment" || kind === "fee-waiver") && (
         <Field label={kind === "restructure" ? "Reason (one line)" : "What happened"} optional>{id => (
           <textarea id={id} className="input textarea" value={reason} onChange={e => setReason(e.target.value)} rows={3}
             placeholder={kind === "restructure" ? "e.g. my salary was reduced by 30% from August" : "Dates, times, numbers, what was said, who was contacted"} />
@@ -669,6 +673,7 @@ function CardSheet({ item, fromLoan }: { item?: CreditCard; fromLoan?: Loan }) {
   const [atmPct, setAtmPct] = useState(String(base.atmFeePct));
   const [atmMin, setAtmMin] = useState(String(base.atmMinFee));
   const [late, setLate] = useState(String(base.lateFee));
+  const [drawPct, setDrawPct] = useState(String(base.drawFeePct ?? 3));
   // latest statement (new cards only)
   const [stStatus, setStStatus] = useState<"none" | "unpaid" | "part">(fromLoan && fromLoan.outstanding > 0 ? "unpaid" : "none");
   const [tad, setTad] = useState(str(fromLoan?.outstanding));
@@ -689,7 +694,7 @@ function CardSheet({ item, fromLoan }: { item?: CreditCard; fromLoan?: Loan }) {
     const terms = {
       name: name.trim(), bank: bank.trim(), limit: num(limit), statementDay: stDay!, dueDay: dueDay!, accountId: acct, plan, customPay: num(custom) || 0,
       monthlyRatePct: num(rate) || 3.6, minPct: num(minPct) || 5, minFloor: Number.isNaN(num(minFloor)) ? 200 : num(minFloor),
-      atmFeePct: num(atmPct) || 2.5, atmMinFee: num(atmMin) || 0, lateFee: num(late) || 0,
+      atmFeePct: num(atmPct) || 2.5, atmMinFee: num(atmMin) || 0, lateFee: num(late) || 0, drawFeePct: Number.isNaN(num(drawPct)) ? 3 : num(drawPct),
     };
     if (item) {
       update(s => ({ ...s, cards: s.cards.map(c => (c.id === item.id ? { ...c, ...terms } : c)) }));
@@ -759,6 +764,7 @@ function CardSheet({ item, fromLoan }: { item?: CreditCard; fromLoan?: Loan }) {
           <Field label="…minimum">{id => <MoneyInput id={id} value={atmMin} onChange={setAtmMin} />}</Field>
         </div>
         <Field label="Late payment fee">{id => <MoneyInput id={id} value={late} onChange={setLate} />}</Field>
+        <Field label="Fee to move card money to your bank" hint="What your app charges for card-to-bank / rent / EMI payments. Used when the plan needs a card draw.">{id => <NumberInput id={id} value={drawPct} onChange={setDrawPct} suffix="% + GST" />}</Field>
         <p className="note">18% GST is added to interest and all fees automatically. Exact figures are in your card's “Most Important Terms & Conditions”.</p>
       </Disclosure>
     </Sheet>
@@ -871,8 +877,8 @@ function CardCashSheet({ cardId, item }: { cardId: string; item?: CardCashOut })
   const card = state.cards.find(c => c.id === cardId);
   const [method, setMethod] = useState<CardCashOut["method"]>(item?.method ?? "app");
   const [amount, setAmount] = useState(str(item?.amount));
-  const [feePct, setFeePct] = useState(str(item?.feePct ?? (card ? 3 : 3)));
-  const [incl, setIncl] = useState(item?.feeIncludesGst ?? false);
+  const [feePct, setFeePct] = useState(str(item?.feePct ?? (card?.drawFeePct ?? 3)));
+  const [incl, setIncl] = useState(item?.feeIncludesGst ?? card?.drawFeeIncludesGst ?? false);
   const [date, setDate] = useState((item?.date ?? new Date().toISOString()).slice(0, 10));
   const [note, setNote] = useState(item?.note ?? "");
   if (!card) return null;
@@ -880,7 +886,7 @@ function CardCashSheet({ cardId, item }: { cardId: string; item?: CardCashOut })
   const tx = { amount: a, method, feePct: num(feePct) || 0, feeIncludesGst: incl, date: new Date(date + "T12:00:00").toISOString() };
   const k = a > 0 ? cashCost(card, tx) : null;
   const kMin = a > 0 && card.plan === "full" ? cashCost(card, tx, false) : null;
-  const pickMethod = (m: CardCashOut["method"]) => { setMethod(m); setFeePct(String(m === "atm" ? card.atmFeePct : 3)); };
+  const pickMethod = (m: CardCashOut["method"]) => { setMethod(m); setFeePct(String(m === "atm" ? card.atmFeePct : card.drawFeePct ?? 3)); };
   const save = () => {
     if (!(a > 0)) return;
     const rec: CardCashOut = { id: item?.id ?? uid(), ...tx, note: note.trim() };
@@ -890,7 +896,7 @@ function CardCashSheet({ cardId, item }: { cardId: string; item?: CardCashOut })
   const del = item ? () => { update(s => ({ ...s, cards: s.cards.map(c => (c.id !== cardId ? c : { ...c, cashOuts: c.cashOuts.filter(x => x.id !== item.id) })) })); close(); } : undefined;
   return (
     <Sheet title="Cash via credit card" subtitle="See the real cost first, then save it to the card" onClose={close} footer={<SaveBar onSave={save} onDelete={del} label={item ? "Save" : "Add to card"} disabled={!(a > 0)} />}>
-      <Segmented label="Method" value={method} onChange={pickMethod} options={[{ value: "app", label: "Pay via app (rent, EMI, wallet)" }, { value: "atm", label: "ATM withdrawal" }]} />
+      <Segmented label="Method" value={method} onChange={pickMethod} options={[{ value: "app", label: "Card to bank (app)" }, { value: "atm", label: "ATM cash" }]} />
       <Field label={method === "atm" ? "Cash withdrawn" : "Amount paid / received"}>{id => <MoneyInput id={id} value={amount} onChange={setAmount} large autoFocus />}</Field>
       <Field label="Fee charged" hint={method === "atm" ? `Your card: ${card.atmFeePct}% (at least ${inr(card.atmMinFee)}) + GST` : "The app's convenience fee, often 1–3%."}>{id => <NumberInput id={id} value={feePct} onChange={setFeePct} suffix="%" />}</Field>
       {method === "app" && <Toggle checked={incl} onChange={setIncl} label="Fee already includes GST" description={incl ? "Fee shown is the final amount" : "18% GST is added to the fee"} />}
@@ -919,11 +925,11 @@ function CardCashSheet({ cardId, item }: { cardId: string; item?: CardCashOut })
 }
 
 // ─── Record a card payment ──────────────────────────────────────────────────
-function CardPaySheet({ cardId }: { cardId: string }) {
+function CardPaySheet({ cardId, amount: preset }: { cardId: string; amount?: number }) {
   const { state, update, close, toast } = useApp();
   const card = state.cards.find(c => c.id === cardId);
   const p = card ? nextPayment(card) : null;
-  const [amount, setAmount] = useState(p ? String(Math.round(p.amount)) : "");
+  const [amount, setAmount] = useState(preset ? String(Math.round(preset)) : p ? String(Math.round(p.amount)) : "");
   if (!card || !p) return null;
   const acct = state.accounts.find(x => x.id === card.accountId);
   const save = () => {
@@ -1061,6 +1067,72 @@ function RiskQuizSheet() {
         <div className="quote">
           <div className="quote-head"><span>Your profile</span><b>{PROFILES[result.profile].label}</b><small>{PROFILES[result.profile].tagline} · ~{PROFILES[result.profile].expected}% a year expected, bad years down to {PROFILES[result.profile].worstYear}%</small></div>
           {result.capped && <p className="field-error">Your answers suggest Growth, but your EMIs are high right now, so we've set Balanced until your debt is lower. A market crash shouldn't force you to sell to pay EMIs.</p>}
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+// ─── Enter the bank's statement ─────────────────────────────────────────────
+function CardStatementSheet({ cardId }: { cardId: string }) {
+  const { state, update, close, toast } = useApp();
+  const card = state.cards.find(c => c.id === cardId);
+  const stmt = card ? lastStatementDate(card) : new Date();
+  const ls = card?.lastStatement && card.lastStatement.ym === ymOf(stmt) ? card.lastStatement : null;
+  const est = card ? estimateStatement(card, new Date(stmt.getTime() - 86400000)) : null;
+  const [tad, setTad] = useState(str(ls?.tad ?? (est ? Math.round(est.tad) : undefined)));
+  const [mad, setMad] = useState(str(ls?.mad ?? (est ? Math.round(est.mad) : undefined)));
+  const [paid, setPaid] = useState(str(ls?.paidAmount ?? 0));
+  const [err, setErr] = useState("");
+  if (!card) return null;
+  const due = dueAfter(card, stmt);
+  const save = () => {
+    const t = num(tad), m = num(mad);
+    if (!(t >= 0) || Number.isNaN(t)) return setErr("Enter the total amount due.");
+    const minDue = Number.isNaN(m) || m <= 0 ? Math.min(t, Math.max(card.minFloor, t * card.minPct / 100)) : Math.min(m, t);
+    update(s => ({ ...s, cards: s.cards.map(c => (c.id !== cardId ? c : {
+      ...c, cycleYm: ymOf(stmt), revolving: 0, cashOuts: c.cashOuts.filter(x => new Date(x.date) > stmt),
+      unbilled: ls ? c.unbilled : 0,
+      lastStatement: { ym: ymOf(stmt), date: stmt.toISOString(), due: due.toISOString(), tad: t, mad: minDue, paidAmount: num(paid) || 0, estimated: false },
+    })) }));
+    toast("Statement saved. Reminders and plan updated"); close();
+  };
+  return (
+    <Sheet title="Enter your statement" subtitle={`${card.name} · statement of ${stmt.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`} onClose={close} footer={<SaveBar onSave={save} label="Save statement" />}>
+      <div className="kpi-row">
+        <div><small>Statement date</small><b>{stmt.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</b></div>
+        <div><small>Due date</small><b>{due.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</b></div>
+        <div><small>Days to pay</small><b>{Math.round((due.getTime() - stmt.getTime()) / 86400000)}</b></div>
+      </div>
+      <Field label="Total amount due" error={err} hint="Pre-filled with Lifeline's estimate. Change it to match the bank's SMS or statement.">{id => <MoneyInput id={id} value={tad} onChange={setTad} large autoFocus />}</Field>
+      <Field label="Minimum amount due">{id => <MoneyInput id={id} value={mad} onChange={setMad} />}</Field>
+      <Field label="Already paid towards it" optional>{id => <MoneyInput id={id} value={paid} onChange={setPaid} />}</Field>
+      <p className="note">EMI instalments on this card are already inside these totals. Lifeline keeps tracking each EMI separately for its payoff date.</p>
+    </Sheet>
+  );
+}
+
+// ─── Can I afford this? ─────────────────────────────────────────────────────
+function AffordSheet() {
+  const { state, close, go } = useApp();
+  const [amount, setAmount] = useState("");
+  const [mode, setMode] = useState<PayMode>("cash");
+  const [months, setMonths] = useState("6");
+  const [what, setWhat] = useState("");
+  const a = num(amount) || 0;
+  const v = a > 0 ? checkPurchase(state, a, mode, Number(months) || 6) : null;
+  return (
+    <Sheet title="Can I afford this?" subtitle="Check before you buy. It takes 10 seconds" onClose={close}
+      footer={<div className="savebar"><Button full onClick={close}>Done</Button>{v && v.level !== "safe" && <Button variant="primary" full onClick={() => { close(); go("payplan"); }}>See my plan</Button>}</div>}>
+      <Field label="What is it?" optional>{id => <TextInput id={id} value={what} onChange={setWhat} placeholder="e.g. New phone" />}</Field>
+      <Field label="Price">{id => <MoneyInput id={id} value={amount} onChange={setAmount} large autoFocus />}</Field>
+      <Field label="How would you pay?">{() => <Segmented label="Payment mode" value={mode} onChange={setMode} options={[{ value: "cash", label: "Bank / UPI" }, { value: "card", label: "Credit card" }, { value: "card-emi", label: "Card EMI" }]} />}</Field>
+      {mode === "card-emi" && <Field label="EMI months">{() => <ChoiceChips value={months} options={["3", "6", "9", "12"].map(m => ({ value: m, label: m }))} onChange={setMonths} />}</Field>}
+      {v && (
+        <div className={"verdict v-" + v.level}>
+          <div className="verdict-head"><Icon name={v.level === "safe" ? "check" : "alert"} /><b>{v.headline}</b></div>
+          <ul className="flags">{v.lines.map(l => <li key={l}>{l}</li>)}</ul>
+          {v.level !== "safe" && <p className="note">{v.after.fitsFrom ? `With it, your payments fit your income from ${monthName(v.after.fitsFrom)}.` : "Wait until a loan closes or your card balance is cleared, or look for a cheaper option."}</p>}
         </div>
       )}
     </Sheet>
