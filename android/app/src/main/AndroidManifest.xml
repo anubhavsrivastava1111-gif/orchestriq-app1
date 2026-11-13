@@ -6,13 +6,14 @@
   - usesCleartextTraffic off: only HTTPS network traffic is possible.
   - Every component except the launcher activity is non-exported (other apps cannot call it).
   - Only the permissions the features need. No contacts, location, storage or camera access.
-  - SMS: only when the user turns on "Read bank messages". Only bank/business senders are kept;
-    one-time passwords are dropped. The receiver accepts broadcasts from the system only (BROADCAST_SMS).
+  - SMS: RECEIVE_SMS only (no READ_SMS: the app cannot open the phone's SMS inbox). Only when the user turns
+    on "Read bank messages". Only bank/business senders are kept; OTP messages are dropped and any OTP-like
+    code is masked before storage. The receiver accepts broadcasts from the system only (BROADCAST_SMS).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.orchestriq.lifeline"
-    android:versionCode="6"
-    android:versionName="1.5.0">
+    android:versionCode="7"
+    android:versionName="1.6.0">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
 
@@ -21,7 +22,6 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
-    <uses-permission android:name="android.permission.READ_SMS" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <!-- Apps Lifeline can hand off to (Android 11+ requires declaring these). -->
@@ -42,6 +42,16 @@
         <package android:name="in.indwealth" />
         <package android:name="com.whatsapp" />
         <package android:name="com.google.android.calendar" />
+        <!-- Remote-access apps used in screen-sharing scams: detected only, to warn the user. -->
+        <package android:name="com.anydesk.anydeskandroid" />
+        <package android:name="com.teamviewer.quicksupport.market" />
+        <package android:name="com.teamviewer.teamviewer.market.mobile" />
+        <package android:name="com.rustdesk.rustdesk" />
+        <package android:name="com.sand.airdroid" />
+        <package android:name="com.sand.airmirror" />
+        <package android:name="com.carriez.flutter_hbb" />
+        <package android:name="com.remotepc.viewer" />
+        <package android:name="com.splashtop.remote.pad.v2" />
         <intent>
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="text/plain" />

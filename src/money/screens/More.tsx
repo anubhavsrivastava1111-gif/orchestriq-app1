@@ -6,7 +6,7 @@ import { RED_FLAGS, RESOURCES } from "../resources";
 import { RIGHTS } from "../rights";
 import { planLabel } from "../entitlements";
 import * as vault from "../vault";
-import { bioDisable, bioEnable, bioStatus, isNative, nativeInfo, openExternal, pickTextFile } from "../native";
+import { bioDisable, bioEnable, bioStatus, isNative, nativeInfo, openExternal, pickTextFile, remoteAccessApps } from "../native";
 import { Card, Disclosure, Field, List, MoneyInput, Pill, Row, Screen, Section, Segmented, TextInput, Toggle } from "../components";
 import { Icon } from "../icons";
 
@@ -60,6 +60,7 @@ export default function More() {
       </Section>
 
       <Section title="Security & privacy">
+        <SecurityCheck bio={state.settings.bioEnabled && bio.enrolledHere} />
         <Card className="security-card">
           <div className="sec-head"><Icon name="shield" /><div><b>Your data is encrypted</b><small>AES-256 · locked by your passcode{isNative ? " · bound to this phone's secure hardware" : ""}</small><small>Wrong passcode attempts are reported to you at the next unlock. Research and market data requests never include your personal data.</small></div></div>
         </Card>
@@ -69,7 +70,7 @@ export default function More() {
             <Toggle checked={state.settings.bioEnabled && bio.enrolledHere} onChange={toggleBio} label="Fingerprint / face unlock"
               description={bio.available ? "Hardware-backed. Turns off automatically if fingerprints change" : "Add a fingerprint in Android settings first"} />
           )}
-          {isNative && <Toggle checked={state.settings.blockScreenshots} onChange={v => set("blockScreenshots", v)} label="Block screenshots & hide in recent apps" description="Recommended: stops other apps and screen recorders seeing your money" />}
+          {isNative && <Toggle checked={state.settings.blockScreenshots || state.settings.smsCapture} onChange={v => { if (state.settings.smsCapture && !v) { toast("Always on while bank messages are read"); return; } set("blockScreenshots", v); }} label="Block screenshots, screen sharing & recent-apps preview" description={state.settings.smsCapture ? "Always on while bank messages are read" : "Recommended: stops screen-sharing apps and recorders seeing your money"} />}
           <Toggle checked={state.settings.hideAmounts} onChange={v => set("hideAmounts", v)} label="Hide amounts" description="Masks every ₹ figure, useful in public" />
           <div className="row seg-row">
             <span className="row-main"><span className="row-title">Auto-lock</span><span className="row-sub">After leaving the app</span></span>
@@ -137,5 +138,35 @@ export default function More() {
 
       <p className="note center">Lifeline {info ? `v${info.version} for Android` : "web"} · <Pill>{planLabel(state)}</Pill><br />General guidance, not regulated financial advice. Part of OrchestrIQ.</p>
     </Screen>
+  );
+}
+
+/** Live security status: what protects the data right now, and anything risky on this phone. */
+function SecurityCheck({ bio }: { bio: boolean }) {
+  const { state, open } = useApp();
+  const remote = remoteAccessApps();
+  const s = state.settings;
+  const items: { ok: boolean; title: string; sub: string; act?: () => void }[] = [
+    { ok: true, title: "Data encrypted and locked", sub: `AES-256, opened only with your passcode${isNative ? ", sealed to this phone's secure chip" : ""}` },
+    { ok: s.autoLockSec <= 60, title: `Auto-lock ${s.autoLockSec === 0 ? "instantly" : s.autoLockSec <= 60 ? `after ${s.autoLockSec} s` : "after 5 min"}`, sub: s.autoLockSec <= 60 ? "Locks soon after you leave the app" : "Choose 1 minute or less below" },
+    ...(isNative ? [
+      { ok: s.blockScreenshots || s.smsCapture, title: "Screenshots and screen sharing blocked", sub: s.blockScreenshots || s.smsCapture ? "Screen-sharing apps see a black screen" : "Turn it on below" },
+      { ok: bio, title: bio ? "Fingerprint tied to your enrolled fingers" : "Fingerprint unlock off", sub: bio ? "Stops working if someone adds a new fingerprint" : "Optional. Passcode still protects you" },
+      { ok: remote.length === 0, title: remote.length ? `Screen-sharing app found: ${remote.join(", ")}` : "No screen-sharing apps found", sub: remote.length ? "Used in OTP scams. Uninstall unless you trust why it's there" : "AnyDesk, TeamViewer and similar aren't installed" },
+      { ok: true, title: s.smsCapture ? "Bank messages: OTPs never stored" : "Bank messages: off", sub: s.smsCapture ? "OTP messages dropped, codes masked, no inbox access" : "Nothing is read", act: () => open({ kind: "sms-setup" }) },
+    ] : []),
+    { ok: true, title: "Backups encrypted, without message texts", sub: "Separate password; message texts never leave the phone" },
+  ];
+  const bad = items.filter(i => !i.ok).length;
+  return (
+    <Card className={"sec-check" + (bad ? " warn" : "")}>
+      <div className="sec-check-head"><Icon name={bad ? "alert" : "shield"} /><b>{bad ? `${bad} thing${bad > 1 ? "s" : ""} to fix` : "Security check: all good"}</b></div>
+      {items.map(i => (
+        <button key={i.title} type="button" className={"sec-item" + (i.ok ? "" : " bad")} onClick={i.act} disabled={!i.act}>
+          <Icon name={i.ok ? "check" : "alert"} size={16} /><span><b>{i.title}</b><small>{i.sub}</small></span>
+        </button>
+      ))}
+      <p className="fraud-rule">Lifeline never asks for an OTP, PIN or password, and never calls you. Anyone who does is a fraudster.</p>
+    </Card>
   );
 }

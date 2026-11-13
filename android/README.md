@@ -8,7 +8,7 @@ A native Android app (package `com.orchestriq.lifeline`) that hosts the Lifeline
 - secure file save and open.
 
 - **Size:** ~0.3 MB · **Android:** 8.0+ (API 26), targets Android 15 (API 35)
-- **Permissions:** Internet, Notifications, Run at startup (to restore reminders after a reboot), Biometric, SMS (only when you turn on "Read bank messages"). No contacts, location, storage or camera.
+- **Permissions:** Internet, Notifications, Run at startup (to restore reminders after a reboot), Biometric, Receive SMS (only when you turn on "Read bank messages"; the app has no permission to open the SMS inbox). No contacts, location, storage or camera.
 
 ## Install on your phone (sideload)
 
@@ -31,6 +31,7 @@ This works because every release is signed with the same key and has a higher ve
 | Version | Code | What's new |
 |---|---|---|
 | 1.0.0 | 1 | First Android release |
+| 1.6.0 | 7 | OTP and fraud protection: no SMS-inbox access at all (READ_SMS removed, new messages only); every stored message scrubbed (OTP-like codes masked, links removed) in native code before it is saved; message texts deleted after 90 days and never put in backups; screenshots and screen sharing always blocked while SMS capture is on; auto-lock capped at 1 minute; warning when AnyDesk, TeamViewer or similar screen-sharing apps are installed; "never share an OTP" pledge before turning on; Security check in More |
 | 1.5.0 | 6 | Reads bank SMS (optional): balances, card swipes, card payments and bills, cash withdrawals, money received and EMIs recorded automatically; OTPs and personal messages never read; new Activity tab with month totals and filters; unknown accounts linked once and remembered; plan steps tick off by themselves with the real amount, plus Done (any amount) / Later / Not doing; card-rotation explainer with costs; far fewer notifications (one per due date, none when already covered, no check-ins when SMS is on) |
 | 1.4.0 | 5 | Calm Home: your bank balances exactly as entered, no unasked-for steps. "Plan my payments" on request: confirm balances first, then a two-part plan (before salary / after salary) built from those balances. New Cards tab: card wallet with realistic card pictures, status at a glance (due / overdue / paid), one-tap Pay, Enter bill, Add EMI, Card cash; Bill, EMIs, Activity and Details views; activity history; 4-step add-card wizard with last 4 digits and network |
 | 1.3.0 | 4 | Payment Organizer: dated step-by-step plan each pay cycle (EMIs never bounce, card minimums protected, gap covered by the cheaper of card-to-bank draw or part-payment), 12-month view with total card fees and the month payments fit income, ways to lighten the load with ready emails, "Can I afford this?", simpler card screen (total/minimum/statement/due/days left, enter statement, overdue shown), card EMI payoff dates and interest left, card statement and due reminders, RBI rights, Nifty 50 comparison in research |
@@ -47,7 +48,8 @@ This works because every release is signed with the same key and has a higher ve
 | The app container | Interface ships inside the APK and is served from a reserved offline origin. A strict Content-Security-Policy allows scripts only from the app and network only to `api.anthropic.com`, `api.mfapi.in` and `www.alphavantage.co`. The WebView can't open other sites, `file://` or `content://`. External links go to the browser; only https/tel/mailto/upi are allowed. |
 | Native bridge | Works only while the app's own origin is loaded. App hand-off is limited to a fixed list of known packages. The native HTTP helper only reaches two market-data hosts. |
 | Backups | Android cloud/adb backup is **disabled**. Your own backups are AES-256 encrypted with a separate password and saved through the system file picker. Lifeline needs no storage permission. |
-| Bank SMS | Off until you turn it on. Only bank/business senders are kept; messages with a one-time password are dropped before storage; personal SMS are ignored. Messages that arrive while the app is locked wait in a queue sealed with the hardware Keystore key, then move into the encrypted vault. The SMS receiver only accepts broadcasts from the system. |
+| Bank SMS | Off until you turn it on. Only RECEIVE_SMS (no READ_SMS): the app can't open the inbox or old messages. Only bank/business senders are kept; OTP messages are dropped on arrival; in every kept message any OTP-like 4–8 digit code is masked and links are removed, in native code, before storage. Waiting messages are sealed with the hardware Keystore key until unlock. Texts are deleted after 90 days and never included in backups or AI summaries. The receiver accepts broadcasts from the system only. |
+| Fraud defences | Screenshots, screen recording and screen sharing blocked (always, while SMS capture is on). Warns when remote-access apps (AnyDesk, TeamViewer, RustDesk, AirDroid…) are installed. The app never asks for an OTP, has no server and no account to log into remotely. |
 | Notifications | Lock-screen version shows only "You have an EMI reminder". Amounts appear after unlocking the phone. |
 | AI | Summaries sent to AI apps never include your name, account numbers or keys, and you choose rounded, exact or hidden amounts. Your own Claude API key is stored inside the encrypted vault. |
 

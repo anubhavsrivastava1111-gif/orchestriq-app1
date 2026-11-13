@@ -26,7 +26,8 @@ interface NativeBridge {
   smsRequest?(cb: string): void;
   smsSetOn?(on: boolean): void;
   smsDrain?(): string;
-  smsScan?(cb: string, days: number): void;
+  remoteAccessApps?(): string;
+  openAppSettings?(): void;
 }
 
 declare global {
@@ -188,9 +189,14 @@ export function smsDrain(): SmsMsg[] {
   if (!smsSupported()) return [];
   try { const a = JSON.parse(bridge!.smsDrain!()); return Array.isArray(a) ? a : []; } catch { return []; }
 }
-/** Bank messages already in the phone's inbox for the last `days` days. */
-export async function smsScan(days: number): Promise<SmsMsg[]> {
-  if (!smsSupported()) return [];
-  const raw = await call(id => bridge!.smsScan!(id, days));
-  try { const a = JSON.parse(raw); return Array.isArray(a) ? a : []; } catch { return []; }
+/** Screen-sharing / remote-control apps installed on the phone (used in OTP scams). */
+const REMOTE_NAMES: Record<string, string> = {
+  "com.anydesk.anydeskandroid": "AnyDesk", "com.teamviewer.quicksupport.market": "TeamViewer QuickSupport", "com.teamviewer.teamviewer.market.mobile": "TeamViewer",
+  "com.rustdesk.rustdesk": "RustDesk", "com.carriez.flutter_hbb": "RustDesk", "com.sand.airdroid": "AirDroid", "com.sand.airmirror": "AirMirror",
+  "com.remotepc.viewer": "RemotePC", "com.splashtop.remote.pad.v2": "Splashtop",
+};
+export function remoteAccessApps(): string[] {
+  if (!bridge?.remoteAccessApps) return [];
+  try { return [...new Set((JSON.parse(bridge.remoteAccessApps()) as string[]).map(p => REMOTE_NAMES[p] ?? p))]; } catch { return []; }
 }
+export const openAppSettings = () => bridge?.openAppSettings?.();

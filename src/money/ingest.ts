@@ -6,7 +6,7 @@
 //   • an EMI debit marks the matching loan paid for that month (the balance already moved with the message).
 // Messages older than the last balance you entered don't change the balance again.
 import type { CardCashOut, CreditCard, MoneyState, PlanMark, Txn } from "./types";
-import { parseSms, bankName, type ParsedSms } from "./sms";
+import { parseSms, bankName, redactSms, type ParsedSms } from "./sms";
 import { applyPayment, dueAfter, lastStatementDate, logCard, ymOf } from "./cards";
 import { buildCyclePlan, drawFeePct, type PlanStep } from "./payplan";
 import { dueDateIn, inrRaw } from "./engine";
@@ -29,7 +29,7 @@ export function ingestMessages(state: MoneyState, msgs: RawSms[], source: Txn["s
     if (!p) { skipped++; continue; }
     const txn: Txn = {
       id: uid(), date: new Date(m.ts).toISOString(), amount: p.amount, dir: p.dir, kind: p.kind, party: p.party,
-      last4: p.last4, balanceAfter: p.balanceAfter, ref: p.ref, bank: bankName(m.from, m.body), text: m.body.slice(0, 400),
+      last4: p.last4, balanceAfter: p.balanceAfter, ref: p.ref, bank: bankName(m.from, m.body), text: redactSms(m.body).slice(0, 320),
       status: "review", source, stmt: p.stmt && { tad: p.stmt.tad, mad: p.stmt.mad, due: p.stmt.due },
     };
     if (isDuplicate([...s.txns, ...added], txn)) { dupes++; continue; }
@@ -285,3 +285,19 @@ export function monthSummary(txns: Txn[], ym: string): MonthSummary {
   }
   return out;
 }
+
+/** Run on every unlock: masks anything OTP-like in stored messages and drops message text older than 90 days. */
+export function scrubTxns(state: MoneyState, now = new Date()): MoneyState {
+  let changed = false;
+  const cutoff = now.getTime() - 90 * day;
+  const txns = state.txns.map(t => {
+    const text = new Date(t.date).getTime() < cutoff ? "" : redactSms(t.text);
+    if (text === t.text) return t;
+    changed = true;
+    return { ...t, text };
+  });
+  return changed ? { ...state, txns } : state;
+}
+
+/** What goes into a backup file: everything except the original message texts. */
+export const forExport = (state: MoneyState): MoneyState => ({ ...state, txns: state.txns.map(t => ({ ...t, text: "" })) });

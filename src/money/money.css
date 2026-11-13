@@ -897,3 +897,22 @@ textarea.input { min-height: 120px; resize: vertical; font: inherit; line-height
   .act-summary b { font-size: 13px; }
   .quick-btn { font-size: 11.5px; padding: 10px 2px; }
 }
+
+/* ─── v1.6 · Security ────────────────────────────────────────────────────── */
+.fraud-alert { display: flex; gap: 10px; padding: 12px; border-radius: 12px; background: var(--danger-soft); color: var(--danger); }
+.fraud-alert svg { flex-shrink: 0; margin-top: 2px; }
+.fraud-alert p { color: var(--text-2); font-size: 13px; margin-top: 4px; }
+.sec-rules { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); }
+.sec-rules > b { display: flex; align-items: center; gap: 6px; color: var(--good); }
+.sec-rules ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; color: var(--text-2); }
+.fraud-rule { font-size: 13px; color: var(--danger); background: var(--danger-soft); padding: 8px 10px; border-radius: 10px; margin-top: 4px; }
+.sec-check { display: flex !important; flex-direction: column; gap: 4px; }
+.sec-check.warn { box-shadow: inset 4px 0 0 var(--warn), var(--shadow); }
+.sec-check-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; color: var(--good); }
+.sec-check.warn .sec-check-head { color: var(--warn); }
+.sec-item { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 8px 0; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--text); cursor: pointer; width: 100%; }
+.sec-item:disabled { cursor: default; opacity: 1; }
+.sec-item svg { color: var(--good); flex-shrink: 0; margin-top: 3px; }
+.sec-item.bad svg { color: var(--warn); }
+.sec-item b { display: block; font-size: 14px; }
+.sec-item small { color: var(--text-3); font-size: 12.5px; }

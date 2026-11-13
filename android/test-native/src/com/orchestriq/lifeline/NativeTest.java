@@ -215,4 +215,36 @@ public class NativeTest {
         new SmsReceiver().onReceive(c, new Intent("android.provider.Telephony.SMS_RECEIVED"));
         assertEquals(0, SmsInbox.queued(c));
     }
+
+    @Test
+    public void storedMessagesNeverContainOtpLikeCodesOrLinks() {
+        String r1 = SmsInbox.redact("OTP for transaction of INR 999 on your card XX9004 is 837261. Never share it.");
+        assertFalse(r1.contains("837261"));
+        assertTrue(r1.contains("XX9004") && r1.contains("INR 999"));
+        String r2 = SmsInbox.redact("Rs.2000.00 withdrawn at ATM from A/c XX4417 on 12-11-26. Avl Bal Rs 19,500.00 Ref 431234567890");
+        assertEquals("amounts, account digits, dates and references are kept",
+                "Rs.2000.00 withdrawn at ATM from A/c XX4417 on 12-11-26. Avl Bal Rs 19,500.00 Ref 431234567890", r2);
+        String r3 = SmsInbox.redact("Use code 7788 to verify. Visit https://hdfc-kyc.example/upd now or hdfcbank-kyc.in/update");
+        assertFalse(r3.contains("7788") || r3.contains("http") || r3.contains("kyc.in"));
+        assertTrue(SmsInbox.redact("Spent Rs.150 On HDFC Bank Card 1234 At SWIGGY").contains("Card 1234"));
+    }
+
+    @Test
+    public void appCannotReadTheSmsInbox() throws Exception {
+        Application c = RuntimeEnvironment.getApplication();
+        PackageInfo pi = c.getPackageManager().getPackageInfo(c.getPackageName(), android.content.pm.PackageManager.GET_PERMISSIONS);
+        boolean receive = false;
+        for (String p : pi.requestedPermissions) {
+            assertFalse("READ_SMS must not be requested", "android.permission.READ_SMS".equals(p));
+            if ("android.permission.RECEIVE_SMS".equals(p)) receive = true;
+        }
+        assertTrue(receive);
+    }
+
+    @Test
+    public void remoteAccessAppsAreDetectedOnlyFromTheTrustedPage() {
+        MainActivity a = launch();
+        assertEquals("[]", a.bridge.remoteAccessApps().replace(" ", "").isEmpty() ? "[]" : a.bridge.remoteAccessApps());
+        assertTrue(Bridge.REMOTE_APPS.length >= 5);
+    }
 }

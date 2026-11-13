@@ -20,8 +20,8 @@ import { FREE_FEATURES, PRICES, PRO_FEATURES } from "./entitlements";
 import { DEFAULT_CARD, alternativeCost, applyPayment, logCard, cashCost, dueAfter, emiQuote, emiRemaining, emiRowFor, emiSchedule, estimateStatement, lastStatementDate, nextPayment, nextStatementDate, ymAdd, ymOf } from "./cards";
 import { checkPurchase, monthName, type PayMode, type PlanStep } from "./payplan";
 import { markStep, useStepActions } from "./planSteps";
-import { ingestMessages, ignoreTxn, linkTxn } from "./ingest";
-import { smsRequest, smsScan, smsSetOn, smsStatus, smsSupported } from "./native";
+import { forExport, ingestMessages, ignoreTxn, linkTxn } from "./ingest";
+import { openAppSettings, remoteAccessApps, smsRequest, smsSetOn, smsStatus, smsSupported } from "./native";
 import { CardFace } from "./cardFace";
 
 // ─── Shared option lists ────────────────────────────────────────────────────
@@ -505,7 +505,7 @@ function BackupSheet() {
     if (pw.length < 8) return setErr("Use at least 8 characters. A short sentence is best.");
     if (pw !== pw2) return setErr("The passwords don't match.");
     setBusy(true);
-    const text = await vault.makeBackup(state, pw);
+    const text = await vault.makeBackup(forExport(state), pw);
     const ok = await saveTextFile(`lifeline-backup-${new Date().toISOString().slice(0, 10)}.json`, "application/json", text);
     setBusy(false);
     if (ok) { toast("Encrypted backup saved"); close(); }
@@ -1286,42 +1286,46 @@ function SmsSetupSheet() {
   const { state, update, close, toast, open } = useApp();
   const [busy, setBusy] = useState(false);
   const [denied, setDenied] = useState(false);
+  const [agree, setAgree] = useState(false);
   const st = smsStatus();
   const on = state.settings.smsCapture && st.granted;
-  const importInbox = async (days: number) => {
-    setBusy(true);
-    try {
-      const msgs = await smsScan(days);
-      let summary = "";
-      update(s => {
-        // Cards keep the figures you entered: older messages are logged but don't change the bill again.
-        const now = new Date().toISOString();
-        const base = { ...s, cards: s.cards.map(c => (c.syncedAt ? c : { ...c, syncedAt: now })), settings: { ...s.settings, smsScannedAt: now } };
-        const r = ingestMessages(base, msgs, "sms");
-        summary = `${r.added.length} transaction${r.added.length === 1 ? "" : "s"} found${r.review ? ` · ${r.review} need you to pick the account` : ""}`;
-        return r.state;
-      });
-      setTimeout(() => toast(summary || "No new bank messages"), 50);
-      close();
-    } catch { toast("Couldn't read messages. Check the SMS permission."); }
-    finally { setBusy(false); }
-  };
+  const remote = remoteAccessApps();
   const turnOn = async () => {
     setBusy(true);
     const ok = await smsRequest().catch(() => false);
     setBusy(false);
     if (!ok) { setDenied(true); return; }
-    update(s => ({ ...s, settings: { ...s.settings, smsCapture: true } }));
-    await importInbox(60);
+    // Cards keep the figures you entered; only messages from now on change them.
+    const now = new Date().toISOString();
+    update(s => ({ ...s, cards: s.cards.map(c => ({ ...c, syncedAt: c.syncedAt && c.syncedAt > now ? c.syncedAt : now })),
+      settings: { ...s.settings, smsCapture: true, smsScannedAt: now, blockScreenshots: true, autoLockSec: Math.min(s.settings.autoLockSec, 60) } }));
+    toast("On. New bank messages are recorded from now");
+    close();
   };
-  const turnOff = () => { smsSetOn(false); update(s => ({ ...s, settings: { ...s.settings, smsCapture: false } })); toast("Bank messages turned off"); close(); };
+  const turnOff = () => { smsSetOn(false); update(s => ({ ...s, settings: { ...s.settings, smsCapture: false } })); toast("Turned off. You can also remove the SMS permission"); };
   return (
     <Sheet title="Read bank messages" subtitle="Record spends, money received, cash and EMIs automatically" onClose={close}>
+      {remote.length > 0 && (
+        <div className="fraud-alert" role="alert">
+          <Icon name="alert" />
+          <div><b>{remote.join(", ")} {remote.length > 1 ? "are" : "is"} installed on this phone</b>
+            <p>Fraudsters ask people to install screen-sharing apps, then watch OTPs and bank apps. If you didn't install it yourself for a reason you trust, uninstall it now. Never open it while someone on a call is guiding you.</p></div>
+        </div>
+      )}
       <div className="sms-how">
-        <div><Icon name="check" /><span><b>Balances update by themselves</b> from the “Avl Bal” in each message.</span></div>
-        <div><Icon name="card" /><span><b>Card swipes, payments and bills</b> go straight to the right card.</span></div>
-        <div><Icon name="calendar" /><span><b>EMIs are marked paid</b> when the debit message arrives, and plan steps tick off with the real amount.</span></div>
-        <div><Icon name="lock" /><span><b>Private:</b> only bank and card messages are read. Personal messages are ignored. Messages with an OTP are dropped and never stored. Everything stays encrypted on this phone.</span></div>
+        <div><Icon name="check" /><span><b>Balances update by themselves</b> from the “Avl Bal” in each bank message.</span></div>
+        <div><Icon name="card" /><span><b>Card swipes, payments and bills</b> go straight to the right card. <b>EMIs</b> are marked paid when the debit arrives.</span></div>
+      </div>
+      <div className="sec-rules">
+        <b><Icon name="shield" size={16} /> How your OTPs stay safe</b>
+        <ul>
+          <li><b>Never stored:</b> a message with an OTP is thrown away the moment it arrives, before it is saved anywhere. Any other code-like number is masked as ••••.</li>
+          <li><b>Never sent anywhere:</b> Lifeline has no server. Messages never go to the internet, to AI apps, or into backups.</li>
+          <li><b>No inbox access:</b> Lifeline only receives new messages. It cannot open your SMS inbox or old messages.</li>
+          <li><b>Only bank messages:</b> personal messages and unknown numbers are ignored. Links in messages are removed.</li>
+          <li><b>Locked:</b> captured messages stay encrypted until you unlock with your passcode or fingerprint. Screenshots and screen sharing are blocked.</li>
+        </ul>
+        <p className="fraud-rule"><b>Lifeline will never ask you for an OTP, PIN or password, and nobody from Lifeline will ever call you.</b> Anyone who asks for an OTP is a fraudster, even if they say they're from your bank.</p>
       </div>
       {!smsSupported() ? (
         <>
@@ -1330,15 +1334,16 @@ function SmsSetupSheet() {
         </>
       ) : on ? (
         <div className="choice-stack">
-          <p className="ok-line"><Icon name="check" size={16} /> On{state.settings.smsScannedAt ? ` · inbox last read ${ago(state.settings.smsScannedAt)}` : ""}</p>
-          <Button variant="primary" full icon="refresh" disabled={busy} onClick={() => importInbox(60)}>{busy ? "Reading…" : "Read inbox again (last 60 days)"}</Button>
+          <p className="ok-line"><Icon name="check" size={16} /> On since {state.settings.smsScannedAt ? ago(state.settings.smsScannedAt) : "earlier"}</p>
           <Button full variant="ghost" onClick={turnOff}>Turn off</Button>
+          <Button full variant="ghost" icon="external" onClick={() => openAppSettings()}>Remove SMS permission in phone settings</Button>
         </div>
       ) : (
         <div className="choice-stack">
-          <Button variant="primary" full icon="check" disabled={busy} onClick={turnOn}>{busy ? "Working…" : "Allow and turn on"}</Button>
+          <Toggle checked={agree} onChange={setAgree} label="I understand: I will never share an OTP with anyone" description="Banks, Lifeline and the police never ask for it." />
+          <Button variant="primary" full icon="check" disabled={busy || !agree} onClick={turnOn}>{busy ? "Working…" : "Allow and turn on"}</Button>
           {denied && <p className="hint-warn">Permission wasn't given. To allow it later: phone Settings → Apps → Lifeline → Permissions → SMS → Allow. Then tap the button again.</p>}
-          <p className="note">Android will ask to allow SMS access. Lifeline then reads the last 60 days of bank messages once, and new ones as they arrive.</p>
+          <p className="note">Android asks to allow SMS. Lifeline then records new bank messages as they arrive. You can turn it off any time.</p>
         </div>
       )}
     </Sheet>
@@ -1397,7 +1402,7 @@ function TxnSheet({ txnId }: { txnId: string }) {
           {txn.last4 && <Toggle checked={remember} onChange={setRemember} label={`Remember: ending ${txn.last4} is this one`} description="Future messages are matched automatically." />}
         </div>
       )}
-      <details className="disclosure"><summary>Original message<Icon name="chevron" size={16} /></summary><div className="disclosure-body"><p className="sms-text">{txn.text}</p></div></details>
+      {txn.text && !state.settings.hideAmounts && <details className="disclosure"><summary>Original message<Icon name="chevron" size={16} /></summary><div className="disclosure-body"><p className="sms-text">{txn.text}</p><small className="note">Codes that could be an OTP are masked as ••••. Links are removed.</small></div></details>}
       <div className="btn-row">
         {txn.status !== "ignored" && <Button onClick={() => { update(s => ignoreTxn(s, txn.id)); toast("Ignored"); close(); }}>{txn.status === "review" ? "Not mine / ignore" : "Ignore"}</Button>}
         <Button variant="ghost" icon="trash" onClick={() => { update(s => ({ ...s, txns: s.txns.filter(t => t.id !== txn.id) })); toast("Removed from the list. Balances were not changed back."); close(); }}>Remove</Button>

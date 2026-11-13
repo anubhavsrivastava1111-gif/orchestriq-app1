@@ -55,8 +55,8 @@ export default function Activity() {
   return (
     <div className="screen">
       <div className="screen-head">
-        <div className="screen-titles" style={{ flex: 1 }}><h1>Activity</h1><p>{smsOn ? `Reading bank messages${state.settings.smsScannedAt ? ` · inbox read ${ago(state.settings.smsScannedAt)}` : ""}` : "Spends, money in, cash and EMIs"}</p></div>
-        <Button size="sm" icon={smsSupported() ? "refresh" : "doc"} onClick={() => open({ kind: smsSupported() ? "sms-setup" : "paste-sms" })}>{smsSupported() ? (smsOn ? "Sync" : "Turn on") : "Paste"}</Button>
+        <div className="screen-titles" style={{ flex: 1 }}><h1>Activity</h1><p>{smsOn ? `Recording new bank messages${state.settings.smsScannedAt ? ` · since ${ago(state.settings.smsScannedAt)}` : ""}` : "Spends, money in, cash and EMIs"}</p></div>
+        <Button size="sm" icon={smsSupported() ? (smsOn ? "shield" : "bell") : "doc"} onClick={() => open({ kind: smsSupported() ? "sms-setup" : "paste-sms" })}>{smsSupported() ? (smsOn ? "Settings" : "Turn on") : "Paste"}</Button>
       </div>
 
       {!smsOn && (

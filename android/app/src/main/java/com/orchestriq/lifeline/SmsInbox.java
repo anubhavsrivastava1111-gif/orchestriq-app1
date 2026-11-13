@@ -2,8 +2,6 @@ package com.orchestriq.lifeline;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.database.Cursor;
-import android.net.Uri;
 import android.util.Base64;
 
 import org.json.JSONArray;
@@ -16,7 +14,7 @@ import java.util.regex.Pattern;
  * Bank SMS capture.
  * - Only messages from bank / business senders that mention money are kept. Personal SMS are never read.
  * - Messages with a one-time password are dropped and never stored.
- * - Kept messages wait in a queue encrypted with the hardware Keystore key until the app is unlocked,
+ * - Kept messages are scrubbed (OTP-like codes masked, links removed) and wait in a queue encrypted with the hardware Keystore key until the app is unlocked,
  *   then the app reads them into its encrypted vault and the queue is emptied.
  */
 final class SmsInbox {
@@ -68,7 +66,7 @@ final class SmsInbox {
         try {
             JSONObject o = new JSONObject();
             o.put("from", from);
-            o.put("body", body);
+            o.put("body", redact(body));
             o.put("ts", ts);
             String sealed = DeviceKey.encrypt(Base64.encodeToString(o.toString().getBytes(Bridge.UTF8), Base64.NO_WRAP));
             SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -99,7 +97,8 @@ final class SmsInbox {
             for (int i = 0; i < q.length(); i++) {
                 try {
                     byte[] plain = Base64.decode(DeviceKey.decrypt(q.getString(i)), Base64.NO_WRAP);
-                    out.put(new JSONObject(new String(plain, Bridge.UTF8)));
+                    JSONObject o = new JSONObject(new String(plain, Bridge.UTF8));
+                    if (System.currentTimeMillis() - o.optLong("ts") < 30L * 86400000L) out.put(o);
                 } catch (Exception ignored) {
                     // unreadable entry (e.g. key reset) is dropped
                 }
@@ -111,29 +110,34 @@ final class SmsInbox {
         return out.toString();
     }
 
-    /** Reads bank messages from the phone's inbox for the last `days` days (needs READ_SMS). */
-    static String scan(Context c, int days) {
-        JSONArray out = new JSONArray();
-        long since = System.currentTimeMillis() - Math.max(1, Math.min(days, 365)) * 86400000L;
-        Cursor cur = null;
-        try {
-            cur = c.getContentResolver().query(Uri.parse("content://sms/inbox"), new String[]{"address", "body", "date"},
-                    "date > ?", new String[]{String.valueOf(since)}, "date ASC");
-            if (cur == null) return out.toString();
-            while (cur.moveToNext() && out.length() < 3000) {
-                String from = cur.getString(0), body = cur.getString(1);
-                if (!isMoneySms(from, body)) continue;
-                JSONObject o = new JSONObject();
-                o.put("from", from);
-                o.put("body", body);
-                o.put("ts", cur.getLong(2));
-                out.put(o);
-            }
-        } catch (Exception ignored) {
-            // permission revoked or provider unavailable → whatever was read so far
-        } finally {
-            if (cur != null) cur.close();
+    private static final Pattern DIGITS = Pattern.compile("\\d{4,8}");
+    private static final Pattern KEEP_BEFORE = Pattern.compile("(rs\\.?|inr|₹|card|a/c|ac|acct|account|ending|end|with|no\\.?|by|of|for|x|\\*)\\s*[:.#-]?\\s*$");
+    private static final Pattern LINK1 = Pattern.compile("(?i)\\b(?:https?://|www\\.)\\S+");
+    private static final Pattern LINK2 = Pattern.compile("(?i)\\b[a-z0-9-]+\\.(?:com|in|co|me|ly|link|info|xyz|app)/\\S*");
+
+    /**
+     * Masks anything that could be a one-time password and removes links, before a message is stored.
+     * Same rules as redactSms() in the app: amounts and account / card digits are kept.
+     */
+    static String redact(String body) {
+        String s = LINK2.matcher(LINK1.matcher(body).replaceAll("[link removed]")).replaceAll("[link removed]");
+        java.util.regex.Matcher m = DIGITS.matcher(s);
+        StringBuilder out = new StringBuilder();
+        int last = 0;
+        while (m.find()) {
+            int at = m.start(), end = m.end();
+            char prev = at > 0 ? s.charAt(at - 1) : ' ';
+            char next = end < s.length() ? s.charAt(end) : ' ';
+            char next2 = end + 1 < s.length() ? s.charAt(end + 1) : ' ';
+            boolean keep = Character.isDigit(prev) || Character.isDigit(next)
+                    || (next == '.' && Character.isDigit(next2))
+                    || next == ',' || prev == ',' || prev == '.'
+                    || "-/:".indexOf(prev) >= 0 || "-/:".indexOf(next) >= 0
+                    || KEEP_BEFORE.matcher(s.substring(Math.max(0, at - 14), at).toLowerCase(Locale.ROOT)).find();
+            out.append(s, last, at).append(keep ? m.group() : "••••");
+            last = end;
         }
+        out.append(s.substring(last));
         return out.toString();
     }
 }

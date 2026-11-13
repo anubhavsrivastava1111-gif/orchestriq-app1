@@ -152,7 +152,7 @@ export interface Settings {
   plan: Plan;
   aiShare: "exact" | "rounded" | "none"; // how amounts appear in summaries shared with AI apps
   smsCapture: boolean;     // Android: read bank SMS to record transactions automatically
-  smsScannedAt: string;    // ISO time of the last inbox scan
+  smsScannedAt: string;    // ISO time bank-message capture was turned on
 }
 
 export type Plan = "free" | "early-access" | "pro";

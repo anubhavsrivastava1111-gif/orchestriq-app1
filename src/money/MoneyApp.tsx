@@ -19,7 +19,7 @@ import Ai from "./screens/Ai";
 import Connect from "./screens/Connect";
 import Cards from "./screens/Cards";
 import Activity from "./screens/Activity";
-import { ingestMessages } from "./ingest";
+import { ingestMessages, scrubTxns } from "./ingest";
 import PayPlan from "./screens/PayPlan";
 import { rollAllCards } from "./cards";
 
@@ -123,8 +123,9 @@ export default function MoneyApp() {
 
   // ─── Android: screenshot blocking + reminder notifications ────────────────
   useEffect(() => {
-    if (phase === "ready") setSecureScreen(state.settings.blockScreenshots);
-  }, [phase, state.settings.blockScreenshots]);
+    // While bank messages are read, screenshots and screen sharing are always blocked (screen-share scams).
+    if (phase === "ready") setSecureScreen(state.settings.blockScreenshots || state.settings.smsCapture);
+  }, [phase, state.settings.blockScreenshots, state.settings.smsCapture]);
   useEffect(() => {
     if (!isNative || phase !== "ready") return;
     const t = setTimeout(() => scheduleReminders(buildReminders(state)), 1200);
@@ -219,7 +220,7 @@ export default function MoneyApp() {
   if (phase === "locked") {
     // Credit cards: statements that came due while the app was closed are generated on unlock.
     return <LockScreen bioOn onUnlock={s => {
-      setState(rollAllCards(s)); setPhase("ready");
+      setState(scrubTxns(rollAllCards(s))); setPhase("ready");
       // Security: tell the owner if someone tried wrong passcodes since the last unlock.
       const rep = vault.takeUnlockReport();
       if (rep && rep.fails > 0) setTimeout(() => toast(`⚠ ${rep.fails} wrong passcode attempt${rep.fails > 1 ? "s" : ""} since your last unlock`), 400);

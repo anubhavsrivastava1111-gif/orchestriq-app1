@@ -419,8 +419,7 @@ public class Bridge {
 
     // ─── Bank SMS capture ───────────────────────────────────────────────────
     boolean smsGranted() {
-        return activity.checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
-                && activity.checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED;
+        return activity.checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED;
     }
 
     @JavascriptInterface
@@ -449,7 +448,7 @@ public class Bridge {
         activity.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                activity.requestPermissions(new String[]{Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS}, MainActivity.REQ_SMS);
+                activity.requestPermissions(new String[]{Manifest.permission.RECEIVE_SMS}, MainActivity.REQ_SMS);
             }
         });
     }
@@ -466,19 +465,39 @@ public class Bridge {
         return SmsInbox.drain(activity);
     }
 
+    /** Remote-access / screen-sharing apps that fraudsters ask victims to install (detection only). */
+    static final String[] REMOTE_APPS = {"com.anydesk.anydeskandroid", "com.teamviewer.quicksupport.market", "com.teamviewer.teamviewer.market.mobile",
+            "com.rustdesk.rustdesk", "com.sand.airdroid", "com.sand.airmirror", "com.carriez.flutter_hbb", "com.remotepc.viewer", "com.splashtop.remote.pad.v2"};
+
     @JavascriptInterface
-    public void smsScan(final String cbId, final int days) {
-        if (!trusted) return;
-        if (!smsGranted()) {
-            activity.callback(cbId, false, "permission");
-            return;
+    public String remoteAccessApps() {
+        JSONArray out = new JSONArray();
+        if (!trusted) return out.toString();
+        PackageManager pm = activity.getPackageManager();
+        for (String p : REMOTE_APPS) {
+            try {
+                pm.getPackageInfo(p, 0);
+                out.put(p);
+            } catch (PackageManager.NameNotFoundException ignored) {
+                // not installed
+            }
         }
-        new Thread(new Runnable() {
+        return out.toString();
+    }
+
+    @JavascriptInterface
+    public void openAppSettings() {
+        if (!trusted) return;
+        activity.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                activity.callback(cbId, true, SmsInbox.scan(activity, days));
+                try {
+                    activity.startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + activity.getPackageName())));
+                } catch (ActivityNotFoundException ignored) {
+                    // no settings screen
+                }
             }
-        }, "lifeline-sms-scan").start();
+        });
     }
 
     /** Clears native-side state (reminders, fingerprint key) when the user resets the app. */

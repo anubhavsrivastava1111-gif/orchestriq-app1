@@ -188,3 +188,23 @@ export function parseDate(s: string | undefined): string | undefined {
   if (mo < 0 || mo > 11 || d < 1 || d > 31) return undefined;
   return new Date(y, mo, d, 12).toISOString();
 }
+
+/**
+ * Removes anything that could be a one-time password or a link before a message is stored.
+ * A 4–8 digit number survives only when it is clearly an amount ("Rs 4500", "debited by 2000", "45000.00")
+ * or account / card digits ("A/c XX4417", "Card 1234", "ending 9004"). Everything else becomes ••••.
+ * Long numbers (UPI references, phone numbers) are left as they are; they can't be used as OTPs.
+ */
+export function redactSms(body: string): string {
+  const noLinks = body.replace(/\b(?:https?:\/\/|www\.)\S+/gi, "[link removed]").replace(/\b[a-z0-9-]+\.(?:com|in|co|me|ly|link|info|xyz|app)\/\S*/gi, "[link removed]");
+  return noLinks.replace(/\d{4,8}/g, (m, at: number, s: string) => {
+    const prev = s[at - 1] ?? "", next = s[at + m.length] ?? "";
+    if (/\d/.test(prev) || /\d/.test(next)) return m;                 // part of a longer number
+    if (next === "." && /\d/.test(s[at + m.length + 1] ?? "")) return m; // 45000.00 → an amount
+    if (next === "," || prev === "," || prev === ".") return m;          // 1,25,000 style amounts
+    if (/[-/:]/.test(prev) || /[-/:]/.test(next)) return m;               // dates and times
+    const before = s.slice(Math.max(0, at - 14), at).toLowerCase();
+    if (/(rs\.?|inr|₹|card|a\/c|ac|acct|account|ending|end|with|no\.?|by|of|for|x|\*)\s*[:.#-]?\s*$/.test(before)) return m;
+    return "••••";
+  });
+}
