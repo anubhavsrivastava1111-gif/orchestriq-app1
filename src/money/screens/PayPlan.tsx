@@ -10,6 +10,8 @@ import type { LetterKind } from "../letters";
 import { Button, Card, Disclosure, Empty, MeterBar, Pill } from "../components";
 import { Icon } from "../icons";
 import { StepRow } from "../planUi";
+import { isOpen } from "../planSteps";
+import type { MoneyState } from "../types";
 
 const fmt = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 
@@ -20,8 +22,10 @@ function statusOf(plan: PayPlan) {
     : { tone: "danger" as const, text: `${inr(plan.shortfall)} short` };
 }
 
-function Phase({ n, title, plan, inLabel }: { n: number; title: string; plan: PayPlan; inLabel: string }) {
+function Phase({ n, title, plan, inLabel, state }: { n: number; title: string; plan: PayPlan; inLabel: string; state: MoneyState }) {
   const st = statusOf(plan);
+  const steps = plan.steps.filter(x => isOpen(state, x));
+  const notDoing = plan.steps.filter(x => state.planLog[x.key]?.status === "ignored" && x.kind !== "income");
   const gap = Math.max(0, plan.needed - plan.available);
   return (
     <section className={"phase" + (plan.mode === "short" ? " short" : "")} aria-label={title}>
@@ -38,7 +42,10 @@ function Phase({ n, title, plan, inLabel }: { n: number; title: string; plan: Pa
       {plan.mode === "clear"
         ? <p className="phase-note good">{plan.steps.length ? `All covered. ${inr(plan.leftover)} spare after these payments.` : "Nothing is due in this period."}</p>
         : <p className="phase-note">Gap of {inr(gap)}. The steps below cover it the cheapest way and keep every EMI and card minimum safe.</p>}
-      {plan.steps.length > 0 && <div className="steps">{plan.steps.map(s => <StepRow key={s.key} step={s} />)}</div>}
+      {plan.rotation && <Rotation plan={plan} />}
+      {steps.length > 0 ? <div className="steps">{steps.map(s => <StepRow key={s.key} step={s} />)}</div>
+        : plan.steps.length > 0 && <p className="phase-note good">Every step here is done or decided.</p>}
+      {notDoing.length > 0 && <p className="hint-warn">You chose not to do: {notDoing.map(x => x.title).join("; ")}. Payments that relied on {notDoing.length > 1 ? "them" : "it"} may fail. Check the EMIs above.</p>}
       {plan.options.length > 0 && (
         <Disclosure summary={<b>Ways to cover the gap, compared</b>}>
           {plan.options.map(o => (
@@ -86,10 +93,11 @@ export default function PayPlan() {
         </div>
       </Card>
 
-      <Phase n={1} title={nextSalary ? "Before your salary" : "Next 30 days"} plan={before} inLabel={`in banks ${inr(before.cashNow)}`} />
-      {after && <Phase n={2} title={`After salary on ${fmt(nextSalary!)}`} plan={after} inLabel={`left over ${inr(after.cashNow)}`} />}
+      <Phase n={1} title={nextSalary ? "Before your salary" : "Next 30 days"} plan={before} inLabel={`in banks ${inr(before.cashNow)}`} state={state} />
+      {after && <Phase n={2} title={`After salary on ${fmt(nextSalary!)}`} plan={after} inLabel={`left over ${inr(after.cashNow)}`} state={state} />}
+      <PlanLog state={state} />
       {!nextSalary && <p className="note">Add your salary and pay day (+ → Add income) to see the plan split around pay day.</p>}
-      <p className="note center">Tap each step's button when it's done. Balances update and the plan recalculates.</p>
+      <p className="note center">{state.settings.smsCapture ? "Steps tick off by themselves when the bank message arrives, with the real amount. You can still mark them yourself." : "Tap Done when a step is done, or More for a different amount, later, or not doing it."}</p>
 
       <Disclosure summary={<span><b>Next 12 months</b> <small>· {glide.fitsFrom ? `payments fit income from ${monthName(glide.fitsFrom)}` : "payments don't fit income yet"}</small></span>}>
         <div className="glide-head"><div><small>Card fees over 12 months</small><b className={glide.totalFees > 0 ? "neg" : "pos"}>{inr(glide.totalFees)}</b></div><div><small>Biggest monthly draw</small><b>{inr(glide.peakRotation)}</b></div></div>
@@ -131,6 +139,48 @@ export default function PayPlan() {
       </Disclosure>
       <p className="note">Card draws and part-payments are short-term bridges and cost money every month. The aim is to reach a month where payments fit your income.</p>
     </div>
+  );
+}
+
+/** Why the card is paid first: card money can be drawn back, loan EMIs can't. */
+function Rotation({ plan }: { plan: PayPlan }) {
+  const r = plan.rotation!;
+  const carry = plan.options.find(o => o.id === "carry");
+  const monthlyRate = r.card.monthlyRatePct;
+  const keep = r.amount * (monthlyRate / 100) * 1.18;
+  return (
+    <div className="rotation">
+      <b><Icon name="transfer" size={16} /> Card rotation: how this covers the gap</b>
+      <ol>
+        <li><b>Pay {r.card.name} in full first.</b> Card money can be taken out again; a loan EMI, once paid, can't.</li>
+        <li><b>Draw {inr(r.amount)} back to your bank</b> through a card-to-bank / rent-payment app. Fee about {inr(r.fee)}.</li>
+        <li><b>Use it for the loan EMIs.</b> No EMI bounces, no card interest this month.</li>
+      </ol>
+      <div className="rot-compare">
+        <div><small>This way</small><b>{inr(r.fee)}</b><span>one-time fee</span></div>
+        <div><small>Leaving {inr(r.amount)} unpaid on the card</small><b className="neg">~{inr(carry && carry.feasible ? carry.cost : keep)}</b><span>{monthlyRate}% a month + GST, and new spends lose the free period</span></div>
+      </div>
+      <p className="note">Use rotation only to protect EMIs. It costs about {Math.round(r.fee / r.amount * 1200)}% a year if repeated, more than a personal loan, so never draw extra to prepay loans. The 12-month view below shows when you can stop.</p>
+    </div>
+  );
+}
+
+function PlanLog({ state }: { state: MoneyState }) {
+  const { update } = useApp();
+  const cutoff = new Date().getTime() - 40 * 86400000;
+  const items = Object.entries(state.planLog).filter(([, m]) => new Date(m.at).getTime() > cutoff).sort((a, b) => b[1].at.localeCompare(a[1].at));
+  if (!items.length) return null;
+  const done = items.filter(([, m]) => m.status === "done").length;
+  return (
+    <Disclosure summary={<span><b>What you've done this cycle</b> <small>· {done} done{items.length - done ? `, ${items.length - done} decided` : ""}</small></span>}>
+      {items.map(([k, m]) => (
+        <div key={k} className="log-row">
+          <span className={"log-dot s-" + m.status}><Icon name={m.status === "done" ? "check" : m.status === "skipped" ? "clock" : "close"} size={14} /></span>
+          <div><b>{m.title}</b><small>{m.status === "done" ? `Done${m.amount !== undefined && Math.round(m.amount) !== Math.round(m.planned) ? ` with ${inr(m.amount)} (planned ${inr(m.planned)})` : ""}${m.auto ? " · from bank message" : ""}` : m.status === "skipped" ? "Later" : "Not doing it"} · {new Date(m.at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</small></div>
+          {m.status !== "done" && <button type="button" className="text-btn" onClick={() => update(s => { const pl = { ...s.planLog }; delete pl[k]; return { ...s, planLog: pl }; })}>Undo</button>}
+        </div>
+      ))}
+    </Disclosure>
   );
 }
 

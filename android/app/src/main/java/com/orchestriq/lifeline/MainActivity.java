@@ -54,6 +54,10 @@ public class MainActivity extends Activity {
     static final int REQ_SAVE = 101;
     static final int REQ_OPEN = 102;
     static final int REQ_NOTIF = 103;
+    static final int REQ_SMS = 104;
+
+    /** The running screen, so a newly captured bank SMS can be shown straight away. */
+    private static java.lang.ref.WeakReference<MainActivity> current = new java.lang.ref.WeakReference<MainActivity>(null);
 
     WebView web;
     FrameLayout root;
@@ -63,6 +67,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        current = new java.lang.ref.WeakReference<MainActivity>(this);
         SharedPreferences prefs = getSharedPreferences(Bridge.PREFS, MODE_PRIVATE);
         applySecureScreen(prefs.getBoolean("secure_screen", true));
 
@@ -319,6 +324,18 @@ public class MainActivity extends Activity {
             web = null;
         }
         super.onDestroy();
+    }
+
+    /** Tells the page that bank messages are waiting (it reads them only while unlocked). */
+    static void notifySms() {
+        final MainActivity a = current.get();
+        if (a == null) return;
+        a.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (a.web != null) a.web.evaluateJavascript("window.LifelineOnSms && window.LifelineOnSms()", null);
+            }
+        });
     }
 
     /** Sends an async result back to the page. */

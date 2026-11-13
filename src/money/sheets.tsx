@@ -18,7 +18,10 @@ import * as vault from "./vault";
 import { searchFunds, fundNav, type MfScheme } from "./market";
 import { FREE_FEATURES, PRICES, PRO_FEATURES } from "./entitlements";
 import { DEFAULT_CARD, alternativeCost, applyPayment, logCard, cashCost, dueAfter, emiQuote, emiRemaining, emiRowFor, emiSchedule, estimateStatement, lastStatementDate, nextPayment, nextStatementDate, ymAdd, ymOf } from "./cards";
-import { checkPurchase, monthName, type PayMode } from "./payplan";
+import { checkPurchase, monthName, type PayMode, type PlanStep } from "./payplan";
+import { markStep, useStepActions } from "./planSteps";
+import { ingestMessages, ignoreTxn, linkTxn } from "./ingest";
+import { smsRequest, smsScan, smsSetOn, smsStatus, smsSupported } from "./native";
 import { CardFace } from "./cardFace";
 
 // ─── Shared option lists ────────────────────────────────────────────────────
@@ -59,7 +62,11 @@ export function SheetHost({ sheet }: { sheet: SheetState }) {
     case "card-emi": return <CardEmiSheet cardId={sheet.cardId} item={sheet.item} />;
     case "card-emi-detail": return <CardEmiDetailSheet cardId={sheet.cardId} emiId={sheet.emiId} />;
     case "card-cash": return <CardCashSheet cardId={sheet.cardId} item={sheet.item} />;
-    case "card-pay": return <CardPaySheet cardId={sheet.cardId} amount={sheet.amount} />;
+    case "card-pay": return <CardPaySheet cardId={sheet.cardId} amount={sheet.amount} step={sheet.step} />;
+    case "sms-setup": return <SmsSetupSheet />;
+    case "paste-sms": return <PasteSmsSheet />;
+    case "txn": return <TxnSheet txnId={sheet.txnId} />;
+    case "step": return <StepSheet step={sheet.step} />;
     case "card-statement": return <CardStatementSheet cardId={sheet.cardId} />;
     case "afford": return <AffordSheet />;
     case "goal": return <GoalSheet item={sheet.item} preset={sheet.preset} />;
@@ -110,13 +117,16 @@ function AccountSheet({ item }: { item?: Account }) {
   const [name, setName] = useState(item?.name ?? "");
   const [bal, setBal] = useState(str(item?.balance));
   const [minBal, setMinBal] = useState(str(item?.minBalance ?? 0));
+  const [last4, setLast4] = useState(item?.last4 ?? "");
   const [err, setErr] = useState<Record<string, string>>({});
   const save = () => {
     const e: Record<string, string> = {};
     if (!name.trim()) e.name = "Give this account a name, e.g. “SBI salary”.";
+    if (last4 && !/^\d{3,4}$/.test(last4)) e.last4 = "The last 4 digits of the account number, or leave it blank.";
     if (Number.isNaN(num(bal))) e.bal = "Enter the current balance (0 is fine).";
     setErr(e); if (Object.keys(e).length) return;
-    const rec: Account = { id: item?.id ?? uid(), name: name.trim(), balance: num(bal), minBalance: num(minBal) || 0, updatedAt: new Date().toISOString() };
+    const same = item && item.balance === num(bal);
+    const rec: Account = { id: item?.id ?? uid(), name: name.trim(), balance: num(bal), minBalance: num(minBal) || 0, updatedAt: same ? item!.updatedAt : new Date().toISOString(), last4: last4 || undefined, balanceSource: same ? item!.balanceSource : "manual" };
     update(s => ({ ...s, accounts: item ? s.accounts.map(a => (a.id === item.id ? rec : a)) : [...s.accounts, rec] }));
     toast(item ? "Account updated" : "Account added"); close();
   };
@@ -134,6 +144,7 @@ function AccountSheet({ item }: { item?: Account }) {
       )}
       <Field label="Account name" error={err.name} hint="Use a name you'll recognise, e.g. “HDFC salary”.">{id => <TextInput id={id} value={name} onChange={setName} placeholder="e.g. SBI salary account" autoFocus={!!item} />}</Field>
       <Field label="Balance right now" error={err.bal} hint="Check your bank app or last SMS.">{id => <MoneyInput id={id} value={bal} onChange={setBal} large />}</Field>
+      <Field label="Last 4 digits of the account number" optional error={err.last4} hint="Bank messages say “A/c XX1234”. With these digits Lifeline matches them to this account.">{id => <input id={id} className="input" inputMode="numeric" maxLength={4} value={last4} onChange={e => setLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="1234" />}</Field>
       <Field label="Minimum balance the bank requires" hint="We keep this aside so you don't pay a penalty.">{id => (
         <>
           <MoneyInput id={id} value={minBal} onChange={setMinBal} />
@@ -365,9 +376,9 @@ function RemindersSheet() {
   return (
     <Sheet title="EMI reminders" subtitle={isNative ? "Lifeline alerts you even when the app is closed" : "Your phone's calendar will alert you even when Lifeline is closed"} onClose={close}>
       <div className="steps-mini">
-        <div><span>1</span>“Fund your account”: {state.settings.bufferDays} day{state.settings.bufferDays > 1 ? "s" : ""} before each EMI, 9 am</div>
-        <div><span>2</span>“EMI today”: on the due date, 8 am</div>
-        {isNative && <div><span>3</span>“Salary day”: update balances, plan the month</div>}
+        <div><span>1</span>One “keep money ready” alert {state.settings.bufferDays} day{state.settings.bufferDays > 1 ? "s" : ""} before each due date, all payments that day together. Skipped when the account already has enough.</div>
+        <div><span>2</span>{state.settings.smsCapture ? "No “did it go through?” alerts: bank messages confirm payments." : "“Did it go through?” the evening after, so you can tap Paid or Bounced."}</div>
+        {isNative && <div><span>3</span>“Salary day”: one alert a month to open your plan</div>}
       </div>
       <Field label={`Remind me ${state.settings.bufferDays} day(s) before`}>{id => (
         <Slider id={id} value={state.settings.bufferDays} min={1} max={7} onChange={v => update(s => ({ ...s, settings: { ...s.settings, bufferDays: v } }))} />
@@ -721,7 +732,7 @@ function CardSheet({ item, fromLoan }: { item?: CreditCard; fromLoan?: Loan }) {
       update(s => ({ ...s, cards: s.cards.map(c => (c.id === item.id ? { ...c, ...terms } : c)) }));
       toast("Card updated"); close(); return;
     }
-    let draft: CreditCard = { ...DEFAULT_CARD, id: uid(), ...terms, unbilled: num(spends) || 0, paidMonths: fromLoan?.paidMonths ?? [], history: [] };
+    let draft: CreditCard = { ...DEFAULT_CARD, id: uid(), ...terms, unbilled: num(spends) || 0, paidMonths: fromLoan?.paidMonths ?? [], history: [], syncedAt: new Date().toISOString() };
     const lsDate = lastStatementDate(draft);
     draft.cycleYm = ymOf(lsDate);
     if (stStatus !== "none") {
@@ -1034,7 +1045,7 @@ function CardCashSheet({ cardId, item }: { cardId: string; item?: CardCashOut })
 }
 
 // ─── Record a card payment ──────────────────────────────────────────────────
-function CardPaySheet({ cardId, amount: preset }: { cardId: string; amount?: number }) {
+function CardPaySheet({ cardId, amount: preset, step }: { cardId: string; amount?: number; step?: PlanStep }) {
   const { state, update, close, toast } = useApp();
   const card = state.cards.find(c => c.id === cardId);
   const p = card ? nextPayment(card) : null;
@@ -1047,9 +1058,10 @@ function CardPaySheet({ cardId, amount: preset }: { cardId: string; amount?: num
     const before = state;
     update(s => ({
       ...s,
-      cards: s.cards.map(c => (c.id === cardId ? applyPayment(c, amt) : c)),
+      cards: s.cards.map(c => (c.id === cardId ? { ...applyPayment(c, amt), syncedAt: new Date().toISOString() } : c)),
       accounts: s.accounts.map(a => (a.id === card.accountId ? { ...a, balance: a.balance - amt } : a)),
     }));
+    if (step) update(s => markStep(s, step, "done", amt));
     toast(`${inr(amt)} recorded for ${card.name}`, () => update(() => before));
     close();
   };
@@ -1200,7 +1212,7 @@ function CardStatementSheet({ cardId }: { cardId: string }) {
     if (!(t >= 0) || Number.isNaN(t)) return setErr("Enter the total amount due.");
     const minDue = Number.isNaN(m) || m <= 0 ? Math.min(t, Math.max(card.minFloor, t * card.minPct / 100)) : Math.min(m, t);
     update(s => ({ ...s, cards: s.cards.map(c => (c.id !== cardId ? c : {
-      ...c, cycleYm: ymOf(stmt), revolving: 0, cashOuts: c.cashOuts.filter(x => new Date(x.date) > stmt),
+      ...c, cycleYm: ymOf(stmt), revolving: 0, cashOuts: c.cashOuts.filter(x => new Date(x.date) > stmt), syncedAt: new Date().toISOString(),
       unbilled: ls ? c.unbilled : 0,
       lastStatement: { ym: ymOf(stmt), date: stmt.toISOString(), due: due.toISOString(), tad: t, mad: minDue, paidAmount: num(paid) || 0, estimated: false },
       history: [{ kind: "statement" as const, label: "Statement (entered by you)", amount: t, date: stmt.toISOString() }, ...(c.history ?? []).filter(h => !(h.kind === "statement" && h.date.slice(0, 10) === stmt.toISOString().slice(0, 10)))].slice(0, 50),
@@ -1245,6 +1257,151 @@ function AffordSheet() {
           {v.level !== "safe" && <p className="note">{v.after.fitsFrom ? `With it, your payments fit your income from ${monthName(v.after.fitsFrom)}.` : "Wait until a loan closes or your card balance is cleared, or look for a cheaper option."}</p>}
         </div>
       )}
+    </Sheet>
+  );
+}
+
+// ─── Plan step: done with another amount / later / not doing ────────────────
+function StepSheet({ step }: { step: PlanStep }) {
+  const { close } = useApp();
+  const act = useStepActions();
+  const [amount, setAmount] = useState(String(Math.round(step.amount)));
+  const a = num(amount);
+  return (
+    <Sheet title={step.title} subtitle={step.date.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })} onClose={close}>
+      <p className="note">{step.detail}</p>
+      <Field label={step.kind === "income" ? "Amount received" : "Amount you actually moved or paid"} hint={`Planned: ${inr(step.amount)}. Lifeline updates the balances with what you enter.`}>{id => <MoneyInput id={id} value={amount} onChange={setAmount} large />}</Field>
+      <div className="choice-stack">
+        <Button variant="primary" full icon="check" disabled={!(a > 0)} onClick={() => { close(); act.done(step, a); }}>{a === Math.round(step.amount) ? "Done" : `Done with ${inr(a || 0)}`}</Button>
+        <Button full icon="clock" onClick={() => { close(); act.later(step); }}>Remind me later (hide until tomorrow)</Button>
+        <Button full variant="ghost" icon="close" onClick={() => { close(); act.notDoing(step); }}>Not doing it this time</Button>
+      </div>
+      <p className="note">With bank messages turned on, Lifeline marks steps done by itself when the money actually moves, with the real amount.</p>
+    </Sheet>
+  );
+}
+
+// ─── Bank messages: turn on / scan ──────────────────────────────────────────
+function SmsSetupSheet() {
+  const { state, update, close, toast, open } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [denied, setDenied] = useState(false);
+  const st = smsStatus();
+  const on = state.settings.smsCapture && st.granted;
+  const importInbox = async (days: number) => {
+    setBusy(true);
+    try {
+      const msgs = await smsScan(days);
+      let summary = "";
+      update(s => {
+        // Cards keep the figures you entered: older messages are logged but don't change the bill again.
+        const now = new Date().toISOString();
+        const base = { ...s, cards: s.cards.map(c => (c.syncedAt ? c : { ...c, syncedAt: now })), settings: { ...s.settings, smsScannedAt: now } };
+        const r = ingestMessages(base, msgs, "sms");
+        summary = `${r.added.length} transaction${r.added.length === 1 ? "" : "s"} found${r.review ? ` · ${r.review} need you to pick the account` : ""}`;
+        return r.state;
+      });
+      setTimeout(() => toast(summary || "No new bank messages"), 50);
+      close();
+    } catch { toast("Couldn't read messages. Check the SMS permission."); }
+    finally { setBusy(false); }
+  };
+  const turnOn = async () => {
+    setBusy(true);
+    const ok = await smsRequest().catch(() => false);
+    setBusy(false);
+    if (!ok) { setDenied(true); return; }
+    update(s => ({ ...s, settings: { ...s.settings, smsCapture: true } }));
+    await importInbox(60);
+  };
+  const turnOff = () => { smsSetOn(false); update(s => ({ ...s, settings: { ...s.settings, smsCapture: false } })); toast("Bank messages turned off"); close(); };
+  return (
+    <Sheet title="Read bank messages" subtitle="Record spends, money received, cash and EMIs automatically" onClose={close}>
+      <div className="sms-how">
+        <div><Icon name="check" /><span><b>Balances update by themselves</b> from the “Avl Bal” in each message.</span></div>
+        <div><Icon name="card" /><span><b>Card swipes, payments and bills</b> go straight to the right card.</span></div>
+        <div><Icon name="calendar" /><span><b>EMIs are marked paid</b> when the debit message arrives, and plan steps tick off with the real amount.</span></div>
+        <div><Icon name="lock" /><span><b>Private:</b> only bank and card messages are read. Personal messages are ignored. Messages with an OTP are dropped and never stored. Everything stays encrypted on this phone.</span></div>
+      </div>
+      {!smsSupported() ? (
+        <>
+          <p className="note">Reading messages works in the Android app. Here you can paste a bank message instead.</p>
+          <Button full icon="doc" onClick={() => open({ kind: "paste-sms" })}>Paste a bank message</Button>
+        </>
+      ) : on ? (
+        <div className="choice-stack">
+          <p className="ok-line"><Icon name="check" size={16} /> On{state.settings.smsScannedAt ? ` · inbox last read ${ago(state.settings.smsScannedAt)}` : ""}</p>
+          <Button variant="primary" full icon="refresh" disabled={busy} onClick={() => importInbox(60)}>{busy ? "Reading…" : "Read inbox again (last 60 days)"}</Button>
+          <Button full variant="ghost" onClick={turnOff}>Turn off</Button>
+        </div>
+      ) : (
+        <div className="choice-stack">
+          <Button variant="primary" full icon="check" disabled={busy} onClick={turnOn}>{busy ? "Working…" : "Allow and turn on"}</Button>
+          {denied && <p className="hint-warn">Permission wasn't given. To allow it later: phone Settings → Apps → Lifeline → Permissions → SMS → Allow. Then tap the button again.</p>}
+          <p className="note">Android will ask to allow SMS access. Lifeline then reads the last 60 days of bank messages once, and new ones as they arrive.</p>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+function PasteSmsSheet() {
+  const { update, close, toast } = useApp();
+  const [text, setText] = useState("");
+  const read = () => {
+    const parts = text.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
+    let msg = "";
+    update(s => {
+      const r = ingestMessages(s, parts.map((body, i) => ({ from: "", body, ts: Date.now() + i })), "paste");
+      msg = r.added.length ? `${r.added.length} transaction${r.added.length > 1 ? "s" : ""} added${r.review ? ` · pick the account for ${r.review}` : ""}` : r.dupes ? "Already recorded" : "No transaction found in that message";
+      return r.state;
+    });
+    setTimeout(() => toast(msg), 30);
+    close();
+  };
+  return (
+    <Sheet title="Paste a bank message" subtitle="Copy the SMS from your messages app and paste it here" onClose={close} footer={<SaveBar onSave={read} label="Read message" disabled={text.trim().length < 15} />}>
+      <Field label="Message" hint="Several messages? Leave an empty line between them.">{id => <textarea id={id} className="input textarea" rows={7} value={text} onChange={e => setText(e.target.value)} placeholder="e.g. Rs.150.00 spent on HDFC Bank Card XX1234 at SWIGGY on 12-11-26…" />}</Field>
+      <p className="note">One-time passwords are rejected and never stored.</p>
+    </Sheet>
+  );
+}
+
+const TXN_LABEL: Record<string, string> = {
+  spend: "Payment", "card-spend": "Card spend", atm: "Cash withdrawal", "cash-in": "Cash deposit", received: "Money received", salary: "Salary",
+  emi: "EMI / auto-debit", "card-payment": "Card bill payment", transfer: "Between your accounts", refund: "Refund", statement: "Card statement", other: "Other",
+};
+function TxnSheet({ txnId }: { txnId: string }) {
+  const { state, update, close, toast } = useApp();
+  const txn = state.txns.find(t => t.id === txnId);
+  const [remember, setRemember] = useState(true);
+  if (!txn) return null;
+  const where = txn.accountId ? state.accounts.find(a => a.id === txn.accountId)?.name : txn.cardId ? state.cards.find(c => c.id === txn.cardId)?.name : undefined;
+  const link = (target: { accountId?: string; cardId?: string }) => { update(s => linkTxn(s, txn.id, target, remember)); toast("Linked and applied"); close(); };
+  return (
+    <Sheet title={txn.party || TXN_LABEL[txn.kind]} subtitle={`${TXN_LABEL[txn.kind]} · ${new Date(txn.date).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}`} onClose={close}>
+      <div className={"txn-amount " + (txn.dir === "credit" ? "pos" : "")}>{txn.dir === "credit" ? "+" : txn.dir === "debit" ? "−" : ""}{inr(txn.amount)}</div>
+      <div className="kpi-row">
+        <div><small>{txn.cardId ? "Card" : "Account"}</small><b>{where ?? (txn.last4 ? `ends ${txn.last4}` : "Not linked")}</b></div>
+        {txn.balanceAfter !== undefined && <div><small>Balance after</small><b>{inr(txn.balanceAfter)}</b></div>}
+        {txn.ref && <div><small>Reference</small><b className="mono">{txn.ref}</b></div>}
+      </div>
+      {txn.note && <p className={txn.status === "review" ? "hint-warn" : "ok-line"}>{txn.note}</p>}
+      {txn.status === "review" && (
+        <div className="inline-group">
+          <b>Which one is it?</b>
+          <div className="choice-stack">
+            {state.accounts.map(a => <Button key={a.id} full icon="bank" onClick={() => link({ accountId: a.id })}>{a.name}</Button>)}
+            {state.cards.map(c => <Button key={c.id} full icon="card" onClick={() => link({ cardId: c.id })}>{c.name}</Button>)}
+          </div>
+          {txn.last4 && <Toggle checked={remember} onChange={setRemember} label={`Remember: ending ${txn.last4} is this one`} description="Future messages are matched automatically." />}
+        </div>
+      )}
+      <details className="disclosure"><summary>Original message<Icon name="chevron" size={16} /></summary><div className="disclosure-body"><p className="sms-text">{txn.text}</p></div></details>
+      <div className="btn-row">
+        {txn.status !== "ignored" && <Button onClick={() => { update(s => ignoreTxn(s, txn.id)); toast("Ignored"); close(); }}>{txn.status === "review" ? "Not mine / ignore" : "Ignore"}</Button>}
+        <Button variant="ghost" icon="trash" onClick={() => { update(s => ({ ...s, txns: s.txns.filter(t => t.id !== txn.id) })); toast("Removed from the list. Balances were not changed back."); close(); }}>Remove</Button>
+      </div>
     </Sheet>
   );
 }

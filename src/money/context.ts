@@ -2,8 +2,9 @@
 import { createContext, useContext } from "react";
 import type { Account, CardCashOut, CardEmi, CreditCard, Expense, Goal, GoalKind, Holding, Income, Loan, MoneyState } from "./types";
 import type { LetterKind } from "./letters";
+import type { PlanStep } from "./payplan";
 
-export type Tab = "home" | "bills" | "insights" | "earn" | "more" | "ai" | "connect" | "card" | "cards" | "payplan";
+export type Tab = "home" | "bills" | "insights" | "earn" | "more" | "ai" | "connect" | "card" | "cards" | "payplan" | "activity";
 
 export type SheetState =
   | { kind: "quick-add" }
@@ -27,11 +28,15 @@ export type SheetState =
   | { kind: "card-emi"; cardId: string; item?: CardEmi }
   | { kind: "card-emi-detail"; cardId: string; emiId: string }
   | { kind: "card-cash"; cardId: string; item?: CardCashOut }
-  | { kind: "card-pay"; cardId: string; amount?: number }
+  | { kind: "card-pay"; cardId: string; amount?: number; step?: PlanStep }
   | { kind: "card-statement"; cardId: string }
   | { kind: "afford" }
   | { kind: "goal"; item?: Goal; preset?: GoalKind }
-  | { kind: "risk-quiz" };
+  | { kind: "risk-quiz" }
+  | { kind: "sms-setup" }
+  | { kind: "paste-sms" }
+  | { kind: "txn"; txnId: string }
+  | { kind: "step"; step: PlanStep };
 
 export interface AppCtx {
   state: MoneyState;

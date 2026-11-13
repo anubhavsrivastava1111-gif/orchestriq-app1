@@ -3,9 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MoneyState } from "./types";
 import { Ctx, type AppCtx, type SheetState, type Tab } from "./context";
 import { EMPTY, clearLegacy, readLegacy } from "./store";
-import { setHideAmounts } from "./engine";
+import { inr, setHideAmounts } from "./engine";
 import * as vault from "./vault";
-import { bioDisable, bioEnable, bioStatus, isNative, scheduleReminders, setNativeTheme, setSecureScreen, wipeNative } from "./native";
+import { bioDisable, bioEnable, bioStatus, isNative, scheduleReminders, setNativeTheme, setSecureScreen, smsDrain, smsSetOn, smsStatus, wipeNative } from "./native";
 import { buildReminders } from "./remindersPlan";
 import { SheetHost } from "./sheets";
 import { Icon } from "./icons";
@@ -18,6 +18,8 @@ import More from "./screens/More";
 import Ai from "./screens/Ai";
 import Connect from "./screens/Connect";
 import Cards from "./screens/Cards";
+import Activity from "./screens/Activity";
+import { ingestMessages } from "./ingest";
 import PayPlan from "./screens/PayPlan";
 import { rollAllCards } from "./cards";
 
@@ -25,12 +27,12 @@ type Phase = "welcome" | "create" | "bio-offer" | "locked" | "ready";
 
 const NAV: { id: Tab | "add"; label: string; icon: string }[] = [
   { id: "home", label: "Home", icon: "home" },
-  { id: "cards", label: "Cards", icon: "card" },
+  { id: "activity", label: "Activity", icon: "chart" },
   { id: "add", label: "Add", icon: "plus" },
+  { id: "cards", label: "Cards", icon: "card" },
   { id: "bills", label: "Loans", icon: "calendar" },
-  { id: "earn", label: "Grow", icon: "grow" },
 ];
-const TABS: Tab[] = ["home", "bills", "insights", "earn", "more", "ai", "connect", "card", "cards", "payplan"];
+const TABS: Tab[] = ["home", "bills", "insights", "earn", "more", "ai", "connect", "card", "cards", "payplan", "activity"];
 
 function readHash(): { tab: Tab; sub: string } {
   const [t, s] = location.hash.slice(1).split("/");
@@ -141,6 +143,29 @@ export default function MoneyApp() {
   }, [phase, go]);
 
   const toast = useCallback((msg: string, undo?: () => void) => setToast({ msg, undo, id: Date.now() }), []);
+
+  // ─── Bank SMS: read messages captured while the app was closed or locked ──
+  const syncSms = useCallback(() => {
+    if (!vault.isUnlocked() || !stateRef.current.settings.smsCapture) return;
+    const msgs = smsDrain();
+    if (!msgs.length) return;
+    const r = ingestMessages(stateRef.current, msgs, "sms");
+    if (!r.added.length) return;
+    stateRef.current = r.state;
+    setState(r.state);
+    const last = r.added[r.added.length - 1];
+    toast(r.added.length === 1 ? `${last.dir === "credit" ? "+" : last.dir === "debit" ? "−" : ""}${inr(last.amount)} ${last.party ? "· " + last.party : ""} recorded${r.review ? " · pick the account" : ""}` : `${r.added.length} bank messages recorded${r.review ? ` · ${r.review} need a look` : ""}`);
+  }, [toast]);
+  useEffect(() => {
+    if (!isNative || phase !== "ready") return;
+    const st = smsStatus();
+    if (state.settings.smsCapture && st.granted && !st.on) smsSetOn(true);
+    const t = setTimeout(syncSms, 600);
+    window.LifelineOnSms = () => setTimeout(syncSms, 300);
+    const onVis = () => { if (!document.hidden) setTimeout(syncSms, 400); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearTimeout(t); window.LifelineOnSms = undefined; document.removeEventListener("visibilitychange", onVis); };
+  }, [phase, state.settings.smsCapture, syncSms]);
   useEffect(() => {
     if (!toastMsg) return;
     const t = setTimeout(() => setToast(null), toastMsg.undo ? 6000 : 3200);
@@ -222,7 +247,7 @@ export default function MoneyApp() {
             <button type="button" className="icon-btn" aria-label="Lock now" onClick={lockNow}>
               <Icon name="lock" />
             </button>
-            <button type="button" className={"icon-btn" + (tab === "more" || tab === "connect" || tab === "insights" ? " on" : "")} aria-label="More: settings and help" onClick={() => go("more")}>
+            <button type="button" className={"icon-btn" + (tab === "more" || tab === "connect" || tab === "insights" || tab === "earn" ? " on" : "")} aria-label="More: settings and help" onClick={() => go("more")}>
               <Icon name="menu" />
             </button>
           </div>
@@ -238,6 +263,7 @@ export default function MoneyApp() {
           {tab === "connect" && <Connect />}
           {(tab === "cards" || tab === "card") && <Cards />}
           {tab === "payplan" && <PayPlan />}
+          {tab === "activity" && <Activity />}
         </main>
 
         {!onboarding && (

@@ -22,6 +22,11 @@ interface NativeBridge {
   wipeNative(): void;
   deviceEncrypt(plainB64: string): string;
   deviceDecrypt(sealedB64: string): string;
+  smsStatus?(): string;
+  smsRequest?(cb: string): void;
+  smsSetOn?(on: boolean): void;
+  smsDrain?(): string;
+  smsScan?(cb: string, days: number): void;
 }
 
 declare global {
@@ -29,6 +34,7 @@ declare global {
     LifelineNative?: NativeBridge;
     __lifelineCb?: (id: string, ok: boolean, payload: string) => void;
     LifelineOnBack?: () => boolean;
+    LifelineOnSms?: () => void;
   }
 }
 
@@ -161,4 +167,30 @@ export function deviceDecrypt(sealedB64: string): string {
   const r = bridge ? bridge.deviceDecrypt(sealedB64) : "";
   if (!r) throw new Error("device-key-failed");
   return r;
+}
+
+// ─── Bank SMS capture (Android only) ────────────────────────────────────────
+export interface SmsMsg { from: string; body: string; ts: number }
+export interface SmsStatus { supported: boolean; granted: boolean; on: boolean; queued: number }
+export const smsSupported = () => !!bridge && typeof bridge.smsStatus === "function";
+export function smsStatus(): SmsStatus {
+  if (!smsSupported()) return { supported: false, granted: false, on: false, queued: 0 };
+  try { return { supported: true, ...JSON.parse(bridge!.smsStatus!()) } as SmsStatus; } catch { return { supported: true, granted: false, on: false, queued: 0 }; }
+}
+/** Asks Android for SMS permission; turns capture on when granted. */
+export async function smsRequest(): Promise<boolean> {
+  if (!smsSupported()) return false;
+  return (await call(id => bridge!.smsRequest!(id))) === "true";
+}
+export const smsSetOn = (on: boolean) => bridge?.smsSetOn?.(on);
+/** Messages captured while the app was closed or locked (the native queue is emptied). */
+export function smsDrain(): SmsMsg[] {
+  if (!smsSupported()) return [];
+  try { const a = JSON.parse(bridge!.smsDrain!()); return Array.isArray(a) ? a : []; } catch { return []; }
+}
+/** Bank messages already in the phone's inbox for the last `days` days. */
+export async function smsScan(days: number): Promise<SmsMsg[]> {
+  if (!smsSupported()) return [];
+  const raw = await call(id => bridge!.smsScan!(id, days));
+  try { const a = JSON.parse(raw); return Array.isArray(a) ? a : []; } catch { return []; }
 }

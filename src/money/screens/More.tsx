@@ -52,6 +52,8 @@ export default function More() {
 
       <Section title="Connected apps">
         <List>
+          <Row icon="grow" iconTone="brand" title="Grow: goals & investing" subtitle="Goal planner, fund research, watchlist" onClick={() => go("earn")} />
+          <Row icon="bell" iconTone="brand" title="Bank messages" subtitle="Record spends, cash, money received and EMIs automatically" onClick={() => open({ kind: "sms-setup" })} />
           <Row icon="sparkle" iconTone="brand" title="AI assistant" subtitle="Gemini, ChatGPT, Claude, Perplexity, Copilot" onClick={() => go("ai")} />
           <Row icon="transfer" iconTone="brand" title="Apps & data connections" subtitle="Notifications, calendar, market prices, UPI and broker apps" onClick={() => go("connect")} />
         </List>

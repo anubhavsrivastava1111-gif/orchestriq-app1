@@ -19,7 +19,7 @@ export const EMPTY: MoneyState = {
   settings: {
     bufferDays: 2, bounceFee: 1000, remindersOn: false, name: "", hideAmounts: false, theme: "system",
     setupDismissed: false, calendarAdded: false, autoLockSec: 30, blockScreenshots: true, bioEnabled: false,
-    plan: "early-access", aiShare: "rounded",
+    plan: "early-access", aiShare: "rounded", smsCapture: false, smsScannedAt: "",
   },
   holdings: [],
   integrations: { anthropicKey: "", alphaVantageKey: "" },
@@ -27,6 +27,8 @@ export const EMPTY: MoneyState = {
   goals: [],
   watchlist: [],
   wealth: { risk: null, riskScore: 0, inflationPct: 6, taxpayer: true },
+  txns: [],
+  planLog: {},
 };
 
 /** Fills in fields added by newer versions so older saved data keeps working. */
@@ -42,6 +44,8 @@ export function normalize(p: Partial<MoneyState> | null | undefined): MoneyState
     goals: Array.isArray(p.goals) ? p.goals : [],
     watchlist: Array.isArray(p.watchlist) ? p.watchlist : [],
     wealth: { ...EMPTY.wealth, ...p.wealth },
+    txns: Array.isArray(p.txns) ? p.txns : [],
+    planLog: p.planLog && typeof p.planLog === "object" ? p.planLog : {},
   };
 }
 
@@ -81,8 +85,8 @@ export function demoState(): MoneyState {
   return {
     ...EMPTY,
     accounts: [
-      { id: sal, name: "Salary account (SBI)", balance: 21500, minBalance: 0, updatedAt: new Date().toISOString() },
-      { id: sav, name: "Savings account (HDFC)", balance: 6000, minBalance: 5000, updatedAt: new Date().toISOString() },
+      { id: sal, name: "Salary account (SBI)", balance: 21500, minBalance: 0, updatedAt: new Date().toISOString(), last4: "4417" },
+      { id: sav, name: "Savings account (HDFC)", balance: 6000, minBalance: 5000, updatedAt: new Date().toISOString(), last4: "8823" },
     ],
     loans: [
       { id: uid(), name: "Bike loan", lender: "Bajaj Finance", type: "two-wheeler", emi: 3400, dueDay: 3, accountId: sav, outstanding: 52000, ratePct: 14, paidMonths: [prev] },
@@ -122,7 +126,7 @@ function demoCard(accountId: string) {
   const nextYm = ymOf(nextStatementDate(base));
   const sixDaysAgo = new Date(Date.now() - 6 * 86400000).toISOString();
   return {
-    ...DEFAULT_CARD, id: uid(), name: "ICICI Coral", bank: "ICICI Bank", accountId,
+    ...DEFAULT_CARD, id: uid(), name: "ICICI Coral", bank: "ICICI Bank", accountId, last4: "9004", network: "visa" as const,
     limit: 120000, statementDay: 12, dueDay: 2, monthlyRatePct: 3.75, plan: "minimum" as const,
     revolving: 38000, unbilled: 6500, cycleYm: ymOf(lastStatementDate(base)),
     emis: [

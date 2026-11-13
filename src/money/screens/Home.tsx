@@ -23,12 +23,18 @@ export default function Home() {
   const coming = dues.filter(d => d.status !== "paid" && d.status !== "confirm").slice(0, 4);
   const total = state.accounts.reduce((s, a) => s + a.balance, 0);
   const anyStale = state.accounts.some(a => isStale(a.updatedAt, 1));
+  const todayKey = new Date().toDateString();
+  const todayTx = state.txns.filter(t => t.status !== "ignored" && t.kind !== "statement" && t.kind !== "transfer" && new Date(t.date).toDateString() === todayKey);
+  const todayOut = todayTx.filter(t => t.dir === "debit").reduce((n, t) => n + t.amount, 0);
+  const todayIn = todayTx.filter(t => t.dir === "credit" && t.kind !== "card-payment").reduce((n, t) => n + t.amount, 0);
+  const review = state.txns.filter(t => t.status === "review").length;
 
   const steps = [
     { done: state.accounts.length > 0, title: "Add your bank accounts", sub: "With today's balance", act: () => open({ kind: "account" }) },
     { done: state.loans.length + state.cards.length > 0, title: "Add your loans and cards", sub: "EMIs, due dates, card bills", act: () => open({ kind: "quick-add" }) },
     { done: state.incomes.some(i => i.day), title: "Add income and pay day", sub: "So the plan knows when money arrives", act: () => open({ kind: "income" }) },
     { done: isNative ? notificationsEnabled() : state.settings.calendarAdded, title: "Turn on reminders", sub: "Alerts before every due date", act: () => open({ kind: "reminders" }) },
+    ...(isNative ? [{ done: state.settings.smsCapture, title: "Let Lifeline read bank messages", sub: "Balances and spends update by themselves", act: () => open({ kind: "sms-setup" }) }] : []),
   ];
   const doneCount = steps.filter(s => s.done).length;
 
@@ -67,14 +73,23 @@ export default function Home() {
             {state.accounts.map(a => (
               <div key={a.id} className="acct-row">
                 <span className="acct-name">{a.name}</span>
-                <span className={"acct-when" + (isStale(a.updatedAt, 1) ? " stale" : "")}>{ago(a.updatedAt)}</span>
+                <span className={"acct-when" + (isStale(a.updatedAt, 1) ? " stale" : "")}>{a.balanceSource === "sms" ? "from SMS · " : ""}{ago(a.updatedAt)}</span>
                 <b>{inr(a.balance)}</b>
               </div>
             ))}
           </div>
         )}
-        {anyStale && <p className="hint-warn">Some balances are over a day old. Update them before planning payments.</p>}
+        {anyStale && !state.settings.smsCapture && <p className="hint-warn">Some balances are over a day old. Update them, or let Lifeline read bank messages so they update by themselves.</p>}
       </Card>
+
+      {/* What came in from bank messages (only when there is something) */}
+      {(todayTx.length > 0 || review > 0) && (
+        <button type="button" className="activity-strip" onClick={() => go("activity")}>
+          <Icon name="chart" size={18} />
+          <span>{todayTx.length > 0 ? `${todayTx.length} transaction${todayTx.length > 1 ? "s" : ""} today · out ${inr(todayOut)}${todayIn ? ` · in ${inr(todayIn)}` : ""}` : "Bank messages"}{review > 0 ? ` · ${review} need a look` : ""}</span>
+          <Icon name="chevron" size={16} />
+        </button>
+      )}
 
       {/* Plan only on request */}
       <Card className="plan-cta" onClick={() => open({ kind: "plan-start" })}>
@@ -114,6 +129,7 @@ export default function Home() {
       <div className="quick">
         <button type="button" className="quick-btn" onClick={() => open({ kind: "afford" })}><Icon name="wallet" /><span>Can I afford it?</span></button>
         <button type="button" className="quick-btn" onClick={() => go("insights")}><Icon name="chart" /><span>Insights</span></button>
+        <button type="button" className="quick-btn" onClick={() => go("earn")}><Icon name="grow" /><span>Grow</span></button>
         <button type="button" className="quick-btn" onClick={() => go("ai")}><Icon name="sparkle" /><span>Ask AI</span></button>
       </div>
 

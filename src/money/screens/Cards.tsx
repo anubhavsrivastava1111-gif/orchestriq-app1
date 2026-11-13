@@ -273,10 +273,23 @@ const EV: Record<CardEvent["kind"], { icon: string; tone: "good" | "brand" | "wa
   payment: { icon: "check", tone: "good" }, statement: { icon: "doc", tone: "brand" }, cash: { icon: "transfer", tone: "warn" }, emi: { icon: "calendar", tone: "brand" },
 };
 function ActivityView({ card }: { card: CreditCard }) {
-  const { open } = useApp();
+  const { open, state } = useApp();
   const hist = card.history ?? [];
+  const msgs = state.txns.filter(t => t.cardId === card.id && t.status !== "ignored").slice(0, 25);
   return (
     <>
+      {msgs.length > 0 && (
+        <Section title="From bank messages" hint="Swipes, payments and bills read from this card's SMS.">
+          <List>
+            {msgs.map(t => (
+              <Row key={t.id} icon={t.kind === "card-payment" ? "check" : t.kind === "statement" ? "doc" : "card"} iconTone={t.kind === "card-payment" ? "good" : "brand"}
+                title={t.party || (t.kind === "statement" ? "Card bill" : "Card spend")} subtitle={new Date(t.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                value={t.kind === "statement" ? inr(t.amount) : `${t.dir === "credit" ? "−" : "+"}${inr(t.amount)}`} valueTone={t.dir === "credit" ? "pos" : undefined}
+                onClick={() => open({ kind: "txn", txnId: t.id })} />
+            ))}
+          </List>
+        </Section>
+      )}
       {card.cashOuts.length > 0 && (
         <Section title="Card cash on the next bill" hint={`ATM cash or card-to-bank transfers (your fee: ${drawFeePct(card)}%). Tap to edit.`}>
           <List>

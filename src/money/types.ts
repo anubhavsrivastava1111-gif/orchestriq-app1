@@ -12,6 +12,8 @@ export interface Account {
   balance: number;       // last known balance
   minBalance: number;    // amount the bank requires you to keep (avoid charges)
   updatedAt: string;     // ISO date of last balance update
+  last4?: string;        // last digits of the account number, used to match bank SMS
+  balanceSource?: "manual" | "sms"; // where the latest balance came from
 }
 
 export interface Loan {
@@ -77,6 +79,7 @@ export interface CreditCard {
   last4?: string;        // last 4 digits, shown on the card picture only
   network?: CardNetwork;
   history?: CardEvent[]; // newest first, last 50 kept
+  syncedAt?: string;     // card figures are known up to this time; older bank messages don't change them
   limit: number;
   statementDay: number;
   dueDay: number;
@@ -148,6 +151,8 @@ export interface Settings {
   bioEnabled: boolean;     // Android: fingerprint / face unlock
   plan: Plan;
   aiShare: "exact" | "rounded" | "none"; // how amounts appear in summaries shared with AI apps
+  smsCapture: boolean;     // Android: read bank SMS to record transactions automatically
+  smsScannedAt: string;    // ISO time of the last inbox scan
 }
 
 export type Plan = "free" | "early-access" | "pro";
@@ -188,6 +193,55 @@ export interface MoneyState {
   goals: Goal[];
   watchlist: WatchItem[];
   wealth: WealthSettings;
+  txns: Txn[];                         // transactions captured from bank SMS or pasted by the user
+  planLog: Record<string, PlanMark>;   // what the user did with each plan step
+}
+
+// ─── Transactions captured from bank messages ───────────────────────────────
+export type TxnKind =
+  | "spend"          // card swipe / online purchase / UPI payment to a merchant or person
+  | "card-spend"     // spend on a credit card
+  | "atm"            // cash withdrawal
+  | "cash-in"        // cash deposit
+  | "received"       // money received (UPI / NEFT / IMPS from someone)
+  | "salary"
+  | "emi"            // loan EMI / NACH / auto-debit
+  | "card-payment"   // payment received on a credit card
+  | "transfer"       // money moved between your own accounts
+  | "refund"
+  | "statement"      // credit card statement / bill generated
+  | "other";
+
+export interface Txn {
+  id: string;
+  date: string;          // ISO, from the message time
+  amount: number;
+  dir: "debit" | "credit" | "info";
+  kind: TxnKind;
+  party: string;         // merchant / person / bank, as written in the message
+  last4?: string;        // account / card digits in the message
+  accountId?: string;
+  cardId?: string;
+  loanId?: string;
+  balanceAfter?: number; // "Avl Bal" in the message
+  ref?: string;          // UPI / transaction reference (used to avoid duplicates)
+  bank?: string;         // sender, e.g. HDFCBK
+  text: string;          // the message (one-time passwords are never stored)
+  status: "applied" | "review" | "ignored";
+  note?: string;         // what Lifeline did with it, in plain words
+  source: "sms" | "paste" | "manual";
+  stmt?: { tad: number; mad: number; due?: string };
+}
+
+/** The user's decision on one step of the payment plan. */
+export interface PlanMark {
+  status: "done" | "skipped" | "ignored"; // skipped = remind me later (until `until`), ignored = not doing it this time
+  until?: string;        // skipped steps come back after this time
+  amount?: number;       // actual amount when it differs from the plan
+  at: string;
+  auto?: boolean;        // marked automatically from a bank message
+  title: string;
+  planned: number;
 }
 
 // ─── Wealth: goals, risk profile, research ──────────────────────────────────

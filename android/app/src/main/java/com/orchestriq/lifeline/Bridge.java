@@ -46,7 +46,7 @@ public class Bridge {
 
     final MainActivity activity;
     private volatile boolean trusted = false;
-    private String pendingSaveId, pendingSaveContent, pendingOpenId, pendingNotifId;
+    private String pendingSaveId, pendingSaveContent, pendingOpenId, pendingNotifId, pendingSmsId;
 
     Bridge(MainActivity activity) {
         this.activity = activity;
@@ -219,6 +219,13 @@ public class Bridge {
     }
 
     void onPermissionResult(int requestCode, int[] results) {
+        if (requestCode == MainActivity.REQ_SMS && pendingSmsId != null) {
+            boolean granted = smsGranted();
+            if (granted) SmsInbox.setOn(activity, true);
+            activity.callback(pendingSmsId, true, String.valueOf(granted));
+            pendingSmsId = null;
+            return;
+        }
         if (requestCode == MainActivity.REQ_NOTIF && pendingNotifId != null) {
             boolean granted = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
             activity.callback(pendingNotifId, true, String.valueOf(granted));
@@ -410,11 +417,76 @@ public class Bridge {
         }
     }
 
+    // ─── Bank SMS capture ───────────────────────────────────────────────────
+    boolean smsGranted() {
+        return activity.checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+                && activity.checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @JavascriptInterface
+    public String smsStatus() {
+        if (!trusted) return "{}";
+        try {
+            JSONObject o = new JSONObject();
+            o.put("granted", smsGranted());
+            o.put("on", SmsInbox.isOn(activity));
+            o.put("queued", SmsInbox.queued(activity));
+            return o.toString();
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    @JavascriptInterface
+    public void smsRequest(final String cbId) {
+        if (!trusted) return;
+        if (smsGranted()) {
+            SmsInbox.setOn(activity, true);
+            activity.callback(cbId, true, "true");
+            return;
+        }
+        pendingSmsId = cbId;
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                activity.requestPermissions(new String[]{Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS}, MainActivity.REQ_SMS);
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void smsSetOn(boolean on) {
+        if (!trusted) return;
+        SmsInbox.setOn(activity, on && smsGranted());
+    }
+
+    @JavascriptInterface
+    public String smsDrain() {
+        if (!trusted) return "[]";
+        return SmsInbox.drain(activity);
+    }
+
+    @JavascriptInterface
+    public void smsScan(final String cbId, final int days) {
+        if (!trusted) return;
+        if (!smsGranted()) {
+            activity.callback(cbId, false, "permission");
+            return;
+        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                activity.callback(cbId, true, SmsInbox.scan(activity, days));
+            }
+        }, "lifeline-sms-scan").start();
+    }
+
     /** Clears native-side state (reminders, fingerprint key) when the user resets the app. */
     @JavascriptInterface
     public void wipeNative() {
         if (!trusted) return;
         BiometricVault.disable(activity);
         Reminders.schedule(activity, "[]");
+        SmsInbox.setOn(activity, false);
     }
 }

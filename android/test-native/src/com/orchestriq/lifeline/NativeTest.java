@@ -179,4 +179,40 @@ public class NativeTest {
         assertFalse(Bridge.HTTP_ALLOW.contains("evil.example"));
         assertEquals(2, Bridge.HTTP_ALLOW.size());
     }
+
+    @Test
+    public void smsFilterKeepsBankMessagesAndDropsOtpAndPersonal() {
+        assertTrue(SmsInbox.isMoneySms("AD-HDFCBK", "Rs.2000.00 withdrawn at ATM from A/c XX4417 on 12-11-26. Avl Bal Rs 19,500.00"));
+        assertTrue(SmsInbox.isMoneySms("JD-SBIUPI", "Dear UPI user A/C X4417 debited by 150.0 on date 12Nov26 trf to SWIGGY Refno 431234567890"));
+        assertTrue(SmsInbox.isMoneySms("AD-ICICIB", "Payment of Rs 12,750.00 received towards your ICICI Bank Credit Card XX9004."));
+        assertTrue("bank alert that only warns about OTP sharing is kept",
+                SmsInbox.isMoneySms("AD-HDFCBK", "Sent Rs.150.00 From HDFC Bank A/C *8823 To SWIGGY. Never share OTP. Call 1800 2586"));
+        assertFalse("OTP", SmsInbox.isMoneySms("AD-HDFCBK", "123456 is your OTP for txn of Rs 150.00 at SWIGGY. Do not share."));
+        assertFalse("OTP 2", SmsInbox.isMoneySms("AD-ICICIB", "OTP for transaction of INR 999 on your card XX9004 is 837261."));
+        assertFalse("personal sender", SmsInbox.isMoneySms("+919876543210", "Sent Rs 500 to you, debited from my a/c"));
+        assertFalse("no money", SmsInbox.isMoneySms("AD-HDFCBK", "Your request has been registered. Thank you for banking with us."));
+    }
+
+    @Test
+    public void smsCaptureIsOffUntilTheUserTurnsItOn() {
+        Application c = RuntimeEnvironment.getApplication();
+        assertFalse(SmsInbox.isOn(c));
+        SmsInbox.enqueue(c, "AD-HDFCBK", "Rs.2000.00 withdrawn at ATM from A/c XX4417. Avl Bal Rs 19,500.00", 1L);
+        assertEquals(0, SmsInbox.queued(c));
+        assertEquals("[]", SmsInbox.drain(c));
+        SmsInbox.setOn(c, true);
+        assertTrue(SmsInbox.isOn(c));
+        SmsInbox.setOn(c, false);
+        assertFalse(SmsInbox.isOn(c));
+    }
+
+    @Test
+    public void smsReceiverOnlyAcceptsTheSystem() throws Exception {
+        Application c = RuntimeEnvironment.getApplication();
+        android.content.pm.ActivityInfo ri = c.getPackageManager().getReceiverInfo(new android.content.ComponentName(c, SmsReceiver.class), 0);
+        assertEquals("android.permission.BROADCAST_SMS", ri.permission);
+        // A plain broadcast without SMS data is ignored safely.
+        new SmsReceiver().onReceive(c, new Intent("android.provider.Telephony.SMS_RECEIVED"));
+        assertEquals(0, SmsInbox.queued(c));
+    }
 }

@@ -8,7 +8,7 @@ A native Android app (package `com.orchestriq.lifeline`) that hosts the Lifeline
 - secure file save and open.
 
 - **Size:** ~0.3 MB · **Android:** 8.0+ (API 26), targets Android 15 (API 35)
-- **Permissions:** Internet, Notifications, Run at startup (to restore reminders after a reboot), Biometric. No contacts, SMS, location, storage or camera.
+- **Permissions:** Internet, Notifications, Run at startup (to restore reminders after a reboot), Biometric, SMS (only when you turn on "Read bank messages"). No contacts, location, storage or camera.
 
 ## Install on your phone (sideload)
 
@@ -31,6 +31,7 @@ This works because every release is signed with the same key and has a higher ve
 | Version | Code | What's new |
 |---|---|---|
 | 1.0.0 | 1 | First Android release |
+| 1.5.0 | 6 | Reads bank SMS (optional): balances, card swipes, card payments and bills, cash withdrawals, money received and EMIs recorded automatically; OTPs and personal messages never read; new Activity tab with month totals and filters; unknown accounts linked once and remembered; plan steps tick off by themselves with the real amount, plus Done (any amount) / Later / Not doing; card-rotation explainer with costs; far fewer notifications (one per due date, none when already covered, no check-ins when SMS is on) |
 | 1.4.0 | 5 | Calm Home: your bank balances exactly as entered, no unasked-for steps. "Plan my payments" on request: confirm balances first, then a two-part plan (before salary / after salary) built from those balances. New Cards tab: card wallet with realistic card pictures, status at a glance (due / overdue / paid), one-tap Pay, Enter bill, Add EMI, Card cash; Bill, EMIs, Activity and Details views; activity history; 4-step add-card wizard with last 4 digits and network |
 | 1.3.0 | 4 | Payment Organizer: dated step-by-step plan each pay cycle (EMIs never bounce, card minimums protected, gap covered by the cheaper of card-to-bank draw or part-payment), 12-month view with total card fees and the month payments fit income, ways to lighten the load with ready emails, "Can I afford this?", simpler card screen (total/minimum/statement/due/days left, enter statement, overdue shown), card EMI payoff dates and interest left, card statement and due reminders, RBI rights, Nifty 50 comparison in research |
 | 1.2.0 | 3 | Grow tab: goal planner (inflation, 3 plans, 80%-confidence amounts from 2,000 simulated markets), "next rupee" priority ladder, risk quiz (capped under debt stress), fund/stock research (returns over 1/3/5/10 years, biggest fall, rolling returns, SIP backtest, scenarios from the fund's own history), watchlist, research-site links, AI analysis; wrong-passcode alert at unlock |
@@ -46,6 +47,7 @@ This works because every release is signed with the same key and has a higher ve
 | The app container | Interface ships inside the APK and is served from a reserved offline origin. A strict Content-Security-Policy allows scripts only from the app and network only to `api.anthropic.com`, `api.mfapi.in` and `www.alphavantage.co`. The WebView can't open other sites, `file://` or `content://`. External links go to the browser; only https/tel/mailto/upi are allowed. |
 | Native bridge | Works only while the app's own origin is loaded. App hand-off is limited to a fixed list of known packages. The native HTTP helper only reaches two market-data hosts. |
 | Backups | Android cloud/adb backup is **disabled**. Your own backups are AES-256 encrypted with a separate password and saved through the system file picker. Lifeline needs no storage permission. |
+| Bank SMS | Off until you turn it on. Only bank/business senders are kept; messages with a one-time password are dropped before storage; personal SMS are ignored. Messages that arrive while the app is locked wait in a queue sealed with the hardware Keystore key, then move into the encrypted vault. The SMS receiver only accepts broadcasts from the system. |
 | Notifications | Lock-screen version shows only "You have an EMI reminder". Amounts appear after unlocking the phone. |
 | AI | Summaries sent to AI apps never include your name, account numbers or keys, and you choose rounded, exact or hidden amounts. Your own Claude API key is stored inside the encrypted vault. |
 
@@ -91,4 +93,5 @@ Play requires an **Android App Bundle (.aab)** built with Google's toolchain. Th
 2. Copy `app/src/main` (manifest, `java/`, `res/`) over the new project's `app/src/main`. Run `npx vite build --config vite.android.config.ts` to fill `assets/www`.
 3. **Build → Generate Signed App Bundle**, using `lifeline-release.jks` as the upload key.
 4. In Play Console: create the app → **Data safety** ("No data collected": everything stays on the device; data sent to AI apps or Anthropic happens only at the user's request, under the user's own account) → **Financial features** declaration (budgeting/tracking, no lending) → privacy policy URL → closed testing (Play requires 12 testers for 14 days on new personal developer accounts) → production.
-5. Subscriptions: add **Google Play Billing** (products `lifeline_pro_monthly` at ₹149 and `lifeline_pro_yearly` at ₹999). Set `settings.plan` from the verified purchase (`src/money/entitlements.ts`). Verify purchases on a small server (Play Developer API) before trusting them.
+5. **SMS permission on Play:** Google Play only allows READ_SMS/RECEIVE_SMS after a Permissions Declaration review. If it's refused, ship the Play build without SMS (paste-a-message still works) and keep SMS in the direct-install APK.
+6. Subscriptions: add **Google Play Billing** (products `lifeline_pro_monthly` at ₹149 and `lifeline_pro_yearly` at ₹999). Set `settings.plan` from the verified purchase (`src/money/entitlements.ts`). Verify purchases on a small server (Play Developer API) before trusting them.
