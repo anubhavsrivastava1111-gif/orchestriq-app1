@@ -131,3 +131,8 @@ from profiles p left join user_state us on us.user_id = p.id;
 
 revoke all on function public.gate_signup() from public, anon, authenticated;
 revoke all on function public.handle_new_user() from public, anon, authenticated;
+
+-- Lock down: trigger functions are internal only; role checks callable only by signed-in users (they reveal only the caller's own status).
+revoke execute on function public.guard_invite(), public.guard_profile() from public, anon, authenticated;
+revoke execute on function public.is_active(), public.is_admin(), public.is_owner() from public, anon;
+grant execute on function public.is_active(), public.is_admin(), public.is_owner() to authenticated;

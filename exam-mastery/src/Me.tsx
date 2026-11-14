@@ -5,7 +5,7 @@ import { EXAMS, paperById, QUESTIONS } from './data'
 import { exportAdmin, exportBackup, exportExcel, exportPdf } from './exports'
 import { getState, replaceAll, resetProgress, setLevel, setProfile, topicStats, useStore, type State } from './store'
 
-export const APP_VERSION = '0.2.0'
+export const APP_VERSION = '0.3.0'
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0)
 
 export default function Me({ me }: { me: ProfileRow | null }) {
