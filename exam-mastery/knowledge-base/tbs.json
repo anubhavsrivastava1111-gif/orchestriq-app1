@@ -1,0 +1,81 @@
+{
+  "_meta": { "purpose": "CPA task-based simulations (TBS) in exam style. Each row is scored separately, as in the real exam. Original content.", "lastReviewed": "2026-11-14" },
+  "tasks": [
+    { "id": "TBS-FAR-01", "exam": "CPA", "paper": "FAR", "topic": "Financial statements & cash flows", "title": "Operating cash flow worksheet",
+      "scenario": "Darwin Co. reports net income of $250,000. During the year: depreciation $40,000; accounts receivable increased $30,000; inventory decreased $10,000; accounts payable decreased $15,000; gain on sale of equipment $8,000. Enter each adjustment to net income (use a minus sign for deductions) and the resulting cash from operating activities (indirect method).",
+      "rows": [
+        { "label": "Depreciation", "kind": "number", "answer": 40000 },
+        { "label": "Change in accounts receivable", "kind": "number", "answer": -30000 },
+        { "label": "Change in inventory", "kind": "number", "answer": 10000 },
+        { "label": "Change in accounts payable", "kind": "number", "answer": -15000 },
+        { "label": "Gain on sale of equipment", "kind": "number", "answer": -8000 },
+        { "label": "Net cash from operating activities", "kind": "number", "answer": 247000 }
+      ],
+      "explain": "Add back non-cash expenses. Subtract gains (the cash proceeds go to investing). Subtract increases in current assets and add decreases. Add increases in current liabilities and subtract decreases. 250,000 + 40,000 − 30,000 + 10,000 − 15,000 − 8,000 = 247,000." },
+    { "id": "TBS-FAR-02", "exam": "CPA", "paper": "FAR", "topic": "Bonds and liabilities", "title": "Bond amortisation schedule",
+      "scenario": "On 1 Jan Year 1, Kepler Inc. issued bonds with face value $500,000 and a 6% annual coupon paid each 31 Dec, for $480,000 (market rate 7%). Using the effective interest method, complete the schedule. Round to whole dollars.",
+      "rows": [
+        { "label": "Year 1 interest expense", "kind": "number", "answer": 33600 },
+        { "label": "Year 1 cash paid", "kind": "number", "answer": 30000 },
+        { "label": "Year 1 discount amortisation", "kind": "number", "answer": 3600 },
+        { "label": "Carrying amount, 31 Dec Year 1", "kind": "number", "answer": 483600 },
+        { "label": "Year 2 interest expense", "kind": "number", "answer": 33852, "tolerance": 1 },
+        { "label": "Carrying amount, 31 Dec Year 2", "kind": "number", "answer": 487452, "tolerance": 1 }
+      ],
+      "explain": "Expense = opening carrying amount × 7%. Cash = 500,000 × 6%. The difference is amortisation, which increases the carrying amount towards face. Year 2: 483,600 × 7% = 33,852, so the carrying amount becomes 483,600 + 3,852 = 487,452." },
+    { "id": "TBS-FAR-03", "exam": "CPA", "paper": "FAR", "topic": "Financial statements & cash flows", "title": "Classify cash flows (US GAAP)",
+      "scenario": "For each item, select the section of the statement of cash flows where it is reported under US GAAP.",
+      "rows": [
+        { "label": "Purchase of equipment for cash", "kind": "select", "options": ["Operating", "Investing", "Financing", "Non-cash disclosure"], "answer": "Investing" },
+        { "label": "Dividends paid to shareholders", "kind": "select", "options": ["Operating", "Investing", "Financing", "Non-cash disclosure"], "answer": "Financing" },
+        { "label": "Interest paid on bonds", "kind": "select", "options": ["Operating", "Investing", "Financing", "Non-cash disclosure"], "answer": "Operating" },
+        { "label": "Issuance of bonds for cash", "kind": "select", "options": ["Operating", "Investing", "Financing", "Non-cash disclosure"], "answer": "Financing" },
+        { "label": "Acquisition of land by issuing common stock", "kind": "select", "options": ["Operating", "Investing", "Financing", "Non-cash disclosure"], "answer": "Non-cash disclosure" },
+        { "label": "Interest received on a loan to a supplier", "kind": "select", "options": ["Operating", "Investing", "Financing", "Non-cash disclosure"], "answer": "Operating" }
+      ],
+      "explain": "US GAAP: interest paid and received and dividends received are operating; dividends paid are financing; buying long-term assets is investing; issuing debt or equity is financing; non-cash exchanges are disclosed separately." },
+    { "id": "TBS-AUD-01", "exam": "CPA", "paper": "AUD", "topic": "Audit evidence", "title": "Match procedures to assertions",
+      "scenario": "For each audit procedure, select the PRIMARY assertion it tests.",
+      "rows": [
+        { "label": "Confirm accounts receivable balances with customers", "kind": "select", "options": ["Existence", "Completeness", "Valuation", "Rights & obligations", "Cut-off"], "answer": "Existence" },
+        { "label": "Trace shipping documents to the sales journal", "kind": "select", "options": ["Existence", "Completeness", "Valuation", "Rights & obligations", "Cut-off"], "answer": "Completeness" },
+        { "label": "Review cash collected from customers after year-end", "kind": "select", "options": ["Existence", "Completeness", "Valuation", "Rights & obligations", "Cut-off"], "answer": "Valuation" },
+        { "label": "Inspect the title deed for land", "kind": "select", "options": ["Existence", "Completeness", "Valuation", "Rights & obligations", "Cut-off"], "answer": "Rights & obligations" },
+        { "label": "Examine sales invoices from the last 5 days of the year and the first 5 days of the next year", "kind": "select", "options": ["Existence", "Completeness", "Valuation", "Rights & obligations", "Cut-off"], "answer": "Cut-off" },
+        { "label": "Search for unrecorded liabilities by examining payments made after year-end", "kind": "select", "options": ["Existence", "Completeness", "Valuation", "Rights & obligations", "Cut-off"], "answer": "Completeness" }
+      ],
+      "explain": "Vouching from records to evidence tests existence. Tracing from source documents to records, and searching for unrecorded items, tests completeness. Subsequent receipts support collectability (valuation). Title documents prove rights. Transactions around year-end test cut-off." },
+    { "id": "TBS-AUD-02", "exam": "CPA", "paper": "AUD", "topic": "Audit reports", "title": "Select the auditor's report",
+      "scenario": "For each independent situation, select the appropriate type of auditor's report.",
+      "rows": [
+        { "label": "Inventory is overstated materially, but the effect is confined to inventory and COGS", "kind": "select", "options": ["Unmodified", "Unmodified + going concern section", "Qualified", "Adverse", "Disclaimer"], "answer": "Qualified" },
+        { "label": "The company failed to consolidate a major subsidiary; misstatements affect most line items", "kind": "select", "options": ["Unmodified", "Unmodified + going concern section", "Qualified", "Adverse", "Disclaimer"], "answer": "Adverse" },
+        { "label": "Records were destroyed in a fire and the auditor cannot obtain evidence for most balances", "kind": "select", "options": ["Unmodified", "Unmodified + going concern section", "Qualified", "Adverse", "Disclaimer"], "answer": "Disclaimer" },
+        { "label": "Substantial doubt about going concern, adequately disclosed", "kind": "select", "options": ["Unmodified", "Unmodified + going concern section", "Qualified", "Adverse", "Disclaimer"], "answer": "Unmodified + going concern section" },
+        { "label": "Auditor could not observe the inventory count; other procedures failed; inventory is material but not pervasive", "kind": "select", "options": ["Unmodified", "Unmodified + going concern section", "Qualified", "Adverse", "Disclaimer"], "answer": "Qualified" }
+      ],
+      "explain": "Use the 2×2 grid: misstatement (material → qualified, pervasive → adverse) and inability to obtain evidence (material → qualified, pervasive → disclaimer). Going concern with adequate disclosure keeps an unmodified opinion, with a separate section." },
+    { "id": "TBS-REG-01", "exam": "CPA", "paper": "REG", "topic": "Entity taxation", "title": "Partner's outside basis",
+      "scenario": "Mira contributed $80,000 cash for a 25% partnership interest on 1 Jan. For the year, her distributive share was: ordinary business income $30,000 and tax-exempt interest $2,000. She received cash distributions of $25,000. Her share of partnership liabilities increased by $10,000. Complete her basis computation.",
+      "rows": [
+        { "label": "Beginning basis (contribution)", "kind": "number", "answer": 80000 },
+        { "label": "Add: ordinary income", "kind": "number", "answer": 30000 },
+        { "label": "Add: tax-exempt income", "kind": "number", "answer": 2000 },
+        { "label": "Add: increase in share of liabilities", "kind": "number", "answer": 10000 },
+        { "label": "Less: distributions (enter as negative)", "kind": "number", "answer": -25000 },
+        { "label": "Ending outside basis", "kind": "number", "answer": 97000 }
+      ],
+      "explain": "Outside basis increases with contributions, ALL income (including tax-exempt) and increases in liability share. It decreases with distributions, losses and non-deductible expenses. 80,000 + 30,000 + 2,000 + 10,000 − 25,000 = 97,000." },
+    { "id": "TBS-BAR-01", "exam": "CPA", "paper": "BAR", "topic": "Cost & variance analysis", "title": "Direct materials variances",
+      "scenario": "Standard: 2 kg per unit at $5.00/kg. 1,000 units were produced. 2,200 kg were purchased and used at $4.80/kg. Enter each variance as a positive number and select favourable (F) or unfavourable (U).",
+      "rows": [
+        { "label": "Materials price variance (amount)", "kind": "number", "answer": 440 },
+        { "label": "Materials price variance (F/U)", "kind": "select", "options": ["F", "U"], "answer": "F" },
+        { "label": "Materials quantity variance (amount)", "kind": "number", "answer": 1000 },
+        { "label": "Materials quantity variance (F/U)", "kind": "select", "options": ["F", "U"], "answer": "U" },
+        { "label": "Total materials variance (amount)", "kind": "number", "answer": 560 },
+        { "label": "Total materials variance (F/U)", "kind": "select", "options": ["F", "U"], "answer": "U" }
+      ],
+      "explain": "Price variance = (4.80 − 5.00) × 2,200 = 440 F. Quantity variance = (2,200 − 2,000) × 5.00 = 1,000 U. Total = 1,000 U − 440 F = 560 U." }
+  ]
+}

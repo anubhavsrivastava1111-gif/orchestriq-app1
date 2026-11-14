@@ -3,7 +3,9 @@
 import { readFileSync } from 'node:fs';
 const kb = (f) => JSON.parse(readFileSync(new URL(`../knowledge-base/${f}`, import.meta.url)));
 const { exams } = kb('exams.json');
-const { questions } = kb('questions.json');
+import { readdirSync } from 'node:fs';
+const questions = readdirSync(new URL('../knowledge-base/', import.meta.url)).filter((f) => /^questions.*\.json$/.test(f)).flatMap((f) => kb(f).questions);
+const notes = kb('notes.json').notes; const tbs = kb('tbs.json').tasks;
 const { lessons } = kb('lessons.json');
 const guides = kb('guides.json');
 const errors = [];
@@ -28,11 +30,16 @@ for (const q of questions) {
   if (!STATUSES.includes(q.status)) errors.push(`${where}: bad status ${q.status}`);
 }
 for (const l of lessons) for (const k of ['id', 'title', 'story', 'rule', 'example', 'check']) if (!l[k]) errors.push(`lesson ${l.id}: missing ${k}`);
+for (const k of Object.keys(notes)) { const [e, p, t] = k.split('|'); if (!papers.get(p)?.topics.includes(t)) errors.push(`note ${k}: topic not in syllabus`); }
+for (const t of tbs) { if (!papers.get(t.paper)?.topics.includes(t.topic)) errors.push(`tbs ${t.id}: topic not in syllabus`); for (const r of t.rows) if (r.kind === 'select' && !r.options.includes(r.answer)) errors.push(`tbs ${t.id}: answer not in options`); }
+const cpaFrmTopics = [...papers.entries()].filter(([, v]) => v.exam === 'CPA' || v.exam === 'FRM').flatMap(([p, v]) => v.topics.map((t) => `${v.exam}|${p}|${t}`));
+const noNote = cpaFrmTopics.filter((k) => !notes[k]); if (noNote.length) console.log(`CPA/FRM topics without a coaching note: ${noNote.join(', ')}`);
 // coverage report
 const cov = {};
 for (const e of exams) for (const p of e.papers) for (const t of p.topics) cov[`${e.id} / ${p.id} / ${t}`] = 0;
 for (const q of questions) cov[`${q.exam} / ${q.paper} / ${q.topic}`]++;
 const empty = Object.entries(cov).filter(([, n]) => n === 0).map(([k]) => k);
+console.log(`Notes: ${Object.keys(notes).length}  Simulations: ${tbs.length}`);
 console.log(`Questions: ${questions.length}  Lessons: ${lessons.length}  Challenges: ${guides.challenges.length}  Workplace guides: ${guides.workplace.length}`);
 console.log(`Syllabus topics: ${Object.keys(cov).length}, with ≥1 question: ${Object.keys(cov).length - empty.length}`);
 if (empty.length) console.log(`Topics with no questions yet (${empty.length}):\n  - ` + empty.join('\n  - '));

@@ -1,18 +1,26 @@
 {
   "name": "exam-mastery",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "validate": "node scripts/validate-kb.mjs",
+    "test": "tsx tests/generators.test.ts",
     "build": "node scripts/validate-kb.mjs && tsc --noEmit && vite build",
     "preview": "vite preview",
     "android:sync": "npm run build && npx cap sync android"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "@capacitor/android": "8.6.2",
     "@capacitor/core": "8.6.2",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/share": "^8.0.3",
+    "@supabase/supabase-js": "^2.119.0",
+    "exceljs": "^4.4.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.9",
     "react": "19.2.0",
     "react-dom": "19.2.0"
   },
@@ -21,6 +29,7 @@
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "@vitejs/plugin-react": "5.1.0",
+    "tsx": "^4.20.6",
     "typescript": "5.9.3",
     "vite": "7.2.2"
   }

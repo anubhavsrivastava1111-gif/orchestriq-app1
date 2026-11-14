@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { paperById, type Question } from './data'
-import { record, useStore, type Level } from './store'
+import { addAttempt, record, useStore, type Level } from './store'
 
-type Props = { questions: Question[]; mode: 'practice' | 'mock'; title: string; onExit: () => void }
+type Props = { questions: Question[]; mode: 'practice' | 'mock'; title: string; onExit: () => void; onAsk?: (q: Question) => void }
 const SECONDS_PER_Q = 90
 const LETTERS = 'ABCDEF'
 
-export function Explanation({ q, level }: { q: Question; level: Level }) {
+export function Explanation({ q, level, onAsk }: { q: Question; level: Level; onAsk?: (q: Question) => void }) {
   const [tab, setTab] = useState<'simple' | 'steps' | 'trap'>(level === 'simple' ? 'simple' : 'steps')
   useEffect(() => setTab(level === 'simple' ? 'simple' : 'steps'), [q.id, level])
   return (
@@ -19,12 +19,14 @@ export function Explanation({ q, level }: { q: Question; level: Level }) {
       {tab === 'simple' && <p className="story">{q.explain.simple}</p>}
       {tab === 'steps' && <ol className="steps">{q.explain.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
       {tab === 'trap' && <p className="trap">{q.explain.trap}</p>}
-      <p className="ref">Source: {q.ref} · {q.status === 'sme-verified' ? 'Expert-verified' : 'Draft, awaiting expert review'}</p>
+      <p className="ref">Source: {q.ref} · {q.status === 'sme-verified' ? 'Expert-verified' : q.status === 'generated' ? 'Auto-generated · maths computed by the app' : 'Draft, awaiting expert review'}</p>
+      {onAsk && <button className="btn ghost small" onClick={() => onAsk(q)}>💬 Still confused? Ask Mentor</button>}
     </div>
   )
 }
 
-export default function Quiz({ questions, mode, title, onExit }: Props) {
+export default function Quiz({ questions, mode, title, onExit, onAsk }: Props) {
+  const [started] = useState(() => Date.now())
   const { level } = useStore()
   const [i, setI] = useState(0)
   const [picked, setPicked] = useState<(number | null)[]>(() => questions.map(() => null))
@@ -48,6 +50,8 @@ export default function Quiz({ questions, mode, title, onExit }: Props) {
   }
   function finish() {
     if (mode === 'mock') questions.forEach((qq, k) => picked[k] !== null && record(qq, picked[k] === qq.answer))
+    const detail = questions.map((qq, k) => ({ qid: qq.id, topic: qq.topic, correct: picked[k] === qq.answer })).filter((_, k) => picked[k] !== null)
+    if (detail.length) addAttempt({ kind: mode, exam: questions[0].exam, paper: questions[0].paper, title, score: detail.filter((x) => x.correct).length, total: detail.length, seconds: Math.round((Date.now() - started) / 1000), detail })
     setDone(true)
   }
 
@@ -74,7 +78,7 @@ export default function Quiz({ questions, mode, title, onExit }: Props) {
             <summary><span className="dot" />{qq.stem}</summary>
             <p><b>Correct:</b> {LETTERS[qq.answer]}. {qq.options[qq.answer]}</p>
             {picked[k] !== qq.answer && <p className="muted"><b>You chose:</b> {picked[k] === null ? 'No answer' : `${LETTERS[picked[k]!]}. ${qq.options[picked[k]!]}`}</p>}
-            <Explanation q={qq} level={level} />
+            <Explanation q={qq} level={level} onAsk={onAsk} />
           </details>
         ))}
       </div>
@@ -85,7 +89,7 @@ export default function Quiz({ questions, mode, title, onExit }: Props) {
   return (
     <div className="screen">
       <div className="quizbar">
-        <button className="link" onClick={onExit} aria-label="Exit">✕ Exit</button>
+        <button className="link" onClick={() => { if (mode === 'practice' && picked.some((x) => x !== null)) finish(); onExit() }} aria-label="Exit">✕ Exit</button>
         <span>{i + 1} / {questions.length}</span>
         {mode === 'mock' ? <span className={`timer ${left < 60 ? 'warn' : ''}`}>⏱ {mm}:{ss}</span> : <span className="muted">{title}</span>}
       </div>
@@ -106,7 +110,7 @@ export default function Quiz({ questions, mode, title, onExit }: Props) {
         {revealed && (
           <>
             <p className={`verdict ${choice === q.answer ? 'ok' : 'bad'}`}>{choice === q.answer ? '✓ Correct' : `✗ Not quite. The answer is ${LETTERS[q.answer]}.`}</p>
-            <Explanation q={q} level={level} />
+            <Explanation q={q} level={level} onAsk={onAsk} />
           </>
         )}
       </div>
