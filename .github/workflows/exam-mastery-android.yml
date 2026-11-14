@@ -7,6 +7,9 @@ on:
       - 'exam-mastery/**'
       - '.github/workflows/exam-mastery-android.yml'
 
+permissions:
+  contents: write
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -37,3 +40,14 @@ jobs:
         with:
           name: exam-mastery-debug-apk
           path: exam-mastery/android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Rename APK for download
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk ExamMastery.apk
+      - name: Publish as a GitHub Release (direct phone download link)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: exam-mastery-build-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: Exam Mastery (test build ${{ github.run_number }})
+          body: Tap ExamMastery.apk below on your Android phone to download and install.
+          files: exam-mastery/ExamMastery.apk
+          make_latest: true
