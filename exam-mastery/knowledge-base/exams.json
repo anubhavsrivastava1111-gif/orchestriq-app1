@@ -13,12 +13,92 @@
       "syllabusVersion": "CPA Evolution model (Core + 1 Discipline). Verify current blueprint.",
       "plain": "The licence to work as a Certified Public Accountant in the USA. Three core papers that everyone takes, plus one specialist paper you choose.",
       "papers": [
-        { "id": "FAR", "name": "Financial Accounting & Reporting", "kind": "Core", "topics": ["Conceptual framework", "Revenue recognition", "Inventory", "PP&E and depreciation", "Leases", "Bonds and liabilities", "Governmental accounting", "Not-for-profit accounting"] },
-        { "id": "AUD", "name": "Auditing & Attestation", "kind": "Core", "topics": ["Ethics and independence", "Audit risk", "Internal control", "Audit evidence", "Audit reports"] },
-        { "id": "REG", "name": "Taxation & Regulation", "kind": "Core", "topics": ["Business law", "Property basis", "Individual taxation", "Entity taxation", "Professional responsibilities"] },
-        { "id": "BAR", "name": "Business Analysis & Reporting", "kind": "Discipline", "topics": ["Cost-volume-profit", "Financial statement analysis", "Advanced technical accounting"] },
-        { "id": "ISC", "name": "Information Systems & Controls", "kind": "Discipline", "topics": ["SOC engagements", "IT general controls", "Data security"] },
-        { "id": "TCP", "name": "Tax Compliance & Planning", "kind": "Discipline", "topics": ["Individual planning", "Entity planning", "Gift and estate"] }
+        {
+          "id": "FAR",
+          "name": "Financial Accounting & Reporting",
+          "kind": "Core",
+          "topics": [
+            "Conceptual framework",
+            "Financial statements & cash flows",
+            "Revenue recognition",
+            "Receivables",
+            "Inventory",
+            "PP&E and depreciation",
+            "Impairment & intangibles",
+            "Investments",
+            "Leases",
+            "Bonds and liabilities",
+            "Contingencies",
+            "Income taxes",
+            "Equity & EPS",
+            "Business combinations",
+            "Accounting changes & errors",
+            "Governmental accounting",
+            "Not-for-profit accounting"
+          ]
+        },
+        {
+          "id": "AUD",
+          "name": "Auditing & Attestation",
+          "kind": "Core",
+          "topics": [
+            "Ethics and independence",
+            "Engagement acceptance & planning",
+            "Audit risk",
+            "Internal control",
+            "Audit evidence",
+            "Audit sampling",
+            "Audit reports",
+            "Review & compilation engagements"
+          ]
+        },
+        {
+          "id": "REG",
+          "name": "Taxation & Regulation",
+          "kind": "Core",
+          "topics": [
+            "Professional responsibilities",
+            "Business law",
+            "Property basis",
+            "Property transactions",
+            "Individual taxation",
+            "Entity taxation"
+          ]
+        },
+        {
+          "id": "BAR",
+          "name": "Business Analysis & Reporting",
+          "kind": "Discipline",
+          "topics": [
+            "Cost-volume-profit",
+            "Financial statement analysis",
+            "Cost & variance analysis",
+            "Decision making",
+            "Advanced technical accounting"
+          ]
+        },
+        {
+          "id": "ISC",
+          "name": "Information Systems & Controls",
+          "kind": "Discipline",
+          "topics": [
+            "SOC engagements",
+            "IT general controls",
+            "Data security",
+            "Data management & continuity"
+          ]
+        },
+        {
+          "id": "TCP",
+          "name": "Tax Compliance & Planning",
+          "kind": "Discipline",
+          "topics": [
+            "Individual planning",
+            "Entity planning",
+            "Gift and estate",
+            "Property planning"
+          ]
+        }
       ]
     },
     {
@@ -29,14 +109,112 @@
       "syllabusVersion": "Part I + Part II. Verify the current year's study guide and learning objectives.",
       "plain": "The Financial Risk Manager certificate. It teaches you to measure and control the risk of losing money in banks, funds and companies.",
       "papers": [
-        { "id": "P1-FRM", "name": "Part I: Foundations of Risk Management", "kind": "Part I", "topics": ["Risk-adjusted performance", "CAPM", "Risk governance"] },
-        { "id": "P1-QA", "name": "Part I: Quantitative Analysis", "kind": "Part I", "topics": ["Probability", "Portfolio statistics", "Regression"] },
-        { "id": "P1-FMP", "name": "Part I: Financial Markets & Products", "kind": "Part I", "topics": ["Forwards and futures", "Options", "Bonds"] },
-        { "id": "P1-VRM", "name": "Part I: Valuation & Risk Models", "kind": "Part I", "topics": ["Value at Risk", "Duration and convexity", "Expected shortfall"] },
-        { "id": "P2-MR", "name": "Part II: Market Risk", "kind": "Part II", "topics": ["Backtesting", "FRTB"] },
-        { "id": "P2-CR", "name": "Part II: Credit Risk", "kind": "Part II", "topics": ["Expected loss", "Counterparty risk"] },
-        { "id": "P2-OR", "name": "Part II: Operational Risk & Resilience", "kind": "Part II", "topics": ["Basel operational risk capital"] },
-        { "id": "P2-LT", "name": "Part II: Liquidity & Treasury Risk", "kind": "Part II", "topics": ["LCR and NSFR"] }
+        {
+          "id": "P1-FRM",
+          "name": "Part I: Foundations of Risk Management",
+          "kind": "Part I",
+          "topics": [
+            "Risk governance",
+            "CAPM",
+            "Risk-adjusted performance",
+            "Case studies & ethics"
+          ]
+        },
+        {
+          "id": "P1-QA",
+          "name": "Part I: Quantitative Analysis",
+          "kind": "Part I",
+          "topics": [
+            "Probability",
+            "Statistics & distributions",
+            "Portfolio statistics",
+            "Regression",
+            "Time series & simulation"
+          ]
+        },
+        {
+          "id": "P1-FMP",
+          "name": "Part I: Financial Markets & Products",
+          "kind": "Part I",
+          "topics": [
+            "Forwards and futures",
+            "Swaps",
+            "Options",
+            "Bonds",
+            "Interest & FX rates",
+            "Clearing & securitised products"
+          ]
+        },
+        {
+          "id": "P1-VRM",
+          "name": "Part I: Valuation & Risk Models",
+          "kind": "Part I",
+          "topics": [
+            "Value at Risk",
+            "Expected shortfall",
+            "Duration and convexity",
+            "Option valuation & Greeks",
+            "Credit ratings & stress testing"
+          ]
+        },
+        {
+          "id": "P2-MR",
+          "name": "Part II: Market Risk",
+          "kind": "Part II",
+          "topics": [
+            "Backtesting",
+            "FRTB",
+            "Volatility models",
+            "Term structure & volatility smiles"
+          ]
+        },
+        {
+          "id": "P2-CR",
+          "name": "Part II: Credit Risk",
+          "kind": "Part II",
+          "topics": [
+            "Expected loss",
+            "Counterparty risk",
+            "Credit derivatives & securitisation",
+            "Credit risk models"
+          ]
+        },
+        {
+          "id": "P2-OR",
+          "name": "Part II: Operational Risk & Resilience",
+          "kind": "Part II",
+          "topics": [
+            "Basel operational risk capital",
+            "Operational risk management",
+            "Model risk & resilience"
+          ]
+        },
+        {
+          "id": "P2-LT",
+          "name": "Part II: Liquidity & Treasury Risk",
+          "kind": "Part II",
+          "topics": [
+            "LCR and NSFR",
+            "Asset-liability management"
+          ]
+        },
+        {
+          "id": "P2-RMIM",
+          "name": "Part II: Risk Management & Investment Management",
+          "kind": "Part II",
+          "topics": [
+            "Portfolio risk",
+            "Performance & hedge funds"
+          ]
+        },
+        {
+          "id": "P2-CI",
+          "name": "Part II: Current Issues in Financial Markets",
+          "kind": "Part II",
+          "topics": [
+            "Current issues (annual readings)"
+          ]
+        }
       ]
     },
     {
@@ -47,8 +225,26 @@
       "syllabusVersion": "Two parts. Verify the current Content Specification Outline.",
       "plain": "Certified Management Accountant. It is about using numbers inside a company to plan, control costs and make decisions.",
       "papers": [
-        { "id": "CMA1", "name": "Part 1: Financial Planning, Performance & Analytics", "kind": "Part 1", "topics": ["Budgeting", "Variance analysis", "Cost management"] },
-        { "id": "CMA2", "name": "Part 2: Strategic Financial Management", "kind": "Part 2", "topics": ["Financial statement analysis", "Cost of capital", "Investment decisions"] }
+        {
+          "id": "CMA1",
+          "name": "Part 1: Financial Planning, Performance & Analytics",
+          "kind": "Part 1",
+          "topics": [
+            "Budgeting",
+            "Variance analysis",
+            "Cost management"
+          ]
+        },
+        {
+          "id": "CMA2",
+          "name": "Part 2: Strategic Financial Management",
+          "kind": "Part 2",
+          "topics": [
+            "Financial statement analysis",
+            "Cost of capital",
+            "Investment decisions"
+          ]
+        }
       ]
     },
     {
@@ -59,11 +255,49 @@
       "syllabusVersion": "New scheme: Foundation, Intermediate, Final. Verify papers and applicable amendments for your attempt.",
       "plain": "Chartered Accountant of India. The main licence for audit, tax and accounting work in India.",
       "papers": [
-        { "id": "CAF-ACC", "name": "Foundation: Accounting", "kind": "Foundation", "topics": ["Bank reconciliation", "Depreciation", "Final accounts"] },
-        { "id": "CAI-ACC", "name": "Intermediate: Advanced Accounting / Ind AS", "kind": "Intermediate", "topics": ["Ind AS 116 Leases", "Ind AS 115 Revenue"] },
-        { "id": "CAI-LAW", "name": "Intermediate: Corporate Laws", "kind": "Intermediate", "topics": ["Companies Act 2013"] },
-        { "id": "CAI-TAX", "name": "Intermediate: Taxation (Income Tax & GST)", "kind": "Intermediate", "topics": ["GST basics"] },
-        { "id": "CAFI-AUD", "name": "Final: Advanced Auditing", "kind": "Final", "topics": ["Standards on Auditing (SA)"] }
+        {
+          "id": "CAF-ACC",
+          "name": "Foundation: Accounting",
+          "kind": "Foundation",
+          "topics": [
+            "Bank reconciliation",
+            "Depreciation",
+            "Final accounts"
+          ]
+        },
+        {
+          "id": "CAI-ACC",
+          "name": "Intermediate: Advanced Accounting / Ind AS",
+          "kind": "Intermediate",
+          "topics": [
+            "Ind AS 116 Leases",
+            "Ind AS 115 Revenue"
+          ]
+        },
+        {
+          "id": "CAI-LAW",
+          "name": "Intermediate: Corporate Laws",
+          "kind": "Intermediate",
+          "topics": [
+            "Companies Act 2013"
+          ]
+        },
+        {
+          "id": "CAI-TAX",
+          "name": "Intermediate: Taxation (Income Tax & GST)",
+          "kind": "Intermediate",
+          "topics": [
+            "GST basics"
+          ]
+        },
+        {
+          "id": "CAFI-AUD",
+          "name": "Final: Advanced Auditing",
+          "kind": "Final",
+          "topics": [
+            "Standards on Auditing (SA)"
+          ]
+        }
       ]
     },
     {
@@ -74,7 +308,16 @@
       "syllabusVersion": "Syllabus 2022: Foundation, Intermediate, Final. Verify for your term.",
       "plain": "Cost and Management Accountant of India. Focus on calculating what things really cost and helping managers decide.",
       "papers": [
-        { "id": "CMAI-CA", "name": "Intermediate: Cost Accounting", "kind": "Intermediate", "topics": ["Material cost (EOQ)", "Labour cost", "Marginal costing"] }
+        {
+          "id": "CMAI-CA",
+          "name": "Intermediate: Cost Accounting",
+          "kind": "Intermediate",
+          "topics": [
+            "Material cost (EOQ)",
+            "Labour cost",
+            "Marginal costing"
+          ]
+        }
       ]
     }
   ]
