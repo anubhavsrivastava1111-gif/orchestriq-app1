@@ -1,0 +1,660 @@
+{
+  "_meta": {
+    "schemaVersion": 1,
+    "provenance": "All questions are ORIGINAL, written for this app in the style of each exam. None are copied from AICPA, GARP, IMA, ICAI or ICMAI papers. Those papers are copyrighted, and CPA/FRM/CMA-US live questions are also covered by candidate NDAs.",
+    "status": "Every item is 'author-draft' until a qualified reviewer (CPA/FRM/CA/CMA) signs it off. Only 'sme-verified' items should be marketed as verified.",
+    "lastReviewed": "2026-11-14"
+  },
+  "questions": [
+    {
+      "id": "CPA-FAR-001", "exam": "CPA", "paper": "FAR", "topic": "Leases", "difficulty": 2,
+      "stem": "Under ASC 842, which of the following is NOT one of the criteria that makes a lease a finance lease for the lessee?",
+      "options": [
+        "The lease transfers ownership of the asset to the lessee by the end of the term",
+        "The lease term is for the major part of the asset's remaining economic life",
+        "The lessee's incremental borrowing rate is higher than the rate implicit in the lease",
+        "The asset is so specialised that it has no alternative use to the lessor at the end of the term"
+      ],
+      "answer": 2,
+      "explain": {
+        "simple": "Imagine renting a car. If at the end you get to keep it, or you rent it for almost its whole life, or you pay almost its full price, then you have really bought it, just in instalments. That is a finance lease. Comparing interest rates tells you nothing about whether you effectively bought the car.",
+        "steps": [
+          "List the five ASC 842 finance-lease tests: (1) ownership transfers, (2) purchase option reasonably certain to be exercised, (3) term is the major part of remaining economic life, (4) PV of payments (plus guaranteed residual) is substantially all of fair value, (5) specialised asset with no alternative use.",
+          "Meeting ANY one test makes it a finance lease.",
+          "The incremental borrowing rate is only the discount rate used when the implicit rate cannot be readily determined. It is not a classification test, so option C is the answer."
+        ],
+        "trap": "Examiners put a real lease term ('incremental borrowing rate') in the wrong role. Ask yourself: is this a TEST, or just an INPUT to a calculation?"
+      },
+      "ref": "ASC 842-10-25-2", "status": "author-draft"
+    },
+    {
+      "id": "CPA-FAR-002", "exam": "CPA", "paper": "FAR", "topic": "Inventory", "difficulty": 1,
+      "stem": "Prices have risen steadily all year. Which inventory cost-flow method gives the HIGHEST ending inventory on the balance sheet?",
+      "options": ["LIFO", "FIFO", "Weighted average", "All methods give the same ending inventory"],
+      "answer": 1,
+      "explain": {
+        "simple": "A shop buys bread at ₹10, then ₹12, then ₹15. Under FIFO (first in, first out) the old cheap bread is treated as sold first, so the bread still on the shelf is the expensive ₹15 bread. Expensive bread left on the shelf means a higher inventory value.",
+        "steps": [
+          "FIFO: the oldest (cheapest) costs go to cost of goods sold, and the newest (most expensive) costs stay in ending inventory.",
+          "LIFO: the newest (most expensive) costs go to cost of goods sold, and the oldest (cheapest) stay in inventory.",
+          "Weighted average sits in between.",
+          "So when prices are rising, FIFO gives the highest ending inventory and the highest profit."
+        ],
+        "trap": "Students confuse 'highest COGS' (LIFO) with 'highest inventory' (FIFO). Read whether the question asks about the balance sheet or the income statement."
+      },
+      "ref": "ASC 330", "status": "author-draft"
+    },
+    {
+      "id": "CPA-FAR-003", "exam": "CPA", "paper": "FAR", "topic": "PP&E and depreciation", "difficulty": 2,
+      "stem": "A machine costs $50,000, has a salvage value of $5,000 and a 5-year life. What is year-1 depreciation under the double-declining-balance method?",
+      "options": ["$9,000", "$18,000", "$20,000", "$10,000"],
+      "answer": 2,
+      "explain": {
+        "simple": "Double-declining means you write off value quickly at the start, like a new phone that loses most of its value in the first year. You take twice the normal yearly rate and apply it to whatever value is left.",
+        "steps": [
+          "Straight-line rate = 1 / 5 years = 20%.",
+          "Double it: 40%.",
+          "Apply it to the book value at the start of the year. Salvage is IGNORED here: $50,000 × 40% = $20,000.",
+          "Salvage only matters later: you stop depreciating once book value reaches $5,000."
+        ],
+        "trap": "$18,000 is the trap: (50,000 − 5,000) × 40%. Under DDB you do NOT subtract salvage before applying the rate."
+      },
+      "ref": "ASC 360", "status": "author-draft"
+    },
+    {
+      "id": "CPA-FAR-004", "exam": "CPA", "paper": "FAR", "topic": "Revenue recognition", "difficulty": 1,
+      "stem": "Under ASC 606, what is step 3 of the five-step revenue recognition model?",
+      "options": [
+        "Identify the performance obligations in the contract",
+        "Determine the transaction price",
+        "Allocate the transaction price to performance obligations",
+        "Recognise revenue when a performance obligation is satisfied"
+      ],
+      "answer": 1,
+      "explain": {
+        "simple": "Think of selling a phone plus 1 year of repair service. (1) Is there a deal? (2) What did you promise? Phone + repairs. (3) How much is the customer paying in total? (4) Split that money between phone and repairs. (5) Count the money as earned when you deliver each one.",
+        "steps": [
+          "Step 1: Identify the contract.",
+          "Step 2: Identify the performance obligations.",
+          "Step 3: Determine the transaction price.",
+          "Step 4: Allocate the price to the obligations.",
+          "Step 5: Recognise revenue when (or as) each obligation is satisfied."
+        ],
+        "trap": "Memory aid: C-P-P-A-R (Contract, Promises, Price, Allocate, Recognise). The same model is in IFRS 15 and Ind AS 115."
+      },
+      "ref": "ASC 606-10-05-4", "status": "author-draft"
+    },
+    {
+      "id": "CPA-FAR-005", "exam": "CPA", "paper": "FAR", "topic": "Bonds and liabilities", "difficulty": 1,
+      "stem": "A company issues bonds with a 6% coupon when the market interest rate for similar bonds is 8%. The bonds will be issued at:",
+      "options": ["Par", "A premium", "A discount", "It cannot be determined"],
+      "answer": 2,
+      "explain": {
+        "simple": "If the bank down the road pays 8% and your bond only pays 6%, nobody will pay full price for yours. You have to sell it cheaper, at a discount, to attract buyers.",
+        "steps": [
+          "Coupon rate < market rate means the bond pays less than investors demand.",
+          "Investors pay less than face value, so the bond is issued at a discount.",
+          "The discount is amortised over the bond's life as extra interest expense."
+        ],
+        "trap": "Reverse case: coupon > market rate means a premium. Always compare coupon with market and ask 'would I pay more or less for this?'"
+      },
+      "ref": "ASC 835-30", "status": "author-draft"
+    },
+    {
+      "id": "CPA-FAR-006", "exam": "CPA", "paper": "FAR", "topic": "Governmental accounting", "difficulty": 2,
+      "stem": "Which measurement focus and basis of accounting do governmental funds (e.g., the General Fund) use in fund financial statements?",
+      "options": [
+        "Economic resources focus, accrual basis",
+        "Current financial resources focus, modified accrual basis",
+        "Economic resources focus, modified accrual basis",
+        "Current financial resources focus, cash basis"
+      ],
+      "answer": 1,
+      "explain": {
+        "simple": "A city's General Fund is like a household's monthly budget: 'What money do we have now and soon, and what must we pay soon?' It does not worry about long-term things like the value of roads. That short-term view is 'current financial resources' with 'modified accrual'.",
+        "steps": [
+          "Governmental funds: current financial resources focus with modified accrual. Revenue is recognised when measurable and available.",
+          "Proprietary and fiduciary funds, plus government-wide statements: economic resources focus with full accrual.",
+          "So governmental funds use option B."
+        ],
+        "trap": "Government-wide statements use FULL accrual even for governmental activities. Check whether the question says 'fund statements' or 'government-wide'."
+      },
+      "ref": "GASB Codification 1600", "status": "author-draft"
+    },
+    {
+      "id": "CPA-AUD-001", "exam": "CPA", "paper": "AUD", "topic": "Audit risk", "difficulty": 2,
+      "stem": "The auditor assesses the risk of material misstatement (inherent and control risk) for inventory as HIGH. To keep audit risk acceptably low, the auditor should:",
+      "options": [
+        "Increase acceptable detection risk and do fewer substantive procedures",
+        "Decrease acceptable detection risk and do more or better substantive procedures",
+        "Rely more heavily on internal controls",
+        "Issue a qualified opinion"
+      ],
+      "answer": 1,
+      "explain": {
+        "simple": "Audit risk works like a see-saw. If the area is very risky (one side goes up), the auditor must lower their own chance of missing a mistake (the other side goes down). They do that by checking much more carefully.",
+        "steps": [
+          "Audit risk = Risk of material misstatement × Detection risk.",
+          "To hold audit risk constant, when RMM goes up, detection risk must go down.",
+          "Lower detection risk needs more substantive testing: bigger samples, testing nearer year-end, and stronger evidence such as external confirmations."
+        ],
+        "trap": "You cannot change RMM. It belongs to the client. Detection risk is the only lever the auditor controls."
+      },
+      "ref": "AU-C 200 / AU-C 330", "status": "author-draft"
+    },
+    {
+      "id": "CPA-AUD-002", "exam": "CPA", "paper": "AUD", "topic": "Audit reports", "difficulty": 2,
+      "stem": "The financial statements contain a misstatement that is material AND pervasive. The auditor should issue:",
+      "options": ["A qualified opinion", "An adverse opinion", "A disclaimer of opinion", "An unmodified opinion with an emphasis-of-matter paragraph"],
+      "answer": 1,
+      "explain": {
+        "simple": "A small but important mistake in one place gets 'mostly fine, except this' (qualified). A big mistake that spreads everywhere gets 'these accounts are wrong' (adverse). If the auditor couldn't look at the books at all, they say 'I can't say anything' (disclaimer).",
+        "steps": [
+          "Use a 2×2 grid. Row: is the problem a MISSTATEMENT or a LACK OF EVIDENCE? Column: material only, or material AND pervasive?",
+          "Misstatement + material = Qualified. Misstatement + pervasive = Adverse.",
+          "No evidence + material = Qualified. No evidence + pervasive = Disclaimer.",
+          "Here: misstatement + pervasive = Adverse."
+        ],
+        "trap": "Disclaimer is only for being UNABLE to get evidence. It is never the answer when the auditor has found an actual misstatement."
+      },
+      "ref": "AU-C 705 / ISA 705 / SA 705", "status": "author-draft"
+    },
+    {
+      "id": "CPA-AUD-003", "exam": "CPA", "paper": "AUD", "topic": "Ethics and independence", "difficulty": 1,
+      "stem": "An audit engagement partner owns a small number of shares in the audit client, worth an immaterial amount to the partner. Under the AICPA Code, independence is:",
+      "options": ["Not impaired, because the amount is immaterial", "Impaired, because it is a direct financial interest", "Not impaired if the shares are sold before the report date", "Impaired only if the partner's spouse also owns shares"],
+      "answer": 1,
+      "explain": {
+        "simple": "A cricket umpire who owns even one rupee of a team's shares can't be trusted to judge that team fairly. Any DIRECT ownership, however small, ruins independence.",
+        "steps": [
+          "A direct financial interest held by a covered member impairs independence regardless of materiality.",
+          "Materiality only matters for INDIRECT interests (e.g., via a mutual fund).",
+          "So independence is impaired."
+        ],
+        "trap": "The word 'immaterial' is bait. Direct = always impaired. Indirect = impaired only if material."
+      },
+      "ref": "AICPA Code ET 1.240", "status": "author-draft"
+    },
+    {
+      "id": "CPA-REG-001", "exam": "CPA", "paper": "REG", "topic": "Property basis", "difficulty": 2,
+      "stem": "Asha receives shares as a gift. The donor's basis was $10,000 and the fair market value at the date of the gift was $15,000. Asha later sells them for $18,000. What is Asha's basis for computing gain?",
+      "options": ["$15,000", "$10,000", "$18,000", "$0"],
+      "answer": 1,
+      "explain": {
+        "simple": "When you receive a gift, you also receive the giver's 'price tag' for tax purposes. The tax on the growth while the giver owned it is not forgiven. It moves to you.",
+        "steps": [
+          "Gifted property generally takes the donor's basis (carryover basis): $10,000.",
+          "Special dual-basis rule: only when FMV at the gift date is LOWER than the donor's basis is FMV used for computing a LOSS. Here FMV ($15,000) is higher, so it doesn't apply.",
+          "Gain = $18,000 − $10,000 = $8,000."
+        ],
+        "trap": "Don't confuse this with INHERITED property, which usually gets FMV at the date of death (a 'step-up')."
+      },
+      "ref": "IRC §1015", "status": "author-draft"
+    },
+    {
+      "id": "CPA-REG-002", "exam": "CPA", "paper": "REG", "topic": "Business law", "difficulty": 1,
+      "stem": "Which of the following is NOT a required element of a valid contract under common law?",
+      "options": ["Offer and acceptance", "Consideration", "Legal capacity of the parties", "A written document signed by both parties"],
+      "answer": 3,
+      "explain": {
+        "simple": "If you agree out loud to wash your neighbour's car for ₹200, that is usually a real contract. No paper is needed. Paper is required only for special kinds of deals, such as selling land.",
+        "steps": [
+          "Elements: agreement (offer + acceptance), consideration, capacity, and a legal purpose.",
+          "Writing is required only for contracts within the Statute of Frauds, such as land sales, contracts that cannot be performed within one year, and UCC sales of goods of $500 or more.",
+          "So a written document is not a general requirement."
+        ],
+        "trap": "The Statute of Frauds is an exception, not the rule. India's Contract Act 1872, s.10 has similar elements: free consent, competent parties, lawful consideration and object."
+      },
+      "ref": "Restatement (Second) of Contracts", "status": "author-draft"
+    },
+    {
+      "id": "CPA-BAR-001", "exam": "CPA", "paper": "BAR", "topic": "Cost-volume-profit", "difficulty": 1,
+      "stem": "Fixed costs are $120,000, the selling price is $50 per unit and variable cost is $30 per unit. What is the break-even point in units?",
+      "options": ["2,400 units", "4,000 units", "6,000 units", "10,000 units"],
+      "answer": 2,
+      "explain": {
+        "simple": "Every unit you sell leaves you $20 after paying for its materials. You need to collect $120,000 to pay the rent and salaries. $120,000 ÷ $20 = 6,000 units before you start making profit.",
+        "steps": [
+          "Contribution margin per unit = 50 − 30 = $20.",
+          "Break-even units = Fixed costs ÷ CM per unit = 120,000 ÷ 20 = 6,000."
+        ],
+        "trap": "2,400 divides by the price ($50), and 4,000 divides by the variable cost ($30). Always divide by CONTRIBUTION."
+      },
+      "ref": "Management accounting fundamentals", "status": "author-draft"
+    },
+    {
+      "id": "CPA-ISC-001", "exam": "CPA", "paper": "ISC", "topic": "SOC engagements", "difficulty": 2,
+      "stem": "A user entity's financial statement auditor needs assurance over a payroll service provider's controls that affect the user's financial reporting. Which report is most relevant?",
+      "options": ["SOC 1 Type 2", "SOC 2 Type 1", "SOC 3", "SOC for Cybersecurity"],
+      "answer": 0,
+      "explain": {
+        "simple": "If an outside company does your payroll, your auditor needs a report saying 'their payroll controls worked properly all year.' SOC 1 is about controls that affect the accounts. Type 2 means the controls were TESTED over a period, not just described.",
+        "steps": [
+          "SOC 1 covers controls relevant to the user entity's internal control over financial reporting.",
+          "SOC 2 and SOC 3 cover Trust Services Criteria: security, availability, processing integrity, confidentiality and privacy.",
+          "Type 1 covers design at a point in time. Type 2 covers design AND operating effectiveness over a period.",
+          "An auditor relying on controls needs Type 2."
+        ],
+        "trap": "'SOC 2' sounds more advanced but it is about a different subject (security and privacy), not 'better' assurance."
+      },
+      "ref": "AT-C 320 / AT-C 205", "status": "author-draft"
+    },
+    {
+      "id": "FRM-QA-001", "exam": "FRM", "paper": "P1-QA", "topic": "Portfolio statistics", "difficulty": 2,
+      "stem": "A portfolio is 50% in Asset A (σ = 10%) and 50% in Asset B (σ = 20%). The correlation between A and B is zero. What is the portfolio standard deviation (approx.)?",
+      "options": ["15.00%", "11.18%", "12.50%", "7.07%"],
+      "answer": 1,
+      "explain": {
+        "simple": "Mixing two things that move independently cancels out some of the wobble. So the mix is less risky than the simple average (15%). This is diversification: 'don't put all your eggs in one basket.'",
+        "steps": [
+          "σp² = wA²σA² + wB²σB² + 2·wA·wB·ρ·σA·σB",
+          "= 0.25 × 0.01 + 0.25 × 0.04 + 0 = 0.0025 + 0.01 = 0.0125",
+          "σp = √0.0125 = 0.1118 = 11.18%"
+        ],
+        "trap": "15% is the weighted average, which is only correct when ρ = +1. Any ρ < 1 gives a lower risk."
+      },
+      "ref": "FRM Part I – Quantitative Analysis", "status": "author-draft"
+    },
+    {
+      "id": "FRM-QA-002", "exam": "FRM", "paper": "P1-QA", "topic": "Probability", "difficulty": 2,
+      "stem": "1% of borrowers default. A credit model flags 90% of defaulters and wrongly flags 5% of non-defaulters. If a borrower is flagged, what is the probability (approx.) that they will actually default?",
+      "options": ["90%", "15.4%", "5%", "50%"],
+      "answer": 1,
+      "explain": {
+        "simple": "Out of 10,000 borrowers, 100 will default and the model catches 90 of them. But of the 9,900 good borrowers, 5% (495) also get flagged. So of the 585 flagged, only 90 are truly bad, about 15%. Because good borrowers are so many, the false alarms outnumber the real ones.",
+        "steps": [
+          "Bayes: P(D|F) = P(F|D)P(D) / P(F)",
+          "P(F) = 0.90 × 0.01 + 0.05 × 0.99 = 0.009 + 0.0495 = 0.0585",
+          "P(D|F) = 0.009 / 0.0585 = 0.1538 ≈ 15.4%"
+        ],
+        "trap": "90% is P(flag | default), not P(default | flag). Examiners love reversing the condition."
+      },
+      "ref": "FRM Part I – Quantitative Analysis (Bayes' theorem)", "status": "author-draft"
+    },
+    {
+      "id": "FRM-VRM-001", "exam": "FRM", "paper": "P1-VRM", "topic": "Value at Risk", "difficulty": 2,
+      "stem": "A $10 million portfolio has daily return volatility of 2% and an expected daily return of zero. Assuming normality, what is the 1-day 95% VaR?",
+      "options": ["$200,000", "$329,000", "$465,000", "$392,000"],
+      "answer": 1,
+      "explain": {
+        "simple": "VaR answers: 'On a bad day, the kind that happens about 1 day in 20, how much could we lose?' Here it's about $329,000. On 95% of days the loss will be smaller.",
+        "steps": [
+          "VaR = z × σ × Portfolio value",
+          "z (95%, one-tailed) = 1.645",
+          "VaR = 1.645 × 0.02 × 10,000,000 = $329,000"
+        ],
+        "trap": "$392,000 uses 1.96 (two-tailed 95%). $465,000 uses 2.326 (99%). VaR is one-tailed. Memorise: 95% = 1.645, 99% = 2.326."
+      },
+      "ref": "FRM Part I – Valuation & Risk Models", "status": "author-draft"
+    },
+    {
+      "id": "FRM-VRM-002", "exam": "FRM", "paper": "P1-VRM", "topic": "Value at Risk", "difficulty": 1,
+      "stem": "A 1-day 99% VaR is $1 million. Assuming returns are i.i.d. with zero mean, what is the 10-day 99% VaR (approx.)?",
+      "options": ["$10.0 million", "$3.16 million", "$1.0 million", "$2.33 million"],
+      "answer": 1,
+      "explain": {
+        "simple": "Risk doesn't grow in a straight line with time. Some bad days are cancelled by good days. So 10 days of risk is about √10 ≈ 3.16 times one day's risk, not 10 times.",
+        "steps": ["VaR(T) = VaR(1) × √T", "= 1 × √10 = $3.16 million"],
+        "trap": "The square-root-of-time rule needs i.i.d. returns. If returns are autocorrelated, the rule fails, and the exam may ask about that."
+      },
+      "ref": "FRM Part I – Valuation & Risk Models", "status": "author-draft"
+    },
+    {
+      "id": "FRM-VRM-003", "exam": "FRM", "paper": "P1-VRM", "topic": "Duration and convexity", "difficulty": 2,
+      "stem": "A bond priced at $1,000 has a modified duration of 5. If yields rise by 100 basis points, the estimated price change using duration only is:",
+      "options": ["+$50", "−$50", "−$5", "−$500"],
+      "answer": 1,
+      "explain": {
+        "simple": "Bond prices and interest rates are on a see-saw: rates up, prices down. Duration 5 means 'for every 1% rise in rates, price falls about 5%.' 5% of $1,000 = $50.",
+        "steps": ["ΔP ≈ −D_mod × Δy × P", "= −5 × 0.01 × 1,000 = −$50"],
+        "trap": "100 bp = 1% = 0.01, not 1 or 0.1. Also, convexity makes the actual fall a little SMALLER than $50."
+      },
+      "ref": "FRM Part I – Valuation & Risk Models", "status": "author-draft"
+    },
+    {
+      "id": "FRM-VRM-004", "exam": "FRM", "paper": "P1-VRM", "topic": "Expected shortfall", "difficulty": 2,
+      "stem": "Which property does Expected Shortfall (ES) satisfy that VaR does NOT always satisfy?",
+      "options": ["Monotonicity", "Subadditivity", "Translation invariance", "Positive homogeneity"],
+      "answer": 1,
+      "explain": {
+        "simple": "Combining two businesses should never look riskier than running them separately, because diversification should help. VaR can sometimes break this common-sense rule. ES never does.",
+        "steps": [
+          "A coherent risk measure satisfies monotonicity, subadditivity, positive homogeneity and translation invariance.",
+          "VaR can violate subadditivity (e.g., with non-normal, lumpy loss distributions such as credit portfolios).",
+          "ES is coherent."
+        ],
+        "trap": "VaR also says nothing about how bad losses are BEYOND the cut-off. ES (average loss in the tail) fixes that too."
+      },
+      "ref": "FRM Part I – Valuation & Risk Models (Artzner et al.)", "status": "author-draft"
+    },
+    {
+      "id": "FRM-FRM-001", "exam": "FRM", "paper": "P1-FRM", "topic": "CAPM", "difficulty": 1,
+      "stem": "Risk-free rate = 3%, expected market return = 8%, stock beta = 1.2. What is the expected return under CAPM?",
+      "options": ["9.0%", "9.6%", "12.6%", "6.0%"],
+      "answer": 0,
+      "explain": {
+        "simple": "You start with what a totally safe investment gives (3%). The market pays 5% extra for taking risk. This stock is 1.2 times as jumpy as the market, so it should pay 1.2 × 5% = 6% extra. Total 9%.",
+        "steps": ["E(R) = Rf + β × (Rm − Rf)", "= 3% + 1.2 × (8% − 3%) = 3% + 6% = 9%"],
+        "trap": "9.6% = 1.2 × 8%, which forgets to subtract the risk-free rate. The risk premium is (Rm − Rf), not Rm."
+      },
+      "ref": "FRM Part I – Foundations", "status": "author-draft"
+    },
+    {
+      "id": "FRM-FRM-002", "exam": "FRM", "paper": "P1-FRM", "topic": "Risk-adjusted performance", "difficulty": 1,
+      "stem": "Which performance measure divides excess return by BETA rather than by total standard deviation?",
+      "options": ["Sharpe ratio", "Treynor ratio", "Information ratio", "Sortino ratio"],
+      "answer": 1,
+      "explain": {
+        "simple": "Sharpe asks 'reward per unit of ALL risk.' Treynor asks 'reward per unit of MARKET risk only.' Treynor suits someone who already owns many other investments, because their other risks are already diversified away.",
+        "steps": [
+          "Sharpe = (Rp − Rf) / σp",
+          "Treynor = (Rp − Rf) / βp",
+          "Information ratio = (Rp − Rb) / tracking error",
+          "Sortino = (Rp − target) / downside deviation"
+        ],
+        "trap": "Memory aid: Treynor and beTa both contain a 'T'."
+      },
+      "ref": "FRM Part I – Foundations", "status": "author-draft"
+    },
+    {
+      "id": "FRM-FMP-001", "exam": "FRM", "paper": "P1-FMP", "topic": "Options", "difficulty": 2,
+      "stem": "A European call costs $5. The stock is $50, the strike is $50, and the present value of the strike is $48. Using put-call parity, what should the European put (same strike and expiry) cost?",
+      "options": ["$3", "$5", "$7", "$2"],
+      "answer": 0,
+      "explain": {
+        "simple": "Owning 'a call plus cash' gives exactly the same payoff as owning 'a share plus a put'. Since the two packages are identical, they must cost the same. Fill in the numbers and the put's price is whatever balances the equation.",
+        "steps": ["C + PV(K) = P + S", "5 + 48 = P + 50", "P = $3"],
+        "trap": "This holds only for EUROPEAN options on non-dividend stocks (or adjust S for the PV of dividends)."
+      },
+      "ref": "FRM Part I – Financial Markets & Products", "status": "author-draft"
+    },
+    {
+      "id": "FRM-FMP-002", "exam": "FRM", "paper": "P1-FMP", "topic": "Forwards and futures", "difficulty": 2,
+      "stem": "A non-dividend stock trades at $100. The continuously compounded risk-free rate is 5%. What is the 1-year forward price?",
+      "options": ["$105.00", "$105.13", "$95.12", "$100.00"],
+      "answer": 1,
+      "explain": {
+        "simple": "Instead of buying the share today, you agree to buy it in a year. Meanwhile your money stays in the bank earning interest. So the fair future price is today's price plus the interest you'd have earned.",
+        "steps": ["F = S × e^(rT)", "= 100 × e^0.05 = 100 × 1.05127 = $105.13"],
+        "trap": "$105.00 uses simple compounding. If the question says 'continuously compounded', use e^(rT)."
+      },
+      "ref": "FRM Part I – Financial Markets & Products", "status": "author-draft"
+    },
+    {
+      "id": "FRM-MR-001", "exam": "FRM", "paper": "P2-MR", "topic": "Backtesting", "difficulty": 2,
+      "stem": "A bank backtests its 99% 1-day VaR over 250 trading days and finds 7 exceptions. Under the Basel traffic-light approach, the model falls in which zone?",
+      "options": ["Green", "Yellow", "Red", "No zone, because 250 days is too few"],
+      "answer": 1,
+      "explain": {
+        "simple": "A 99% VaR should be broken about 1 day in 100, so about 2 or 3 times in 250 days. Breaking it 7 times is a warning sign but not yet proof the model is broken. That is the yellow light.",
+        "steps": [
+          "Expected exceptions = 1% × 250 = 2.5.",
+          "Zones: Green 0–4, Yellow 5–9, Red 10 or more.",
+          "7 is in Yellow, which raises the capital multiplier (plus factor)."
+        ],
+        "trap": "Expect follow-ups on Type I/II errors: a strict cut-off rejects good models (Type I), a loose one accepts bad models (Type II)."
+      },
+      "ref": "Basel Committee – Supervisory framework for backtesting", "status": "author-draft"
+    },
+    {
+      "id": "FRM-MR-002", "exam": "FRM", "paper": "P2-MR", "topic": "FRTB", "difficulty": 2,
+      "stem": "Under the Fundamental Review of the Trading Book (FRTB) internal models approach, which risk measure replaced 99% VaR?",
+      "options": ["99.9% VaR", "97.5% Expected Shortfall", "95% Expected Shortfall", "Stressed 99% VaR only"],
+      "answer": 1,
+      "explain": {
+        "simple": "Regulators wanted a measure that looks at HOW BAD the worst days are, not just where the bad days start. So they switched to the average of the worst 2.5% of days (97.5% ES), calibrated to a stressed period.",
+        "steps": [
+          "FRTB IMA uses Expected Shortfall at 97.5% confidence.",
+          "It is calibrated to a period of significant stress.",
+          "It applies varying liquidity horizons (10 to 120 days) by risk factor."
+        ],
+        "trap": "Under normality, 97.5% ES ≈ 99% VaR in size (≈ 2.34σ vs 2.33σ). That is why 97.5% was chosen."
+      },
+      "ref": "BCBS d457 – Minimum capital requirements for market risk", "status": "author-draft"
+    },
+    {
+      "id": "FRM-CR-001", "exam": "FRM", "paper": "P2-CR", "topic": "Expected loss", "difficulty": 1,
+      "stem": "A loan has exposure at default of $1,000,000, probability of default of 2% and loss given default of 40%. What is the expected loss?",
+      "options": ["$20,000", "$8,000", "$400,000", "$12,000"],
+      "answer": 1,
+      "explain": {
+        "simple": "If you lend ₹1,000 to 100 people like this one, about 2 will fail to repay, and from each failure you lose 40% (you recover the rest). On average you expect to lose 0.8% of the loan.",
+        "steps": ["EL = PD × LGD × EAD", "= 0.02 × 0.40 × 1,000,000 = $8,000"],
+        "trap": "$12,000 wrongly uses the recovery rate (60%) instead of LGD. LGD = 1 − recovery rate."
+      },
+      "ref": "FRM Part II – Credit Risk", "status": "author-draft"
+    },
+    {
+      "id": "FRM-OR-001", "exam": "FRM", "paper": "P2-OR", "topic": "Basel operational risk capital", "difficulty": 2,
+      "stem": "Under the finalised Basel III framework, which operational-risk capital approach was REMOVED and replaced by the new Standardised Approach?",
+      "options": ["Basic Indicator Approach only", "Advanced Measurement Approach (AMA) and the older approaches", "Internal Ratings-Based approach", "Standardised Approach for counterparty credit risk"],
+      "answer": 1,
+      "explain": {
+        "simple": "Banks used to build their own complex models (AMA) for losses from fraud, system failures and so on. The results varied wildly between banks. Regulators replaced all of that with one formula everyone uses.",
+        "steps": [
+          "The new SA uses a Business Indicator Component (BIC) based on income and size.",
+          "It is multiplied by an Internal Loss Multiplier (ILM) based on the bank's own historical losses (national discretion).",
+          "It replaces BIA, TSA/ASA and AMA."
+        ],
+        "trap": "IRB is a CREDIT risk approach. Don't mix the risk types."
+      },
+      "ref": "BCBS d424 – Basel III: Finalising post-crisis reforms", "status": "author-draft"
+    },
+    {
+      "id": "FRM-LT-001", "exam": "FRM", "paper": "P2-LT", "topic": "LCR and NSFR", "difficulty": 1,
+      "stem": "The Liquidity Coverage Ratio (LCR) requires a bank to hold enough high-quality liquid assets to cover net cash outflows over what horizon under stress?",
+      "options": ["1 day", "30 days", "1 year", "90 days"],
+      "answer": 1,
+      "explain": {
+        "simple": "LCR is the bank's emergency cash box: 'If everyone panics, can we survive a month with what we can sell quickly?' NSFR is the long-term version: 'Is our funding stable over a year?'",
+        "steps": [
+          "LCR = HQLA / Total net cash outflows over 30 days ≥ 100%.",
+          "NSFR = Available stable funding / Required stable funding ≥ 100% (1-year horizon)."
+        ],
+        "trap": "Memory aid: LCR = Little time (30 days), NSFR = long-term Structure (1 year)."
+      },
+      "ref": "BCBS 238 (LCR) / BCBS 295 (NSFR)", "status": "author-draft"
+    },
+    {
+      "id": "CMAUS-1-001", "exam": "CMAUS", "paper": "CMA1", "topic": "Variance analysis", "difficulty": 2,
+      "stem": "A company bought 10,000 kg of material at $5.20/kg. The standard price is $5.00/kg. The material price variance (computed at purchase) is:",
+      "options": ["$2,000 favourable", "$2,000 unfavourable", "$200 unfavourable", "$52,000 unfavourable"],
+      "answer": 1,
+      "explain": {
+        "simple": "You planned to pay ₹5 a kilo but paid ₹5.20. You overpaid 20 paise on each of 10,000 kilos, which is ₹2,000 more than planned. Paying more than planned is 'unfavourable'.",
+        "steps": ["MPV = (Actual price − Standard price) × Actual quantity purchased", "= (5.20 − 5.00) × 10,000 = $2,000 U"],
+        "trap": "Use the quantity PURCHASED for a price variance at purchase, and the quantity USED for the usage/efficiency variance."
+      },
+      "ref": "IMA CMA Part 1 – Performance Management", "status": "author-draft"
+    },
+    {
+      "id": "CMAUS-1-002", "exam": "CMAUS", "paper": "CMA1", "topic": "Budgeting", "difficulty": 1,
+      "stem": "Which budget is MOST useful for evaluating a manager's cost control when actual production differs from planned production?",
+      "options": ["Static budget", "Flexible budget", "Cash budget", "Capital budget"],
+      "answer": 1,
+      "explain": {
+        "simple": "If you planned to cook for 10 guests but 15 came, it's unfair to blame you for buying more food. A flexible budget asks 'what SHOULD 15 guests have cost?' and compares that with what you spent.",
+        "steps": [
+          "A flexible budget restates budgeted costs for the ACTUAL activity level.",
+          "Flexible vs actual = spending/efficiency variances (controllable).",
+          "Static vs flexible = sales-volume variance."
+        ],
+        "trap": "A static budget comparison mixes volume effects with efficiency, which makes it misleading for performance evaluation."
+      },
+      "ref": "IMA CMA Part 1 – Planning, Budgeting & Forecasting", "status": "author-draft"
+    },
+    {
+      "id": "CMAUS-2-001", "exam": "CMAUS", "paper": "CMA2", "topic": "Investment decisions", "difficulty": 2,
+      "stem": "A project costs $100,000 today and returns $30,000 at the end of each of the next 5 years. The required return is 10% (5-year annuity factor = 3.7908). What is the NPV and the decision?",
+      "options": ["$50,000; accept", "$13,724; accept", "−$13,724; reject", "$113,724; accept"],
+      "answer": 1,
+      "explain": {
+        "simple": "Money later is worth less than money now, just as ₹100 next year is worth less than ₹100 in your hand today. Convert all future money into 'today rupees', then subtract what you pay today. If something is left over, the project creates value.",
+        "steps": [
+          "PV of inflows = 30,000 × 3.7908 = $113,724",
+          "NPV = 113,724 − 100,000 = $13,724",
+          "NPV > 0, so accept."
+        ],
+        "trap": "$50,000 ignores the time value of money. $113,724 is the PV of inflows, not the NPV."
+      },
+      "ref": "IMA CMA Part 2 – Investment Decisions", "status": "author-draft"
+    },
+    {
+      "id": "CMAUS-2-002", "exam": "CMAUS", "paper": "CMA2", "topic": "Cost of capital", "difficulty": 2,
+      "stem": "Capital structure: 60% equity (cost 12%), 40% debt (pre-tax cost 8%). Tax rate 25%. What is the WACC?",
+      "options": ["10.4%", "9.6%", "8.8%", "10.0%"],
+      "answer": 1,
+      "explain": {
+        "simple": "WACC is the average 'rent' a company pays for its money, weighted by how much comes from each source. Interest on debt saves tax, so debt is cheaper than it looks.",
+        "steps": [
+          "After-tax cost of debt = 8% × (1 − 0.25) = 6%",
+          "WACC = 0.6 × 12% + 0.4 × 6% = 7.2% + 2.4% = 9.6%"
+        ],
+        "trap": "10.4% forgets the tax shield on debt. Never apply the tax adjustment to equity."
+      },
+      "ref": "IMA CMA Part 2 – Corporate Finance", "status": "author-draft"
+    },
+    {
+      "id": "CMAUS-2-003", "exam": "CMAUS", "paper": "CMA2", "topic": "Financial statement analysis", "difficulty": 1,
+      "stem": "Current assets are $300,000, of which inventory is $120,000. Current liabilities are $150,000. What is the quick (acid-test) ratio?",
+      "options": ["2.0", "1.2", "0.8", "1.5"],
+      "answer": 1,
+      "explain": {
+        "simple": "The quick ratio asks: 'If bills came due tomorrow, could we pay using things that are almost cash?' Inventory is left out because it may take a long time to sell.",
+        "steps": ["Quick assets = 300,000 − 120,000 = 180,000", "Quick ratio = 180,000 / 150,000 = 1.2"],
+        "trap": "2.0 is the CURRENT ratio. Strictly, prepaid expenses are also excluded from quick assets."
+      },
+      "ref": "IMA CMA Part 2 – Financial Statement Analysis", "status": "author-draft"
+    },
+    {
+      "id": "CAIN-F-001", "exam": "CAINDIA", "paper": "CAF-ACC", "topic": "Bank reconciliation", "difficulty": 1,
+      "stem": "While preparing a Bank Reconciliation Statement starting from the debit balance as per the Cash Book, how are cheques issued but not yet presented for payment treated?",
+      "options": ["Deducted", "Added", "Ignored", "Shown as a liability"],
+      "answer": 1,
+      "explain": {
+        "simple": "You wrote a ₹5,000 cheque and reduced your own notebook (cash book) at once. But the shopkeeper hasn't deposited it yet, so the bank still shows the ₹5,000 in your account. The bank balance is HIGHER than your notebook, so you ADD it back to get from your notebook to the bank's figure.",
+        "steps": [
+          "Cash book was already reduced when the cheque was issued.",
+          "Passbook is not yet reduced, so the passbook balance is higher.",
+          "Starting from the cash book (favourable/debit balance): ADD cheques issued but not presented."
+        ],
+        "trap": "If you start from the PASSBOOK balance, the treatment reverses (deduct). Always ask 'which balance is higher, and why?'"
+      },
+      "ref": "ICAI Foundation – Principles & Practice of Accounting", "status": "author-draft"
+    },
+    {
+      "id": "CAIN-I-001", "exam": "CAINDIA", "paper": "CAI-ACC", "topic": "Ind AS 116 Leases", "difficulty": 2,
+      "stem": "Under Ind AS 116, a lessee may elect NOT to recognise a right-of-use asset and lease liability for which leases?",
+      "options": [
+        "All operating leases",
+        "Short-term leases (12 months or less) and leases of low-value assets",
+        "Leases of land only",
+        "Leases where payments are variable"
+      ],
+      "answer": 1,
+      "explain": {
+        "simple": "Under the new rules almost every lease goes on the balance sheet, like saying 'I owe rent for 5 years, so record that debt.' The only allowed shortcuts are very short leases (a year or less) or cheap items like a laptop or small furniture.",
+        "steps": [
+          "Ind AS 116 has a single lessee model: ROU asset + lease liability.",
+          "There are two optional recognition exemptions: short-term leases (≤ 12 months, no purchase option) and low-value underlying assets.",
+          "The operating/finance distinction now matters only for LESSORS."
+        ],
+        "trap": "Ind AS 116 (like IFRS 16) differs from US ASC 842. ASC 842 keeps operating vs finance classification for lessees and has no low-value exemption."
+      },
+      "ref": "Ind AS 116 paras 5–8", "status": "author-draft"
+    },
+    {
+      "id": "CAIN-I-002", "exam": "CAINDIA", "paper": "CAI-LAW", "topic": "Companies Act 2013", "difficulty": 2,
+      "stem": "Under Section 135 of the Companies Act 2013, a company meeting the CSR threshold must spend in every financial year at least what amount on CSR activities?",
+      "options": [
+        "2% of the average net profits of the three immediately preceding financial years",
+        "2% of turnover of the preceding financial year",
+        "5% of net profit of the current year",
+        "1% of net worth"
+      ],
+      "answer": 0,
+      "explain": {
+        "simple": "Large or profitable companies must give back to society. The rule is: look at your profit over the last three years, take the average, and spend 2% of it on approved social causes.",
+        "steps": [
+          "Applicability (any one, in the immediately preceding FY): net worth ≥ ₹500 crore, OR turnover ≥ ₹1,000 crore, OR net profit ≥ ₹5 crore.",
+          "Obligation: at least 2% of the average net profits of the three immediately preceding financial years.",
+          "Net profit is computed as per Section 198."
+        ],
+        "trap": "The THRESHOLD is tested on the preceding year. The SPEND is based on the 3-year AVERAGE profit. Check the latest MCA amendments before your exam."
+      },
+      "ref": "Companies Act 2013 s.135; CSR Rules 2014 (as amended)", "status": "author-draft"
+    },
+    {
+      "id": "CAIN-I-003", "exam": "CAINDIA", "paper": "CAI-TAX", "topic": "GST basics", "difficulty": 1,
+      "stem": "A registered supplier in Maharashtra sells goods to a registered buyer in Karnataka. Which GST applies?",
+      "options": ["CGST + SGST", "IGST", "Only SGST of Karnataka", "No GST because it's B2B"],
+      "answer": 1,
+      "explain": {
+        "simple": "GST is split by 'within my state' or 'across states.' Inside one state, the tax is shared as CGST (Centre) and SGST (State). When goods cross state lines, one tax, IGST, is charged, and the Centre later passes the state's share to the consuming state.",
+        "steps": [
+          "Supplier location and place of supply are in different states, so it is an inter-state supply.",
+          "Inter-state supply attracts IGST under the IGST Act 2017."
+        ],
+        "trap": "B2B doesn't remove GST. The buyer usually claims input tax credit instead."
+      },
+      "ref": "IGST Act 2017 s.7 & s.5", "status": "author-draft"
+    },
+    {
+      "id": "CAIN-FI-001", "exam": "CAINDIA", "paper": "CAFI-AUD", "topic": "Standards on Auditing (SA)", "difficulty": 1,
+      "stem": "Which Standard on Auditing deals with Emphasis of Matter and Other Matter paragraphs in the independent auditor's report?",
+      "options": ["SA 700", "SA 701", "SA 705", "SA 706"],
+      "answer": 3,
+      "explain": {
+        "simple": "The auditor's report has 'chapters.' SA 700 is the basic report, SA 701 covers the most important areas the auditor looked at, SA 705 is for when the auditor disagrees, and SA 706 is for 'I'm fine with the accounts, but please notice this point.'",
+        "steps": [
+          "SA 700: Forming an opinion and reporting.",
+          "SA 701: Communicating Key Audit Matters.",
+          "SA 705: Modifications to the opinion.",
+          "SA 706: Emphasis of Matter and Other Matter paragraphs."
+        ],
+        "trap": "An Emphasis of Matter paragraph does NOT modify the opinion. It only draws attention to something already properly disclosed."
+      },
+      "ref": "ICAI Standards on Auditing", "status": "author-draft"
+    },
+    {
+      "id": "CMAIN-I-001", "exam": "CMAINDIA", "paper": "CMAI-CA", "topic": "Material cost (EOQ)", "difficulty": 1,
+      "stem": "Annual demand is 10,000 units, ordering cost is ₹50 per order and carrying cost is ₹4 per unit per year. What is the Economic Order Quantity?",
+      "options": ["250 units", "500 units", "1,000 units", "707 units"],
+      "answer": 1,
+      "explain": {
+        "simple": "Order too often and you pay a lot of delivery charges. Order huge amounts and you pay a lot for storage. EOQ is the 'just right' order size where those two costs balance.",
+        "steps": ["EOQ = √(2 × A × O / C)", "= √(2 × 10,000 × 50 / 4) = √250,000 = 500 units"],
+        "trap": "At EOQ, annual ordering cost = annual carrying cost. Check: (10,000/500) × 50 = ₹1,000 and (500/2) × 4 = ₹1,000."
+      },
+      "ref": "ICMAI Intermediate – Cost Accounting", "status": "author-draft"
+    },
+    {
+      "id": "CMAIN-I-002", "exam": "CMAINDIA", "paper": "CMAI-CA", "topic": "Labour cost", "difficulty": 1,
+      "stem": "Workers at the start of the year were 900 and at the end were 1,100. During the year 50 workers left. What is the labour turnover rate under the separation method?",
+      "options": ["5.0%", "4.5%", "5.6%", "10.0%"],
+      "answer": 0,
+      "explain": {
+        "simple": "Labour turnover tells you how many people out of every 100 leave the company in a year. On average there were 1,000 workers and 50 left, so 5 out of every 100.",
+        "steps": ["Average workers = (900 + 1,100) / 2 = 1,000", "Separation rate = 50 / 1,000 × 100 = 5%"],
+        "trap": "Always divide by the AVERAGE number of workers, not the opening or closing figure."
+      },
+      "ref": "ICMAI Intermediate – Cost Accounting", "status": "author-draft"
+    },
+    {
+      "id": "CMAIN-I-003", "exam": "CMAINDIA", "paper": "CMAI-CA", "topic": "Marginal costing", "difficulty": 2,
+      "stem": "Sales are ₹2,00,000, variable costs are ₹1,20,000 and profit is ₹20,000. What is the margin of safety?",
+      "options": ["₹50,000", "₹80,000", "₹1,50,000", "₹20,000"],
+      "answer": 0,
+      "explain": {
+        "simple": "Margin of safety is your cushion: how much sales could fall before you start losing money. You earn 40 paise of contribution per rupee of sales, and you currently make ₹20,000 profit. So sales can drop by ₹20,000 ÷ 0.40 = ₹50,000 before profit reaches zero.",
+        "steps": [
+          "P/V ratio = (2,00,000 − 1,20,000) / 2,00,000 = 40%",
+          "MOS = Profit / P/V ratio = 20,000 / 0.40 = ₹50,000",
+          "Check: fixed cost = 80,000 − 20,000 = 60,000. BEP sales = 60,000 / 0.4 = 1,50,000. MOS = 2,00,000 − 1,50,000 = ₹50,000."
+        ],
+        "trap": "₹1,50,000 is the break-even sales figure, not the margin of safety."
+      },
+      "ref": "ICMAI Intermediate – Cost Accounting", "status": "author-draft"
+    }
+  ]
+}

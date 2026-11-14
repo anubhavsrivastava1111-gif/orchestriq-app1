@@ -1,0 +1,135 @@
+{
+  "_meta": {
+    "purpose": "Two playbooks: (1) candidate challenges while preparing; (2) working-professional situations. Each is a diagnose → act → escalate checklist.",
+    "disclaimer": "Workplace guides are educational frameworks, not legal, tax or audit advice. For a live engagement, confirm against current standards and consult your firm's technical/quality team or a qualified advisor.",
+    "lastReviewed": "2026-11-14"
+  },
+  "challenges": [
+    {
+      "id": "C-TIME", "title": "I work full-time and can't find study hours",
+      "symptoms": ["Studying only on weekends", "Forgetting what you studied last week"],
+      "actions": [
+        "Plan 75–90 minutes on weekdays (e.g., 45 minutes before work + 30 minutes of questions at lunch) instead of weekend marathons.",
+        "Use this app's Daily Review on your commute. It only shows the questions due today.",
+        "Book your exam date first. A fixed deadline beats an open-ended plan.",
+        "Block one 'catch-up' slot per week for days that go wrong."
+      ],
+      "metric": "At least 5 study days a week, and Daily Review cleared at least 80% of days."
+    },
+    {
+      "id": "C-MATH", "title": "I'm scared of maths and formulas",
+      "symptoms": ["Skipping calculation questions", "Panicking at formulas"],
+      "actions": [
+        "Start every formula with its story (see the Learn tab), then the formula.",
+        "Write each formula once a day for a week. Spaced recall beats re-reading.",
+        "Do the same 5 calculation types until you get 5 right in a row before moving on.",
+        "Learn your exam's calculator (financial calculator for FRM/CMA-US; check permitted models for ICAI/ICMAI)."
+      ],
+      "metric": "Calculation accuracy above 70% in the Progress tab."
+    },
+    {
+      "id": "C-FORGET", "title": "I understand topics but forget them by exam day",
+      "symptoms": ["High score when learning, low score in mocks"],
+      "actions": [
+        "Stop re-reading. Test yourself instead. Retrieval practice is the most reliable memory technique.",
+        "Trust the spaced-repetition schedule: questions return after 1, 3, 7, 14 and 30 days.",
+        "Spend the final 3 weeks on mixed mocks only, no new topics."
+      ],
+      "metric": "Weak-topic list shrinking week over week."
+    },
+    {
+      "id": "C-ANXIETY", "title": "I freeze or run out of time in the exam",
+      "symptoms": ["Leaving questions blank", "Spending 10 minutes on one question"],
+      "actions": [
+        "Set a per-question budget (roughly the exam time divided by the number of questions) and practise with the Mock timer.",
+        "Two-pass rule: answer the sure ones first, flag the rest, and come back.",
+        "Never leave an MCQ blank unless there is negative marking. Check your exam's rules; for example, some ICAI MCQ papers and FRM/CPA scoring differ.",
+        "Breathing reset: 4 seconds in, 6 seconds out, three times, when you feel the freeze."
+      ],
+      "metric": "Mocks finished with at least 5 minutes to spare."
+    },
+    {
+      "id": "C-RETAKE", "title": "I failed a section. What now?",
+      "symptoms": ["Low motivation", "Unsure what went wrong"],
+      "actions": [
+        "Use the score report's weak-area ranking. Re-study only the 'weaker' areas first.",
+        "Check exam-specific rules: e.g., CPA credit windows, and ICAI exemption/set-off rules for individual papers.",
+        "Reschedule within about 8–10 weeks while the material is still fresh.",
+        "Run this app's Mock filtered to your weak papers twice a week."
+      ],
+      "metric": "Two consecutive mocks at 75% or above before the retake."
+    },
+    {
+      "id": "C-LANGUAGE", "title": "English is not my first language",
+      "symptoms": ["Misreading 'NOT' / 'EXCEPT' questions", "Slow reading"],
+      "actions": [
+        "Circle trigger words: NOT, EXCEPT, MOST, LEAST, FIRST.",
+        "Read the LAST sentence of a long question first. It tells you what is being asked.",
+        "Build a personal glossary. Every 'trap' note in this app is a vocabulary lesson."
+      ],
+      "metric": "Fewer than 1 in 10 wrong answers caused by misreading."
+    }
+  ],
+  "workplace": [
+    {
+      "id": "W-RECON", "title": "Month-end: bank reconciliation won't tie",
+      "framework": "Reconciliation discipline (SOX/ICFR control mindset)",
+      "steps": [
+        "Confirm the opening balances agree to last month's signed-off reconciliation.",
+        "Match items both ways: book→bank and bank→book. Export both sides to Excel and use XLOOKUP on amount + date ±3 days.",
+        "Classify every unmatched item: timing (outstanding cheques, deposits in transit), bank-only (charges, interest, direct debits) or error.",
+        "Post journal entries only for bank-only items and errors. Timing items need no entry.",
+        "Any unexplained difference must be investigated, not 'plugged'. Escalate anything above your materiality threshold."
+      ],
+      "redFlags": ["Old outstanding items (more than 90 days)", "Round-sum unexplained differences", "The same person posting and reconciling"]
+    },
+    {
+      "id": "W-PRESSURE", "title": "My manager asks me to delay recording an expense to hit targets",
+      "framework": "AICPA Code / IMA Statement of Ethical Professional Practice / ICAI Code of Ethics: integrity, objectivity",
+      "steps": [
+        "Clarify the facts: is there a genuine accounting basis (e.g., the expense really belongs to the next period)? Ask for the documentation.",
+        "If there is no basis, explain the standard (accrual principle; matching) in writing, and propose the correct treatment.",
+        "Follow your organisation's escalation path: next-level management, then the audit committee, then the ethics hotline.",
+        "Document the discussion contemporaneously.",
+        "Seek confidential advice (IMA ethics helpline, ICAI ethical guidance, or a lawyer) before any external disclosure."
+      ],
+      "redFlags": ["A request is verbal only", "'Everyone does it'", "Pressure tied to bonus thresholds"]
+    },
+    {
+      "id": "W-LEASE", "title": "Is there a lease hidden inside this service contract?",
+      "framework": "ASC 842-10-15 / Ind AS 116 / IFRS 16: definition of a lease",
+      "steps": [
+        "Is there an IDENTIFIED asset (explicitly or implicitly specified, with no substantive substitution right for the supplier)?",
+        "Does the customer get substantially all the economic benefits from using it during the period?",
+        "Does the customer direct HOW and FOR WHAT PURPOSE the asset is used?",
+        "If all three are yes, it contains a lease. Separate the lease and non-lease components (or elect the practical expedient where permitted).",
+        "Document the analysis in a technical memo for the auditors."
+      ],
+      "redFlags": ["Dedicated servers/warehouses/vehicles in 'service' deals", "Supplier can't practically swap the asset"]
+    },
+    {
+      "id": "W-VAR-BREACH", "title": "Our desk breached VaR limits three days running",
+      "framework": "Risk governance / Basel backtesting",
+      "steps": [
+        "Confirm the breach is real: check P&L (hypothetical vs actual), market data and position feeds.",
+        "Notify risk management and the desk head per the limit policy. Breaches usually need same-day escalation.",
+        "Diagnose: a new position, a volatility regime shift (model is stale), or a data error.",
+        "Agree remediation: reduce or hedge positions, or obtain a temporary limit increase approved by the right authority.",
+        "Log the exceptions for backtesting. Repeated exceptions may signal model recalibration is needed."
+      ],
+      "redFlags": ["Limit increased after the breach without proper approval", "Exceptions explained away as 'one-offs' repeatedly"]
+    },
+    {
+      "id": "W-GST-ITC", "title": "Vendor's GST doesn't appear in GSTR-2B: can we claim ITC?",
+      "framework": "CGST Act 2017 s.16 (conditions for input tax credit)",
+      "steps": [
+        "Check the invoice appears in GSTR-2B for the period. Credit is generally restricted to what is reflected there.",
+        "If it's missing, contact the vendor to file/correct their GSTR-1.",
+        "Hold the credit until it appears. Track it in an ITC reconciliation sheet (purchase register vs 2B).",
+        "Check the time limit for claiming ITC on that invoice under s.16(4) as currently amended.",
+        "Consider withholding vendor payment of the GST portion until compliance, as per contract terms."
+      ],
+      "redFlags": ["Vendor repeatedly non-compliant", "Large ITC claimed without 2B match"]
+    }
+  ]
+}

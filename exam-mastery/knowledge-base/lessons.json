@@ -1,0 +1,61 @@
+{
+  "_meta": { "purpose": "Zero-background concept lessons. Every lesson: everyday story first, then the rule, then one worked example, then a 10-second check.", "lastReviewed": "2026-11-14" },
+  "lessons": [
+    {
+      "id": "L-DEBIT-CREDIT", "title": "Debits and credits: the two-sided notebook", "exams": ["CPA", "CAINDIA", "CMAINDIA", "CMAUS"],
+      "story": "Every money event has two sides, like a see-saw. When you buy a ₹500 chair with cash, you GET a chair and you GIVE cash. Accounting writes both sides down so the see-saw always balances.",
+      "rule": "Debit = left side, Credit = right side. Assets and expenses go UP with a debit. Liabilities, equity and income go UP with a credit. Total debits always equal total credits.",
+      "example": "Buy chair for ₹500 cash → Debit Furniture ₹500 (asset up), Credit Cash ₹500 (asset down).",
+      "check": { "q": "You receive ₹1,000 salary income in cash. Which account is credited?", "a": "Income (Salary/Revenue). Cash, an asset, is debited." }
+    },
+    {
+      "id": "L-ACCRUAL", "title": "Accrual vs cash: when do you count money?", "exams": ["CPA", "CAINDIA", "CMAUS", "CMAINDIA"],
+      "story": "A tailor stitches your suit in March, and you pay in April. Did the tailor earn the money in March or April? Accrual accounting says March, when the WORK was done, not when cash arrived.",
+      "rule": "Accrual basis: record income when earned and expenses when incurred, regardless of cash. Cash basis: record only when cash moves.",
+      "example": "December electricity bill paid in January → under accrual it's a December expense (and a liability at 31 Dec).",
+      "check": { "q": "Rent for next year paid in advance today. Under accrual, is it this year's expense?", "a": "No. It is a prepaid expense (an asset) until the months pass." }
+    },
+    {
+      "id": "L-TVM", "title": "Time value of money: why ₹100 today beats ₹100 next year", "exams": ["CPA", "FRM", "CMAUS", "CAINDIA", "CMAINDIA"],
+      "story": "If you put ₹100 in a bank at 10%, you'll have ₹110 next year. So ₹110 next year is 'the same' as ₹100 today. Turning future money into today-money is called discounting.",
+      "rule": "PV = FV ÷ (1 + r)^n. FV = PV × (1 + r)^n.",
+      "example": "₹121 receivable in 2 years at 10%: PV = 121 ÷ 1.21 = ₹100.",
+      "check": { "q": "Interest rates go up. Does today's value of a fixed future payment rise or fall?", "a": "It falls. You divide by a bigger number. This is why bond prices fall when rates rise." }
+    },
+    {
+      "id": "L-DEPRECIATION", "title": "Depreciation: spreading a big purchase over its life", "exams": ["CPA", "CAINDIA", "CMAINDIA"],
+      "story": "A delivery van costing ₹10 lakh will work for 5 years. Counting the whole ₹10 lakh as this year's cost would make this year look terrible and the next four look too good. So you spread the cost over the years it helps you.",
+      "rule": "Straight-line = (Cost − Salvage) ÷ Useful life. Written-down value / declining balance = Rate × Opening book value.",
+      "example": "₹10,00,000 van, ₹1,00,000 salvage, 5 years → ₹1,80,000 per year straight-line.",
+      "check": { "q": "Is depreciation a cash outflow?", "a": "No. The cash left when you bought the van. Depreciation is only an allocation of that cost." }
+    },
+    {
+      "id": "L-CONTRIBUTION", "title": "Contribution margin: what each sale really adds", "exams": ["CPA", "CMAUS", "CMAINDIA", "CAINDIA"],
+      "story": "A tea stall sells tea at ₹20. Milk, tea and sugar cost ₹8 a cup. Each cup 'contributes' ₹12 towards the stall's rent and the owner's salary. Once rent is covered, every extra cup is profit.",
+      "rule": "Contribution = Sales − Variable costs. Break-even units = Fixed costs ÷ Contribution per unit. P/V ratio = Contribution ÷ Sales.",
+      "example": "Rent ₹6,000/month ÷ ₹12 per cup = 500 cups to break even.",
+      "check": { "q": "Rent doubles. What happens to the break-even point?", "a": "It doubles to 1,000 cups. Contribution per cup is unchanged." }
+    },
+    {
+      "id": "L-RISK-VOL", "title": "Risk and volatility: how wobbly is an investment?", "exams": ["FRM", "CMAUS"],
+      "story": "Two buses both average 30 minutes to reach office. Bus A always takes 29–31 minutes. Bus B takes anything from 10 to 50. Same average, but Bus B is riskier. Standard deviation measures that wobble.",
+      "rule": "Standard deviation (σ) = typical distance of outcomes from the average. Higher σ = more risk. Roughly 68% of outcomes fall within ±1σ of the average if returns are normal.",
+      "example": "Average return 8%, σ = 10% → in about two-thirds of years the return lies between −2% and 18%.",
+      "check": { "q": "Two funds both return 10% on average. Fund X σ = 5%, Fund Y σ = 15%. Which has the better Sharpe ratio (rf = 2%)?", "a": "Fund X: (10 − 2)/5 = 1.6 vs Y: 8/15 = 0.53." }
+    },
+    {
+      "id": "L-VAR", "title": "Value at Risk: the 'bad day' number", "exams": ["FRM"],
+      "story": "A shopkeeper asks: 'On a normal bad day, the kind I get about once a month, how much could I lose?' VaR gives one number for that. It does NOT say how bad the very worst day could be.",
+      "rule": "VaR(confidence, horizon) = the loss that will NOT be exceeded with that confidence. Parametric VaR = z × σ × Value. z(95%) = 1.645, z(99%) = 2.326.",
+      "example": "₹1 crore portfolio, σ = 1%/day → 99% 1-day VaR ≈ 2.326 × 1% × 1 crore ≈ ₹2.33 lakh.",
+      "check": { "q": "Which measure tells you the AVERAGE loss on the days that are worse than VaR?", "a": "Expected Shortfall (also called CVaR)." }
+    },
+    {
+      "id": "L-AUDIT-RISK", "title": "Audit risk: why auditors check some things harder", "exams": ["CPA", "CAINDIA"],
+      "story": "A teacher marking exams checks the top scorer's paper extra carefully, because a mistake there matters more. Auditors do the same: riskier areas get more checking.",
+      "rule": "Audit Risk = Inherent Risk × Control Risk × Detection Risk. The auditor sets detection risk (how much testing to do) based on the other two.",
+      "example": "Cash in a well-controlled bank account → low risk → lighter testing. Complex revenue with weak controls → high risk → heavy testing.",
+      "check": { "q": "Controls are weak. Should detection risk be set higher or lower?", "a": "Lower, which means more substantive testing." }
+    }
+  ]
+}

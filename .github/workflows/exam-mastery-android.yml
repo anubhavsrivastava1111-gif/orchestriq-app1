@@ -1,0 +1,39 @@
+name: Exam Mastery – build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'exam-mastery/**'
+      - '.github/workflows/exam-mastery-android.yml'
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: exam-mastery
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: exam-mastery/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install dependencies
+        run: npm ci
+      - name: Validate knowledge base, type-check and build web app
+        run: npm run build
+      - name: Copy web app into Android project
+        run: npx cap sync android
+      - name: Build debug APK
+        working-directory: exam-mastery/android
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exam-mastery-debug-apk
+          path: exam-mastery/android/app/build/outputs/apk/debug/app-debug.apk
