@@ -7,8 +7,8 @@ android {
         applicationId "com.exammastery.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "0.3.0"
+        versionCode 4
+        versionName "0.3.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +16,25 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Permanent signing key, supplied by CI from GitHub secrets (never committed).
+    // Every build MUST use the same key, otherwise Android refuses to install updates over the old app.
+    signingConfigs {
+        stable {
+            def ks = System.getenv('EXAM_KEYSTORE_PATH')
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv('EXAM_KEYSTORE_PASSWORD')
+                keyAlias 'exammastery'
+                keyPassword System.getenv('EXAM_KEYSTORE_PASSWORD')
+            }
+        }
+    }
     buildTypes {
+        debug {
+            if (System.getenv('EXAM_KEYSTORE_PATH')) signingConfig signingConfigs.stable
+        }
         release {
+            if (System.getenv('EXAM_KEYSTORE_PATH')) signingConfig signingConfigs.stable
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

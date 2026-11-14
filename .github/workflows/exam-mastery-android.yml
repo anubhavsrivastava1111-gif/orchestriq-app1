@@ -33,9 +33,26 @@ jobs:
         run: npm run build
       - name: Copy web app into Android project
         run: npx cap sync android
-      - name: Build debug APK
+      - name: Load permanent signing key
+        env:
+          KS: ${{ secrets.EXAM_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KS" ]; then
+            echo "::error::Signing key secret EXAM_KEYSTORE_B64 is missing. Add it under Settings > Secrets and variables > Actions. Builds are blocked so that no randomly-signed APK (which cannot update the installed app) is ever published."
+            exit 1
+          fi
+          echo "$KS" | base64 -d > "$RUNNER_TEMP/exam.jks"
+          echo "EXAM_KEYSTORE_PATH=$RUNNER_TEMP/exam.jks" >> "$GITHUB_ENV"
+      - name: Build APK (signed with the permanent key)
         working-directory: exam-mastery/android
+        env:
+          EXAM_KEYSTORE_PASSWORD: ${{ secrets.EXAM_KEYSTORE_PASSWORD }}
         run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+      - name: Verify signing certificate
+        run: |
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          "$APKSIGNER" verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | tee cert.txt
+          grep -qi "e3054339" <(tr -d ':' < cert.txt | tr 'A-F' 'a-f') || { echo "::error::APK is not signed with the permanent Exam Mastery key"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: exam-mastery-debug-apk
